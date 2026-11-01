@@ -1,0 +1,68 @@
+plugins {
+    id 'com.android.application'
+}
+
+// SDL2's Java glue (org.libsdl.app.*) must match the native SDL version that CMake fetches.
+def sdlTag = 'release-2.32.8'
+def sdlDir = file("${rootDir}/sdl")
+
+tasks.register('fetchSdlJava') {
+    onlyIf { !file("${sdlDir}/android-project/app/src/main/java/org/libsdl/app/SDLActivity.java").exists() }
+    doLast {
+        exec { commandLine 'git', 'clone', '--depth', '1', '-b', sdlTag, 'https://github.com/libsdl-org/SDL.git', sdlDir.absolutePath }
+    }
+}
+preBuild.dependsOn 'fetchSdlJava'
+
+android {
+    namespace 'org.lunamoo.lunashare'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'org.lunamoo.lunashare'
+        minSdk 24          // getifaddrs() + modern Wi-Fi APIs
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_shared', '-DLUNASHARE_BUILD_TESTS=OFF',
+                          "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdlDir.absolutePath}"
+                cppFlags '-std=c++17'
+            }
+        }
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug   // replace with your own key for distribution
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += ["${sdlDir}/android-project/app/src/main/java"]
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('../../CMakeLists.txt')
+            version '3.22.1+'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}

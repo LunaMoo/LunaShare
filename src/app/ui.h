@@ -1,0 +1,150 @@
+// LunaShare user interface (Dear ImGui). Desktop: sidebar + tabs. Mobile: vertical screens with big buttons.
+#pragma once
+#include <set>
+#include <string>
+#include <vector>
+
+#include "engine.h"
+#include "file_browser.h"
+#include "imgui.h"
+
+class App {
+public:
+    explicit App(ls::Engine& e);
+
+    // Builds the whole UI for this frame. Call between ImGui::NewFrame() and ImGui::Render().
+    void Frame();
+    void OnDrop(const std::vector<std::string>& paths);
+    // Returns true when the app may quit now; otherwise shows a confirmation first.
+    bool RequestQuit();
+    // Two-finger pinch from SDL_MULTIGESTURE (dDist as reported, x/y in window pixels).
+    void OnPinch(float dDist, float x, float y);
+    bool ViewerOpen() const { return viewer.open; }
+
+    bool quitConfirmed = false;
+    bool wantAttention = false;  // flash the taskbar / vibrate
+    std::string windowTitle = "LunaShare";
+    bool busy = false;           // transfers running -> keep redrawing
+    float keyboardInset = 0;     // px hidden by the on-screen keyboard (mobile)
+
+    // style rebuild requests
+    int styleGeneration = 0;
+
+private:
+    enum class Tab { Chat, Transfers, History, Devices, Nearby, Settings };
+    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices };
+
+    struct Toast {
+        ls::EventType type;
+        std::string title, text, peer;
+        uint64_t tid = 0;
+        float ttl = 6.0f;
+    };
+
+    void PullEvents();
+    std::vector<std::string> SortedPeers();
+    bool IsMobileLayout();
+
+    // layouts
+    void DrawDesktop();
+    void DrawMobile();
+    void DrawSidebar();
+    void DrawMobileHome();
+    void DrawMobileNav();
+
+    // screens (shared)
+    void DrawChat(const std::string& peer);
+    void DrawMessages(const std::string& peer);
+    void DrawBatchCard(const std::string& peer, const ls::ChatMessage& m, float width);
+    void DrawTransferRow(const std::shared_ptr<ls::Transfer>& t, bool compact);
+    void DrawTransferActions(const std::shared_ptr<ls::Transfer>& t);
+    void DrawTransfers();
+    void DrawHistory();
+    void DrawDevices();
+    void DrawDeviceDetails(const std::string& peer);
+    void DrawNearby();
+    void DrawSettings();
+
+    // popups / overlays
+    void DrawPopups();
+    // picture viewer (ui_viewer.cpp)
+    void OpenViewer(const std::string& peer, const std::string& path, bool all);
+    void RebuildViewerList();
+    void DrawViewer();
+    void ViewerZoomAt(ImVec2 pt, float factor);
+    void ViewerGo(int delta);
+    void DrawThumbnails(const std::string& peer, const std::vector<std::shared_ptr<ls::Transfer>>& items, float width);
+    void DrawToasts();
+    void OpenSendTo(const std::vector<std::string>& paths);
+    void CopySelectedMessages(const std::string& peer);
+    void SelectPeer(const std::string& peer);
+
+    bool DevicePeerRow(const std::string& peer, bool selected, float height);
+
+    ls::Engine& eng;
+    Tab tab = Tab::Chat;
+    bool tabForce = false;
+    MScreen screen = MScreen::Home;
+    std::vector<MScreen> backStack;
+    std::string selectedPeer;
+    std::string chatInput;
+    bool focusInput = false;
+    size_t lastMsgCount = 0;
+    std::string lastMsgPeer;
+    bool scrollToBottom = false;
+
+    std::set<std::string> selMsgs;  // selected message ids
+    int lastSelIndex = -1;
+    bool selectionMode = false;     // touch: taps toggle selection
+    std::string textViewBuf;
+    bool openTextView = false;
+    std::string contextMid;
+
+    std::vector<std::string> pendingSend;
+    bool openSendTo = false;
+    std::string sendToFilter;
+
+    std::set<uint64_t> expandedBatches;
+
+    FileBrowser browser;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import } browseFor = BrowseFor::None;
+    bool exportHistory = true, exportIdentity = false, importIdentity = false;
+
+    std::string historyFilter;
+    std::set<uint64_t> historySel;
+    std::vector<std::string> reshareFiles;
+
+    std::string devicesSel;
+    std::string renameBuf;
+    std::string renamePeer;
+    bool openRename = false;
+
+    std::string manualHost;
+    int manualPort = 47820;
+    std::string qrSsid, qrPass;
+    std::string joinSsid, joinPass;
+    struct WifiOffer { std::string peer, ssid, pass; };
+    std::vector<WifiOffer> wifiOffers;
+    bool openWifiOffer = false;
+
+    std::vector<Toast> toasts;
+    std::string infoMessage;
+    bool openInfo = false;
+    bool openQuit = false;
+
+    struct Viewer {
+        bool open = false, requestOpen = false;
+        bool all = false;          // false: pictures of this chat, true: all shared pictures
+        std::string peer;
+        std::vector<std::string> paths, captions;
+        int index = 0;
+        float zoom = 1.0f;
+        ImVec2 pan{0, 0};
+        float swipeX = 0;
+        ImVec2 areaMin{0, 0}, areaMax{0, 0};
+        float uiAlpha = 1.0f;
+    } viewer;
+
+    ls::Settings edit;
+    bool editDirty = false;
+};

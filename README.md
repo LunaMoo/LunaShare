@@ -1,0 +1,131 @@
+# LunaShare
+
+A chat app built around file sharing. It is written in C++ with [Dear ImGui](https://github.com/ocornut/imgui) on SDL2 and runs on Windows, Linux, macOS and Android, with an iOS port planned.
+Devices on the same network find each other automatically. Transfers can be paused and resumed at any time, and every file is
+SHA-256 hashed before sending and again after receiving, so you know it arrived intact.
+
+| Desktop | Phone |
+|---|---|
+| ![desktop](docs/desktop-chat.png) | ![phone](docs/phone-chat.png) |
+| ![viewer](docs/viewer.png) | ![phone viewer](docs/phone-viewer.png) |
+
+## Features
+
+**Sharing**
+- Drag and drop files or whole folders onto the window. Folder structure is kept.
+- Pause and resume from either side, at any time. Transfers also survive disconnects and app restarts:
+  the receiver keeps a `.part` file and both sides continue from where they stopped.
+- Integrity checks: the sender computes the SHA-256 before offering, every chunk carries a CRC-32, and the receiver computes the SHA-256 of the finished file. The chat card shows *"SHA-256 verified on both sides"*. If the hashes don't match, the partial file is discarded and you can **Retry**.
+- Several files stream in parallel (configurable). There's an optional upload speed limit and a free-space check before accepting.
+- Before sending, the app checks that the source file hasn't changed (size + mtime) since it was hashed.
+
+**Chat**
+- Text chat per device. Messages queue while the other device is offline and show delivered/queued state.
+- Selecting and copying: click to select, Ctrl/Shift+click for several, Ctrl+C copies them (with timestamps when several are selected). Double-click or *Select text…* opens a view where you can select part of a message. On phones, long-press enters selection mode.
+- Pictures appear as thumbnails in the chat (EXIF rotation is respected). Tapping one opens a **full-screen viewer**:
+  swipe left/right (or arrow keys and the side buttons) to go to the previous/next picture, pinch, mouse wheel or +/- to zoom,
+  double-tap to zoom in, drag to pan. Toggle between *this chat's pictures* and *all shared pictures*.
+- Incoming offers appear in the chat and as notifications with Accept/Decline. Trusted devices are accepted automatically.
+
+**History & re-sharing**
+- Every sent and received file goes into a searchable history (name, device, hash). Select any number of entries and
+  **share them with another device** in one click. You can also do this from a chat card or the picture viewer.
+
+**Devices**
+- Every device has a permanent random ID (UUID). User name, host name, platform and MAC addresses are stored as extra information.
+  MACs can't be the primary key because phones randomise or hide them. If a known MAC shows up with a new ID (app reinstalled),
+  the nickname is carried over.
+- A list of every device you've ever connected to, with **custom nicknames**, a trusted flag (auto-accept), blocked, notes, last address, and Bluetooth address.
+
+**Connectivity**
+- **LAN, no setup:** UDP broadcast and multicast beacons (port 47821) plus a TCP connection (port 47820, falls back to the next free one).
+  Known devices are reconnected automatically when they still have work pending.
+- **Phone-to-phone with no Wi-Fi:** one phone starts a hotspot (Android LocalOnlyHotspot) and shows a Wi-Fi QR code the other phone can scan
+  with its camera. If the two are already connected over Bluetooth, one tap sends the hotspot login across and the other phone
+  joins automatically. The app then switches to full Wi-Fi speed.
+- **Bluetooth RFCOMM:** Windows (Winsock + SDP), Linux (BlueZ, fixed channel), Android (Java bridge). Good for chat, small files, and handing over hotspot logins.
+- Manual connect by `ip[:port]`.
+
+**Security**
+- Every connection is end-to-end encrypted: an X25519 key exchange per connection (forward secrecy),
+  XChaCha20-Poly1305 for every frame, and a per-device EdDSA identity key ([Monocypher](https://monocypher.org)).
+- The identity key signs the key exchange, so a man in the middle can't relay it. Keys are pinned to the device on first contact. If a known device later shows up
+  with a different key, the connection is refused and you have to review it (*Accept new key* or *Block*).
+- Each pair of devices has a **safety number** (30 digits, identical on both screens). Compare it once and mark the device as *verified*.
+- Bluetooth links and hotspot logins sent over them are encrypted the same way. Only the discovery beacons (name, ID, port) are plain.
+
+**Settings**
+- Download folder, auto-accept rules, discovery, port, speed limit, chunk size, parallel files, Bluetooth, theme (dark/light/classic), UI scale.
+- Layout: *automatic*, *desktop*, or *phone*. Phones get a vertical UI with large buttons, a bottom navigation bar, drag-to-scroll with inertia, and long-press menus.
+  A narrow, tall desktop window switches to the phone layout automatically.
+- **Export/import** settings to a JSON file. The export includes known devices and their custom names. Chat and file history are optional, and so is the device identity (only for restoring the same device).
+
+## Building
+
+Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, stb_image, Monocypher).
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+./build/lunashare_tests        # headless end-to-end tests (two engines over loopback)
+```
+
+- **Windows:** Visual Studio 2022 or MinGW/llvm-mingw. The result is a single `LunaShare.exe`.
+- **Linux:** needs X11/Wayland and GL development packages for SDL (see `.github/workflows/build.yml`).
+- **macOS:** builds `LunaShare.app`.
+- **Android:** open `android/` in Android Studio, or run `gradle assembleRelease` in `android/`. The Gradle build fetches SDL's Java glue
+  and builds the native code through the same top-level `CMakeLists.txt`. Needs NDK 27 and minSdk 24.
+  On Android 11+ the app asks for *All files access* so it can send any file and save to `Download/LunaShare`.
+- Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only).
+- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`.
+
+The GitHub Actions workflow builds Windows, Linux, macOS and the Android APK on every push and uploads them as artifacts.
+
+Command line: `--portable` (keeps settings in `LunaShareData` next to the executable), `--config <dir>`.
+
+## Layout
+
+```
+src/core/      engine (no UI dependencies)
+  engine.*       connections, discovery, chat, resumable transfers, persistence
+  protocol.*     framing: [u32 len][u8 type][payload]  (JSON control frames, binary data frames)
+  hash.*         SHA-256, CRC-32
+  crypto.*       handshake, frame encryption, identity keys, safety numbers
+  bluetooth.*    RFCOMM per platform + HostBridge hooks for Android
+  model.*        settings / devices / messages / transfers / history + JSON
+  platform.*     paths, MACs, interfaces, UTF-8 file I/O
+src/app/       SDL2 + Dear ImGui front end
+  ui.cpp         desktop & phone layouts, chat, transfers, history, devices, connect, settings
+  ui_viewer.cpp  thumbnails + full-screen picture viewer
+  image_cache.*  async stb_image decoding, EXIF orientation, GL texture cache
+  file_browser.* built-in file picker (works the same on phones)
+  android_bridge.cpp  JNI glue to android/…/LunaShareActivity.java
+tests/         engine tests (pause/resume, receiver restart, corruption detection, folders, export/import)
+```
+
+## Protocol notes
+
+0. Key exchange (see `src/core/crypto.h`). Everything below is sent encrypted.
+1. Both sides send `Hello` (id, name, user, host, platform, MACs, identity public key, and a signature over the handshake). If two devices connect to each other at the same time, the duplicate connection is dropped deterministically.
+2. The sender hashes the file, then sends `FileOffer` (tid, relative path, size, sha256, batch).
+3. The receiver replies `FileAccept {offset}`, where offset is the size of its `.part` file. The same message is used to resume.
+4. `FileData` frames: `[tid][offset][crc32][bytes]`. If an offset or CRC is wrong, the receiver sends a new `FileAccept` from the last good offset.
+5. `FileDone` → the receiver hashes the file → `FileVerify {ok, sha256}`. The file is renamed into place only after the hash matches.
+6. `FilePause` can come from either side. Resuming is done with an offer carrying `resume:true`, or with an accept carrying `resume:true`.
+   After a reconnect, the sender re-offers everything that isn't finished, and the receiver answers based on its own state.
+
+## Status / known limitations
+
+- The Android project is complete but hasn't been built or run on a device yet. Expect small fixes on the first build.
+- No iOS project yet. The core and UI compile for iOS in principle, but iOS can't create hotspots and has no RFCOMM (would need MultipeerConnectivity).
+- Bluetooth on macOS isn't implemented. Linux Bluetooth uses a fixed RFCOMM channel (no SDP record), so Windows/Android→Linux connections
+  need the same channel.
+- The identity secret is stored in `settings.json` in the user's config folder, with the same protection as an SSH key. A settings export only includes it
+  when you choose *include identity*.
+- Protocol v2 (encrypted) can't talk to builds from before encryption was added.
+
+## License
+
+LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
+Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
+QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0).

@@ -1,0 +1,328 @@
+#include "ui_widgets.h"
+
+#include <cmath>
+#include <unordered_map>
+
+#include "imgui_internal.h"
+#include "qrcodegen.hpp"
+
+namespace ui {
+
+Metrics& M() {
+    static Metrics m;
+    return m;
+}
+
+ImU32 ColAccent() { return ImGui::GetColorU32(ImGuiCol_ButtonActive); }
+ImU32 ColOk() { return IM_COL32(64, 190, 110, 255); }
+ImU32 ColWarn() { return IM_COL32(230, 175, 50, 255); }
+ImU32 ColErr() { return IM_COL32(225, 75, 75, 255); }
+ImU32 ColMuted() { return ImGui::GetColorU32(ImGuiCol_TextDisabled); }
+ImVec4 MutedText() { return ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled); }
+
+void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
+    float h = s * 0.5f;
+    float t = std::max(1.5f, s * 0.11f);  // stroke thickness
+    auto P = [&](float x, float y) { return ImVec2(c.x + x * h, c.y + y * h); };
+    switch (icon) {
+        case Icon::Pause:
+            dl->AddRectFilled(P(-0.6f, -0.7f), P(-0.15f, 0.7f), col, 1.5f);
+            dl->AddRectFilled(P(0.15f, -0.7f), P(0.6f, 0.7f), col, 1.5f);
+            break;
+        case Icon::Play:
+            dl->AddTriangleFilled(P(-0.5f, -0.75f), P(0.75f, 0.0f), P(-0.5f, 0.75f), col);
+            break;
+        case Icon::Cancel:
+            dl->AddLine(P(-0.55f, -0.55f), P(0.55f, 0.55f), col, t);
+            dl->AddLine(P(0.55f, -0.55f), P(-0.55f, 0.55f), col, t);
+            break;
+        case Icon::Check: {
+            ImVec2 pts[3] = {P(-0.65f, 0.0f), P(-0.2f, 0.5f), P(0.7f, -0.55f)};
+            dl->AddPolyline(pts, 3, col, 0, t * 1.2f);
+            break;
+        }
+        case Icon::Folder:
+            dl->AddRectFilled(P(-0.8f, -0.55f), P(-0.1f, -0.3f), col, 1.0f);
+            dl->AddRectFilled(P(-0.8f, -0.4f), P(0.8f, 0.65f), col, 2.0f);
+            break;
+        case Icon::File: {
+            ImVec2 pts[5] = {P(-0.55f, -0.8f), P(0.25f, -0.8f), P(0.6f, -0.45f), P(0.6f, 0.8f), P(-0.55f, 0.8f)};
+            dl->AddPolyline(pts, 5, col, ImDrawFlags_Closed, t);
+            break;
+        }
+        case Icon::Retry:
+            dl->PathArcTo(c, h * 0.62f, 0.6f, 5.6f, 20);
+            dl->PathStroke(col, 0, t);
+            dl->AddTriangleFilled(P(0.6f, -0.65f), P(0.85f, 0.05f), P(0.2f, -0.05f), col);
+            break;
+        case Icon::Send:
+            dl->AddTriangleFilled(P(-0.8f, -0.75f), P(0.85f, 0.0f), P(-0.8f, 0.75f), col);
+            dl->AddTriangleFilled(P(-0.8f, -0.75f), P(-0.35f, 0.0f), P(-0.8f, 0.75f), ImGui::GetColorU32(ImGuiCol_Button));
+            break;
+        case Icon::Attach:
+        case Icon::Plus:
+            dl->AddLine(P(0, -0.7f), P(0, 0.7f), col, t * 1.2f);
+            dl->AddLine(P(-0.7f, 0), P(0.7f, 0), col, t * 1.2f);
+            break;
+        case Icon::Back: {
+            ImVec2 pts[3] = {P(0.35f, -0.7f), P(-0.35f, 0.0f), P(0.35f, 0.7f)};
+            dl->AddPolyline(pts, 3, col, 0, t * 1.3f);
+            break;
+        }
+        case Icon::Up:
+            dl->AddLine(P(0, 0.75f), P(0, -0.6f), col, t);
+            dl->AddTriangleFilled(P(0, -0.8f), P(0.5f, -0.2f), P(-0.5f, -0.2f), col);
+            break;
+        case Icon::Down:
+            dl->AddLine(P(0, -0.75f), P(0, 0.6f), col, t);
+            dl->AddTriangleFilled(P(0, 0.8f), P(-0.5f, 0.2f), P(0.5f, 0.2f), col);
+            break;
+        case Icon::Trash:
+            dl->AddLine(P(-0.7f, -0.55f), P(0.7f, -0.55f), col, t);
+            dl->AddLine(P(-0.2f, -0.75f), P(0.2f, -0.75f), col, t);
+            dl->AddRect(P(-0.5f, -0.45f), P(0.5f, 0.8f), col, 2.0f, 0, t);
+            break;
+        case Icon::Copy:
+            dl->AddRect(P(-0.7f, -0.7f), P(0.25f, 0.35f), col, 2.0f, 0, t);
+            dl->AddRectFilled(P(-0.2f, -0.2f), P(0.75f, 0.8f), col, 2.0f);
+            break;
+        case Icon::Share:
+            dl->AddCircleFilled(P(-0.55f, 0.0f), h * 0.22f, col);
+            dl->AddCircleFilled(P(0.55f, -0.55f), h * 0.22f, col);
+            dl->AddCircleFilled(P(0.55f, 0.55f), h * 0.22f, col);
+            dl->AddLine(P(-0.55f, 0.0f), P(0.55f, -0.55f), col, t);
+            dl->AddLine(P(-0.55f, 0.0f), P(0.55f, 0.55f), col, t);
+            break;
+        case Icon::Bluetooth: {
+            ImVec2 pts[6] = {P(-0.45f, -0.4f), P(0.45f, 0.4f), P(0.0f, 0.8f), P(0.0f, -0.8f), P(0.45f, -0.4f), P(-0.45f, 0.4f)};
+            dl->AddPolyline(pts, 6, col, 0, t);
+            break;
+        }
+        case Icon::Wifi:
+            for (int i = 1; i <= 3; i++) {
+                dl->PathArcTo(P(0, 0.6f), h * 0.4f * (float)i, -2.35f, -0.79f, 12);
+                dl->PathStroke(col, 0, t);
+            }
+            dl->AddCircleFilled(P(0, 0.6f), t, col);
+            break;
+        case Icon::Link:
+            dl->AddCircle(P(-0.3f, 0.0f), h * 0.38f, col, 16, t);
+            dl->AddCircle(P(0.3f, 0.0f), h * 0.38f, col, 16, t);
+            break;
+        case Icon::Gear:
+            dl->AddCircle(c, h * 0.45f, col, 16, t * 1.3f);
+            for (int i = 0; i < 8; i++) {
+                float a = (float)i * 3.14159f / 4.0f;
+                dl->AddLine(ImVec2(c.x + cosf(a) * h * 0.55f, c.y + sinf(a) * h * 0.55f),
+                            ImVec2(c.x + cosf(a) * h * 0.85f, c.y + sinf(a) * h * 0.85f), col, t * 1.4f);
+            }
+            break;
+        case Icon::Users:
+            dl->AddCircleFilled(P(0, -0.35f), h * 0.32f, col);
+            dl->PathArcTo(P(0, 0.85f), h * 0.7f, 3.4f, 6.0f, 16);
+            dl->PathFillConvex(col);
+            break;
+        case Icon::History:
+            dl->AddCircle(c, h * 0.75f, col, 24, t);
+            dl->AddLine(c, P(0, -0.5f), col, t);
+            dl->AddLine(c, P(0.4f, 0.2f), col, t);
+            break;
+        case Icon::Transfers:
+            dl->AddLine(P(-0.35f, 0.75f), P(-0.35f, -0.55f), col, t);
+            dl->AddTriangleFilled(P(-0.35f, -0.8f), P(0.0f, -0.35f), P(-0.7f, -0.35f), col);
+            dl->AddLine(P(0.35f, -0.75f), P(0.35f, 0.55f), col, t);
+            dl->AddTriangleFilled(P(0.35f, 0.8f), P(0.7f, 0.35f), P(0.0f, 0.35f), col);
+            break;
+        case Icon::Edit:
+            dl->AddLine(P(-0.6f, 0.6f), P(0.55f, -0.55f), col, t * 1.6f);
+            dl->AddTriangleFilled(P(-0.75f, 0.75f), P(-0.7f, 0.35f), P(-0.35f, 0.7f), col);
+            break;
+        case Icon::Star: {
+            ImVec2 pts[10];
+            for (int i = 0; i < 10; i++) {
+                float a = -1.5708f + (float)i * 3.14159f / 5.0f;
+                float r = (i & 1) ? h * 0.38f : h * 0.85f;
+                pts[i] = ImVec2(c.x + cosf(a) * r, c.y + sinf(a) * r);
+            }
+            dl->AddConcavePolyFilled(pts, 10, col);
+            break;
+        }
+        case Icon::ZoomIn:
+        case Icon::ZoomOut:
+            dl->AddCircle(P(-0.15f, -0.15f), h * 0.55f, col, 20, t);
+            dl->AddLine(P(0.25f, 0.25f), P(0.8f, 0.8f), col, t * 1.6f);
+            dl->AddLine(P(-0.42f, -0.15f), P(0.12f, -0.15f), col, t);
+            if (icon == Icon::ZoomIn) dl->AddLine(P(-0.15f, -0.42f), P(-0.15f, 0.12f), col, t);
+            break;
+        case Icon::Fit: {
+            float a = 0.75f, b = 0.3f;
+            ImVec2 c1[3] = {P(-a, -b), P(-a, -a), P(-b, -a)}, c2[3] = {P(b, -a), P(a, -a), P(a, -b)};
+            ImVec2 c3[3] = {P(a, b), P(a, a), P(b, a)}, c4[3] = {P(-b, a), P(-a, a), P(-a, b)};
+            dl->AddPolyline(c1, 3, col, 0, t);
+            dl->AddPolyline(c2, 3, col, 0, t);
+            dl->AddPolyline(c3, 3, col, 0, t);
+            dl->AddPolyline(c4, 3, col, 0, t);
+            break;
+        }
+        case Icon::Image:
+            dl->AddRect(P(-0.8f, -0.65f), P(0.8f, 0.65f), col, 2.0f, 0, t);
+            dl->AddTriangleFilled(P(-0.6f, 0.45f), P(-0.15f, -0.15f), P(0.3f, 0.45f), col);
+            dl->AddCircleFilled(P(0.4f, -0.25f), h * 0.14f, col);
+            break;
+        case Icon::Open:
+            dl->AddRect(P(-0.7f, -0.5f), P(0.5f, 0.7f), col, 2.0f, 0, t);
+            dl->AddLine(P(-0.05f, 0.1f), P(0.75f, -0.7f), col, t);
+            dl->AddTriangleFilled(P(0.8f, -0.8f), P(0.75f, -0.25f), P(0.25f, -0.75f), col);
+            break;
+    }
+}
+
+bool IconButton(const char* id, Icon icon, const char* tooltip, float size, bool danger) {
+    if (size <= 0) size = M().mobile ? M().rowH : ImGui::GetFrameHeight();
+    ImGui::PushID(id);
+    if (danger) ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.25f, 0.25f, 1.0f));
+    bool r = ImGui::Button("##ib", ImVec2(size, size));
+    if (danger) ImGui::PopStyleColor();
+    ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+    ImU32 col = ImGui::GetColorU32(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+    DrawIcon(ImGui::GetWindowDrawList(), icon, ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f), size * 0.55f, col);
+    if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tooltip);
+    ImGui::PopID();
+    return r;
+}
+
+bool IconTextButton(const char* label, Icon icon, ImVec2 size) {
+    float fh = ImGui::GetFrameHeight();
+    if (M().mobile && size.y == 0) size.y = M().rowH;
+    float ih = (size.y > 0 ? size.y : fh);
+    ImVec2 ts = ImGui::CalcTextSize(label, nullptr, true);
+    if (size.x == 0) size.x = ts.x + ih + ImGui::GetStyle().FramePadding.x * 2;
+    if (size.y == 0) size.y = fh;
+    ImGui::PushID(label);
+    bool r = ImGui::Button("##itb", size);
+    ImGui::PopID();
+    ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    float contentW = ih * 0.75f + ts.x;
+    float x0 = mn.x + std::max(ImGui::GetStyle().FramePadding.x, (mx.x - mn.x - contentW) * 0.5f);
+    float cy = (mn.y + mx.y) * 0.5f;
+    ImU32 col = ImGui::GetColorU32(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+    DrawIcon(dl, icon, ImVec2(x0 + ih * 0.25f, cy), ih * 0.5f, col);
+    const char* end = ImGui::FindRenderedTextEnd(label);
+    dl->AddText(ImVec2(x0 + ih * 0.65f, cy - ts.y * 0.5f), col, label, end);
+    return r;
+}
+
+bool BigButton(const char* label, Icon icon, float width) {
+    float w = width < 0 ? ImGui::GetContentRegionAvail().x : width;
+    float h = M().mobile ? M().rowH : ImGui::GetFrameHeight() * 1.4f;
+    return IconTextButton(label, icon, ImVec2(w, h));
+}
+
+void ProgressBarText(float frac, const char* overlay, ImVec2 size, ImU32 col) {
+    if (col) ImGui::PushStyleColor(ImGuiCol_PlotHistogram, col);
+    ImGui::ProgressBar(frac < 0 ? 0 : (frac > 1 ? 1 : frac), size, overlay);
+    if (col) ImGui::PopStyleColor();
+}
+
+void StatusDot(ImU32 col, float radius) {
+    if (radius <= 0) radius = ImGui::GetFontSize() * 0.3f;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float h = ImGui::GetTextLineHeight();
+    ImGui::Dummy(ImVec2(radius * 2 + 2, h));
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + radius + 1, p.y + h * 0.5f), radius, col);
+}
+
+void Badge(const char* text, ImU32 bg) {
+    ImVec2 ts = ImGui::CalcTextSize(text);
+    float padX = ImGui::GetFontSize() * 0.4f, padY = 1;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float h = ImGui::GetTextLineHeight();
+    ImGui::Dummy(ImVec2(ts.x + padX * 2, h));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(ImVec2(p.x, p.y + padY), ImVec2(p.x + ts.x + padX * 2, p.y + h - padY), bg, h * 0.5f);
+    dl->AddText(ImVec2(p.x + padX, p.y + (h - ts.y) * 0.5f), IM_COL32(255, 255, 255, 255), text);
+}
+
+void HelpMarker(const char* text) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::BeginItemTooltip()) {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+        ImGui::TextUnformatted(text);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
+
+void TouchScroll() {
+    struct State { float velocity = 0; bool dragging = false; };
+    static std::unordered_map<ImGuiID, State> states;
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiWindow* win = ImGui::GetCurrentWindow();
+    State& st = states[win->ID];
+    float threshold = ImGui::GetFontSize() * 0.6f;
+    bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    if (ImGui::IsMouseDown(0) && (hovered || st.dragging)) {
+        ImVec2 drag = ImGui::GetMouseDragDelta(0, threshold);
+        if (!st.dragging && fabsf(drag.y) > threshold && fabsf(drag.y) > fabsf(drag.x)) {
+            // Only grab the gesture if the active item is not a text field / slider being edited.
+            ImGuiContext& g = *GImGui;
+            bool editing = g.ActiveId != 0 && (g.InputTextState.ID == g.ActiveId || g.ActiveIdUsingAllKeyboardKeys);
+            if (!editing) {
+                st.dragging = true;
+                if (g.ActiveId) ImGui::ClearActiveID();
+            }
+        }
+        if (st.dragging) {
+            ImGui::SetScrollY(win, win->Scroll.y - io.MouseDelta.y);
+            st.velocity = io.DeltaTime > 0 ? -io.MouseDelta.y / io.DeltaTime : 0;
+            // stop buttons below the finger from reacting while scrolling
+            ImGui::SetHoveredID(0);
+        }
+    } else {
+        if (st.dragging) st.dragging = false;
+        if (fabsf(st.velocity) > 5.0f) {
+            ImGui::SetScrollY(win, win->Scroll.y + st.velocity * io.DeltaTime);
+            st.velocity *= powf(0.05f, io.DeltaTime);
+        } else {
+            st.velocity = 0;
+        }
+    }
+}
+
+void QrCode(const char* text, float px) {
+    using qrcodegen::QrCode;
+    static std::string cachedText;
+    static std::vector<bool> mods;
+    static int n = 0;
+    if (cachedText != text) {
+        cachedText = text;
+        try {
+            QrCode qr = QrCode::encodeText(text, QrCode::Ecc::MEDIUM);
+            n = qr.getSize();
+            mods.assign((size_t)(n * n), false);
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++) mods[(size_t)(y * n + x)] = qr.getModule(x, y);
+        } catch (...) {
+            n = 0;
+        }
+    }
+    if (n == 0) return;
+    int quiet = 3;
+    float cell = floorf(px / (float)(n + quiet * 2));
+    if (cell < 1) cell = 1;
+    float total = cell * (float)(n + quiet * 2);
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + total, p.y + total), IM_COL32_WHITE);
+    for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++)
+            if (mods[(size_t)(y * n + x)]) {
+                ImVec2 a(p.x + (float)(x + quiet) * cell, p.y + (float)(y + quiet) * cell);
+                dl->AddRectFilled(a, ImVec2(a.x + cell, a.y + cell), IM_COL32_BLACK);
+            }
+    ImGui::Dummy(ImVec2(total, total));
+}
+
+}  // namespace ui
