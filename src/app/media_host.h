@@ -24,8 +24,14 @@ public:
 
     void SetMute(bool m);
     bool Muted() const { return mute_; }
-    void SetSpeaker(bool on);  // phones: loudspeaker vs earpiece
-    bool Speaker() const { return speaker_; }
+    // Phones: where call audio goes (earpiece, loudspeaker, Bluetooth, wired headset). Empty on desktop.
+    struct Route { int id; std::string kind, name; };
+    void RefreshRoutes();
+    const std::vector<Route>& Routes() const { return routes_; }
+    int CurrentRoute() const { return currentRoute_; }
+    const Route* Current() const;
+    void SetRoute(int id);
+    static std::string RouteLabel(const Route& r);
     LsmStats Stats();
     std::string audioError;
 
@@ -53,7 +59,12 @@ private:
     std::atomic<Mode> mode_{Mode::Off};
     uint32_t capDev_ = 0, playDev_ = 0;
     std::atomic<bool> mute_{false};
-    bool speaker_ = false;
+    std::vector<Route> routes_;
+    int currentRoute_ = -1;
+    uint32_t routesTick_ = 0;
+    std::atomic<float> micGain_{1.0f};
+    uint32_t settingsTick_ = 0;
+    void ApplyMicGain(int16_t* pcm, int n);
     std::atomic<bool> micTest_{false};
     std::atomic<float> micTestLevel_{0};
     uint64_t toneSample_ = 0;

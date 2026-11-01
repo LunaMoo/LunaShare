@@ -34,7 +34,9 @@ struct HostBridge {
     std::function<void(const std::string& path)> openFolder;
     std::function<void()> requestPermissions;
     std::function<void(bool inCall)> callAudioMode;   // Android: MODE_IN_COMMUNICATION (earpiece routing, system AEC)
-    std::function<void(bool on)> setSpeakerphone;
+    // Android call audio routes: "current id\n" + lines "id\tkind\tname" (kind: earpiece/speaker/bluetooth/wired/usb)
+    std::function<std::string()> callRoutes;
+    std::function<void(int id)> setCallRoute;
 };
 HostBridge& Bridge();
 

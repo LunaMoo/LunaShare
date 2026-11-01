@@ -2125,10 +2125,29 @@ void App::DrawCallBar() {
         if (muted) ImGui::PopStyleColor();
         ImGui::SameLine();
         if (IsMobilePlatform()) {
-            bool spk = Media().Speaker();
-            if (spk) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ui::IconButton("speaker", Icon::Speaker, "Loudspeaker", bw)) Media().SetSpeaker(!spk);
-            if (spk) ImGui::PopStyleColor();
+            // Audio output: with only earpiece + loudspeaker it's a toggle; with a headset connected it opens a list.
+            const MediaHost::Route* cur = Media().Current();
+            bool spk = cur && cur->kind == "speaker";
+            bool hl = cur && cur->kind != "earpiece";
+            if (hl) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : "Audio output", bw)) {
+                Media().RefreshRoutes();
+                auto& rs = Media().Routes();
+                if (rs.size() > 2) {
+                    ImGui::OpenPopup("##callroute");
+                } else {
+                    for (auto& r : rs)
+                        if ((r.kind == "speaker") != spk) { Media().SetRoute(r.id); break; }
+                }
+            }
+            if (hl) ImGui::PopStyleColor();
+            if (ImGui::BeginPopup("##callroute")) {
+                for (auto& r : Media().Routes()) {
+                    if (ImGui::Selectable(MediaHost::RouteLabel(r).c_str(), r.id == Media().CurrentRoute(), 0, ImVec2(ImGui::GetFontSize() * 12, h * 0.9f)))
+                        Media().SetRoute(r.id);
+                }
+                ImGui::EndPopup();
+            }
             ImGui::SameLine();
         }
     }
@@ -2241,6 +2260,10 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     ImGui::SetNextItemWidth(fieldW);
     if (ImGui::SliderInt("##callbr", &kbps, 12, 48, "Voice quality: %d kbps")) { edit.callBitrate = kbps * 1000; editDirty = true; }
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+    ImGui::SetNextItemWidth(fieldW);
+    if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, "Microphone boost: +%d dB")) editDirty = true;
+    if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+    ui::HelpMarker("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar.");
     bool testing = Media().MicTesting();
     if (eng.call.state == CallState::None) {
         if (ImGui::Button(testing ? "Stop microphone test" : "Test microphone", ImVec2(0, h))) testing ? Media().StopMicTest() : Media().StartMicTest();

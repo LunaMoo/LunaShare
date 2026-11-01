@@ -115,10 +115,20 @@ void MediaHost::SendCb(void* u, const uint8_t* data, size_t len) {
 
 void MediaHost::LogCb(void*, const char* msg) { SDL_Log("media: %s", msg); }
 
+void MediaHost::ApplyMicGain(int16_t* pcm, int n) {
+    float g = micGain_.load();
+    if (g <= 1.001f) return;
+    for (int i = 0; i < n; i++) {
+        float v = pcm[i] * g;
+        pcm[i] = (int16_t)std::max(-32768.f, std::min(32767.f, v));
+    }
+}
+
 void MediaHost::CaptureCb(void* u, uint8_t* stream, int len) {
     auto* self = (MediaHost*)u;
     int n = len / 2;
-    auto* pcm = (const int16_t*)stream;
+    auto* pcm = (int16_t*)stream;
+    self->ApplyMicGain(pcm, n);
     if (self->mode_ == Mode::Call) {
         self->mod_->capture(pcm, n);
     } else if (self->mode_ == Mode::MicTest) {
@@ -220,6 +230,11 @@ void MediaHost::SetMode(Mode m) {
 
 void MediaHost::Update() {
     if (!eng_) return;
+    uint32_t now = SDL_GetTicks();
+    if (now - settingsTick_ > 500) {
+        settingsTick_ = now;
+        micGain_ = std::pow(10.0f, (float)eng_->GetSettings().callMicBoost / 20.0f);
+    }
     CallState st;
     {
         auto lk = eng_->Lock();
@@ -232,6 +247,10 @@ void MediaHost::Update() {
     else if (micTest_) want = Mode::MicTest;
     if (want != Mode::Call && mode_ == Mode::Call) mute_ = false;
     SetMode(want);
+    if (mode_ == Mode::Call && Bridge().callRoutes && now - routesTick_ > 1500) {
+        routesTick_ = now;
+        RefreshRoutes();  // follows headsets being plugged in / connected during the call
+    }
 }
 
 void MediaHost::Shutdown() {
@@ -244,9 +263,48 @@ void MediaHost::SetMute(bool m) {
     if (mod_) mod_->set_mute(m ? 1 : 0);
 }
 
-void MediaHost::SetSpeaker(bool on) {
-    speaker_ = on;
-    if (Bridge().setSpeakerphone) Bridge().setSpeakerphone(on);
+void MediaHost::RefreshRoutes() {
+    routes_.clear();
+    currentRoute_ = -1;
+    if (!Bridge().callRoutes) return;
+    std::string s = Bridge().callRoutes();
+    size_t pos = 0;
+    bool first = true;
+    while (pos < s.size()) {
+        size_t e = s.find('\n', pos);
+        if (e == std::string::npos) e = s.size();
+        std::string line = s.substr(pos, e - pos);
+        pos = e + 1;
+        if (first) { currentRoute_ = atoi(line.c_str()); first = false; continue; }
+        size_t t1 = line.find('\t'), t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1);
+        if (t1 == std::string::npos) continue;
+        Route r;
+        r.id = atoi(line.substr(0, t1).c_str());
+        r.kind = line.substr(t1 + 1, t2 == std::string::npos ? std::string::npos : t2 - t1 - 1);
+        r.name = t2 == std::string::npos ? "" : line.substr(t2 + 1);
+        routes_.push_back(r);
+    }
+}
+
+const MediaHost::Route* MediaHost::Current() const {
+    for (auto& r : routes_)
+        if (r.id == currentRoute_) return &r;
+    return nullptr;
+}
+
+void MediaHost::SetRoute(int id) {
+    if (Bridge().setCallRoute) Bridge().setCallRoute(id);
+    currentRoute_ = id;
+    routesTick_ = SDL_GetTicks();  // give Android a moment before re-reading the route
+}
+
+std::string MediaHost::RouteLabel(const Route& r) {
+    if (r.kind == "earpiece") return "Phone earpiece";
+    if (r.kind == "speaker") return "Loudspeaker";
+    if (r.kind == "bluetooth") return r.name.empty() ? "Bluetooth" : "Bluetooth: " + r.name;
+    if (r.kind == "wired") return r.name.empty() ? "Headphones" : "Headphones: " + r.name;
+    if (r.kind == "usb") return r.name.empty() ? "USB headset" : "USB: " + r.name;
+    return r.name.empty() ? r.kind : r.name;
 }
 
 LsmStats MediaHost::Stats() {

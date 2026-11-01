@@ -59,7 +59,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callInputDevice", s.callInputDevice},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice},
     };
     if (withIdentity) {
@@ -113,6 +113,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "callNoiseSuppress", s.callNoiseSuppress);
     Get(j, "callAutoGain", s.callAutoGain);
     Get(j, "callBitrate", s.callBitrate);
+    Get(j, "callMicBoost", s.callMicBoost);
+    if (s.callMicBoost < 0 || s.callMicBoost > 30) s.callMicBoost = 0;
     Get(j, "callInputDevice", s.callInputDevice);
     Get(j, "callOutputDevice", s.callOutputDevice);
     if (s.callBitrate < 8000 || s.callBitrate > 64000) s.callBitrate = 24000;

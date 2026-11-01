@@ -55,6 +55,7 @@ struct Settings {
     bool callNoiseSuppress = true;
     bool callAutoGain = true;
     int callBitrate = 24000;
+    int callMicBoost = 0;      // dB added to the microphone before processing (quiet PC mics)
     std::string callInputDevice, callOutputDevice;  // empty = system default
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list

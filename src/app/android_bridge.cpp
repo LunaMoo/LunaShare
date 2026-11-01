@@ -126,7 +126,17 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.openFolder = [](const std::string& path) { CallStr1("openFolder", path); };
     b.requestPermissions = [] { CallV("requestPermissions", "()V"); };
     b.callAudioMode = [](bool on) { CallV("callAudioMode", "(Z)V", (jboolean)on); };
-    b.setSpeakerphone = [](bool on) { CallV("setSpeakerphone", "(Z)V", (jboolean)on); };
+    b.callRoutes = []() -> std::string {
+        JNIEnv* env = Env();
+        jmethodID m = M("callRoutes", "()Ljava/lang/String;");
+        if (!m) return {};
+        jstring s = (jstring)env->CallStaticObjectMethod(g_cls, m);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return {}; }
+        std::string r = JStr(env, s);
+        if (s) env->DeleteLocalRef(s);
+        return r;
+    };
+    b.setCallRoute = [](int id) { CallV("setCallRoute", "(I)V", (jint)id); };
     CallV("requestPermissions", "()V");
 }
 

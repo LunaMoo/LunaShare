@@ -173,7 +173,15 @@ public class LunaShareActivity extends SDLActivity {
             try {
                 android.media.AudioManager am = (android.media.AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
                 am.setMode(inCall ? android.media.AudioManager.MODE_IN_COMMUNICATION : android.media.AudioManager.MODE_NORMAL);
-                if (!inCall) am.setSpeakerphoneOn(false);
+                if (!inCall) {
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        am.clearCommunicationDevice();
+                    } else {
+                        am.setSpeakerphoneOn(false);
+                        am.stopBluetoothSco();
+                        am.setBluetoothScoOn(false);
+                    }
+                }
                 self.setVolumeControlStream(inCall ? android.media.AudioManager.STREAM_VOICE_CALL : android.media.AudioManager.USE_DEFAULT_STREAM_TYPE);
             } catch (Exception e) {
                 nativeOnError("audio mode: " + e.getMessage());
@@ -181,12 +189,84 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
-    public static void setSpeakerphone(final boolean on) {
+    private static String routeKind(int type) {
+        switch (type) {
+            case android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return "earpiece";
+            case android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: return "speaker";
+            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case 26: /* TYPE_BLE_HEADSET */
+            case 27: /* TYPE_BLE_SPEAKER */
+                return "bluetooth";
+            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET:
+            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+                return "wired";
+            case android.media.AudioDeviceInfo.TYPE_USB_HEADSET:
+            case android.media.AudioDeviceInfo.TYPE_USB_DEVICE:
+                return "usb";
+            default: return null;
+        }
+    }
+
+    /**
+     * Where call audio can go right now. One line per route: "id\tkind\tname"; the first line is the id of the
+     * current route. Android 12+ uses the communication-device API; older versions use speakerphone / Bluetooth SCO.
+     */
+    public static String callRoutes() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
+            if (Build.VERSION.SDK_INT >= 31) {
+                android.media.AudioDeviceInfo cur = am.getCommunicationDevice();
+                sb.append(cur != null ? cur.getId() : -1).append('\n');
+                java.util.HashSet<String> seen = new java.util.HashSet<>();
+                for (android.media.AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                    String kind = routeKind(d.getType());
+                    if (kind == null) continue;
+                    String name = d.getProductName() != null ? d.getProductName().toString() : "";
+                    if (!seen.add(kind + "/" + name)) continue;
+                    sb.append(d.getId()).append('\t').append(kind).append('\t').append(name.replace('\t', ' ').replace('\n', ' ')).append('\n');
+                }
+            } else {
+                boolean bt = false, wired = false;
+                String btName = "";
+                for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
+                    String k = routeKind(d.getType());
+                    if ("bluetooth".equals(k)) { bt = true; if (d.getProductName() != null) btName = d.getProductName().toString(); }
+                    if ("wired".equals(k) || "usb".equals(k)) wired = true;
+                }
+                int cur = am.isBluetoothScoOn() ? 3 : am.isSpeakerphoneOn() ? 2 : wired ? 4 : 1;
+                sb.append(cur).append('\n');
+                if (wired) sb.append("4\twired\t\n");
+                else sb.append("1\tearpiece\t\n");
+                sb.append("2\tspeaker\t\n");
+                if (bt && am.isBluetoothScoAvailableOffCall()) sb.append("3\tbluetooth\t").append(btName).append('\n');
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        return sb.toString();
+    }
+
+    public static void setCallRoute(final int id) {
         ui(() -> {
             try {
                 android.media.AudioManager am = (android.media.AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
-                am.setSpeakerphoneOn(on);
-            } catch (Exception ignored) {}
+                if (Build.VERSION.SDK_INT >= 31) {
+                    for (android.media.AudioDeviceInfo d : am.getAvailableCommunicationDevices())
+                        if (d.getId() == id) { am.setCommunicationDevice(d); return; }
+                } else if (id == 3) {
+                    am.setSpeakerphoneOn(false);
+                    am.startBluetoothSco();
+                    am.setBluetoothScoOn(true);
+                } else {
+                    am.stopBluetoothSco();
+                    am.setBluetoothScoOn(false);
+                    am.setSpeakerphoneOn(id == 2);
+                }
+            } catch (Exception e) {
+                nativeOnError("audio route: " + e.getMessage());
+            }
         });
     }
 
