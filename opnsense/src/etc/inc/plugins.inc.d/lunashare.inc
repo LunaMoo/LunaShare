@@ -27,7 +27,7 @@ function lunashare_services()
                 'stop' => ['lunashare stop'],
             ],
             'name' => 'lunashare',
-            'pidfile' => '/var/run/lunashare_rendezvous.pid',
+            'pidfile' => '/var/run/lunashare/lunashare_rendezvous.pid',
         ];
     }
     return $services;

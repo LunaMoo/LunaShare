@@ -20,9 +20,17 @@ load_rc_config $name
 
 # The pid file belongs to the daemon(8) supervisor: stopping it also stops the server, and -r restarts the
 # server should it ever exit unexpectedly. -S/-T log to syslog, -u drops root privileges.
-pidfile="/var/run/${name}.pid"
+# daemon(8) may drop privileges before writing the pid file, so it lives in a directory owned by that user.
+piddir="/var/run/lunashare"
+pidfile="${piddir}/${name}.pid"
+start_precmd="${name}_prestart"
 procname="daemon"
 command="/usr/sbin/daemon"
 command_args="-r -S -T lunashare -u ${lunashare_rendezvous_user} -P ${pidfile} /usr/local/bin/lunashare-rendezvous ${lunashare_rendezvous_args}"
+
+lunashare_rendezvous_prestart()
+{
+    install -d -o "${lunashare_rendezvous_user}" -m 0755 "${piddir}"
+}
 
 run_rc_command "$1"
