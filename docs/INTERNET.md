@@ -17,16 +17,17 @@ OPNsense router.
 
 ## Server on OPNsense
 
-1. Download `LunaShare-opnsense-freebsd-amd64` from the latest GitHub Actions build (or a release) and copy
-   `lunashare-opnsense.tar.gz` to the router.
-2. Over SSH (as root, option 8 "Shell" in the console menu):
+1. Over SSH (as root, option 8 "Shell" in the console menu), download and install:
    ```sh
+   cd /tmp
+   fetch https://github.com/LunaMoo/LunaShare/releases/download/latest/lunashare-opnsense.tar.gz
    tar xzf lunashare-opnsense.tar.gz && cd lunashare-opnsense && sh install.sh
    ```
-3. In the web UI: **Services → LunaShare rendezvous**, tick *Enable*, keep port **47830** (UDP), leave
+   To update later, run the same commands again.
+2. In the web UI: **Services → LunaShare rendezvous**, tick *Enable*, keep port **47830** (UDP), leave
    *Allow on WAN* ticked (adds the firewall pass rule for you), press **Apply**. The service also appears in the
    Services widget / dashboard with start/stop buttons. Logs: *System → Log Files → General* (tag `lunashare`).
-4. Optional: paste your room hash(es) into *Allowed rooms* so strangers can't use your server.
+3. Optional: paste your room hash(es) into *Allowed rooms* so strangers can't use your server.
 
 Uninstall: `sh install.sh uninstall`.
 

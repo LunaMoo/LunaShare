@@ -102,3 +102,31 @@ jobs:
         with:
           name: LunaShare-opnsense-freebsd-amd64
           path: lunashare-opnsense.tar.gz
+
+  # Every push to main refreshes the "latest" pre-release, so files have stable public download links
+  # (Actions artifacts need a GitHub login, which e.g. an OPNsense box doesn't have).
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [desktop, android, opnsense]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir out
+          cp art/LunaShare-opnsense-freebsd-amd64/lunashare-opnsense.tar.gz out/
+          find art/LunaShare-android -name '*.apk' -exec cp {} out/ \;
+          for d in windows-x64 linux-x64 macos-arm64; do (cd art/LunaShare-$d && zip -qry ../../out/LunaShare-$d.zip .); done
+          ls -l out
+          git_sha=${GITHUB_SHA::7}
+          gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create latest -R "$GITHUB_REPOSITORY" --prerelease --title "Latest build" --notes "Automatic build of main."
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true || true
+          gh release edit latest -R "$GITHUB_REPOSITORY" --notes "Automatic build of main ($git_sha)."
+          gh release upload latest out/* -R "$GITHUB_REPOSITORY" --clobber
