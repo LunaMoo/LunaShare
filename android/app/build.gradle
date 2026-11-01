@@ -43,12 +43,14 @@ android {
     productFlavors {
         lite {
             dimension 'features'
+            manifestPlaceholders = [appLabel: 'LunaShare']
             externalNativeBuild { cmake { arguments '-DLUNASHARE_BUILD_VOICE=OFF' } }
         }
         calls {
             dimension 'features'
             applicationIdSuffix '.calls'
             versionNameSuffix '-calls'
+            manifestPlaceholders = [appLabel: 'LunaShare + Calls']
             externalNativeBuild { cmake { arguments '-DLUNASHARE_BUILD_VOICE=ON' } }
         }
     }

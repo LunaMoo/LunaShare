@@ -28,7 +28,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:label="LunaShare"
+        android:label="${appLabel}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:requestLegacyExternalStorage="true"
@@ -38,7 +38,7 @@
         <activity
             android:name="org.lunamoo.lunashare.LunaShareActivity"
             android:exported="true"
-            android:label="LunaShare"
+            android:label="${appLabel}"
             android:launchMode="singleTask"
             android:alwaysRetainTaskState="true"
             android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
