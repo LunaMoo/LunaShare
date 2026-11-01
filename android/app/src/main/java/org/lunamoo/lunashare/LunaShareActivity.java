@@ -189,6 +189,15 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
+    /** The video call engine class, present only in the "calls" build. */
+    public static Class<?> videoClass() {
+        try {
+            return Class.forName("org.lunamoo.lunashare.VideoEngine");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     private static String routeKind(int type) {
         switch (type) {
             case android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: return "earpiece";

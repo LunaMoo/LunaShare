@@ -154,7 +154,10 @@ public:
     uint64_t StartCall(const std::string& peer, const std::string& media = "voice");
     void AcceptCall();
     void EndCall(const std::string& reason = "hangup");
-    void SendMedia(const void* data, size_t len);  // thread-safe, called from audio threads
+    // thread-safe (audio/video threads). data[0] is the media kind: 1 = audio, 2 = video. Audio always goes ahead of
+    // queued video; video is refused (returns false) when too much is already waiting - the sender then skips frames.
+    bool SendMedia(const void* data, size_t len);
+    size_t MediaQueuedBytes();  // video+audio bytes waiting on the call connection (congestion signal)
     // Called on a network thread (never with the engine lock held) for each media packet of the active call.
     std::function<void(uint64_t call, const uint8_t* data, size_t len)> onMedia;
     CallInfo call;
@@ -230,6 +233,7 @@ private:
     std::weak_ptr<Connection> activeCallConn_;  // guarded by mediaMtx_; lets audio threads send without the engine lock
     std::mutex mediaMtx_;
     std::string activeCallPeerSnapshot();
+    std::shared_ptr<Connection> CallConn();
     std::string PartDir();
 
     void Load();

@@ -137,6 +137,22 @@ void AndroidBridgeInit(ls::Engine* engine) {
         return r;
     };
     b.setCallRoute = [](int id) { CallV("setCallRoute", "(I)V", (jint)id); };
+    b.javaVm = []() -> void* {
+        JavaVM* vm = nullptr;
+        Env()->GetJavaVM(&vm);
+        return vm;
+    };
+    b.videoClass = []() -> void* {
+        JNIEnv* env = Env();
+        jmethodID m = M("videoClass", "()Ljava/lang/Class;");
+        if (!m) { env->ExceptionClear(); return nullptr; }
+        jobject c = env->CallStaticObjectMethod(g_cls, m);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
+        if (!c) return nullptr;
+        jobject g = env->NewGlobalRef(c);
+        env->DeleteLocalRef(c);
+        return g;
+    };
     CallV("requestPermissions", "()V");
 }
 

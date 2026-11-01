@@ -14,6 +14,7 @@ extern void (*DeleteTextures)(int, const unsigned int*);
 extern void (*BindTexture)(Enum, unsigned int);
 extern void (*TexParameteri)(Enum, Enum, int);
 extern void (*TexImage2D)(Enum, int, int, int, int, int, Enum, Enum, const void*);
+extern void (*TexSubImage2D)(Enum, int, int, int, int, int, Enum, Enum, const void*);
 extern void (*PixelStorei)(Enum, int);
 extern void (*GetIntegerv)(Enum, int*);
 bool Load();  // call after the GL context is current

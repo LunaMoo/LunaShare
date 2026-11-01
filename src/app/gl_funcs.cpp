@@ -12,6 +12,7 @@ void (*DeleteTextures)(int, const unsigned int*);
 void (*BindTexture)(Enum, unsigned int);
 void (*TexParameteri)(Enum, Enum, int);
 void (*TexImage2D)(Enum, int, int, int, int, int, Enum, Enum, const void*);
+void (*TexSubImage2D)(Enum, int, int, int, int, int, Enum, Enum, const void*);
 void (*PixelStorei)(Enum, int);
 void (*GetIntegerv)(Enum, int*);
 
@@ -32,6 +33,7 @@ bool Load() {
     ok &= L(BindTexture, "glBindTexture");
     ok &= L(TexParameteri, "glTexParameteri");
     ok &= L(TexImage2D, "glTexImage2D");
+    ok &= L(TexSubImage2D, "glTexSubImage2D");
     ok &= L(PixelStorei, "glPixelStorei");
     ok &= L(GetIntegerv, "glGetIntegerv");
     return ok;

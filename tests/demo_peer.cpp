@@ -10,6 +10,9 @@
 #ifdef LS_DEMO_VOICE
 #include "lunashare_media.h"
 #endif
+#ifdef LS_DEMO_VIDEO
+#include "lunashare_video.h"
+#endif
 
 using namespace ls;
 
@@ -23,7 +26,11 @@ int main(int argc, char** argv) {
     if (!LoadJsonFile(JoinPath(argv[1], "settings.json"), existing)) SaveJsonFile(JoinPath(argv[1], "settings.json"), j);
     Engine e;
     e.configDir = argv[1];
+    bool videoCall = getenv("DEMO_CALL") && std::string(getenv("DEMO_CALL")) == "video";
     if (getenv("DEMO_CALL")) e.localCaps = {"voice"};
+#ifdef LS_DEMO_VIDEO
+    if (videoCall) e.localCaps.push_back("video");
+#endif
     e.Start();
     if (std::string(argv[3]) == "-") {  // just stay online (discovery testing)
         std::this_thread::sleep_for(std::chrono::seconds(getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30));
@@ -40,7 +47,8 @@ int main(int argc, char** argv) {
     if (peer.empty()) { printf("could not connect\n"); return 1; }
     if (getenv("DEMO_CALL")) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-        uint64_t cid = e.StartCall(peer);
+        uint64_t cid = e.StartCall(peer, videoCall ? "video" : "voice");
+        (void)cid;
         fflush(stdout);
 #ifdef LS_DEMO_VOICE
         // once accepted, talk: a warbling tone through the real voice module
@@ -57,7 +65,25 @@ int main(int argc, char** argv) {
                 auto lk = e.Lock();
                 active = e.call.state == CallState::Active;
             }
-            if (active && !started) { m->start(&h, &st); started = true; }
+            if (active && !started) {
+                m->start(&h, &st);
+                started = true;
+#ifdef LS_DEMO_VIDEO
+                if (videoCall) {
+                    // test-pattern camera through the video module core
+                    static LsvHost vh{LSV_API_VERSION, nullptr,
+                                      [](void*, const uint8_t* d, size_t n) { return eng->SendMedia(d, n) ? 1 : 0; },
+                                      [](void*, int, const LsvImage*) {}, [](void*, int) {},
+                                      [](void*) { return eng->MediaQueuedBytes(); }, nullptr, nullptr, nullptr};
+                    const LsvModule* vm = lunashare_video_module();
+                    LsvSettings vs{960, 540, 24, 1800000, 1};
+                    vm->init(&vh);
+                    vm->start(&vs);
+                    vm->set_camera_on(1);
+                    eng->onMedia = [vm](uint64_t, const uint8_t* d, size_t n) { if (n && d[0] == 2) vm->receive(d, n); };
+                }
+#endif
+            }
             if (started) {
                 int16_t f[320];
                 for (int k = 0; k < 320; k++, t++)

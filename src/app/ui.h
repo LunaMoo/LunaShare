@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "lunashare_video.h"
 #include "file_browser.h"
 #include "imgui.h"
 
@@ -70,7 +71,19 @@ private:
     // calls (only when the optional media module is installed)
     void DrawCallBar();
     void DrawIncomingCall();
-    bool CallButton(const std::string& peer, float size);
+    bool CallButton(const std::string& peer, float size, bool video = false);
+    void DrawCallButtons(float bw, float h, bool withVideo);
+    int CallButtonCount(bool withVideo) const;
+    void DrawVideoStage(ImVec2 size, bool phone);
+    void DrawVideoOverlay();  // phone: full-screen video call
+    void DrawCameraPanel();
+    bool VideoVisible() const;
+    bool videoFull = false;       // phone: full-screen video shown
+    bool videoAutoOpened = false; // opened once per call
+    bool videoBig = false;        // desktop: video takes the whole chat area
+    bool camPanel = false;
+    std::vector<LsvControl> camCtl;
+    double camCtlTime = -1;
     void DrawCallSettings(float fieldW, float h, bool& changed);
     // picture viewer (ui_viewer.cpp)
     void OpenViewer(const std::string& peer, const std::string& path, bool all);

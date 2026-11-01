@@ -37,6 +37,9 @@ struct HostBridge {
     // Android call audio routes: "current id\n" + lines "id\tkind\tname" (kind: earpiece/speaker/bluetooth/wired/usb)
     std::function<std::string()> callRoutes;
     std::function<void(int id)> setCallRoute;
+    // Android: JavaVM* and a global ref to the VideoEngine class (calls build only), for the video module
+    std::function<void*()> javaVm;
+    std::function<void*()> videoClass;
 };
 HostBridge& Bridge();
 

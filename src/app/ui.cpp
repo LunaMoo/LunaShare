@@ -116,7 +116,11 @@ void App::Frame() {
     static int64_t ringSince = 0;
     if (autoAnswer && eng.call.state == CallState::IncomingRinging) {
         if (!ringSince) ringSince = SteadyMs();
-        if (SteadyMs() - ringSince > 1500) { eng.AcceptCall(); ringSince = 0; }
+        if (SteadyMs() - ringSince > 1500) {
+            Media().WantCameraAtStart(std::string(autoAnswer) == "video");
+            eng.AcceptCall();
+            ringSince = 0;
+        }
     }
     static const char* autoView = getenv("LUNASHARE_AUTOVIEW");
     static bool autoViewDone = false;
@@ -152,6 +156,16 @@ void App::Frame() {
     DrawPopups();
     DrawViewer();
     ImGui::End();
+    if (eng.call.state != CallState::Active) {
+        videoFull = videoAutoOpened = false;
+        camPanel = false;
+    } else if (m.mobile && VideoVisible() && !videoAutoOpened) {
+        videoFull = videoAutoOpened = true;  // a video call opens full screen on phones
+    }
+    static bool devPanel = getenv("LUNASHARE_CAMPANEL") != nullptr;  // dev hook for screenshots
+    if (devPanel && Media().CameraOn()) { camPanel = true; devPanel = false; }
+    if (m.mobile && videoFull && VideoVisible()) DrawVideoOverlay();
+    if (camPanel && Media().CameraOn()) DrawCameraPanel();
     DrawToasts();
     if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
     // Touch scrolling everywhere (phone layout or a touch screen on desktop); the picture viewer handles its own drags.
@@ -534,9 +548,15 @@ void App::DrawMobile() {
     ImGui::PopFont();
     if (screen == MScreen::Chat) {
         bool callable = Media().Available();
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - rowH * (callable ? 2.0f : 1.0f) - (callable ? ImGui::GetStyle().ItemSpacing.x : 0));
+        bool videoable = callable && Media().VideoAvailable();
+        int nb = 1 + (callable ? 1 : 0) + (videoable ? 1 : 0);
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - rowH * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (callable) {
             CallButton(selectedPeer, rowH);
+            ImGui::SameLine();
+        }
+        if (videoable) {
+            CallButton(selectedPeer, rowH, true);
             ImGui::SameLine();
         }
         if (ui::IconButton("attach", Icon::Attach, nullptr, rowH)) {
@@ -657,10 +677,15 @@ void App::DrawChat(const std::string& peer) {
     if (!mobile) {
         float bw = ImGui::GetFrameHeight();
         bool callable = Media().Available();
-        int nb = callable ? 4 : 3;
+        bool videoable = callable && Media().VideoAvailable();
+        int nb = 3 + (callable ? 1 : 0) + (videoable ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (callable) {
             CallButton(peer, bw);
+            ImGui::SameLine();
+        }
+        if (videoable) {
+            CallButton(peer, bw, true);
             ImGui::SameLine();
         }
         if (ui::IconButton("sendfiles", Icon::Attach, "Send files or folders")) {
@@ -702,6 +727,11 @@ void App::DrawChat(const std::string& peer) {
     ImGui::Separator();
 
     float inputH = mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 2.2f;
+    if (!mobile && peer == eng.call.peer && VideoVisible()) {
+        float availH = ImGui::GetContentRegionAvail().y - inputH - ImGui::GetStyle().ItemSpacing.y * 3;
+        float vh = videoBig ? availH - ImGui::GetFrameHeight() * 3 : std::max(ImGui::GetFontSize() * 10, availH * 0.5f);
+        DrawVideoStage(ImVec2(ImGui::GetContentRegionAvail().x, vh), false);
+    }
     ImGui::BeginChild("messages", ImVec2(0, -(inputH + ImGui::GetStyle().ItemSpacing.y * 2)), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
@@ -2110,18 +2140,99 @@ void App::DrawToasts() {
 
 // ============================================================================ calls
 
-bool App::CallButton(const std::string& peer, float size) {
+bool App::CallButton(const std::string& peer, float size, bool video) {
     bool connected = eng.IsConnected(peer);
-    bool capable = connected && eng.PeerHasCap(peer, "voice");
+    bool capable = connected && eng.PeerHasCap(peer, video ? "video" : "voice");
     bool busy = eng.call.state != CallState::None;
-    const char* tip = !connected ? "Voice call (device is offline)"
-                    : !capable ? "Voice call - the other device does not have the voice module"
-                    : busy ? "Already in a call" : "Voice call";
+    const char* tip = !connected ? (video ? "Video call (device is offline)" : "Voice call (device is offline)")
+                    : !capable ? (video ? "Video call - the other device does not have the video module"
+                                        : "Voice call - the other device does not have the voice module")
+                    : busy ? "Already in a call" : video ? "Video call" : "Voice call";
     ImGui::BeginDisabled(!capable || busy);
-    bool clicked = ui::IconButton("call", Icon::Phone, tip, size);
+    bool clicked = ui::IconButton(video ? "vcall" : "call", video ? Icon::Video : Icon::Phone, tip, size);
     ImGui::EndDisabled();
-    if (clicked) eng.StartCall(peer, "voice");
+    if (clicked) {
+        Media().WantCameraAtStart(video);
+        eng.StartCall(peer, video ? "video" : "voice");
+    }
     return clicked;
+}
+
+bool App::VideoVisible() const {
+    if (!Media().VideoRunning()) return false;
+    const auto& r = Media().RemoteVideo();
+    return Media().CameraOn() || (Media().RemoteCameraOn() && r.valid);
+}
+
+int App::CallButtonCount(bool withVideo) const {
+    int n = 2;  // mute, hang up
+    if (eng.call.state != CallState::Active) return 1;
+    if (IsMobilePlatform()) n++;  // audio output
+    if (withVideo && Media().VideoRunning()) {
+        n++;                                   // camera on/off
+        if (Media().CameraOn()) n += 2;        // flip, camera settings
+    }
+    return n;
+}
+
+void App::DrawCallButtons(float bw, float h, bool withVideo) {
+    const CallInfo& c = eng.call;
+    if (c.state == CallState::Active) {
+        bool muted = Media().Muted();
+        if (muted) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
+        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? "Unmute" : "Mute", bw)) Media().SetMute(!muted);
+        if (muted) ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (withVideo && Media().VideoRunning()) {
+            bool on = Media().CameraOn();
+            if (!on) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
+            if (ui::IconButton("cam", on ? Icon::Video : Icon::VideoOff, on ? "Turn camera off" : "Turn camera on", bw)) {
+                Media().SetCameraOn(!on);
+                if (!on && ui::M().mobile) videoFull = true;
+            }
+            if (!on) ImGui::PopStyleColor();
+            ImGui::SameLine();
+            if (on) {
+                if (ui::IconButton("flip", Icon::FlipCamera, "Switch camera", bw)) Media().NextCamera();
+                ImGui::SameLine();
+                if (camPanel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+                bool wasOpen = camPanel;
+                if (ui::IconButton("camset", Icon::Sliders, "Camera settings (zoom, exposure, focus, quality...)", bw)) camPanel = !camPanel;
+                if (wasOpen) ImGui::PopStyleColor();
+                ImGui::SameLine();
+            }
+        }
+        if (IsMobilePlatform()) {
+            // Audio output: with only earpiece + loudspeaker it's a toggle; with a headset connected it opens a list.
+            const MediaHost::Route* cur = Media().Current();
+            bool spk = cur && cur->kind == "speaker";
+            bool hl = cur && cur->kind != "earpiece";
+            if (hl) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : "Audio output", bw)) {
+                Media().RefreshRoutes();
+                auto& rs = Media().Routes();
+                if (rs.size() > 2) {
+                    ImGui::OpenPopup("##callroute");
+                } else {
+                    for (auto& r : rs)
+                        if ((r.kind == "speaker") != spk) { Media().SetRoute(r.id); break; }
+                }
+            }
+            if (hl) ImGui::PopStyleColor();
+            if (ImGui::BeginPopup("##callroute")) {
+                for (auto& r : Media().Routes()) {
+                    if (ImGui::Selectable(MediaHost::RouteLabel(r).c_str(), r.id == Media().CurrentRoute(), 0, ImVec2(ImGui::GetFontSize() * 12, h * 0.9f)))
+                        Media().SetRoute(r.id);
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::SameLine();
+        }
+    }
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(200, 50, 50, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(230, 70, 70, 255));
+    if (ui::IconButton("hangup", Icon::HangUp, "Hang up", bw)) eng.EndCall();
+    ImGui::PopStyleColor(2);
 }
 
 void App::DrawCallBar() {
@@ -2161,58 +2272,294 @@ void App::DrawCallBar() {
             ImGui::SameLine();
             ui::ProgressBarText(st.speaker_level, "", ImVec2(ImGui::GetFontSize() * 4, ImGui::GetTextLineHeight() * 0.5f), IM_COL32(150, 240, 170, 255));
         }
-        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && !mobile)
-            ImGui::SetTooltip("Packet loss %.1f%%  jitter %d ms  delay %d ms  %d kbps\nsent %d / received %d packets%s%s", st.loss_percent,
-                              st.jitter_ms, st.buffered_ms, st.bitrate_kbps, st.packets_out, st.packets_in,
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && !mobile) {
+            std::string vid;
+            if (Media().VideoRunning()) {
+                LsvStats vs = Media().VideoStats();
+                char b[320];
+                snprintf(b, sizeof(b), "\nVideo out: %s%dx%d %d fps %d kbps  in: %dx%d %d fps %d kbps\n%s / %s", Media().CameraOn() ? "" : "(camera off) ",
+                         vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps, vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps,
+                         vs.encoder[0] ? vs.encoder : "-", vs.decoder[0] ? vs.decoder : "-");
+                vid = b;
+            }
+            ImGui::SetTooltip("Packet loss %.1f%%  jitter %d ms  delay %d ms  %d kbps\nsent %d / received %d packets%s%s%s", st.loss_percent,
+                              st.jitter_ms, st.buffered_ms, st.bitrate_kbps, st.packets_out, st.packets_in, vid.c_str(),
                               Media().audioError.empty() ? "" : "\n", Media().audioError.c_str());
+        }
     }
-    // buttons on the right
-    int nb = c.state == CallState::Active ? (IsMobilePlatform() ? 3 : 2) : 1;
+    // buttons on the right (phones with video showing: those live on the full-screen video view)
+    bool phoneVideo = mobile && VideoVisible();
+    int nb = CallButtonCount(true) + (phoneVideo && !videoFull ? 1 : 0);
     float bw = h;
     ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
     ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y);
-    if (c.state == CallState::Active) {
-        bool muted = Media().Muted();
-        if (muted) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
-        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? "Unmute" : "Mute", bw)) Media().SetMute(!muted);
-        if (muted) ImGui::PopStyleColor();
+    if (phoneVideo && !videoFull) {
+        if (ui::IconButton("vfull", Icon::Expand, "Show video", bw)) videoFull = true;
         ImGui::SameLine();
-        if (IsMobilePlatform()) {
-            // Audio output: with only earpiece + loudspeaker it's a toggle; with a headset connected it opens a list.
-            const MediaHost::Route* cur = Media().Current();
-            bool spk = cur && cur->kind == "speaker";
-            bool hl = cur && cur->kind != "earpiece";
-            if (hl) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : "Audio output", bw)) {
-                Media().RefreshRoutes();
-                auto& rs = Media().Routes();
-                if (rs.size() > 2) {
-                    ImGui::OpenPopup("##callroute");
-                } else {
-                    for (auto& r : rs)
-                        if ((r.kind == "speaker") != spk) { Media().SetRoute(r.id); break; }
-                }
-            }
-            if (hl) ImGui::PopStyleColor();
-            if (ImGui::BeginPopup("##callroute")) {
-                for (auto& r : Media().Routes()) {
-                    if (ImGui::Selectable(MediaHost::RouteLabel(r).c_str(), r.id == Media().CurrentRoute(), 0, ImVec2(ImGui::GetFontSize() * 12, h * 0.9f)))
-                        Media().SetRoute(r.id);
-                }
-                ImGui::EndPopup();
-            }
-            ImGui::SameLine();
-        }
     }
-    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(200, 50, 50, 255));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(230, 70, 70, 255));
-    if (ui::IconButton("hangup", Icon::HangUp, "Hang up", bw)) eng.EndCall();
-    ImGui::PopStyleColor(2);
+    DrawCallButtons(bw, h, true);
     if (!Media().audioError.empty() && c.state == CallState::Active) {
         ImGui::TextColored(ImVec4(1, 0.8f, 0.6f, 1), "%s", Media().audioError.c_str());
     }
     ImGui::EndChild();
     ImGui::PopStyleColor();
+}
+
+// ---------------------------------------------------------------- video
+static void DrawFit(ImDrawList* dl, unsigned tex, int tw, int th, ImVec2 p0, ImVec2 p1, bool cover) {
+    float bw = p1.x - p0.x, bh = p1.y - p0.y;
+    if (tw <= 0 || th <= 0 || bw <= 0 || bh <= 0) return;
+    float s = cover ? std::max(bw / tw, bh / th) : std::min(bw / tw, bh / th);
+    float w = tw * s, h = th * s;
+    ImVec2 c((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+    ImVec2 a(c.x - w * 0.5f, c.y - h * 0.5f), b(c.x + w * 0.5f, c.y + h * 0.5f);
+    // crop to the box when covering
+    ImVec2 uv0(0, 0), uv1(1, 1);
+    if (cover) {
+        if (a.x < p0.x) { float f = (p0.x - a.x) / w; uv0.x = f; uv1.x = 1 - f; a.x = p0.x; b.x = p1.x; }
+        if (a.y < p0.y) { float f = (p0.y - a.y) / h; uv0.y = f; uv1.y = 1 - f; a.y = p0.y; b.y = p1.y; }
+    }
+    dl->AddImage((ImTextureID)(intptr_t)tex, a, b, uv0, uv1);
+}
+
+void App::DrawVideoStage(ImVec2 size, bool phone) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(12, 12, 14, 255));
+    ImGui::BeginChild("videostage", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p0 = ImGui::GetWindowPos(), p1(p0.x + size.x, p0.y + size.y);
+    const auto& rv = Media().RemoteVideo();
+    const auto& lv = Media().LocalVideo();
+    bool remote = Media().RemoteCameraOn() && rv.valid;
+    bool local = Media().CameraOn() && lv.valid;
+    std::string who = eng.PeerName(eng.call.peer);
+    if (remote) {
+        DrawFit(dl, rv.tex, rv.w, rv.h, p0, p1, false);
+    } else if (local) {
+        DrawFit(dl, lv.tex, lv.w, lv.h, p0, p1, false);  // nothing from them: show yourself big
+    }
+    if (!remote) {
+        // their camera is off: initial + hint
+        ImVec2 c((p0.x + p1.x) * 0.5f, p0.y + size.y * (local ? 0.15f : 0.42f));
+        float r = std::min(size.x, size.y) * (local ? 0.07f : 0.13f);
+        dl->AddCircleFilled(c, r, IM_COL32(60, 90, 140, local ? 200 : 255));
+        std::string ini = who.empty() ? "?" : who.substr(0, 1);
+        ImFont* f = ImGui::GetFont();
+        float fs = r * 1.1f;
+        ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0, ini.c_str());
+        dl->AddText(f, fs, ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32_WHITE, ini.c_str());
+        std::string msg = Media().RemoteCameraOn() ? "Waiting for " + who + "'s video..." : who + "'s camera is off";
+        ImVec2 ms = ImGui::CalcTextSize(msg.c_str());
+        dl->AddText(ImVec2(c.x - ms.x * 0.5f, c.y + r + ImGui::GetStyle().ItemSpacing.y), IM_COL32(220, 220, 220, 255), msg.c_str());
+    }
+    if (remote && local) {
+        // self-view in the corner
+        float pw = size.x * (phone ? 0.3f : 0.22f);
+        float ph = pw * (float)lv.h / std::max(1, lv.w);
+        if (ph > size.y * 0.4f) { ph = size.y * 0.4f; pw = ph * (float)lv.w / std::max(1, lv.h); }
+        float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
+        ImVec2 a(p1.x - pw - m, p1.y - ph - m - (phone ? ui::M().rowH * 1.6f : 0)), b(a.x + pw, a.y + ph);
+        dl->AddRectFilled(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), IM_COL32(255, 255, 255, 90), 6);
+        DrawFit(dl, lv.tex, lv.w, lv.h, a, b, true);
+    }
+    if (!phone) {
+        // corner buttons: bigger / smaller
+        float bw = ImGui::GetFrameHeight();
+        ImGui::SetCursorScreenPos(ImVec2(p1.x - bw - ImGui::GetStyle().ItemSpacing.x, p0.y + ImGui::GetStyle().ItemSpacing.y));
+        if (ui::IconButton("vbig", Icon::Expand, videoBig ? "Smaller video" : "Bigger video", bw)) videoBig = !videoBig;
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+}
+
+void App::DrawVideoOverlay() {
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->Pos);
+    ImGui::SetNextWindowSize(vp->Size);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(12, 12, 14, 255));
+    ImGui::Begin("##videocall", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                             ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+    if (!camPanel) ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+    ImVec2 full = ImGui::GetContentRegionAvail();
+    ImVec2 top = ImGui::GetCursorPos();
+    DrawVideoStage(full, true);
+    // top: back to chat + name + timer
+    float bw = ui::M().rowH;
+    float pad = ImGui::GetStyle().ItemSpacing.x;
+    ImGui::SetCursorPos(ImVec2(top.x + pad, top.y + pad));
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 110));
+    if (ui::IconButton("vback", Icon::Back, "Back to chat", bw)) videoFull = false;
+    ImGui::SameLine();
+    int secs = (int)((SteadyMs() - eng.call.answered) / 1000);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (bw - ImGui::GetTextLineHeight()) * 0.5f);
+    ImGui::Text("%s  %d:%02d", eng.PeerName(eng.call.peer).c_str(), secs / 60, secs % 60);
+    // bottom: call buttons, centered
+    int nb = CallButtonCount(true);
+    float bb = bw * 1.05f;
+    float rowW = bb * (float)nb + pad * (float)(nb - 1);
+    ImGui::SetCursorPos(ImVec2(top.x + (full.x - rowW) * 0.5f, top.y + full.y - bb - pad * 2));
+    DrawCallButtons(bb, bb, true);
+    ImGui::PopStyleColor();
+    ImGui::End();
+}
+
+void App::DrawCameraPanel() {
+    bool mobile = ui::M().mobile;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    if (mobile) {
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y * 0.35f));
+        ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, vp->WorkSize.y * 0.65f));
+        ImGui::SetNextWindowBgAlpha(0.92f);
+    } else {
+        ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 24, 0), ImGuiCond_Appearing);
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - ImGui::GetFontSize() * 25, vp->WorkPos.y + ImGui::GetFontSize() * 5),
+                                ImGuiCond_Appearing);
+    }
+    ImGuiWindowFlags fl = ImGuiWindowFlags_NoCollapse | (mobile ? ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize : ImGuiWindowFlags_AlwaysAutoResize);
+    if (!ImGui::Begin("Camera", &camPanel, fl)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+    if (mobile) ui::TouchScroll();
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    float w = ImGui::GetContentRegionAvail().x;
+    double now = ImGui::GetTime();
+    if (now - camCtlTime > 0.5) {  // re-read now and then (the camera may change values itself)
+        camCtl = Media().Controls();
+        camCtlTime = now;
+    }
+    auto find = [&](int id) -> LsvControl* {
+        for (auto& c : camCtl) if (c.id == id) return &c;
+        return nullptr;
+    };
+    auto set = [&](LsvControl* c, float v) {
+        c->value = v;
+        Media().SetControl(c->id, v);
+        camCtlTime = now;  // our value stands for a moment
+    };
+    // camera + quality
+    auto cams = Media().Cameras();
+    if (cams.size() > 1) {
+        ImGui::SetNextItemWidth(w);
+        std::string cur = Media().CurrentCameraName();
+        if (ImGui::BeginCombo("##camsel", cur.c_str())) {
+            for (auto& c : cams)
+                if (ImGui::Selectable(c.name, false, 0, ImVec2(0, h))) {
+                    Media().SelectCamera(c.id);
+                    camCtlTime = -1;
+                }
+            ImGui::EndCombo();
+        }
+    }
+    Settings s = eng.GetSettings();
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("##vq", MediaHost::QualityName(s.callVideoQuality))) {
+        for (int q = 0; q < 4; q++)
+            if (ImGui::Selectable(MediaHost::QualityName(q), q == s.callVideoQuality, 0, ImVec2(0, h))) {
+                s.callVideoQuality = q;
+                eng.ApplySettings(s);
+                edit.callVideoQuality = q;
+                Media().ApplyVideoQuality();
+                camCtlTime = -1;
+            }
+        ImGui::EndCombo();
+    }
+    if (ImGui::Checkbox("Lower quality when the connection is slow", &s.callVideoAdaptive)) {
+        eng.ApplySettings(s);
+        edit.callVideoAdaptive = s.callVideoAdaptive;
+        Media().ApplyVideoQuality();
+    }
+    ImGui::Separator();
+    if (camCtl.empty()) ImGui::TextDisabled("This camera has no adjustable settings.");
+    if (LsvControl* z = find(LSV_CTL_ZOOM)) {
+        float v = z->value;
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("##zoom", &v, z->min, z->max, "Zoom %.1fx", ImGuiSliderFlags_Logarithmic)) set(z, v);
+        // quick zoom steps that the camera supports (0.6x = ultra-wide on many phones)
+        const float steps[] = {0.6f, 1.0f, 2.0f, 3.0f, 5.0f, 10.0f};
+        bool first = true;
+        for (float st : steps) {
+            if (st < z->min - 0.01f || st > z->max + 0.01f) continue;
+            if (!first) ImGui::SameLine();
+            first = false;
+            char lbl[16];
+            snprintf(lbl, sizeof(lbl), st < 1 ? "%.1fx" : "%.0fx", st);
+            if (ImGui::Button(lbl, ImVec2(0, h))) set(z, st);
+        }
+    }
+    LsvControl* ae = find(LSV_CTL_AUTO_EXPOSURE);
+    bool aeAuto = !ae || ae->value > 0.5f;
+    if (ae) {
+        bool v = aeAuto;
+        if (ImGui::Checkbox("Automatic exposure", &v)) set(ae, v ? 1.f : 0.f);
+        aeAuto = v;
+    }
+    if (LsvControl* ev = find(LSV_CTL_EXPOSURE_COMP); ev && aeAuto) {
+        float v = ev->value;
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("##ev", &v, ev->min, ev->max, "Exposure %+.1f EV")) set(ev, v);
+    }
+    if (!aeAuto) {
+        if (LsvControl* iso = find(LSV_CTL_ISO)) {
+            float v = iso->value;
+            ImGui::SetNextItemWidth(w);
+            if (ImGui::SliderFloat("##iso", &v, iso->min, iso->max, "ISO %.0f", ImGuiSliderFlags_Logarithmic)) set(iso, v);
+        }
+        if (LsvControl* sh = find(LSV_CTL_SHUTTER)) {
+            float v = sh->value;
+            char fmt[48];
+            snprintf(fmt, sizeof(fmt), v > 0 ? "Shutter 1/%.0f s (%%.2f ms)" : "Shutter %%.2f ms", v > 0 ? 1000.0 / v : 0.0);
+            ImGui::SetNextItemWidth(w);
+            if (ImGui::SliderFloat("##shutter", &v, std::max(0.01f, sh->min), sh->max, fmt, ImGuiSliderFlags_Logarithmic)) set(sh, v);
+        }
+    }
+    LsvControl* af = find(LSV_CTL_AUTO_FOCUS);
+    bool afAuto = !af || af->value > 0.5f;
+    if (af) {
+        bool v = afAuto;
+        if (ImGui::Checkbox("Automatic focus", &v)) set(af, v ? 1.f : 0.f);
+        afAuto = v;
+    }
+    if (LsvControl* fo = find(LSV_CTL_FOCUS); fo && !afAuto) {
+        float v = fo->value;
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("##focus", &v, fo->min, fo->max, "Focus %.1f")) set(fo, v);
+        if (mobile) ImGui::TextDisabled("Left = far away, right = close up");
+    }
+    if (LsvControl* wb = find(LSV_CTL_WHITE_BALANCE)) {
+        static const char* names[] = {"Auto", "Daylight", "Cloudy", "Shade", "Tungsten (indoor lamps)", "Fluorescent"};
+        int v = std::clamp((int)std::lround(wb->value), 0, 5);
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::BeginCombo("##wb", (std::string("White balance: ") + names[v]).c_str())) {
+            for (int i = 0; i <= std::min(5, (int)wb->max); i++)
+                if (ImGui::Selectable(names[i], i == v, 0, ImVec2(0, h))) set(wb, (float)i);
+            ImGui::EndCombo();
+        }
+    }
+    if (LsvControl* br = find(LSV_CTL_BRIGHTNESS)) {
+        float v = br->value;
+        ImGui::SetNextItemWidth(w);
+        if (ImGui::SliderFloat("##bright", &v, br->min, br->max, "Brightness %.0f")) set(br, v);
+    }
+    if (LsvControl* t = find(LSV_CTL_TORCH)) {
+        bool v = t->value > 0.5f;
+        if (ImGui::Checkbox("Flashlight", &v)) set(t, v ? 1.f : 0.f);
+    }
+    if (LsvControl* st = find(LSV_CTL_STABILIZATION)) {
+        bool v = st->value > 0.5f;
+        if (ImGui::Checkbox("Stabilization", &v)) set(st, v ? 1.f : 0.f);
+    }
+    ImGui::Separator();
+    LsvStats vs = Media().VideoStats();
+    ImGui::TextDisabled("Sending %dx%d, %d fps, %d kbps", vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps);
+    if (vs.encoder[0]) ImGui::TextDisabled("Encoder: %s", vs.encoder);
+    if (vs.recv_width) ImGui::TextDisabled("Receiving %dx%d, %d fps, %d kbps", vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps);
+    if (mobile && ImGui::Button("Close", ImVec2(w, h))) camPanel = false;
+    ImGui::End();
 }
 
 void App::DrawIncomingCall() {
@@ -2252,13 +2599,15 @@ void App::DrawIncomingCall() {
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ts.x) * 0.5f));
     ImGui::TextUnformatted(who.c_str());
     ImGui::PopFont();
-    const char* sub = "is calling you";
+    bool videoCall = eng.call.media == "video" && Media().VideoAvailable();
+    const char* sub = videoCall ? "is video calling you" : "is calling you";
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ImGui::CalcTextSize(sub).x) * 0.5f));
     ImGui::TextDisabled("%s", sub);
     ImGui::Spacing();
     if (mobile) ImGui::Dummy(ImVec2(0, vp->WorkSize.y * 0.15f));
     float bh = mobile ? ui::M().rowH * 1.3f : ImGui::GetFrameHeight() * 1.6f;
-    float bw = (avail - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    int nbtn = videoCall ? 3 : 2;
+    float bw = (avail - ImGui::GetStyle().ItemSpacing.x * (float)(nbtn - 1)) / (float)nbtn;
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 50, 50, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(220, 70, 70, 255));
     if (ui::IconTextButton("Decline", Icon::HangUp, ImVec2(bw, bh)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) eng.EndCall();
@@ -2266,7 +2615,22 @@ void App::DrawIncomingCall() {
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 150, 90, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 180, 110, 255));
-    if (ui::IconTextButton("Accept", Icon::Phone, ImVec2(bw, bh))) {
+    bool accept = false;
+    if (videoCall) {
+        if (ui::IconTextButton(mobile ? "Voice" : "Voice only", Icon::Phone, ImVec2(bw, bh))) {
+            Media().WantCameraAtStart(false);
+            accept = true;
+        }
+        ImGui::SameLine();
+        if (ui::IconTextButton("Video", Icon::Video, ImVec2(bw, bh))) {
+            Media().WantCameraAtStart(true);
+            accept = true;
+        }
+    } else if (ui::IconTextButton("Accept", Icon::Phone, ImVec2(bw, bh))) {
+        Media().WantCameraAtStart(false);
+        accept = true;
+    }
+    if (accept) {
         eng.AcceptCall();
         SelectPeer(eng.call.peer);
         if (mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
@@ -2317,6 +2681,31 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, "Microphone boost: +%d dB")) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     ui::HelpMarker("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar.");
+    if (Media().VideoAvailable()) {
+        ImGui::SetNextItemWidth(fieldW);
+        if (ImGui::BeginCombo("##vqual", (std::string("Video: ") + MediaHost::QualityName(edit.callVideoQuality)).c_str())) {
+            for (int q = 0; q < 4; q++)
+                if (ImGui::Selectable(MediaHost::QualityName(q), q == edit.callVideoQuality, 0, ImVec2(0, h))) {
+                    edit.callVideoQuality = q;
+                    changed = true;
+                }
+            ImGui::EndCombo();
+        }
+        ui::HelpMarker("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call.");
+        changed |= ImGui::Checkbox("Lower video quality automatically when the connection is slow", &edit.callVideoAdaptive);
+        auto cams = Media().Cameras();
+        if (cams.size() > 1) {
+            std::string cur = "Front camera (default)";
+            for (auto& c : cams) if (edit.callCamera == c.id) cur = c.name;
+            ImGui::SetNextItemWidth(fieldW);
+            if (ImGui::BeginCombo("##defcam", ("Camera: " + cur).c_str())) {
+                if (ImGui::Selectable("Front camera (default)", edit.callCamera.empty(), 0, ImVec2(0, h))) { edit.callCamera.clear(); changed = true; }
+                for (auto& c : cams)
+                    if (ImGui::Selectable(c.name, edit.callCamera == c.id, 0, ImVec2(0, h))) { edit.callCamera = c.id; changed = true; }
+                ImGui::EndCombo();
+            }
+        }
+    }
     bool testing = Media().MicTesting();
     if (eng.call.state == CallState::None) {
         if (ImGui::Button(testing ? "Stop microphone test" : "Test microphone", ImVec2(0, h))) testing ? Media().StopMicTest() : Media().StartMicTest();

@@ -55,7 +55,10 @@ struct Settings {
     bool callNoiseSuppress = true;
     bool callAutoGain = true;
     int callBitrate = 24000;
-    int callMicBoost = 0;      // dB added to the microphone before processing (quiet PC mics)
+    int callMicBoost = 0;
+    int callVideoQuality = 1;      // 0 low (360p/15) 1 medium (540p/24) 2 high (720p/30) 3 full HD (1080p/30)
+    bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
+    std::string callCamera;        // preferred camera id (empty: front camera)      // dB added to the microphone before processing (quiet PC mics)
     std::string callInputDevice, callOutputDevice;  // empty = system default
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list

@@ -2167,9 +2167,7 @@ void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
     Emit({EventType::CallEnded, c.peer, text, c.id, reason});
 }
 
-void Engine::SendMedia(const void* data, size_t len) {
-    uint64_t id = activeCallId_.load();
-    if (!id || len > 4000) return;
+std::shared_ptr<Connection> Engine::CallConn() {
     std::shared_ptr<Connection> c;
     std::string peer;
     {
@@ -2181,26 +2179,66 @@ void Engine::SendMedia(const void* data, size_t len) {
         // the connection was replaced (e.g. LAN came back): look it up once, under the engine lock
         auto lk = Lock();
         c = ReadyConn(peer);
-        if (!c) return;
+        if (!c) return nullptr;
         c->callPriority = true;
         std::lock_guard<std::mutex> l(mediaMtx_);
         activeCallConn_ = c;
     }
+    return c;
+}
+
+bool Engine::SendMedia(const void* data, size_t len) {
+    uint64_t id = activeCallId_.load();
+    if (!id || len < 1 || len > (1u << 20)) return false;
+    bool video = ((const uint8_t*)data)[0] == 2;
+    if (!video && len > 4000) return false;
+    auto c = CallConn();
+    if (!c) return false;
     std::string payload(8 + len, '\0');
     PutU64((uint8_t*)payload.data(), id);
     memcpy(&payload[8], data, len);
     {
         std::lock_guard<std::mutex> l(c->qm);
-        // never let voice pile up: if the link stalls, drop the oldest media instead of growing latency
-        size_t media = 0;
-        for (auto& q : c->ctrl) if (q.first == Msg::Media) media++;
-        if (media > 25) {
-            for (auto it = c->ctrl.begin(); it != c->ctrl.end(); ++it)
-                if (it->first == Msg::Media) { c->ctrl.erase(it); break; }
+        size_t audio = 0, videoBytes = 0;
+        for (auto& q : c->ctrl) {
+            if (q.first != Msg::Media) continue;
+            if (q.second.size() > 8 && (uint8_t)q.second[8] == 2) videoBytes += q.second.size();
+            else audio++;
         }
-        c->ctrl.emplace_back(Msg::Media, std::move(payload));
+        if (video) {
+            // keep latency bounded: the module adapts its bitrate from MediaQueuedBytes() and skips frames on refusal
+            if (videoBytes > 768 * 1024) return false;
+            c->ctrl.emplace_back(Msg::Media, std::move(payload));
+        } else {
+            // never let voice pile up: if the link stalls, drop the oldest audio instead of growing latency
+            if (audio > 25) {
+                for (auto it = c->ctrl.begin(); it != c->ctrl.end(); ++it)
+                    if (it->first == Msg::Media && !(it->second.size() > 8 && (uint8_t)it->second[8] == 2)) { c->ctrl.erase(it); break; }
+            }
+            // audio overtakes queued video
+            auto pos = c->ctrl.end();
+            for (auto it = c->ctrl.begin(); it != c->ctrl.end(); ++it)
+                if (it->first == Msg::Media && it->second.size() > 8 && (uint8_t)it->second[8] == 2) { pos = it; break; }
+            c->ctrl.insert(pos, {Msg::Media, std::move(payload)});
+        }
     }
     c->qcv.notify_one();
+    return true;
+}
+
+size_t Engine::MediaQueuedBytes() {
+    if (!activeCallId_.load()) return 0;
+    std::shared_ptr<Connection> c;
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        c = activeCallConn_.lock();
+    }
+    if (!c) return 0;
+    std::lock_guard<std::mutex> l(c->qm);
+    size_t n = 0;
+    for (auto& q : c->ctrl)
+        if (q.first == Msg::Media) n += q.second.size();
+    return n;
 }
 
 std::string Engine::activeCallPeerSnapshot() {

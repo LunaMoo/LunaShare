@@ -200,6 +200,41 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->PathArcTo(P(0.05f, 0), h * 0.65f, -0.8f, 0.8f, 10);
             dl->PathStroke(col, 0, t);
             break;
+        case Icon::Video:
+        case Icon::VideoOff:
+            // camcorder: body + lens wedge
+            dl->AddRectFilled(P(-0.85f, -0.45f), P(0.3f, 0.45f), col, h * 0.15f);
+            dl->AddTriangleFilled(P(0.35f, 0.0f), P(0.85f, -0.4f), P(0.85f, 0.4f), col);
+            if (icon == Icon::VideoOff) dl->AddLine(P(-0.8f, -0.8f), P(0.8f, 0.8f), IM_COL32(230, 70, 70, 255), t * 1.4f);
+            break;
+        case Icon::FlipCamera:
+            // camera body with two turning arrows
+            dl->AddRect(P(-0.7f, -0.35f), P(0.7f, 0.5f), col, h * 0.12f, 0, t);
+            dl->AddRectFilled(P(-0.25f, -0.55f), P(0.25f, -0.35f), col);
+            dl->PathArcTo(P(0, 0.08f), h * 0.25f, 3.6f, 6.0f, 8);
+            dl->PathStroke(col, 0, t);
+            dl->AddTriangleFilled(P(0.18f, 0.12f), P(0.38f, 0.12f), P(0.28f, -0.05f), col);
+            dl->PathArcTo(P(0, 0.08f), h * 0.25f, 0.46f, 2.86f, 8);
+            dl->PathStroke(col, 0, t);
+            dl->AddTriangleFilled(P(-0.18f, 0.04f), P(-0.38f, 0.04f), P(-0.28f, 0.21f), col);
+            break;
+        case Icon::Sliders:
+            for (int i = -1; i <= 1; i++) {
+                float y = i * 0.55f, k = i == 0 ? 0.3f : i < 0 ? -0.3f : 0.1f;
+                dl->AddLine(P(-0.8f, y), P(0.8f, y), col, t);
+                dl->AddCircleFilled(P(k, y), h * 0.17f, col);
+            }
+            break;
+        case Icon::Expand:
+            dl->AddLine(P(-0.75f, -0.75f), P(-0.25f, -0.75f), col, t);
+            dl->AddLine(P(-0.75f, -0.75f), P(-0.75f, -0.25f), col, t);
+            dl->AddLine(P(0.75f, 0.75f), P(0.25f, 0.75f), col, t);
+            dl->AddLine(P(0.75f, 0.75f), P(0.75f, 0.25f), col, t);
+            dl->AddLine(P(0.75f, -0.75f), P(0.25f, -0.75f), col, t);
+            dl->AddLine(P(0.75f, -0.75f), P(0.75f, -0.25f), col, t);
+            dl->AddLine(P(-0.75f, 0.75f), P(-0.25f, 0.75f), col, t);
+            dl->AddLine(P(-0.75f, 0.75f), P(-0.75f, 0.25f), col, t);
+            break;
         case Icon::List:
             for (int i = -1; i <= 1; i++) {
                 dl->AddRectFilled(P(-0.75f, i * 0.55f - 0.1f), P(-0.5f, i * 0.55f + 0.1f), col);

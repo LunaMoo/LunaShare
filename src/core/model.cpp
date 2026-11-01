@@ -1,4 +1,5 @@
 #include "model.h"
+#include <algorithm>
 
 #include "crypto.h"
 #include "platform.h"
@@ -59,7 +60,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callInputDevice", s.callInputDevice},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callVideoQuality", s.callVideoQuality}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice},
     };
     if (withIdentity) {
@@ -114,6 +115,10 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "callAutoGain", s.callAutoGain);
     Get(j, "callBitrate", s.callBitrate);
     Get(j, "callMicBoost", s.callMicBoost);
+    Get(j, "callVideoQuality", s.callVideoQuality);
+    Get(j, "callVideoAdaptive", s.callVideoAdaptive);
+    Get(j, "callCamera", s.callCamera);
+    s.callVideoQuality = std::clamp(s.callVideoQuality, 0, 3);
     if (s.callMicBoost < 0 || s.callMicBoost > 30) s.callMicBoost = 0;
     Get(j, "callInputDevice", s.callInputDevice);
     Get(j, "callOutputDevice", s.callOutputDevice);
