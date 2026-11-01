@@ -82,10 +82,31 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Call bar: timer, mic/speaker levels, link stats (loss, jitter, delay), and buttons for mute, speaker (phones) and hang up. Incoming calls get a ringtone and a full-screen answer screen on phones.
 - Calls are logged in the chat (*Outgoing call – 2:31*, *Missed call*, …).
 - *Settings → Calls*: choose input and output devices, turn echo cancellation, noise suppression and auto gain on or off, set quality, and run a microphone test.
-- Android ships as two APKs: **lite** (no module, no microphone permission) and **calls** (`org.lunamoo.lunashare.calls`, includes the module).
+- Android ships as two APKs: **lite** (no modules, no microphone or camera permission) and **calls** (`org.lunamoo.lunashare.calls`, voice + video).
 - The module has a small, versioned C ABI (`src/media_api/lunashare_media.h`), so a video module can be added later the same way.
 
 ![Voice call](docs/voice-call.png)
+
+**Video calls (optional module, Windows and Android for now)**
+- A second plug-in, `lunashare_video` (`lunashare_video.dll` / `liblunashare_video.so`), sits next to the voice module. It adds the
+  video call button when both devices have it, and any call between two video-capable devices can turn the camera on or off.
+- The module bundles no codec library and uses the system's own H.264: Media Foundation on Windows (a GPU encoder when one works,
+  otherwise Microsoft's software encoder) and MediaCodec on Android (hardware).
+- **Android battery use:** the camera feeds the hardware encoder directly, so frames never pass through the CPU. The self-view is a
+  small 15 fps stream, and the camera runs at a fixed frame rate.
+- **Quality:** pick Low (360p, 15 fps), Medium (540p, 24 fps), High (720p, 30 fps) or Full HD (1080p, 30 fps) in *Settings → Calls*
+  or during a call. With *Lower quality when the connection is slow* on, the bitrate follows what the link can actually carry
+  (measured four times a second), so the picture gets softer instead of lagging. Voice always goes ahead of video.
+- **Camera panel (during a call):**
+  - Phones: zoom (including the ultra-wide lens, e.g. 0.6x, where the phone has one), switching between cameras, exposure
+    compensation, manual ISO and shutter, auto or manual focus, flashlight, white balance and stabilization. What's available
+    depends on the camera.
+  - Webcams: zoom, focus, exposure and brightness, when the camera supports them.
+- **Lost or late video** isn't buffered for long. The receiver asks for a fresh keyframe, so the picture recovers within a moment.
+- On phones a video call opens full screen with the call buttons at the bottom. On desktop the video sits above the chat and can be enlarged.
+
+![Video call](docs/video-call.png)
+![Camera panel](docs/video-camera-panel.png)
 
 **Settings**
 - Download folder, auto-accept rules, discovery, port, speed limit, chunk size, parallel files, Bluetooth, theme (dark/light/classic), UI scale.
@@ -109,11 +130,14 @@ cmake --build build --config Release
 - **Android:** open `android/` in Android Studio, or run `gradle assembleRelease` in `android/`. The Gradle build fetches SDL's Java glue
   and builds the native code through the same top-level `CMakeLists.txt`. Needs NDK 27 and minSdk 24.
   On Android 11+ the app asks for *All files access* so it can send any file and save to `Download/LunaShare`.
-  There are two flavors: `gradle assembleLiteRelease` (without calls) and `gradle assembleCallsRelease` (with the voice module and microphone permission).
+  There are two flavors: `gradle assembleLiteRelease` (without calls) and `gradle assembleCallsRelease` (with the voice and video modules,
+  plus the microphone and camera permissions).
 - Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only),
-  `-DLUNASHARE_BUILD_VOICE=OFF` (skip the voice module, along with Opus and SpeexDSP).
+  `-DLUNASHARE_BUILD_VOICE=OFF` (skip the voice module, along with Opus and SpeexDSP), `-DLUNASHARE_BUILD_VIDEO=OFF` (skip the video module),
+  `-DLUNASHARE_VIDEO_TEST_MODULE=ON` (development: a video module with a test-pattern camera on systems without a real backend).
 - The voice module builds next to the executable. To ship it, put it next to `LunaShare.exe` or in a `modules/` folder (Windows/Linux),
-  or in `LunaShare.app/Contents/MacOS` (macOS). `./build/lunashare_voice_tests` checks the audio pipeline (packet loss, jitter, echo cancellation).
+  or in `LunaShare.app/Contents/MacOS` (macOS). The video module goes in the same place. `./build/lunashare_voice_tests` checks the audio pipeline
+  (packet loss, jitter, echo cancellation), and `./build/lunashare_video_tests` checks the video core (keyframe recovery after loss, bitrate adaptation on a slow link).
 - Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`.
 
 The GitHub Actions workflow builds Windows, Linux, macOS and the Android APK on every push and uploads them as artifacts.
@@ -138,6 +162,8 @@ opnsense/      OPNsense plugin (Services > LunaShare rendezvous) + install.sh
   platform.*     paths, MACs, interfaces, UTF-8 file I/O
 src/media_api/ lunashare_media.h - the C ABI between the app and media modules
 modules/voice/ voice module: Opus + SpeexDSP + jitter buffer (built as lunashare_media)
+modules/video/ video module (lunashare_video): video_core.cpp (packets, keyframes, bitrate), video_win.cpp (Media Foundation),
+               video_android.cpp + android/app/src/calls/java/.../VideoEngine.java (Camera2 + MediaCodec), video_fake.cpp (tests)
 src/app/       SDL2 + Dear ImGui front end
   media_host.*   loads the media module, audio devices, ring tones, call state
   ui.cpp         desktop & phone layouts, chat, transfers, history, devices, connect, settings
@@ -170,7 +196,8 @@ tests/         engine tests (pause/resume, receiver restart, corruption detectio
   when you choose *include identity*.
 - Protocol v2 (encrypted) can't talk to builds from before encryption was added.
 - Voice calls are tested in code (signalling, packet loss/jitter, echo cancellation) but not yet with real microphones and speakers on every platform.
-  Calls are one-to-one, and there's no video yet.
+  Calls are one-to-one. Video calls are tested in code (packets, loss recovery, bitrate adaptation, and the full pipeline on a test-pattern camera),
+  but the Windows and Android camera/codec code hasn't been tried on real devices yet. There's no video on Linux and macOS yet.
 
 ## License
 

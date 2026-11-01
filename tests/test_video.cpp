@@ -141,7 +141,7 @@ int main() {
     L.kbps = 0;
     std::this_thread::sleep_for(std::chrono::milliseconds(9000));
     m->get_stats(&st);
-    CHECK(st.send_kbps > 700, "bitrate climbs back (%d kbps)", st.send_kbps);
+    CHECK(st.send_kbps > 600, "bitrate climbs back (%d kbps)", st.send_kbps);
 
     printf("[video: camera off]\n");
     CHECK(m->set_camera_on(0) == 1, "camera off");

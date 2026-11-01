@@ -384,7 +384,7 @@ public final class VideoEngine {
                 if (aeAuto || !manualSensor()) {
                     request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
                     Rational step = new Rational(chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP));
-                    request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, Math.round(evComp / step.value()));
+                    request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, (int) Math.round(evComp / step.value()));
                 } else {
                     request.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
                     request.set(CaptureRequest.SENSOR_SENSITIVITY, Math.round(iso));

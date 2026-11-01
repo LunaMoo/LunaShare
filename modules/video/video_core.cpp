@@ -254,10 +254,10 @@ public:
                 if (backend) backend->SetBitrate(next);
             } else if (q < budget / 4 && cur < target) {
                 calmMs += 250;
-                if (calmMs >= 1500) {  // probe upwards slowly
+                if (calmMs >= 1000) {  // probe upwards, a step a second
                     int next = std::min(target, std::max(cur + 50000, cur * 115 / 100));
                     curBitrate = next;
-                    calmMs = 500;
+                    calmMs = 0;
                     lastAdjust = now;
                     if (backend) backend->SetBitrate(next);
                 }
