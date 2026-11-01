@@ -42,6 +42,11 @@ struct Settings {
     float uiScale = 0.0f;          // 0 = automatic (DPI based)
     int theme = 0;                 // 0 dark, 1 light, 2 classic
     std::string lastBrowseDir;
+    // file picker
+    bool browserGrid = false;      // gallery tiles instead of a list
+    bool browserPicturesOnly = false;
+    int browserSort = 0;           // 0 name, 1 newest first, 2 largest first
+    int browserTile = 130;         // tile size (unscaled px)
 };
 
 struct KnownDevice {

@@ -417,6 +417,9 @@ std::string UniquePath(const std::string& path) {
 std::vector<DirEntry> ListDir(const std::string& path) {
     std::vector<DirEntry> out;
     std::error_code ec;
+    // file_clock has an implementation-defined epoch (C++17 has no clock_cast): convert via "now" on both clocks.
+    auto fileNow = fs::file_time_type::clock::now();
+    auto sysNow = std::chrono::system_clock::now();
     for (auto it = fs::directory_iterator(P(path), fs::directory_options::skip_permission_denied, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
         DirEntry e;
         e.name = S(it->path().filename());
@@ -425,6 +428,11 @@ std::vector<DirEntry> ListDir(const std::string& path) {
         if (!e.isDir) {
             auto sz = it->file_size(ec2);
             e.size = ec2 ? 0 : (int64_t)sz;
+        }
+        auto t = it->last_write_time(ec2);
+        if (!ec2) {
+            auto sys = sysNow + std::chrono::duration_cast<std::chrono::system_clock::duration>(t - fileNow);
+            e.mtime = (int64_t)std::chrono::duration_cast<std::chrono::seconds>(sys.time_since_epoch()).count();
         }
         out.push_back(std::move(e));
     }

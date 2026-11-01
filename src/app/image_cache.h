@@ -1,6 +1,7 @@
 // Asynchronous image decoding (stb_image, EXIF orientation aware) + GL texture cache for chat thumbnails
 // and the full-screen picture viewer.
 #pragma once
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -26,8 +27,11 @@ class ImageCache {
 public:
     ImageCache();
     ~ImageCache();
-    // full = false: thumbnail (<= 512 px). Never blocks; returns a Loading entry until decoded.
-    const ImageTex& Get(const std::string& path, bool full);
+    enum class Size { Tile, Thumb, Full };
+    // Thumb: <= 512 px. Tile: <= 256 px, uses the JPEG's embedded EXIF preview when present (very fast, for
+    // file-picker galleries). Full: up to the GL texture limit. Never blocks; returns Loading until decoded.
+    const ImageTex& Get(const std::string& path, Size size);
+    const ImageTex& Get(const std::string& path, bool full) { return Get(path, full ? Size::Full : Size::Thumb); }
     void Prefetch(const std::string& path, bool full) { (void)Get(path, full); }
     // Call once per frame on the GL thread: uploads finished decodes, evicts old textures.
     void Update();
@@ -38,12 +42,15 @@ private:
     struct Job {
         std::string key, path;
         int maxSide;
+        bool preferExif = false;
+        uint64_t frame = 0;
     };
     struct Result {
         std::string key;
         std::vector<unsigned char> rgba;
         int w = 0, h = 0, srcW = 0, srcH = 0;
         bool ok = false;
+        bool cancelled = false;
     };
     void Worker();
     std::map<std::string, ImageTex> cache_;
@@ -54,6 +61,7 @@ private:
     std::vector<std::thread> threads_;
     bool stop_ = false;
     uint64_t frame_ = 0;
+    std::atomic<uint64_t> frameAtomic_{0};
     int maxTex_ = 4096;
 };
 

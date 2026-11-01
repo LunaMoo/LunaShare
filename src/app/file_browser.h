@@ -18,9 +18,24 @@ public:
     std::vector<std::string> result;
     std::string lastDir;
 
+    // View preferences (the app persists them in Settings).
+    struct Prefs {
+        bool grid = false;
+        bool picturesOnly = false;
+        int sort = 0;    // 0 name, 1 newest first, 2 largest first
+        int tile = 130;  // unscaled tile size
+        bool operator!=(const Prefs& o) const { return grid != o.grid || picturesOnly != o.picturesOnly || sort != o.sort || tile != o.tile; }
+    } prefs;
+    bool prefsChanged = false;
+    void SelectFirstFiles(int n);  // used by automated screenshots
+
 private:
     void Refresh();
     void Navigate(const std::string& dir);
+    void DrawList(std::string& navigateTo, bool& confirmed);
+    void DrawGrid(std::string& navigateTo, bool& confirmed);
+    void Click(int i, bool& confirmed, std::string& navigateTo, bool doubleClick);
+    int64_t SelectedBytes() const;
     bool open_ = false, requestOpen_ = false;
     Mode mode_ = Mode::OpenMulti;
     std::string title_, dir_, filter_, error_;
@@ -28,6 +43,10 @@ private:
     std::vector<ls::DirEntry> entries_;
     std::set<std::string> selected_;
     int lastClicked_ = -1;
+    bool longPressHandled_ = false;
+    bool resetScroll_ = false;
+    bool openPreview_ = false;
+    std::string previewPath_;
     bool showHidden_ = false;
     std::vector<std::pair<std::string, std::string>> places_;
 };

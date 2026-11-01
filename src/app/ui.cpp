@@ -49,6 +49,10 @@ App::App(Engine& e) : eng(e) {
     auto lk = eng.Lock();
     edit = eng.settings;
     browser.lastDir = eng.settings.lastBrowseDir;
+    browser.prefs.grid = eng.settings.browserGrid;
+    browser.prefs.picturesOnly = eng.settings.browserPicturesOnly;
+    browser.prefs.sort = eng.settings.browserSort;
+    browser.prefs.tile = eng.settings.browserTile;
 }
 
 bool App::IsMobileLayout() {
@@ -97,6 +101,14 @@ void App::Frame() {
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
         autoSel = nullptr;
+    }
+    static const char* autoBrowse = getenv("LUNASHARE_BROWSE");
+    static bool autoBrowseDone = false;
+    if (autoBrowse && !autoBrowseDone) {
+        autoBrowseDone = true;
+        browseFor = BrowseFor::SendFiles;
+        browser.Open(FileBrowser::Mode::OpenMulti, "Send to ...", autoBrowse);
+        if (const char* n = getenv("LUNASHARE_BROWSE_SELECT")) browser.SelectFirstFiles(atoi(n));
     }
     static const char* autoView = getenv("LUNASHARE_AUTOVIEW");
     static bool autoViewDone = false;
@@ -1744,7 +1756,18 @@ void App::DrawPopups() {
     };
 
     // ---- file browser results
-    if (browser.Draw()) {
+    bool browserDone = browser.Draw();
+    if (browser.prefsChanged) {
+        browser.prefsChanged = false;
+        Settings s = eng.settings;
+        s.browserGrid = browser.prefs.grid;
+        s.browserPicturesOnly = browser.prefs.picturesOnly;
+        s.browserSort = browser.prefs.sort;
+        s.browserTile = browser.prefs.tile;
+        eng.ApplySettings(s);
+        edit = eng.settings;
+    }
+    if (browserDone) {
         auto res = browser.result;
         Settings s = eng.settings;
         s.lastBrowseDir = browser.lastDir;

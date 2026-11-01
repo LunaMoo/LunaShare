@@ -47,8 +47,9 @@ void ImageCache::Shutdown() {
     cache_.clear();
 }
 
-const ImageTex& ImageCache::Get(const std::string& path, bool full) {
-    std::string key = (full ? "F|" : "T|") + path;
+const ImageTex& ImageCache::Get(const std::string& path, Size size) {
+    const char* prefix = size == Size::Full ? "F|" : size == Size::Thumb ? "T|" : "S|";
+    std::string key = prefix + path;
     auto it = cache_.find(key);
     if (it != cache_.end()) {
         it->second.lastUsed = frame_;
@@ -58,9 +59,9 @@ const ImageTex& ImageCache::Get(const std::string& path, bool full) {
     t.lastUsed = frame_;
     {
         std::lock_guard<std::mutex> l(m_);
-        Job j{key, path, full ? maxTex_ : 512};
-        if (full) jobs_.push_front(j);  // the viewer is waiting for this one
-        else jobs_.push_back(j);
+        Job j{key, path, size == Size::Full ? maxTex_ : size == Size::Thumb ? 512 : 256, size == Size::Tile, frame_};
+        // Newest requests first: what is on screen right now matters, things scrolled past can wait (or be skipped).
+        jobs_.push_front(j);
     }
     cv_.notify_one();
     return t;
@@ -99,6 +100,48 @@ static int ExifOrientation(const unsigned char* d, size_t n) {
         p += 2 + len;
     }
     return 1;
+}
+
+// Embedded EXIF preview (IFD1 JPEGInterchangeFormat), typically 160x120. Returns {offset, length} into `d`.
+static bool ExifThumbnail(const unsigned char* d, size_t n, size_t& off, size_t& len) {
+    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return false;
+    size_t p = 2;
+    while (p + 4 < n) {
+        if (d[p] != 0xFF) return false;
+        unsigned char marker = d[p + 1];
+        size_t seg = ((size_t)d[p + 2] << 8) | d[p + 3];
+        if (marker == 0xDA || marker == 0xD9) return false;
+        if (marker == 0xE1 && p + 2 + seg <= n && seg > 14 && memcmp(d + p + 4, "Exif\0\0", 6) == 0) {
+            size_t tiff = p + 10;
+            const unsigned char* t = d + tiff;
+            size_t tn = seg - 8;
+            bool le = t[0] == 'I';
+            auto u16 = [&](size_t o) -> size_t { return o + 2 > tn ? 0 : le ? (t[o] | t[o + 1] << 8) : (t[o] << 8 | t[o + 1]); };
+            auto u32 = [&](size_t o) -> size_t {
+                if (o + 4 > tn) return 0;
+                return le ? ((size_t)t[o] | (size_t)t[o + 1] << 8 | (size_t)t[o + 2] << 16 | (size_t)t[o + 3] << 24)
+                          : ((size_t)t[o] << 24 | (size_t)t[o + 1] << 16 | (size_t)t[o + 2] << 8 | (size_t)t[o + 3]);
+            };
+            size_t ifd0 = u32(4);
+            size_t cnt0 = u16(ifd0);
+            size_t ifd1 = u32(ifd0 + 2 + cnt0 * 12);
+            if (!ifd1 || ifd1 >= tn) return false;
+            size_t cnt1 = u16(ifd1);
+            size_t jo = 0, jl = 0;
+            for (size_t i = 0; i < cnt1; i++) {
+                size_t e = ifd1 + 2 + i * 12;
+                size_t tag = u16(e);
+                if (tag == 0x0201) jo = u32(e + 8);
+                if (tag == 0x0202) jl = u32(e + 8);
+            }
+            if (!jo || !jl || jo + jl > tn) return false;
+            off = tiff + jo;
+            len = jl;
+            return true;
+        }
+        p += 2 + seg;
+    }
+    return false;
 }
 
 static std::vector<unsigned char> Downscale(const unsigned char* src, int w, int h, int nw, int nh) {
@@ -158,6 +201,13 @@ void ImageCache::Worker() {
         }
         Result r;
         r.key = job.key;
+        // Skip requests for things that have not been on screen for a while (fast scrolling through a big folder).
+        if (job.maxSide <= 512 && frameAtomic_.load() > job.frame + 90) {
+            r.cancelled = true;
+            std::lock_guard<std::mutex> l(m_);
+            done_.push_back(std::move(r));
+            continue;
+        }
         std::vector<unsigned char> file;
         if (FILE* f = ls::OpenFile(job.path, "rb")) {
             fseek(f, 0, SEEK_END);
@@ -170,7 +220,13 @@ void ImageCache::Worker() {
             fclose(f);
         }
         int w = 0, h = 0, ch = 0;
-        unsigned char* px = file.empty() ? nullptr : stbi_load_from_memory(file.data(), (int)file.size(), &w, &h, &ch, 4);
+        unsigned char* px = nullptr;
+        size_t eo = 0, el = 0;
+        if (job.preferExif && ExifThumbnail(file.data(), file.size(), eo, el)) {
+            px = stbi_load_from_memory(file.data() + eo, (int)el, &w, &h, &ch, 4);
+            if (px && std::max(w, h) < 96) { stbi_image_free(px); px = nullptr; }  // too tiny to be useful
+        }
+        if (!px && !file.empty()) px = stbi_load_from_memory(file.data(), (int)file.size(), &w, &h, &ch, 4);
         if (px && w > 0 && h > 0) {
             r.srcW = w;
             r.srcH = h;
@@ -203,6 +259,7 @@ void ImageCache::Worker() {
 
 void ImageCache::Update() {
     frame_++;
+    frameAtomic_ = frame_;
     if (frame_ == 1 && glf::GetIntegerv) {
         int mt = 0;
         glf::GetIntegerv(glf::MAX_TEXTURE_SIZE, &mt);
@@ -217,6 +274,10 @@ void ImageCache::Update() {
         auto it = cache_.find(r.key);
         if (it == cache_.end()) continue;  // evicted meanwhile
         ImageTex& t = it->second;
+        if (r.cancelled) {
+            cache_.erase(it);  // requested again if it comes back on screen
+            continue;
+        }
         if (!r.ok || !glf::GenTextures) {
             t.state = ImageTex::Failed;
             continue;
@@ -241,7 +302,7 @@ void ImageCache::Update() {
     // Evict: thumbnails unused for ~30 s beyond the newest 300, full images unused for a few frames beyond 4.
     if (frame_ % 120 == 0) {
         std::vector<std::pair<uint64_t, std::string>> thumbs, fulls;
-        for (auto& [k, v] : cache_) (k[0] == 'F' ? fulls : thumbs).push_back({v.lastUsed, k});
+        for (auto& [k, v] : cache_) (k[0] == 'F' ? fulls : thumbs).push_back({v.lastUsed, k});  // 'T' and 'S' share the budget
         auto evict = [&](std::vector<std::pair<uint64_t, std::string>>& v, size_t keep, uint64_t minAge) {
             if (v.size() <= keep) return;
             std::sort(v.begin(), v.end());
@@ -253,7 +314,7 @@ void ImageCache::Update() {
                 cache_.erase(it);
             }
         };
-        evict(thumbs, 300, 1800);
+        evict(thumbs, 600, 600);
         evict(fulls, 4, 30);
     }
 }

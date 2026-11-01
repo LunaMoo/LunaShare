@@ -8,6 +8,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 |---|---|
 | ![desktop](docs/desktop-chat.png) | ![phone](docs/phone-chat.png) |
 | ![viewer](docs/viewer.png) | ![phone viewer](docs/phone-viewer.png) |
+| ![file picker](docs/file-picker-gallery.png) | ![phone file picker](docs/phone-file-picker.png) |
 
 ## Features
 
@@ -26,6 +27,15 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   swipe left/right (or arrow keys and the side buttons) to go to the previous/next picture, pinch, mouse wheel or +/- to zoom,
   double-tap to zoom in, drag to pan. Toggle between *this chat's pictures* and *all shared pictures*.
 - Incoming offers appear in the chat and as notifications with Accept/Decline. Trusted devices are accepted automatically.
+
+**Picking files**
+- The built-in file picker works the same on desktop and phones. You can switch between a **list** and a **gallery of thumbnails**,
+  with a *Pictures only* filter, sorting by name / newest / largest, and adjustable tile size.
+- Gallery tiles load fast because they use the small preview that cameras embed in every JPEG (EXIF), with the photo's
+  rotation applied. Images without one are decoded in the background, and what's on screen loads first.
+- Tap tiles to select several (Ctrl/Shift-click on desktop), *Select all*, see the selected count and total size.
+  Long-press (right-click on desktop) a picture to preview it large; long-press a folder to send the whole folder.
+  Quick shortcuts on Android: Camera, Pictures, Screenshots, Download.
 
 **History & re-sharing**
 - Every sent and received file goes into a searchable history (name, device, hash). Select any number of entries and

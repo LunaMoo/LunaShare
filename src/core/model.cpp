@@ -55,6 +55,8 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"btChannel", s.btChannel}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
         {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"keepHistory", s.keepHistory},
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
+        {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
+        {"browserTile", s.browserTile},
     };
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
@@ -92,6 +94,12 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "uiScale", s.uiScale);
     Get(j, "theme", s.theme);
     Get(j, "lastBrowseDir", s.lastBrowseDir);
+    Get(j, "browserGrid", s.browserGrid);
+    Get(j, "browserPicturesOnly", s.browserPicturesOnly);
+    Get(j, "browserSort", s.browserSort);
+    Get(j, "browserTile", s.browserTile);
+    if (s.browserSort < 0 || s.browserSort > 2) s.browserSort = 0;
+    if (s.browserTile < 64 || s.browserTile > 400) s.browserTile = 130;
     if (s.chunkKB < 16) s.chunkKB = 16;
     if (s.chunkKB > 4096) s.chunkKB = 4096;
     if (s.maxParallel < 1) s.maxParallel = 1;

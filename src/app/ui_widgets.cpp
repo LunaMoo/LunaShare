@@ -164,6 +164,17 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->AddPolyline(c4, 3, col, 0, t);
             break;
         }
+        case Icon::List:
+            for (int i = -1; i <= 1; i++) {
+                dl->AddRectFilled(P(-0.75f, i * 0.55f - 0.1f), P(-0.5f, i * 0.55f + 0.1f), col);
+                dl->AddLine(P(-0.3f, i * 0.55f), P(0.75f, i * 0.55f), col, t);
+            }
+            break;
+        case Icon::Grid:
+            for (int y = 0; y < 2; y++)
+                for (int x = 0; x < 2; x++)
+                    dl->AddRectFilled(P(-0.75f + x * 0.85f, -0.75f + y * 0.85f), P(-0.1f + x * 0.85f, -0.1f + y * 0.85f), col, 1.5f);
+            break;
         case Icon::Image:
             dl->AddRect(P(-0.8f, -0.65f), P(0.8f, 0.65f), col, 2.0f, 0, t);
             dl->AddTriangleFilled(P(-0.6f, 0.45f), P(-0.15f, -0.15f), P(0.3f, 0.45f), col);

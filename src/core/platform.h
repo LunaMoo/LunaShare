@@ -52,7 +52,7 @@ struct DirEntry {
     std::string name;
     bool isDir = false;
     int64_t size = 0;
-    int64_t mtime = 0;
+    int64_t mtime = 0;  // unix seconds (for display / sorting)
 };
 std::vector<DirEntry> ListDir(const std::string& path);
 // Recursively collects regular files; relative paths use '/' and start with the folder's own name.
