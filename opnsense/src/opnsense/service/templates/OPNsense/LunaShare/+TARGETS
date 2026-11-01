@@ -1,0 +1,2 @@
+lunashare_rendezvous:/etc/rc.conf.d/lunashare_rendezvous
+rooms.conf:/usr/local/etc/lunashare/rooms.conf

@@ -10,6 +10,8 @@
 #include "crypto.h"
 #include "engine.h"
 #include "mdns.h"
+#include "rendezvous_server.h"
+#include "wan.h"
 #include "hash.h"
 #include "platform.h"
 
@@ -57,7 +59,8 @@ static void WriteRandomFile(const std::string& path, int64_t size, uint32_t seed
 }
 
 static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port, bool autoAcceptAll, bool discovery,
-                                          bool broadcast = true, bool mdnsOn = true) {
+                                          bool broadcast = true, bool mdnsOn = true, const std::string& wanServer = "",
+                                          const std::string& wanRoom = "") {
     std::string cfg = JoinPath(Root(), name + "/config");
     MakeDirs(cfg);
     json j;
@@ -71,6 +74,11 @@ static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port
         s.autoConnect = discovery;
         s.broadcast = broadcast;
         s.mdns = mdnsOn;
+        s.wanEnabled = !wanServer.empty();
+        s.wanServer = wanServer;
+        s.wanRoom = wanRoom;
+        s.wanPassword = "secret " + wanRoom;
+        if (!wanServer.empty()) s.autoConnect = true;
         j = {{"settings", ToJson(s, false)}, {"devices", json::array()}};
         SaveJsonFile(JoinPath(cfg, "settings.json"), j);
     }
@@ -466,6 +474,64 @@ int main() {
         CHECK(gone, "goodbye removes the device");
         D->Stop();
     }
+    printf("[internet rendezvous]\n");
+    {
+        RendezvousServer srv;
+        RendezvousServer::Options o;
+        o.bind = "127.0.0.1";
+        o.port = 48190;
+        std::string err;
+        CHECK(srv.Start(o, &err), "server start: %s", err.c_str());
+        auto F = MakeEngine("frank", 48170, true, false, false, false, "127.0.0.1:48190", "family");
+        auto G = MakeEngine("gina", 48180, true, false, false, false, "127.0.0.1:48190", "family");
+        auto H = MakeEngine("hank", 48185, true, false, false, false, "127.0.0.1:48190", "strangers");
+        std::string idF = F->settings.deviceId, idG = G->settings.deviceId, idH = H->settings.deviceId;
+        bool listed = WaitFor([&] {
+            auto l1 = F->Lock();
+            auto l2 = G->Lock();
+            return F->online.count(idG) && F->online[idG].lastWan && G->online.count(idF) && G->online[idF].lastWan;
+        }, 6000);
+        CHECK(listed, "devices in the same room see each other (F: %s)", F->WanStatus().c_str());
+        CHECK(srv.DeviceCount() == 3 && srv.RoomCount() == 2, "server state %d devices %d rooms", (int)srv.DeviceCount(), (int)srv.RoomCount());
+        {
+            auto l = F->Lock();
+            CHECK(!F->online.count(idH), "other room is invisible");
+        }
+        bool p2p = WaitFor([&] {
+            auto c = F->ReadyConn(idG);
+            return c && c->transport == Transport::Internet && G->IsConnected(idF);
+        }, 10000);
+        CHECK(p2p, "hole-punched peer-to-peer connection");
+        F->SendChat(idG, "hello over the internet");
+        CHECK(WaitFor([&] { auto l = G->Lock(); return !G->chats[idF].messages.empty(); }, 5000), "chat over internet");
+        std::string fw = JoinPath(Root(), "src/wan.bin");
+        WriteRandomFile(fw, 24 << 20, 11);
+        std::string shaw = Sha256File(fw);
+        int64_t t0 = SteadyMs();
+        uint64_t tw = FirstTid(*F, F->SendPaths(idG, {fw}));
+        CHECK(WaitFor([&] { return StateOf(*F, tw) == TState::Completed && StateOf(*G, tw) == TState::Completed; }, 60000),
+              "file over internet: F=%s G=%s", TStateName(StateOf(*F, tw)), TStateName(StateOf(*G, tw)));
+        auto tg = GetT(*G, tw);
+        CHECK(tg && Sha256File(tg->localPath) == shaw, "internet transfer verified");
+        printf("  24 MB over KCP/UDP loopback: %.2f s\n", (double)(SteadyMs() - t0) / 1000.0);
+        // allow-list: a server that only accepts another room rejects us
+        RendezvousServer locked;
+        RendezvousServer::Options lo;
+        lo.bind = "127.0.0.1";
+        lo.port = 48191;
+        lo.allowedRooms.insert(RoomHash("other", "x"));
+        CHECK(locked.Start(lo, &err), "locked server");
+        auto K = MakeEngine("kate", 48195, true, false, false, false, "127.0.0.1:48191", "family");
+        CHECK(WaitFor([&] { return K->WanStatus().find("not allowed") != std::string::npos; }, 5000), "room allow-list: %s", K->WanStatus().c_str());
+        K->Stop();
+        locked.Stop();
+        H->Stop();
+        G->Stop();
+        F->Stop();
+        CHECK(WaitFor([&] { return srv.DeviceCount() == 0; }, 7000), "devices unregister on exit (%d left)", (int)srv.DeviceCount());
+        srv.Stop();
+    }
+
     std::error_code ec;
     fs::remove_all(Root(), ec);
     printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL TESTS PASSED\n", g_fail);

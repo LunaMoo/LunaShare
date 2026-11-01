@@ -1,0 +1,6 @@
+{% if helpers.exists('OPNsense.lunashare.general.enabled') and OPNsense.lunashare.general.enabled == '1' %}
+lunashare_rendezvous_enable="YES"
+lunashare_rendezvous_args="-p {{ OPNsense.lunashare.general.port|default('47830') }}{% if OPNsense.lunashare.general.listen %} -b {{ OPNsense.lunashare.general.listen }}{% endif %} --max-devices {{ OPNsense.lunashare.general.maxdevices|default('200') }}{% if OPNsense.lunashare.general.rooms %} -r /usr/local/etc/lunashare/rooms.conf{% endif %}"
+{% else %}
+lunashare_rendezvous_enable="NO"
+{% endif %}

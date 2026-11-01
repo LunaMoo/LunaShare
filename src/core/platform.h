@@ -31,6 +31,8 @@ struct LocalAddress {
     std::string broadcast;  // directed broadcast, may be empty
 };
 std::vector<LocalAddress> LocalIPv4Addresses();
+// Likely IPv4 default gateways (routing table where readable, plus x.y.z.1 guesses for each local /24).
+std::vector<std::string> DefaultGateways();
 
 // Filesystem helpers (UTF-8 paths everywhere).
 bool MakeDirs(const std::string& path);

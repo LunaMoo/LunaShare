@@ -1,0 +1,19 @@
+# systemd unit for running the rendezvous server on a Linux box / VPS:
+#   sudo cp lunashare-rendezvous /usr/local/bin/ && sudo cp lunashare-rendezvous.service /etc/systemd/system/
+#   sudo systemctl enable --now lunashare-rendezvous
+[Unit]
+Description=LunaShare rendezvous server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/lunashare-rendezvous -p 47830
+DynamicUser=yes
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

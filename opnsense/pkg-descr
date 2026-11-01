@@ -1,0 +1,5 @@
+LunaShare rendezvous lets LunaShare devices on different networks find each
+other. It only exchanges addresses between devices of the same room; chat and
+files travel directly between the devices, end-to-end encrypted.
+
+WWW: https://github.com/LunaMoo/LunaShare

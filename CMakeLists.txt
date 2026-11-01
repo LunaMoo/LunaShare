@@ -7,6 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(LUNASHARE_BUILD_APP   "Build the Dear ImGui application" ON)
 option(LUNASHARE_BUILD_TESTS "Build headless engine tests" ON)
+option(LUNASHARE_BUILD_SERVER "Build the lunashare-rendezvous server" ON)
 option(LUNASHARE_SYSTEM_SDL  "Use an installed SDL2 instead of fetching it" OFF)
 set(LUNASHARE_GL_API "GL3" CACHE STRING "Renderer API: GL3 (desktop), GLES3 (Android/iOS), GLES2")
 
@@ -18,6 +19,9 @@ set(JSON_Install OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(nlohmann_json)
 FetchContent_Declare(monocypher GIT_REPOSITORY https://github.com/LoupVaillant/Monocypher.git GIT_TAG 4.0.3 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(monocypher)  # no CMakeLists.txt upstream: only populates the sources
+# KCP (reliable UDP for internet connections). Its CMakeLists needs CMake 4, so only the sources are used.
+FetchContent_Declare(kcp GIT_REPOSITORY https://github.com/skywind3000/kcp.git GIT_TAG 2.1.1 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+FetchContent_MakeAvailable(kcp)
 
 # ---------------------------------------------------------------- core library
 add_library(lunashare_core STATIC
@@ -30,9 +34,12 @@ add_library(lunashare_core STATIC
     src/core/engine.cpp
     src/core/crypto.cpp
     src/core/mdns.cpp
+    src/core/wan.cpp
+    src/core/rendezvous_server.cpp
+    ${kcp_SOURCE_DIR}/ikcp.c
     ${monocypher_SOURCE_DIR}/src/monocypher.c
 )
-target_include_directories(lunashare_core PUBLIC src/core PRIVATE ${monocypher_SOURCE_DIR}/src)
+target_include_directories(lunashare_core PUBLIC src/core PRIVATE ${monocypher_SOURCE_DIR}/src ${kcp_SOURCE_DIR})
 target_link_libraries(lunashare_core PUBLIC nlohmann_json::nlohmann_json)
 find_package(Threads REQUIRED)
 target_link_libraries(lunashare_core PUBLIC Threads::Threads)
@@ -47,6 +54,13 @@ else()
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
     target_link_libraries(lunashare_core PUBLIC stdc++fs)
+endif()
+
+# ---------------------------------------------------------------- rendezvous server
+if(LUNASHARE_BUILD_SERVER AND NOT ANDROID AND NOT IOS)
+    add_executable(lunashare-rendezvous server/main.cpp)
+    target_link_libraries(lunashare-rendezvous PRIVATE lunashare_core)
+    install(TARGETS lunashare-rendezvous RUNTIME DESTINATION bin)
 endif()
 
 # ---------------------------------------------------------------- tests

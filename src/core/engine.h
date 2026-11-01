@@ -17,14 +17,16 @@
 #include "bluetooth.h"
 #include "crypto.h"
 #include "mdns.h"
+#include "wan.h"
 #include "model.h"
 #include "net.h"
 #include "protocol.h"
 
 namespace ls {
 
-enum class Transport { LAN = 0, Bluetooth = 1 };
-inline const char* TransportName(Transport t) { return t == Transport::LAN ? "LAN" : "Bluetooth"; }
+enum class Transport { LAN = 0, Bluetooth = 1, Internet = 2 };
+inline const char* TransportName(Transport t) { return t == Transport::LAN ? "LAN" : t == Transport::Internet ? "Internet" : "Bluetooth"; }
+inline int TransportRank(Transport t) { return t == Transport::LAN ? 0 : t == Transport::Internet ? 1 : 2; }  // lower = preferred
 
 struct Connection {
     uint64_t cid = 0;
@@ -53,7 +55,13 @@ struct OnlinePeer {
     uint16_t port = 0;
     int64_t lastBeacon = 0;   // last broadcast beacon
     int64_t lastMdns = 0;     // last mDNS / Bonjour answer
-    std::string Via() const { return lastBeacon && lastMdns ? "broadcast + mDNS" : lastMdns ? "mDNS" : "broadcast"; }
+    int64_t lastWan = 0;      // listed by the internet rendezvous server
+    bool OnLan() const { return lastBeacon || lastMdns; }
+    std::string Via() const {
+        std::string v = lastBeacon && lastMdns ? "broadcast + mDNS" : lastMdns ? "mDNS" : lastBeacon ? "broadcast" : "";
+        if (lastWan) v += v.empty() ? "internet" : " + internet";
+        return v;
+    }
 };
 
 enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error };
@@ -145,6 +153,9 @@ public:
     std::string listenError;
     std::string MdnsStatus() { return mdns_.Running() ? mdns_.Status() : std::string("off"); }
     void RefreshDiscovery() { mdns_.QueryNow(); }
+    std::string WanStatus() { return wan_.Running() ? wan_.Status() : std::string("off"); }
+    std::string WanPublicEndpoint() { return wan_.PublicEndpoint(); }
+    std::string WanMappedEndpoint() { return wan_.MappedEndpoint(); }
     std::atomic<int64_t> totalUp{0}, totalDown{0};
 
     // helpers usable under Lock()
@@ -210,6 +221,10 @@ private:
     Bluetooth bt_;
     Mdns mdns_;
     void StartMdns();
+    WanTransport wan_;
+    void StartWan();
+    std::map<std::string, int64_t> lastWanConnect_;
+    std::atomic<bool> restartMdns_{false}, restartWan_{false};
     // Common path for every discovery mechanism. Returns true when the peer was not known before.
     bool OnDiscovered(const std::string& id, const std::string& name, const std::string& platform, const std::string& ip,
                       uint16_t port, bool viaMdns);

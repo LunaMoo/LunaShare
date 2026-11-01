@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# PROVIDE: lunashare_rendezvous
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# lunashare_rendezvous_enable (bool): YES to run the LunaShare rendezvous server
+# lunashare_rendezvous_args (str):    server options (written by the OPNsense template)
+
+. /etc/rc.subr
+
+name=lunashare_rendezvous
+rcvar=lunashare_rendezvous_enable
+
+load_rc_config $name
+
+: ${lunashare_rendezvous_enable:="NO"}
+: ${lunashare_rendezvous_args:="-p 47830"}
+: ${lunashare_rendezvous_user:="nobody"}
+
+# The pid file belongs to the daemon(8) supervisor: stopping it also stops the server, and -r restarts the
+# server should it ever exit unexpectedly. -S/-T log to syslog, -u drops root privileges.
+pidfile="/var/run/${name}.pid"
+procname="daemon"
+command="/usr/sbin/daemon"
+command_args="-r -S -T lunashare -u ${lunashare_rendezvous_user} -P ${pidfile} /usr/local/bin/lunashare-rendezvous ${lunashare_rendezvous_args}"
+
+run_rc_command "$1"

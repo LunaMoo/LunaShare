@@ -59,6 +59,10 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   joins automatically. The app then switches to full Wi-Fi speed.
 - **Bluetooth RFCOMM:** Windows (Winsock + SDP), Linux (BlueZ, fixed channel), Android (Java bridge). Good for chat, small files, and handing over hotspot logins.
 - Manual connect by `ip[:port]`.
+- **Over the internet (optional):** run the small **rendezvous server**. There's a ready-made **OPNsense plugin**, or it runs on
+  any Linux/Windows/macOS box. Devices with the same room name and password find each other through it and then connect
+  **directly peer-to-peer** (UDP hole punching + KCP, NAT-PMP / port-forward assisted). The server never relays chat or files.
+  See [docs/INTERNET.md](docs/INTERNET.md).
 
 **Security**
 - Every connection is end-to-end encrypted: an X25519 key exchange per connection (forward secrecy),
@@ -76,7 +80,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 
 ## Building
 
-Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, stb_image, Monocypher).
+Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, stb_image, Monocypher, KCP).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -91,7 +95,7 @@ cmake --build build --config Release
   and builds the native code through the same top-level `CMakeLists.txt`. Needs NDK 27 and minSdk 24.
   On Android 11+ the app asks for *All files access* so it can send any file and save to `Download/LunaShare`.
 - Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only).
-- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`.
+- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`.
 
 The GitHub Actions workflow builds Windows, Linux, macOS and the Android APK on every push and uploads them as artifacts.
 
@@ -106,6 +110,10 @@ src/core/      engine (no UI dependencies)
   hash.*         SHA-256, CRC-32
   crypto.*       handshake, frame encryption, identity keys, safety numbers
   mdns.*         Bonjour/mDNS service discovery (dns_sd on Apple, built-in elsewhere)
+  wan.*          internet transport: rendezvous client, hole punching, NAT-PMP, KCP sessions
+  rendezvous_server.*  the optional rendezvous server (also used by the tests)
+server/        lunashare-rendezvous daemon + systemd unit
+opnsense/      OPNsense plugin (Services > LunaShare rendezvous) + install.sh
   bluetooth.*    RFCOMM per platform + HostBridge hooks for Android
   model.*        settings / devices / messages / transfers / history + JSON
   platform.*     paths, MACs, interfaces, UTF-8 file I/O
@@ -144,4 +152,4 @@ tests/         engine tests (pause/resume, receiver restart, corruption detectio
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
-QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0).
+QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT).

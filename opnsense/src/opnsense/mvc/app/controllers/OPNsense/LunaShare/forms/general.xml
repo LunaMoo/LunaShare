@@ -1,0 +1,42 @@
+<form>
+    <field>
+        <id>general.enabled</id>
+        <label>Enable</label>
+        <type>checkbox</type>
+        <help>Run the LunaShare rendezvous server. It only introduces devices to each other; chat and files go directly between the devices, end-to-end encrypted.</help>
+    </field>
+    <field>
+        <id>general.port</id>
+        <label>UDP port</label>
+        <type>text</type>
+        <help>Port the devices use to reach this server (default 47830). In LunaShare enter your public address or DynDNS name and this port, for example home.example.com:47830.</help>
+    </field>
+    <field>
+        <id>general.listen</id>
+        <label>Listen address</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Leave empty to listen on all IPv4 addresses.</help>
+    </field>
+    <field>
+        <id>general.autorule</id>
+        <label>Allow on WAN</label>
+        <type>checkbox</type>
+        <help>Automatically add a firewall rule that passes UDP traffic to this port on the WAN interface. Disable this if you prefer to create the rule yourself.</help>
+    </field>
+    <field>
+        <id>general.rooms</id>
+        <label>Allowed rooms</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help>Optional. Only devices using one of these rooms may register. Copy the room hash from LunaShare (Settings, Internet, "Copy room hash"). Leave empty to allow any room; room names and passwords still keep different groups apart.</help>
+    </field>
+    <field>
+        <id>general.maxdevices</id>
+        <label>Maximum devices</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Upper limit of registered devices.</help>
+    </field>
+</form>

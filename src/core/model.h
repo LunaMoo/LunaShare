@@ -31,7 +31,15 @@ struct Settings {
     bool autoAcceptAll = false;
     bool autoResume = true;
     bool bluetooth = false;
-    int btChannel = 12;            // Linux RFCOMM channel (Windows/Android use SDP with the service UUID)
+    int btChannel = 12;
+    // optional internet rendezvous (see docs/INTERNET.md)
+    bool wanEnabled = false;
+    std::string wanServer;         // "host[:port]" of a lunashare-rendezvous server
+    std::string wanRoom;           // devices with the same room name + password see each other
+    std::string wanPassword;
+    bool wanNatPmp = true;         // ask the router for a port mapping (NAT-PMP)
+    int wanLocalPort = 0;          // fixed local UDP port (0 = automatic)
+    int wanForwardedPort = 0;      // external port forwarded to wanLocalPort on the router            // Linux RFCOMM channel (Windows/Android use SDP with the service UUID)
     int64_t speedLimitKBs = 0;     // 0 = unlimited (total upload)
     int chunkKB = 256;
     int maxParallel = 2;           // concurrently streaming files per device

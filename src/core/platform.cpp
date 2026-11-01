@@ -306,6 +306,49 @@ std::vector<LocalAddress> LocalIPv4Addresses() {
     return out;
 }
 
+std::vector<std::string> DefaultGateways() {
+    std::vector<std::string> out;
+    auto add = [&](const std::string& g) {
+        if (!g.empty() && g != "0.0.0.0" && std::find(out.begin(), out.end(), g) == out.end()) out.push_back(g);
+    };
+#ifdef _WIN32
+    ULONG size = 0;
+    GetIpForwardTable(nullptr, &size, FALSE);
+    std::vector<unsigned char> buf(size ? size : 1);
+    auto* t = (MIB_IPFORWARDTABLE*)buf.data();
+    if (size && GetIpForwardTable(t, &size, TRUE) == NO_ERROR)
+        for (DWORD i = 0; i < t->dwNumEntries; i++)
+            if (t->table[i].dwForwardDest == 0) {
+                in_addr a;
+                a.s_addr = t->table[i].dwForwardNextHop;
+                char ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &a, ip, sizeof(ip));
+                add(ip);
+            }
+#elif defined(__linux__) || defined(__ANDROID__)
+    if (FILE* f = fopen("/proc/net/route", "r")) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            char iface[64];
+            unsigned dest = 1, gw = 0, flags = 0;
+            if (sscanf(line, "%63s %x %x %x", iface, &dest, &gw, &flags) == 4 && dest == 0 && gw) {
+                in_addr a;
+                a.s_addr = gw;
+                char ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &a, ip, sizeof(ip));
+                add(ip);
+            }
+        }
+        fclose(f);
+    }
+#endif
+    for (auto& la : LocalIPv4Addresses()) {
+        size_t dot = la.ip.rfind('.');
+        if (dot != std::string::npos) add(la.ip.substr(0, dot) + ".1");
+    }
+    return out;
+}
+
 bool MakeDirs(const std::string& path) {
     std::error_code ec;
     if (path.empty()) return false;

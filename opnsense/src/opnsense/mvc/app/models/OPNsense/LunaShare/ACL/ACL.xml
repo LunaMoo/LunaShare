@@ -1,0 +1,9 @@
+<acl>
+    <page-services-lunashare>
+        <name>Services: LunaShare rendezvous</name>
+        <patterns>
+            <pattern>ui/lunashare/*</pattern>
+            <pattern>api/lunashare/*</pattern>
+        </patterns>
+    </page-services-lunashare>
+</acl>

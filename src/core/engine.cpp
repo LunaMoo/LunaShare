@@ -85,6 +85,7 @@ bool Engine::Start() {
     btSupported = bt_.Supported();
     StartBtServer();
     StartMdns();
+    StartWan();
 
     listenThread_ = std::thread([this] { ListenLoop(); });
     discoveryThread_ = std::thread([this] { DiscoveryLoop(); });
@@ -102,6 +103,7 @@ void Engine::Stop() {
     hashCv_.notify_all();
     bt_.StopServer();
     mdns_.Stop();
+    wan_.Stop();
     std::vector<std::shared_ptr<Connection>> cs;
     {
         auto lk = Lock();
@@ -240,7 +242,7 @@ std::shared_ptr<Connection> Engine::ReadyConn(const std::string& peer) {
     std::shared_ptr<Connection> best;
     for (auto& c : conns) {
         if (!c->ready || c->closed || c->peerId != peer) continue;
-        if (!best || (best->transport == Transport::Bluetooth && c->transport == Transport::LAN)) best = c;
+        if (!best || TransportRank(c->transport) < TransportRank(best->transport)) best = c;
     }
     return best;
 }
@@ -423,7 +425,7 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
     Spawn([this, c] {
         c->sec = std::make_unique<SecureChannel>();
         std::string err;
-        int timeout = c->transport == Transport::Bluetooth ? 20000 : 8000;
+        int timeout = c->transport == Transport::LAN ? 8000 : 20000;
         if (!running_ || !c->sec->Handshake(c->sock, c->initiator, timeout, &err, &running_)) {
             if (c->initiator && running_) Emit({EventType::Error, "", "Secure handshake with " + c->addr + " failed: " + err});
             CloseSocket(c->sock);
@@ -685,7 +687,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             if (c->transport == Transport::LAN) {
                 d.lastIp = c->addr;
                 d.lastPort = (uint16_t)j.value("tcpPort", (int)kDefaultTcpPort);
-            } else {
+            } else if (c->transport == Transport::Bluetooth) {
                 d.btAddr = c->addr;
             }
             d.lastSeen = NowMs();
@@ -711,7 +713,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 if (o == c || !o->ready || o->closed || o->peerId != id) continue;
                 std::shared_ptr<Connection> loser;
                 if (o->transport != c->transport) {
-                    loser = c->transport == Transport::Bluetooth ? c : o;
+                    loser = TransportRank(c->transport) > TransportRank(o->transport) ? c : o;
                 } else {
                     auto initId = [&](const std::shared_ptr<Connection>& x) { return x->initiator ? settings.deviceId : id; };
                     std::string want = std::min(settings.deviceId, id);
@@ -1298,6 +1300,57 @@ bool Engine::OnDiscovered(const std::string& id, const std::string& name, const 
     return isNew;
 }
 
+void Engine::StartWan() {
+    WanTransport::Config cfg;
+    bool on;
+    {
+        auto lk = Lock();
+        on = settings.wanEnabled && !settings.wanServer.empty() && !settings.wanRoom.empty() && running_;
+        cfg.server = settings.wanServer;
+        cfg.roomHash = RoomHash(settings.wanRoom, settings.wanPassword);
+        cfg.id = settings.deviceId;
+        cfg.name = settings.displayName;
+        cfg.platform = PlatformName();
+        cfg.pub = identity_.PubHex();
+        cfg.natpmp = settings.wanNatPmp;
+        cfg.localPort = (uint16_t)std::clamp(settings.wanLocalPort, 0, 65535);
+        cfg.forwardedPort = (uint16_t)std::clamp(settings.wanForwardedPort, 0, 65535);
+        for (auto& [id, p] : online) p.lastWan = 0;
+    }
+    wan_.Stop();
+    if (!on) return;
+    wan_.Start(
+        cfg,
+        [this](const std::vector<WanPeer>& peers) {
+            std::vector<std::string> toConnect;
+            {
+                auto lk = Lock();
+                int64_t now = SteadyMs();
+                for (auto& wp : peers) {
+                    if (wp.id == settings.deviceId) continue;
+                    OnlinePeer& p = online[wp.id];
+                    p.id = wp.id;
+                    if (!wp.name.empty() && !p.OnLan()) p.name = wp.name;
+                    if (!wp.platform.empty()) p.platform = wp.platform;
+                    p.lastWan = now;
+                    auto d = devices.find(wp.id);
+                    bool blocked = d != devices.end() && d->second.blocked;
+                    // Same rule as on the LAN: the device with the smaller id dials, unless we owe it something.
+                    if (!blocked && !p.OnLan() && !IsConnected(wp.id) && settings.autoConnect && settings.deviceId < wp.id &&
+                        now - lastWanConnect_[wp.id] > 20000) {
+                        lastWanConnect_[wp.id] = now;
+                        toConnect.push_back(wp.id);
+                    }
+                }
+            }
+            for (auto& id : toConnect) wan_.Connect(id);
+        },
+        [this](SocketHandle s, const std::string& peerId, const std::string& addr, bool initiator) {
+            (void)peerId;
+            AdoptSocket(s, Transport::Internet, addr, initiator);
+        });
+}
+
 void Engine::StartMdns() {
     std::string id, name;
     uint16_t port;
@@ -1363,7 +1416,8 @@ void Engine::MaintenanceLoop() {
                 OnlinePeer& op = it->second;
                 if (op.lastBeacon && now - op.lastBeacon > 8000) op.lastBeacon = 0;  // beacons every 2 s
                 if (op.lastMdns && now - op.lastMdns > 100000) op.lastMdns = 0;      // mDNS re-query every 30 s
-                if (!op.lastBeacon && !op.lastMdns && !IsConnected(it->first)) it = online.erase(it);
+                if (op.lastWan && now - op.lastWan > 50000) op.lastWan = 0;          // server re-lists every 15 s
+                if (!op.lastBeacon && !op.lastMdns && !op.lastWan && !IsConnected(it->first)) it = online.erase(it);
                 else ++it;
             }
             // Reconnect to known devices we still owe something to (unfinished transfers / undelivered chat)
@@ -1377,6 +1431,12 @@ void Engine::MaintenanceLoop() {
                     for (auto& m : cv.messages)
                         if (m.outgoing && !m.delivered) owe.insert(peer);
                 for (auto& peer : owe) {
+                    auto ow = online.find(peer);
+                    if (ow != online.end() && !ow->second.OnLan() && ow->second.lastWan && !IsConnected(peer) && wan_.Running()) {
+                        lastWanConnect_[peer] = now;
+                        wan_.Connect(peer);
+                        continue;
+                    }
                     auto d = devices.find(peer);
                     if (d == devices.end() || d->second.blocked || d->second.lastIp.empty() || IsConnected(peer) || connecting_.count(peer)) continue;
                     auto o = online.find(peer);
@@ -1385,6 +1445,8 @@ void Engine::MaintenanceLoop() {
                 }
             }
         }
+        if (restartMdns_.exchange(false)) StartMdns();
+        if (restartWan_.exchange(false)) StartWan();
         for (auto& c : toClose) CloseConn(c, "timeout");
         for (auto& r : reconnect) ConnectAddress(r.first, r.second);
         if (dirty_ && now - lastSave > 1000) {
@@ -1619,8 +1681,13 @@ void Engine::ConnectPeer(const std::string& peer) {
     auto lk = Lock();
     if (IsConnected(peer)) return;
     auto o = online.find(peer);
-    if (o != online.end()) {
+    if (o != online.end() && o->second.OnLan()) {
         ConnectAddress(o->second.ip, o->second.port);
+        return;
+    }
+    if (o != online.end() && o->second.lastWan && wan_.Running()) {
+        lastWanConnect_[peer] = SteadyMs();
+        wan_.Connect(peer);
         return;
     }
     auto d = devices.find(peer);
@@ -1755,7 +1822,14 @@ void Engine::ApplySettings(const Settings& s) {
     MakeDirs(settings.downloadDir);
     if (settings.tcpPort != old.tcpPort && running_) restartListener_ = true;
     if ((settings.bluetooth != old.bluetooth || settings.btChannel != old.btChannel) && running_) StartBtServer();
-    if (running_ && (settings.discovery != old.discovery || settings.mdns != old.mdns || settings.displayName != old.displayName)) StartMdns();
+    // Restarting these joins their threads, which may be waiting for our lock: do it from the maintenance thread.
+    if (running_ && (settings.discovery != old.discovery || settings.mdns != old.mdns || settings.displayName != old.displayName)) restartMdns_ = true;
+    if (running_ && (settings.wanEnabled != old.wanEnabled || settings.wanServer != old.wanServer || settings.wanRoom != old.wanRoom ||
+                     settings.wanPassword != old.wanPassword || settings.wanNatPmp != old.wanNatPmp ||
+                     settings.wanLocalPort != old.wanLocalPort || settings.wanForwardedPort != old.wanForwardedPort))
+        restartWan_ = true;
+    else if (running_ && settings.displayName != old.displayName)
+        wan_.UpdateName(settings.displayName);
     MarkDirty();
 }
 

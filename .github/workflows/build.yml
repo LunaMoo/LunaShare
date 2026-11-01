@@ -44,9 +44,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe dist/;
-          elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app dist/;
-          else cp build/LunaShare dist/; fi
+          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/;
+          elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/;
+          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
@@ -75,3 +75,28 @@ jobs:
         with:
           name: LunaShare-android
           path: android/app/build/outputs/apk/release/*.apk
+
+  opnsense:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build rendezvous server on FreeBSD (OPNsense base)
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.3"
+          usesh: true
+          prepare: pkg install -y cmake git
+          run: |
+            set -e
+            cmake -S . -B build-bsd -DCMAKE_BUILD_TYPE=Release -DLUNASHARE_BUILD_APP=OFF -DLUNASHARE_BUILD_TESTS=OFF -DCMAKE_EXE_LINKER_FLAGS=-static
+            cmake --build build-bsd --target lunashare-rendezvous -j 3
+            ./build-bsd/lunashare-rendezvous --hash-room test test
+            ./build-bsd/lunashare-rendezvous -p 47999 & PID=$!; sleep 2; kill $PID
+            mkdir -p dist/lunashare-opnsense/bin
+            cp build-bsd/lunashare-rendezvous dist/lunashare-opnsense/bin/
+            cp -R opnsense/src opnsense/install.sh docs/INTERNET.md dist/lunashare-opnsense/
+            tar -C dist -czf lunashare-opnsense.tar.gz lunashare-opnsense
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LunaShare-opnsense-freebsd-amd64
+          path: lunashare-opnsense.tar.gz

@@ -1,0 +1,33 @@
+<model>
+    <mount>//OPNsense/lunashare/general</mount>
+    <description>LunaShare rendezvous server</description>
+    <version>1.0.0</version>
+    <items>
+        <enabled type="BooleanField">
+            <Default>0</Default>
+            <Required>Y</Required>
+        </enabled>
+        <port type="PortField">
+            <Default>47830</Default>
+            <Required>Y</Required>
+        </port>
+        <listen type="TextField">
+            <Mask>/^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$/</Mask>
+            <ValidationMessage>Enter an IPv4 address, or leave empty to listen on all addresses.</ValidationMessage>
+        </listen>
+        <autorule type="BooleanField">
+            <Default>1</Default>
+            <Required>Y</Required>
+        </autorule>
+        <rooms type="CSVListField">
+            <Mask>/^([0-9a-fA-F]{64},)*([0-9a-fA-F]{64})?$/</Mask>
+            <ValidationMessage>Each entry must be a 64 character room hash (shown in LunaShare under Settings, Internet).</ValidationMessage>
+        </rooms>
+        <maxdevices type="IntegerField">
+            <Default>200</Default>
+            <MinimumValue>1</MinimumValue>
+            <MaximumValue>100000</MaximumValue>
+            <Required>Y</Required>
+        </maxdevices>
+    </items>
+</model>

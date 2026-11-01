@@ -1,0 +1,5 @@
+<menu>
+    <Services>
+        <LunaShare VisibleName="LunaShare rendezvous" cssClass="fa fa-share-alt fa-fw" url="/ui/lunashare/"/>
+    </Services>
+</menu>

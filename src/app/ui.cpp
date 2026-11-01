@@ -7,6 +7,7 @@
 #include "crypto.h"
 #include "hash.h"
 #include "image_cache.h"
+#include "wan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_stdlib.h"
@@ -1502,11 +1503,13 @@ void App::DrawNearby() {
     ImGui::TextDisabled("Devices on the same network find each other automatically:");
     ImGui::BulletText("Bonjour / mDNS (_lunashare._tcp): %s", eng.settings.discovery && eng.settings.mdns ? eng.MdnsStatus().c_str() : "off");
     ImGui::BulletText("UDP broadcast beacons (port %u): %s", kDiscoveryPort, eng.settings.discovery && eng.settings.broadcast ? "on" : "off");
+    ImGui::BulletText("Internet rendezvous: %s", eng.settings.wanEnabled ? eng.WanStatus().c_str() : "off (Settings > Internet)");
     if (ui::IconTextButton("Search again", Icon::Retry, ImVec2(0, h))) eng.RefreshDiscovery();
     if (!eng.online.empty()) {
         ImGui::TextDisabled("Found on the network:");
         for (auto& [id, p] : eng.online) {
-            ImGui::BulletText("%s  %s:%u", eng.PeerName(id).c_str(), p.ip.c_str(), p.port);
+            if (p.OnLan()) ImGui::BulletText("%s  %s:%u", eng.PeerName(id).c_str(), p.ip.c_str(), p.port);
+            else ImGui::BulletText("%s", eng.PeerName(id).c_str());
             ImGui::SameLine();
             ImGui::TextDisabled("(%s%s)", p.Via().c_str(), eng.IsConnected(id) ? ", connected" : "");
         }
@@ -1680,6 +1683,48 @@ void App::DrawSettings() {
     changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, "Files at once per device: %d");
     ImGui::SetNextItemWidth(fieldW);
     changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, "Chunk size: %d KB", ImGuiSliderFlags_Logarithmic);
+
+    ImGui::SeparatorText("Internet (optional)");
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled("Reach your devices outside the local network through a LunaShare rendezvous server (for example on your "
+                        "OPNsense router). The server only introduces devices that use the same room name and password; chat and "
+                        "files go directly between the devices, end-to-end encrypted.");
+    ImGui::PopTextWrapPos();
+    changed |= ImGui::Checkbox("Use a rendezvous server", &edit.wanEnabled);
+    ImGui::BeginDisabled(!edit.wanEnabled);
+    auto wanField = [&](const char* label, const char* hint, std::string* v, ImGuiInputTextFlags f) {
+        ImGui::TextUnformatted(label);
+        ImGui::SetNextItemWidth(fieldW);
+        ImGui::InputTextWithHint((std::string("##") + label).c_str(), hint, v, f);
+        if (ImGui::IsItemActive()) editDirty = true;
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+    };
+    wanField("Server", "home.example.com:47830", &edit.wanServer, 0);
+    wanField("Room name", "family", &edit.wanRoom, 0);
+    wanField("Room password", "shared by your devices", &edit.wanPassword, ImGuiInputTextFlags_Password);
+    if (ImGui::TreeNode("Connection help for strict routers")) {
+        changed |= ImGui::Checkbox("Ask the router for a port mapping (NAT-PMP)", &edit.wanNatPmp);
+        ui::HelpMarker("Needed behind routers that change the port for every destination (OPNsense/pfSense, many business firewalls). "
+                       "Works when the router supports NAT-PMP (OPNsense: os-upnp plugin with NAT-PMP allowed).");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputInt("Fixed local UDP port", &edit.wanLocalPort, 0)) { edit.wanLocalPort = std::clamp(edit.wanLocalPort, 0, 65535); editDirty = true; }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputInt("Port forwarded on the router", &edit.wanForwardedPort, 0)) { edit.wanForwardedPort = std::clamp(edit.wanForwardedPort, 0, 65535); editDirty = true; }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ui::HelpMarker("If you forward a UDP port on your router to this device, enter the local port above and the external port here.");
+        ImGui::TreePop();
+    }
+    ImGui::EndDisabled();
+    if (eng.settings.wanEnabled) {
+        ImGui::TextDisabled("Status: %s", eng.WanStatus().c_str());
+        std::string ep = eng.WanPublicEndpoint();
+        if (!ep.empty()) ImGui::TextDisabled("Seen by the server as %s", ep.c_str());
+        std::string mp = eng.WanMappedEndpoint();
+        if (!mp.empty()) ImGui::TextDisabled("Router mapping (NAT-PMP): %s", mp.c_str());
+        if (!eng.settings.wanRoom.empty() && ImGui::Button("Copy room hash (for the server's allow-list)", ImVec2(0, h)))
+            ImGui::SetClipboardText(RoomHash(eng.settings.wanRoom, eng.settings.wanPassword).c_str());
+    }
 
     ImGui::SeparatorText("Bluetooth");
     changed |= ImGui::Checkbox("Accept Bluetooth connections##s", &edit.bluetooth);

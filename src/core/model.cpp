@@ -52,7 +52,9 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"displayName", s.displayName}, {"downloadDir", s.downloadDir}, {"tcpPort", s.tcpPort},
         {"discovery", s.discovery}, {"mdns", s.mdns}, {"broadcast", s.broadcast}, {"autoConnect", s.autoConnect}, {"autoAcceptTrusted", s.autoAcceptTrusted},
         {"autoAcceptAll", s.autoAcceptAll}, {"autoResume", s.autoResume}, {"bluetooth", s.bluetooth},
-        {"btChannel", s.btChannel}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
+        {"btChannel", s.btChannel}, {"wanEnabled", s.wanEnabled}, {"wanServer", s.wanServer}, {"wanRoom", s.wanRoom},
+        {"wanPassword", s.wanPassword}, {"wanNatPmp", s.wanNatPmp}, {"wanLocalPort", s.wanLocalPort},
+        {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
         {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"keepHistory", s.keepHistory},
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
@@ -83,6 +85,13 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "autoResume", s.autoResume);
     Get(j, "bluetooth", s.bluetooth);
     Get(j, "btChannel", s.btChannel);
+    Get(j, "wanEnabled", s.wanEnabled);
+    Get(j, "wanServer", s.wanServer);
+    Get(j, "wanRoom", s.wanRoom);
+    Get(j, "wanPassword", s.wanPassword);
+    Get(j, "wanNatPmp", s.wanNatPmp);
+    Get(j, "wanLocalPort", s.wanLocalPort);
+    Get(j, "wanForwardedPort", s.wanForwardedPort);
     Get(j, "speedLimitKBs", s.speedLimitKBs);
     Get(j, "chunkKB", s.chunkKB);
     Get(j, "maxParallel", s.maxParallel);
