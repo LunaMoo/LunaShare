@@ -19,6 +19,7 @@ typedef int socklen_t;
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #endif
 
 namespace ls {
@@ -29,7 +30,9 @@ using sock_t = decltype(socket(0, 0, 0));
 namespace {
 struct Device {
     std::string id, name, pf, pub;
-    sockaddr_in ep{};
+    sockaddr_in ep{};       // where its packets come from (replies go here)
+    in_addr via{};          // the server address it talks to (replies are sent from it)
+    sockaddr_in pubEp{};    // what other devices are told to use (differs for devices on the server's own LAN)
     std::vector<std::string> locals;
     std::vector<std::string> extra;  // router mappings / forwarded port, already "ip:port"
     int64_t lastSeen = 0;
@@ -46,6 +49,81 @@ bool IsHex64(const std::string& s) {
     for (char c : s)
         if (!isxdigit((unsigned char)c)) return false;
     return true;
+}
+
+bool IsPrivate(in_addr a) {
+    uint32_t h = ntohl(a.s_addr);
+    return (h >> 24) == 10 || (h >> 20) == 0xAC1 || (h >> 16) == 0xC0A8 || (h >> 24) == 127 || (h >> 16) == 0xA9FE;
+}
+
+// recvfrom() that also reports which local address the packet was sent to, and sendto() that replies from it.
+// Without this, a device on the server's own LAN talking to the router's public address gets replies from the
+// router's LAN address and ignores them.
+int RecvFromTo(sock_t s, char* buf, int len, sockaddr_in& from, in_addr& dst) {
+    dst.s_addr = 0;
+#if defined(_WIN32)
+    socklen_t fl = sizeof(from);
+    return (int)recvfrom(s, buf, len, 0, (sockaddr*)&from, &fl);
+#else
+    iovec iov{buf, (size_t)len};
+    alignas(cmsghdr) char ctl[256];
+    msghdr mh{};
+    mh.msg_name = &from;
+    mh.msg_namelen = sizeof(from);
+    mh.msg_iov = &iov;
+    mh.msg_iovlen = 1;
+    mh.msg_control = ctl;
+    mh.msg_controllen = sizeof(ctl);
+    int n = (int)recvmsg(s, &mh, 0);
+    if (n < 0) return n;
+    for (cmsghdr* c = CMSG_FIRSTHDR(&mh); c; c = CMSG_NXTHDR(&mh, c)) {
+        if (c->cmsg_level != IPPROTO_IP) continue;
+#if defined(IP_PKTINFO)
+        if (c->cmsg_type == IP_PKTINFO) dst = ((in_pktinfo*)CMSG_DATA(c))->ipi_addr;
+#elif defined(IP_RECVDSTADDR)
+        if (c->cmsg_type == IP_RECVDSTADDR) memcpy(&dst, CMSG_DATA(c), sizeof(dst));
+#endif
+    }
+    return n;
+#endif
+}
+
+void SendFrom(sock_t s, const std::string& p, const sockaddr_in& to, in_addr src) {
+#if !defined(_WIN32) && (defined(IP_PKTINFO) || defined(IP_SENDSRCADDR))
+    if (src.s_addr != 0) {
+        iovec iov{(void*)p.data(), p.size()};
+        msghdr mh{};
+        mh.msg_name = (void*)&to;
+        mh.msg_namelen = sizeof(to);
+        mh.msg_iov = &iov;
+        mh.msg_iovlen = 1;
+#if defined(IP_PKTINFO)
+        alignas(cmsghdr) char ctl[CMSG_SPACE(sizeof(in_pktinfo))] = {};
+        mh.msg_control = ctl;
+        mh.msg_controllen = sizeof(ctl);
+        cmsghdr* c = CMSG_FIRSTHDR(&mh);
+        c->cmsg_level = IPPROTO_IP;
+        c->cmsg_type = IP_PKTINFO;
+        c->cmsg_len = CMSG_LEN(sizeof(in_pktinfo));
+        in_pktinfo pi{};
+        pi.ipi_spec_dst = src;
+        memcpy(CMSG_DATA(c), &pi, sizeof(pi));
+#else
+        alignas(cmsghdr) char ctl[CMSG_SPACE(sizeof(in_addr))] = {};
+        mh.msg_control = ctl;
+        mh.msg_controllen = sizeof(ctl);
+        cmsghdr* c = CMSG_FIRSTHDR(&mh);
+        c->cmsg_level = IPPROTO_IP;
+        c->cmsg_type = IP_SENDSRCADDR;
+        c->cmsg_len = CMSG_LEN(sizeof(in_addr));
+        memcpy(CMSG_DATA(c), &src, sizeof(src));
+#endif
+        if (sendmsg(s, &mh, 0) >= 0) return;
+    }
+#else
+    (void)src;
+#endif
+    sendto(s, p.data(), (int)p.size(), 0, (const sockaddr*)&to, sizeof(to));
 }
 
 std::string Clip(const std::string& s, size_t n) { return s.size() > n ? s.substr(0, n) : s; }
@@ -74,6 +152,14 @@ bool RendezvousServer::Start(const Options& o, std::string* err) {
         CloseSocket((SocketHandle)s);
         return false;
     }
+#if !defined(_WIN32)
+    int one = 1;
+#if defined(IP_PKTINFO)
+    setsockopt(s, IPPROTO_IP, IP_PKTINFO, &one, sizeof(one));
+#elif defined(IP_RECVDSTADDR)
+    setsockopt(s, IPPROTO_IP, IP_RECVDSTADDR, &one, sizeof(one));
+#endif
+#endif
     sock_ = (intptr_t)s;
     running_ = true;
     thread_ = std::thread([this] { Loop(); });
@@ -105,21 +191,22 @@ void RendezvousServer::Loop() {
     char buf[8192];
     int64_t lastSweep = SteadyMs();
     auto log = [&](const std::string& m) { if (opt_.log) opt_.log(m); };
-    auto sendJson = [&](const sockaddr_in& to, const json& j) {
-        std::string p = "R" + j.dump(-1, ' ', false, json::error_handler_t::replace);
-        sendto(s, p.data(), (int)p.size(), 0, (const sockaddr*)&to, sizeof(to));
+    in_addr via{};  // local address of the packet being handled
+    auto sendTo = [&](const sockaddr_in& to, in_addr src, const json& j) {
+        SendFrom(s, "R" + j.dump(-1, ' ', false, json::error_handler_t::replace), to, src);
     };
+    auto sendJson = [&](const sockaddr_in& to, const json& j) { sendTo(to, via, j); };
     auto peersOf = [&](const std::string& room, const std::string& self) {
         json arr = json::array();
         for (auto& [id, d] : rooms[room]) {
             if (id == self) continue;
-            arr.push_back({{"id", d.id}, {"name", d.name}, {"pf", d.pf}, {"pub", d.pub}, {"ep", Ep(d.ep)}, {"local", d.locals}, {"extra", d.extra}});
+            arr.push_back({{"id", d.id}, {"name", d.name}, {"pf", d.pf}, {"pub", d.pub}, {"ep", Ep(d.pubEp)}, {"local", d.locals}, {"extra", d.extra}});
         }
         return arr;
     };
     auto pushRoom = [&](const std::string& room, const std::string& except) {
         for (auto& [id, d] : rooms[room])
-            if (id != except) sendJson(d.ep, {{"t", "peers"}, {"you", Ep(d.ep)}, {"peers", peersOf(room, id)}});
+            if (id != except) sendTo(d.ep, d.via, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}});
     };
     auto counts = [&] {
         size_t n = 0;
@@ -154,8 +241,7 @@ void RendezvousServer::Loop() {
         }
         if (WaitReadable((SocketHandle)s, 500) != 1) continue;
         sockaddr_in from{};
-        socklen_t fl = sizeof(from);
-        int n = (int)recvfrom(s, buf, sizeof(buf), 0, (sockaddr*)&from, &fl);
+        int n = RecvFromTo(s, buf, (int)sizeof(buf), from, via);
         if (n < 2 || buf[0] != 'R') continue;
         // rate limit: 20 packets/s per source address, burst 40
         Bucket& b = limits[from.sin_addr.s_addr];
@@ -187,6 +273,11 @@ void RendezvousServer::Loop() {
             d.pf = Clip(j.value("pf", ""), 20);
             d.pub = Clip(j.value("pub", ""), 64);
             d.ep = from;
+            d.via = via;
+            d.pubEp = from;
+            // A device on the server's own network that reached us through the public address: the world sees it
+            // behind that same public address, not its private one.
+            if (IsPrivate(from.sin_addr) && via.s_addr != 0 && !IsPrivate(via)) d.pubEp.sin_addr = via;
             d.locals.clear();
             for (auto& l : j.value("local", json::array()))
                 if (l.is_string() && d.locals.size() < 8) d.locals.push_back(Clip(l.get<std::string>(), 32));
@@ -196,11 +287,11 @@ void RendezvousServer::Loop() {
             int fwd = j.value("fwd", 0);
             if (fwd > 0 && fwd < 65536) {  // manually forwarded port on the device's public address
                 char ip[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
+                inet_ntop(AF_INET, &d.pubEp.sin_addr, ip, sizeof(ip));
                 d.extra.push_back(std::string(ip) + ":" + std::to_string(fwd));
             }
             d.lastSeen = now;
-            sendJson(from, {{"t", "peers"}, {"you", Ep(from)}, {"peers", peersOf(room, id)}});
+            sendJson(from, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}});
             if (isNew) counts();
             if (isNew || moved) {
                 log(std::string(isNew ? "joined " : "moved ") + d.name + " (" + id.substr(0, 8) + ") from " + Ep(from) + " room " + room.substr(0, 8));
@@ -219,10 +310,10 @@ void RendezvousServer::Loop() {
                 Device& other = it->second;
                 char nonce[33];
                 snprintf(nonce, sizeof(nonce), "%016llx%016llx", (unsigned long long)rng(), (unsigned long long)rng());
-                sendJson(me->ep, {{"t", "punch"}, {"nonce", nonce}, {"initiator", true},
-                                  {"peer", {{"id", other.id}, {"ep", Ep(other.ep)}, {"local", other.locals}, {"extra", other.extra}}}});
-                sendJson(other.ep, {{"t", "punch"}, {"nonce", nonce}, {"initiator", false},
-                                    {"peer", {{"id", me->id}, {"ep", Ep(me->ep)}, {"local", me->locals}, {"extra", me->extra}}}});
+                sendTo(me->ep, me->via, {{"t", "punch"}, {"nonce", nonce}, {"initiator", true},
+                                  {"peer", {{"id", other.id}, {"ep", Ep(other.pubEp)}, {"local", other.locals}, {"extra", other.extra}}}});
+                sendTo(other.ep, other.via, {{"t", "punch"}, {"nonce", nonce}, {"initiator", false},
+                                    {"peer", {{"id", me->id}, {"ep", Ep(me->pubEp)}, {"local", me->locals}, {"extra", me->extra}}}});
                 log("introduced " + me->name + " <-> " + other.name);
                 break;
             }
