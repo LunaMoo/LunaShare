@@ -492,7 +492,8 @@ int main() {
             return F->online.count(idG) && F->online[idG].lastWan && G->online.count(idF) && G->online[idF].lastWan;
         }, 6000);
         CHECK(listed, "devices in the same room see each other (F: %s)", F->WanStatus().c_str());
-        CHECK(srv.DeviceCount() == 3 && srv.RoomCount() == 2, "server state %d devices %d rooms", (int)srv.DeviceCount(), (int)srv.RoomCount());
+        CHECK(WaitFor([&] { return srv.DeviceCount() == 3 && srv.RoomCount() == 2; }, 5000), "server state %d devices %d rooms",
+              (int)srv.DeviceCount(), (int)srv.RoomCount());
         {
             auto l = F->Lock();
             CHECK(!F->online.count(idH), "other room is invisible");
