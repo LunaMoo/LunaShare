@@ -29,6 +29,7 @@ add_library(lunashare_core STATIC
     src/core/bluetooth.cpp
     src/core/engine.cpp
     src/core/crypto.cpp
+    src/core/mdns.cpp
     ${monocypher_SOURCE_DIR}/src/monocypher.c
 )
 target_include_directories(lunashare_core PUBLIC src/core PRIVATE ${monocypher_SOURCE_DIR}/src)

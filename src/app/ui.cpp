@@ -285,7 +285,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     else if (online) sub = eng.online[peer].platform;
     auto conn = eng.ReadyConn(peer);
     if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + "via " + TransportName(conn->transport);
-    else if (online) sub += "  online";
+    else if (online) sub += "  online (" + eng.online[peer].Via() + ")";
     else sub += sub.empty() ? "offline" : "  offline";
 
     int unread = 0;
@@ -1485,7 +1485,18 @@ void App::DrawNearby() {
         ImGui::TextDisabled("(%s)", a.iface.c_str());
     }
     if (addrs.empty()) ImGui::TextDisabled("No network connection.");
-    ImGui::TextDisabled("Devices on the same network find each other automatically (UDP broadcast on port %u).", kDiscoveryPort);
+    ImGui::TextDisabled("Devices on the same network find each other automatically:");
+    ImGui::BulletText("Bonjour / mDNS (_lunashare._tcp): %s", eng.settings.discovery && eng.settings.mdns ? eng.MdnsStatus().c_str() : "off");
+    ImGui::BulletText("UDP broadcast beacons (port %u): %s", kDiscoveryPort, eng.settings.discovery && eng.settings.broadcast ? "on" : "off");
+    if (ui::IconTextButton("Search again", Icon::Retry, ImVec2(0, h))) eng.RefreshDiscovery();
+    if (!eng.online.empty()) {
+        ImGui::TextDisabled("Found on the network:");
+        for (auto& [id, p] : eng.online) {
+            ImGui::BulletText("%s  %s:%u", eng.PeerName(id).c_str(), p.ip.c_str(), p.port);
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%s%s)", p.Via().c_str(), eng.IsConnected(id) ? ", connected" : "");
+        }
+    }
 
     // ---- manual
     ImGui::SeparatorText("Connect by address");
@@ -1631,6 +1642,14 @@ void App::DrawSettings() {
 
     ImGui::SeparatorText("Network");
     changed |= ImGui::Checkbox("Find devices on the local network", &edit.discovery);
+    ImGui::BeginDisabled(!edit.discovery);
+    ImGui::Indent();
+    changed |= ImGui::Checkbox("Bonjour / mDNS", &edit.mdns);
+    ui::HelpMarker("Standard service discovery (_lunashare._tcp). Works on most routers and is the only method iPhones/iPads can use.");
+    changed |= ImGui::Checkbox("UDP broadcast beacons", &edit.broadcast);
+    ui::HelpMarker("Fast discovery that also works on networks without multicast. Not available on iOS.");
+    ImGui::Unindent();
+    ImGui::EndDisabled();
     changed |= ImGui::Checkbox("Connect to found devices automatically", &edit.autoConnect);
     int port = edit.tcpPort;
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);

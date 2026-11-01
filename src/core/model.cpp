@@ -50,7 +50,7 @@ static void Get(const json& j, const char* k, T& v) {
 json ToJson(const Settings& s, bool withIdentity) {
     json j = {
         {"displayName", s.displayName}, {"downloadDir", s.downloadDir}, {"tcpPort", s.tcpPort},
-        {"discovery", s.discovery}, {"autoConnect", s.autoConnect}, {"autoAcceptTrusted", s.autoAcceptTrusted},
+        {"discovery", s.discovery}, {"mdns", s.mdns}, {"broadcast", s.broadcast}, {"autoConnect", s.autoConnect}, {"autoAcceptTrusted", s.autoAcceptTrusted},
         {"autoAcceptAll", s.autoAcceptAll}, {"autoResume", s.autoResume}, {"bluetooth", s.bluetooth},
         {"btChannel", s.btChannel}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
         {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"keepHistory", s.keepHistory},
@@ -73,6 +73,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "downloadDir", s.downloadDir);
     Get(j, "tcpPort", s.tcpPort);
     Get(j, "discovery", s.discovery);
+    Get(j, "mdns", s.mdns);
+    Get(j, "broadcast", s.broadcast);
     Get(j, "autoConnect", s.autoConnect);
     Get(j, "autoAcceptTrusted", s.autoAcceptTrusted);
     Get(j, "autoAcceptAll", s.autoAcceptAll);

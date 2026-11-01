@@ -12,12 +12,18 @@ int main(int argc, char** argv) {
     if (argc < 5) { printf("usage: demo_peer <cfgdir> <name> <host> <port> [files...]\n"); return 1; }
     MakeDirs(argv[1]);
     json j = {{"settings", {{"displayName", argv[2]}, {"downloadDir", JoinPath(argv[1], "dl")}, {"tcpPort", 48300},
-                            {"discovery", false}, {"autoConnect", false}, {"autoAcceptAll", true}, {"speedLimitKBs", 1500}}}};
+                            {"discovery", getenv("DEMO_DISCOVERY") != nullptr}, {"autoConnect", false}, {"autoAcceptAll", true},
+                            {"speedLimitKBs", 1500}}}};
     json existing;
     if (!LoadJsonFile(JoinPath(argv[1], "settings.json"), existing)) SaveJsonFile(JoinPath(argv[1], "settings.json"), j);
     Engine e;
     e.configDir = argv[1];
     e.Start();
+    if (std::string(argv[3]) == "-") {  // just stay online (discovery testing)
+        std::this_thread::sleep_for(std::chrono::seconds(getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30));
+        e.Stop();
+        return 0;
+    }
     std::string peer;
     for (int i = 0; i < 150 && peer.empty(); i++) {
         if (i % 10 == 0) e.ConnectAddress(argv[3], (uint16_t)atoi(argv[4]));

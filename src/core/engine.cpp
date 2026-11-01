@@ -1,5 +1,9 @@
 #include "engine.h"
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
@@ -21,6 +25,16 @@ static std::string NewUuid() {
     const char* v = "89ab";
     h[16] = v[strtoul(h.substr(16, 1).c_str(), nullptr, 16) & 3];
     return h.substr(0, 8) + "-" + h.substr(8, 4) + "-" + h.substr(12, 4) + "-" + h.substr(16, 4) + "-" + h.substr(20, 12);
+}
+
+// iOS apps may not send/receive broadcast or raw multicast without Apple's multicast entitlement;
+// Bonjour (mDNS via the system API) is the supported discovery path there.
+static bool BroadcastAllowed() {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    return false;
+#else
+    return true;
+#endif
 }
 
 Engine::Engine() {}
@@ -70,6 +84,7 @@ bool Engine::Start() {
 
     btSupported = bt_.Supported();
     StartBtServer();
+    StartMdns();
 
     listenThread_ = std::thread([this] { ListenLoop(); });
     discoveryThread_ = std::thread([this] { DiscoveryLoop(); });
@@ -86,6 +101,7 @@ void Engine::Stop() {
     }
     hashCv_.notify_all();
     bt_.StopServer();
+    mdns_.Stop();
     std::vector<std::shared_ptr<Connection>> cs;
     {
         auto lk = Lock();
@@ -377,6 +393,7 @@ void Engine::ListenLoop() {
                 auto lk = Lock();
                 boundPort = newPort;
                 listenError.clear();
+                mdns_.Update(settings.displayName, boundPort);
             } else {
                 auto lk = Lock();
                 listenError = "Port " + std::to_string(want) + " is busy, still using " + std::to_string(boundPort);
@@ -1220,7 +1237,7 @@ void Engine::DiscoveryLoop() {
         bool enabled;
         {
             auto lk = Lock();
-            enabled = settings.discovery;
+            enabled = settings.discovery && settings.broadcast && BroadcastAllowed();
         }
         if (enabled && SteadyMs() - lastSend >= 2000) {
             SendBeacon(nullptr);
@@ -1236,49 +1253,82 @@ void Engine::DiscoveryLoop() {
         json b = json::parse(std::string(buf, (size_t)n), nullptr, false);
         if (b.is_discarded() || b.value("app", "") != kAppId) continue;
         std::string id = b.value("id", "");
-        bool reply = false, connect = false;
         uint16_t port = (uint16_t)b.value("port", (int)kDefaultTcpPort);
-        {
-            auto lk = Lock();
-            if (id.empty() || id == settings.deviceId) continue;
-            bool isNew = online.find(id) == online.end();
-            OnlinePeer& p = online[id];
-            p.id = id;
-            p.name = b.value("name", p.name);
-            p.platform = b.value("platform", p.platform);
-            p.ip = ip;
-            p.port = port;
-            p.lastBeacon = SteadyMs();
-            reply = isNew;
-            auto dit = devices.find(id);
-            bool blocked = dit != devices.end() && dit->second.blocked;
-            if (dit != devices.end() && !blocked) {
-                dit->second.lastIp = ip;
-                dit->second.lastPort = port;
-            }
-            bool busy = connecting_.count(id) || IsConnected(id);
-            if (!blocked && !busy && settings.autoConnect && settings.deviceId < id &&
-                SteadyMs() - lastAutoConnect_[id] > 5000) {
-                lastAutoConnect_[id] = SteadyMs();
-                connect = true;
-            }
+        if (OnDiscovered(id, b.value("name", ""), b.value("platform", ""), ip, port, false)) SendBeacon(&ip);
+    }
+}
+
+bool Engine::OnDiscovered(const std::string& id, const std::string& name, const std::string& platform, const std::string& ip,
+                          uint16_t port, bool viaMdns) {
+    bool isNew = false, connect = false;
+    {
+        auto lk = Lock();
+        if (id.empty() || id == settings.deviceId || !running_ || port == 0) return false;
+        isNew = online.find(id) == online.end();
+        OnlinePeer& p = online[id];
+        p.id = id;
+        if (!name.empty()) p.name = name;
+        if (!platform.empty()) p.platform = platform;
+        p.ip = ip;
+        p.port = port;
+        (viaMdns ? p.lastMdns : p.lastBeacon) = SteadyMs();
+        auto dit = devices.find(id);
+        bool blocked = dit != devices.end() && dit->second.blocked;
+        if (dit != devices.end() && !blocked) {
+            dit->second.lastIp = ip;
+            dit->second.lastPort = port;
         }
-        if (reply) SendBeacon(&ip);
-        if (connect) {
-            {
-                auto lk = Lock();
-                connecting_.insert(id);
-            }
-            Spawn([this, ip, port, id] {
-                SocketHandle s = TcpConnect(ip, port, 3000);
-                {
-                    auto lk = Lock();
-                    connecting_.erase(id);
-                }
-                if (s != kInvalidSocket) AdoptSocket(s, Transport::LAN, ip, true);
-            });
+        bool busy = connecting_.count(id) || IsConnected(id);
+        if (!blocked && !busy && settings.autoConnect && settings.deviceId < id && SteadyMs() - lastAutoConnect_[id] > 5000) {
+            lastAutoConnect_[id] = SteadyMs();
+            connecting_.insert(id);
+            connect = true;
         }
     }
+    if (connect) {
+        Spawn([this, ip, port, id] {
+            SocketHandle s = TcpConnect(ip, port, 3000);
+            {
+                auto lk = Lock();
+                connecting_.erase(id);
+            }
+            if (s != kInvalidSocket) AdoptSocket(s, Transport::LAN, ip, true);
+        });
+    }
+    return isNew;
+}
+
+void Engine::StartMdns() {
+    std::string id, name;
+    uint16_t port;
+    bool on;
+    {
+        auto lk = Lock();
+        on = settings.discovery && settings.mdns && running_;
+        id = settings.deviceId;
+        name = settings.displayName;
+        port = boundPort;
+    }
+    if (!on || port == 0) {
+        mdns_.Stop();
+        return;
+    }
+    if (mdns_.Running()) {
+        mdns_.Update(name, port);
+        return;
+    }
+    mdns_.Start(id, name, PlatformName(), port, [this](const MdnsPeer& p) {
+        if (p.goodbye) {
+            auto lk = Lock();
+            auto it = online.find(p.id);
+            if (it != online.end()) {
+                it->second.lastMdns = 0;
+                if (!it->second.lastBeacon && !IsConnected(p.id)) online.erase(it);
+            }
+            return;
+        }
+        OnDiscovered(p.id, p.name, p.platform, p.ip, p.port, true);
+    });
 }
 
 void Engine::MaintenanceLoop() {
@@ -1310,7 +1360,10 @@ void Engine::MaintenanceLoop() {
             }
             conns.erase(std::remove_if(conns.begin(), conns.end(), [](auto& c) { return c->closed && c->alive == 0; }), conns.end());
             for (auto it = online.begin(); it != online.end();) {
-                if (now - it->second.lastBeacon > 8000 && !IsConnected(it->first)) it = online.erase(it);
+                OnlinePeer& op = it->second;
+                if (op.lastBeacon && now - op.lastBeacon > 8000) op.lastBeacon = 0;  // beacons every 2 s
+                if (op.lastMdns && now - op.lastMdns > 100000) op.lastMdns = 0;      // mDNS re-query every 30 s
+                if (!op.lastBeacon && !op.lastMdns && !IsConnected(it->first)) it = online.erase(it);
                 else ++it;
             }
             // Reconnect to known devices we still owe something to (unfinished transfers / undelivered chat)
@@ -1702,6 +1755,7 @@ void Engine::ApplySettings(const Settings& s) {
     MakeDirs(settings.downloadDir);
     if (settings.tcpPort != old.tcpPort && running_) restartListener_ = true;
     if ((settings.bluetooth != old.bluetooth || settings.btChannel != old.btChannel) && running_) StartBtServer();
+    if (running_ && (settings.discovery != old.discovery || settings.mdns != old.mdns || settings.displayName != old.displayName)) StartMdns();
     MarkDirty();
 }
 

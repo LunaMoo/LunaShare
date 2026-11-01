@@ -24,6 +24,8 @@ struct Settings {
     std::string downloadDir;
     uint16_t tcpPort = 47820;
     bool discovery = true;
+    bool mdns = true;              // Bonjour / mDNS (_lunashare._tcp)
+    bool broadcast = true;         // UDP broadcast + multicast beacons
     bool autoConnect = true;
     bool autoAcceptTrusted = true;
     bool autoAcceptAll = false;

@@ -38,8 +38,12 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - A list of every device you've ever connected to, with **custom nicknames**, a trusted flag (auto-accept), blocked, notes, last address, and Bluetooth address.
 
 **Connectivity**
-- **LAN, no setup:** UDP broadcast and multicast beacons (port 47821) plus a TCP connection (port 47820, falls back to the next free one).
-  Known devices are reconnected automatically when they still have work pending.
+- **LAN, no setup:** two discovery methods running side by side, then a TCP connection (port 47820, falls back to the next free one):
+  - **Bonjour / mDNS** (`_lunashare._tcp`, RFC 6762/6763). It uses the system Bonjour API on macOS/iOS and a built-in responder/browser on
+    Windows, Linux and Android that shares port 5353 with the OS. Works on most routers, and is the method iPhones/iPads will use.
+  - **UDP broadcast + multicast beacons** (port 47821). Fast, and works on networks that filter mDNS. Not available on iOS.
+
+  Both can be switched on or off in Settings. Known devices are reconnected automatically when they still have work pending.
 - **Phone-to-phone with no Wi-Fi:** one phone starts a hotspot (Android LocalOnlyHotspot) and shows a Wi-Fi QR code the other phone can scan
   with its camera. If the two are already connected over Bluetooth, one tap sends the hotspot login across and the other phone
   joins automatically. The app then switches to full Wi-Fi speed.
@@ -91,6 +95,7 @@ src/core/      engine (no UI dependencies)
   protocol.*     framing: [u32 len][u8 type][payload]  (JSON control frames, binary data frames)
   hash.*         SHA-256, CRC-32
   crypto.*       handshake, frame encryption, identity keys, safety numbers
+  mdns.*         Bonjour/mDNS service discovery (dns_sd on Apple, built-in elsewhere)
   bluetooth.*    RFCOMM per platform + HostBridge hooks for Android
   model.*        settings / devices / messages / transfers / history + JSON
   platform.*     paths, MACs, interfaces, UTF-8 file I/O
@@ -100,7 +105,8 @@ src/app/       SDL2 + Dear ImGui front end
   image_cache.*  async stb_image decoding, EXIF orientation, GL texture cache
   file_browser.* built-in file picker (works the same on phones)
   android_bridge.cpp  JNI glue to android/…/LunaShareActivity.java
-tests/         engine tests (pause/resume, receiver restart, corruption detection, folders, export/import)
+tests/         engine tests (pause/resume, receiver restart, corruption detection, folders, export/import,
+               encryption, key pinning, mDNS packets + live mDNS-only discovery)
 ```
 
 ## Protocol notes

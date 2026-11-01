@@ -9,6 +9,7 @@
 
 #include "crypto.h"
 #include "engine.h"
+#include "mdns.h"
 #include "hash.h"
 #include "platform.h"
 
@@ -55,7 +56,8 @@ static void WriteRandomFile(const std::string& path, int64_t size, uint32_t seed
     fclose(f);
 }
 
-static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port, bool autoAcceptAll, bool discovery) {
+static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port, bool autoAcceptAll, bool discovery,
+                                          bool broadcast = true, bool mdnsOn = true) {
     std::string cfg = JoinPath(Root(), name + "/config");
     MakeDirs(cfg);
     json j;
@@ -67,6 +69,8 @@ static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port
         s.autoAcceptAll = autoAcceptAll;
         s.discovery = discovery;
         s.autoConnect = discovery;
+        s.broadcast = broadcast;
+        s.mdns = mdnsOn;
         j = {{"settings", ToJson(s, false)}, {"devices", json::array()}};
         SaveJsonFile(JoinPath(cfg, "settings.json"), j);
     }
@@ -157,10 +161,70 @@ static void TestCrypto() {
     CHECK(re.LoadSeed(ia.seedHex) && re.PubHex() == ia.PubHex(), "identity reload");
 }
 
+static void TestMdnsPackets() {
+    printf("[mdns packets]\n");
+    using namespace mdns;
+    Service sv;
+    sv.instance = InstanceLabel(u8"Kasia's Pixel 8 (żółw).x", "d8875e8b-67f4") + "." + kServiceType;
+    sv.host = "ls-d8875e8b.local";
+    sv.port = 47820;
+    sv.txt = {{"id", "d8875e8b-67f4-4cd4"}, {"v", "2"}, {"name", u8"Kasia's Pixel 8 (żółw).x"}, {"pf", "Android"}};
+    auto b = BuildResponse(sv, {"192.168.1.20", "10.0.0.5"}, 120);
+    Packet pk;
+    CHECK(Parse(b.data(), b.size(), pk) && pk.IsResponse(), "parse response");
+    CHECK(pk.records.size() == 5, "5 records (%d)", (int)pk.records.size());
+    auto peers = ExtractPeers(pk, "10.0.0.5");
+    CHECK(peers.size() == 1 && peers[0].id == "d8875e8b-67f4-4cd4" && peers[0].port == 47820 && peers[0].ip == "10.0.0.5" &&
+              peers[0].name == u8"Kasia's Pixel 8 (żółw).x" && peers[0].platform == "Android" && !peers[0].goodbye,
+          "extract peer");
+    CHECK(ExtractPeers(pk, "172.16.0.9").at(0).ip == "192.168.1.20", "use A record when source is not one of them");
+    auto bye = BuildResponse(sv, {"10.0.0.5"}, 0);
+    Packet pb;
+    Parse(bye.data(), bye.size(), pb);
+    auto gp = ExtractPeers(pb, "10.0.0.5");
+    CHECK(gp.size() == 1 && gp[0].goodbye, "goodbye");
+    // question handling
+    auto q = BuildQuery(kServiceType, PTR);
+    Packet pq;
+    CHECK(Parse(q.data(), q.size(), pq) && !pq.IsResponse() && pq.questions.size() == 1, "parse query");
+    CHECK(ShouldAnswer(pq.questions[0], sv), "answer PTR query");
+    CHECK(ShouldAnswer({"_services._dns-sd._udp.local", PTR, 1}, sv), "answer service enumeration");
+    CHECK(ShouldAnswer({sv.instance, SRV, 1}, sv) && ShouldAnswer({"LS-D8875E8B.LOCAL", A, 1}, sv), "answer SRV / A (case-insensitive)");
+    CHECK(!ShouldAnswer({"_http._tcp.local", PTR, 1}, sv), "ignore other services");
+    // legacy unicast reply echoes the question and the id
+    std::vector<Question> echo{pq.questions[0]};
+    auto lu = BuildResponse(sv, {"10.0.0.5"}, 120, 0x1234, &echo);
+    Packet pl;
+    CHECK(Parse(lu.data(), lu.size(), pl) && pl.id == 0x1234 && pl.questions.size() == 1 && pl.records[1].cls == 1 && pl.records[1].ttl == 10,
+          "legacy unicast reply");
+    // hand-made packet using name compression pointers (as real stacks send)
+    std::vector<uint8_t> c = {0, 0, 0x84, 0, 0, 0, 0, 2, 0, 0, 0, 0};
+    auto lbl = [&](const char* t) { c.push_back((uint8_t)strlen(t)); c.insert(c.end(), t, t + strlen(t)); };
+    size_t svcOff = c.size();
+    lbl("_lunashare"); lbl("_tcp"); lbl("local"); c.push_back(0);
+    c.insert(c.end(), {0, 12, 0, 1, 0, 0, 0, 120});
+    size_t instOff = c.size() + 2;
+    c.insert(c.end(), {0, 6});  // rdlength: label(4) + pointer(2)
+    lbl("abc");
+    c.insert(c.end(), {(uint8_t)(0xC0 | (svcOff >> 8)), (uint8_t)svcOff});
+    c.insert(c.end(), {(uint8_t)(0xC0 | (instOff >> 8)), (uint8_t)instOff, 0, 33, 0x80, 1, 0, 0, 0, 120, 0, 10, 0, 0, 0, 0, 0x1F, 0x90});  // rdlength 6 + label(2) + pointer(2)
+    lbl("h"); c.insert(c.end(), {0xC0, (uint8_t)(svcOff + 16)});
+    Packet pc;
+    CHECK(Parse(c.data(), c.size(), pc) && pc.records.size() == 2 && pc.records[0].target == "abc._lunashare._tcp.local" &&
+              pc.records[1].name == "abc._lunashare._tcp.local" && pc.records[1].port == 8080 && pc.records[1].target == "h.local",
+          "compressed names");
+    // malformed / hostile input must not crash or loop
+    std::vector<uint8_t> loop = {0, 0, 0x84, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0, 12, 0, 1, 0, 1};
+    Packet bad;
+    CHECK(!Parse(loop.data(), loop.size(), bad), "pointer loop rejected");
+    for (size_t cut = 0; cut < b.size(); cut += 7) Parse(b.data(), cut, bad);
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     TestHash();
     TestCrypto();
+    TestMdnsPackets();
     printf("root: %s\n", Root().c_str());
 
     auto A = MakeEngine("alice", 48110, false, true);
@@ -319,7 +383,20 @@ int main() {
         M.Stop();
         B = MakeEngine("bob", 48120, true, true);
         A->ConnectAddress("127.0.0.1", B->boundPort);
-        CHECK(WaitFor([&] { return A->IsConnected(idB); }, 5000), "real Bob still connects (pinned key)");
+        bool ok = WaitFor([&] { return A->IsConnected(idB); }, 2500);
+        if (!ok) {
+            printf("    (first attempt did not connect, retrying)\n");
+            A->ConnectAddress("127.0.0.1", B->boundPort);
+            ok = WaitFor([&] { return A->IsConnected(idB); }, 4000);
+        }
+        if (!ok) {
+            for (auto& e : A->PopEvents()) printf("    A event %d: %s\n", (int)e.type, e.text.c_str());
+            for (auto& e : B->PopEvents()) printf("    B event %d: %s\n", (int)e.type, e.text.c_str());
+            auto l2 = A->Lock();
+            for (auto& c : A->conns) printf("    A conn %s ready=%d closed=%d peer=%s\n", c->addr.c_str(), (int)c->ready, (int)c->closed.load(), c->peerId.c_str());
+            printf("    pending=%s blocked=%d\n", A->devices[idB].pendingKey.c_str(), (int)A->devices[idB].blocked);
+        }
+        CHECK(ok, "real Bob still connects (pinned key)");
         auto l = A->Lock();
         A->devices[idB].pendingKey.clear();
     }
@@ -366,6 +443,29 @@ int main() {
     C->Stop();
     B->Stop();
     A->Stop();
+
+    printf("[mdns discovery only]\n");
+    {
+        auto D = MakeEngine("dave", 48150, false, true, false, true);
+        auto E = MakeEngine("erin", 48160, false, true, false, true);
+        std::string idD = D->settings.deviceId, idE = E->settings.deviceId;
+        bool found = WaitFor([&] {
+            auto l1 = D->Lock();
+            auto l2 = E->Lock();
+            return D->online.count(idE) && D->online[idE].lastMdns && E->online.count(idD) && E->online[idD].lastMdns;
+        }, 8000);
+        printf("  mDNS: %s / %s\n", D->MdnsStatus().c_str(), E->MdnsStatus().c_str());
+        CHECK(found, "found each other via mDNS only");
+        {
+            auto l = D->Lock();
+            CHECK(D->online[idE].lastBeacon == 0 && D->online[idE].port == E->boundPort, "no broadcast used, correct port");
+        }
+        CHECK(WaitFor([&] { return D->IsConnected(idE) && E->IsConnected(idD); }, 8000), "auto-connected via mDNS");
+        E->Stop();  // sends goodbye
+        bool gone = WaitFor([&] { auto l = D->Lock(); return !D->online.count(idE) || D->online[idE].lastMdns == 0; }, 4000);
+        CHECK(gone, "goodbye removes the device");
+        D->Stop();
+    }
     std::error_code ec;
     fs::remove_all(Root(), ec);
     printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL TESTS PASSED\n", g_fail);

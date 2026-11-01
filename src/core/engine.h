@@ -16,6 +16,7 @@
 
 #include "bluetooth.h"
 #include "crypto.h"
+#include "mdns.h"
 #include "model.h"
 #include "net.h"
 #include "protocol.h"
@@ -50,7 +51,9 @@ struct Connection {
 struct OnlinePeer {
     std::string id, name, platform, ip;
     uint16_t port = 0;
-    int64_t lastBeacon = 0;
+    int64_t lastBeacon = 0;   // last broadcast beacon
+    int64_t lastMdns = 0;     // last mDNS / Bonjour answer
+    std::string Via() const { return lastBeacon && lastMdns ? "broadcast + mDNS" : lastMdns ? "mDNS" : "broadcast"; }
 };
 
 enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error };
@@ -140,6 +143,8 @@ public:
     HotspotInfo hotspot;
     uint16_t boundPort = 0;
     std::string listenError;
+    std::string MdnsStatus() { return mdns_.Running() ? mdns_.Status() : std::string("off"); }
+    void RefreshDiscovery() { mdns_.QueryNow(); }
     std::atomic<int64_t> totalUp{0}, totalDown{0};
 
     // helpers usable under Lock()
@@ -203,6 +208,11 @@ private:
     std::set<std::string> connecting_;
     std::map<std::string, int64_t> lastAutoConnect_;
     Bluetooth bt_;
+    Mdns mdns_;
+    void StartMdns();
+    // Common path for every discovery mechanism. Returns true when the peer was not known before.
+    bool OnDiscovered(const std::string& id, const std::string& name, const std::string& platform, const std::string& ip,
+                      uint16_t port, bool viaMdns);
     Identity identity_;
 
     // global upload throttle (token bucket)
