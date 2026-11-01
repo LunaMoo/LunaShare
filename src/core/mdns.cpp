@@ -378,6 +378,11 @@ struct DnssdCtx {
     DNSServiceRef conn = nullptr;
     std::vector<DNSServiceRef> finished;  // subordinate refs to free after DNSServiceProcessResult returns
     std::vector<Pending*> pending;
+    std::map<std::string, std::string> instanceToId;  // browse name -> device id (for removal events)
+};
+struct ResolveCtx {
+    DnssdCtx* owner;
+    std::string instance;
 };
 
 std::string TxtValue(uint16_t len, const unsigned char* txt, const char* key) {
@@ -400,7 +405,10 @@ void DNSSD_API AddrCb(DNSServiceRef, DNSServiceFlags flags, uint32_t, DNSService
 
 void DNSSD_API ResolveCb(DNSServiceRef ref, DNSServiceFlags, uint32_t ifIndex, DNSServiceErrorType err, const char*, const char* host,
                          uint16_t portNet, uint16_t txtLen, const unsigned char* txt, void* ctx) {
-    DnssdCtx* c = (DnssdCtx*)ctx;
+    ResolveCtx* rc = (ResolveCtx*)ctx;
+    DnssdCtx* c = rc->owner;
+    std::string instance = rc->instance;
+    delete rc;
     c->finished.push_back(ref);  // one answer is enough
     if (err != kDNSServiceErr_NoError) return;
     auto* p = new Pending();
@@ -410,6 +418,7 @@ void DNSSD_API ResolveCb(DNSServiceRef ref, DNSServiceFlags, uint32_t ifIndex, D
     p->platform = TxtValue(txtLen, txt, "pf");
     p->port = ntohs(portNet);
     if (p->id.empty() || p->id == c->myId) { delete p; return; }
+    c->instanceToId[instance] = p->id;
     p->ref = c->conn;
     if (DNSServiceGetAddrInfo(&p->ref, kDNSServiceFlagsShareConnection, ifIndex, kDNSServiceProtocol_IPv4, host, AddrCb, p) ==
         kDNSServiceErr_NoError)
@@ -421,9 +430,21 @@ void DNSSD_API ResolveCb(DNSServiceRef ref, DNSServiceFlags, uint32_t ifIndex, D
 void DNSSD_API BrowseCb(DNSServiceRef, DNSServiceFlags flags, uint32_t ifIndex, DNSServiceErrorType err, const char* name,
                         const char* type, const char* domain, void* ctx) {
     DnssdCtx* c = (DnssdCtx*)ctx;
-    if (err != kDNSServiceErr_NoError || !(flags & kDNSServiceFlagsAdd)) return;
+    if (err != kDNSServiceErr_NoError) return;
+    if (!(flags & kDNSServiceFlagsAdd)) {  // service went away (goodbye or expired)
+        auto it = c->instanceToId.find(name);
+        if (it != c->instanceToId.end() && c->cb) {
+            MdnsPeer gone;
+            gone.id = it->second;
+            gone.goodbye = true;
+            c->instanceToId.erase(it);
+            c->cb(gone);
+        }
+        return;
+    }
     DNSServiceRef r = c->conn;
-    DNSServiceResolve(&r, kDNSServiceFlagsShareConnection, ifIndex, name, type, domain, ResolveCb, c);
+    auto* rc = new ResolveCtx{c, name};
+    if (DNSServiceResolve(&r, kDNSServiceFlagsShareConnection, ifIndex, name, type, domain, ResolveCb, rc) != kDNSServiceErr_NoError) delete rc;
 }
 }  // namespace
 
