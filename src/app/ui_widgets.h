@@ -29,8 +29,10 @@ void StatusDot(ImU32 col, float radius = 0);
 void Badge(const char* text, ImU32 bg);
 void HelpMarker(const char* text);
 
-// Call inside a scrolling child/window: drag-to-scroll with inertia (touch screens).
+// Legacy per-window hook (no-op).
 void TouchScroll();
+// Global drag-to-scroll with inertia for touch screens. Call once per frame after all windows were submitted.
+void TouchScrollUpdate(bool enabled);
 
 // Draws a QR code for `text`, `px` pixels wide.
 void QrCode(const char* text, float px);

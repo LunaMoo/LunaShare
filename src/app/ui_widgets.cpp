@@ -1,5 +1,6 @@
 #include "ui_widgets.h"
 
+#include <algorithm>
 #include <cmath>
 #include <unordered_map>
 
@@ -266,38 +267,78 @@ void HelpMarker(const char* text) {
     }
 }
 
-void TouchScroll() {
-    struct State { float velocity = 0; bool dragging = false; };
-    static std::unordered_map<ImGuiID, State> states;
-    ImGuiIO& io = ImGui::GetIO();
-    ImGuiWindow* win = ImGui::GetCurrentWindow();
-    State& st = states[win->ID];
-    float threshold = ImGui::GetFontSize() * 0.6f;
-    bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-    if (ImGui::IsMouseDown(0) && (hovered || st.dragging)) {
-        ImVec2 drag = ImGui::GetMouseDragDelta(0, threshold);
-        if (!st.dragging && fabsf(drag.y) > threshold && fabsf(drag.y) > fabsf(drag.x)) {
-            // Only grab the gesture if the active item is not a text field / slider being edited.
-            ImGuiContext& g = *GImGui;
-            bool editing = g.ActiveId != 0 && (g.InputTextState.ID == g.ActiveId || g.ActiveIdUsingAllKeyboardKeys);
-            if (!editing) {
-                st.dragging = true;
+void TouchScroll() {}  // kept for call sites; scrolling is handled globally by TouchScrollUpdate()
+
+// Drag-to-scroll for touch screens, applied once per frame to whatever scrollable area is under the finger
+// (child windows, tables, popups, combo lists). Works no matter where the drag starts: on a button, a label or
+// empty space. A tap still clicks; once the finger moves vertically past a small threshold the gesture becomes
+// a scroll and the pressed widget is released without triggering. After lifting the finger the list keeps
+// gliding with decaying speed.
+void TouchScrollUpdate(bool enabled) {
+    static ImGuiID target = 0;
+    static float velocity = 0;
+    static bool dragging = false, candidate = false;
+    ImGuiContext& g = *GImGui;
+    ImGuiIO& io = g.IO;
+    if (!enabled) {
+        dragging = candidate = false;
+        velocity = 0;
+        return;
+    }
+    auto scrollable = [](ImGuiWindow* w) -> ImGuiWindow* {
+        while (w) {
+            if (w->ScrollMax.y > 0.5f && !(w->Flags & ImGuiWindowFlags_NoScrollWithMouse)) return w;
+            if (!(w->Flags & ImGuiWindowFlags_ChildWindow)) break;  // stop at popups / top-level windows
+            w = w->ParentWindow;
+        }
+        return nullptr;
+    };
+    if (ImGui::IsMouseClicked(0)) {
+        ImGuiWindow* w = scrollable(g.HoveredWindow);
+        target = w ? w->ID : 0;
+        candidate = w != nullptr;
+        dragging = false;
+        velocity = 0;
+    }
+    ImGuiWindow* w = target ? ImGui::FindWindowByID(target) : nullptr;
+    if (!w || !w->WasActive) {
+        target = 0;
+        dragging = candidate = false;
+        velocity = 0;
+        return;
+    }
+    if (ImGui::IsMouseDown(0) && candidate) {
+        float threshold = ImGui::GetFontSize() * 0.5f;
+        ImVec2 d = ImGui::GetMouseDragDelta(0, 0.0f);
+        if (!dragging && fabsf(d.y) > threshold && fabsf(d.y) > fabsf(d.x) * 1.2f) {
+            // Text fields keep drag-to-select; everything else (buttons, rows, empty space) hands over to scrolling.
+            bool editingText = g.ActiveId != 0 && g.ActiveId == g.InputTextState.ID;
+            if (editingText) {
+                candidate = false;
+            } else {
+                dragging = true;
                 if (g.ActiveId) ImGui::ClearActiveID();
+                ImGui::SetScrollY(w, w->Scroll.y - d.y);  // catch up with the movement below the threshold
             }
+        } else if (dragging) {
+            ImGui::SetScrollY(w, w->Scroll.y - io.MouseDelta.y);
+            float inst = io.DeltaTime > 0 ? -io.MouseDelta.y / io.DeltaTime : 0;
+            velocity = velocity * 0.6f + inst * 0.4f;
         }
-        if (st.dragging) {
-            ImGui::SetScrollY(win, win->Scroll.y - io.MouseDelta.y);
-            st.velocity = io.DeltaTime > 0 ? -io.MouseDelta.y / io.DeltaTime : 0;
-            // stop buttons below the finger from reacting while scrolling
-            ImGui::SetHoveredID(0);
-        }
+        if (dragging) ImGui::SetHoveredID(0);  // no hover highlight on whatever passes under the finger
     } else {
-        if (st.dragging) st.dragging = false;
-        if (fabsf(st.velocity) > 5.0f) {
-            ImGui::SetScrollY(win, win->Scroll.y + st.velocity * io.DeltaTime);
-            st.velocity *= powf(0.05f, io.DeltaTime);
+        if (dragging && ImGui::IsMouseReleased(0) && io.MouseDownDurationPrev[0] > 0 && fabsf(io.MouseDelta.y) < 1 && ImGui::GetIO().DeltaTime > 0) {
+            // finger stopped before lifting: no fling
+            if (fabsf(velocity) < 200) velocity = 0;
+        }
+        dragging = false;
+        candidate = false;
+        if (fabsf(velocity) > 20.0f) {
+            ImGui::SetScrollY(w, std::clamp(w->Scroll.y + velocity * io.DeltaTime, 0.0f, w->ScrollMax.y));
+            velocity *= powf(0.04f, io.DeltaTime);
+            if (w->Scroll.y <= 0 || w->Scroll.y >= w->ScrollMax.y) velocity = 0;
         } else {
-            st.velocity = 0;
+            velocity = 0;
         }
     }
 }

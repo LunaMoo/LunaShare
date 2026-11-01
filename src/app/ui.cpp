@@ -144,6 +144,8 @@ void App::Frame() {
     DrawViewer();
     ImGui::End();
     DrawToasts();
+    // Touch scrolling everywhere (phone layout or a touch screen on desktop); the picture viewer handles its own drags.
+    ui::TouchScrollUpdate((m.mobile || ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen) && !viewer.open);
     Images().Update();
 
     // Ctrl+C copies selected chat messages (when no text field has focus)
