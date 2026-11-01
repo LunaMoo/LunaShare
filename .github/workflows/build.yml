@@ -39,14 +39,16 @@ jobs:
       - name: Test
         shell: bash
         run: |
-          if [ -f build/Release/lunashare_tests.exe ]; then build/Release/lunashare_tests.exe; else build/lunashare_tests; fi
+          if [ -f build/Release/lunashare_tests.exe ]; then build/Release/lunashare_voice_tests.exe && build/Release/lunashare_tests.exe; else build/lunashare_voice_tests && build/lunashare_tests; fi
       - name: Package
         shell: bash
         run: |
           mkdir -p dist
-          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/;
-          elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/;
-          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; fi
+          # the optional calls module goes into modules/ (delete that folder for a chat + files only install)
+          mkdir -p dist/modules
+          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll dist/modules/;
+          elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/; cp build/liblunashare_media.dylib dist/LunaShare.app/Contents/MacOS/; rmdir dist/modules;
+          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; cp build/liblunashare_media.so dist/modules/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
@@ -70,11 +72,11 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "cmake;3.22.1" "platforms;android-35"
       - name: Build APK
         working-directory: android
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleLiteRelease assembleCallsRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: LunaShare-android
-          path: android/app/build/outputs/apk/release/*.apk
+          path: android/app/build/outputs/apk/*/release/*.apk
 
   opnsense:
     runs-on: ubuntu-24.04

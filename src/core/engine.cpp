@@ -439,7 +439,7 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
             conns.push_back(c);
             hello = {{"app", kAppId}, {"proto", kProtocolVersion}, {"id", settings.deviceId}, {"name", settings.displayName},
                      {"user", UserName()}, {"host", HostName()}, {"platform", PlatformName()}, {"macs", MacAddresses()},
-                     {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}};
+                     {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}, {"caps", localCaps}};
         }
         Queue(c, Msg::Hello, hello);
         Spawn([this, c] { ReaderLoop(c); });
@@ -458,6 +458,7 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
         for (auto& o : conns)
             if (o != c && o->ready && !o->closed && o->peerId == c->peerId) other = true;
         if (!other) {
+            if (call.state != CallState::None && call.peer == c->peerId) FinishCall("connection lost", false);
             InterruptPeerTransfers(c->peerId);
             Device(c->peerId).lastSeen = NowMs();
         } else {
@@ -496,6 +497,13 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
         if (!c->ready && f.type != Msg::Hello) break;
         if (f.type == Msg::FileData) {
             HandleData(c, f);
+            continue;
+        }
+        if (f.type == Msg::Media) {
+            if (f.payload.size() > 8 && c->peerId == activeCallPeerSnapshot()) {
+                uint64_t id = GetU64(f.payload.data());
+                if (id && id == activeCallId_.load() && onMedia) onMedia(id, f.payload.data() + 8, f.payload.size() - 8);
+            }
             continue;
         }
         if (f.type == Msg::Bye) break;
@@ -569,6 +577,19 @@ bool Engine::ProduceChunk(const std::shared_ptr<Connection>& c, std::vector<uint
         limit = settings.speedLimitKBs;
     }
     if (c->transport == Transport::Bluetooth && chunk > 32 * 1024) chunk = 32 * 1024;  // keep BT latency low
+    if (c->callPriority) {
+        // Voice frames share this connection: small chunks so they never wait behind a big one, and over
+        // internet/Bluetooth a gentle rate cap (~200 KB/s) so queues stay short.
+        chunk = std::min<size_t>(chunk, c->transport == Transport::LAN ? 64 * 1024 : 16 * 1024);
+        if (c->transport != Transport::LAN) {
+            int64_t since = SteadyMs() - c->lastChunkMs;
+            if (since < 80) {
+                wait = 80 - since;
+                return false;
+            }
+        }
+        c->lastChunkMs = SteadyMs();
+    }
     if (limit > 0) {
         std::lock_guard<std::mutex> l(throttleMtx_);
         double rate = (double)limit * 1024.0;
@@ -705,6 +726,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                     }
                 }
             }
+            c->caps.clear();
+            for (auto& cp : j.value("caps", json::array()))
+                if (cp.is_string()) c->caps.push_back(cp.get<std::string>());
             c->peerId = id;
             c->ready = true;
             MarkDirty();
@@ -967,6 +991,53 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 SetFinal(t, TState::Failed, "The receiver's SHA-256 did not match - file was corrupted in transit");
                 Emit({EventType::TransferFailed, c->peerId, t->name + ": hash mismatch", t->tid});
             }
+            break;
+        }
+        case Msg::CallInvite: {
+            uint64_t id = j.value("call", (uint64_t)0);
+            if (!id) break;
+            std::string media = j.value("media", "voice");
+            bool supported = std::find(localCaps.begin(), localCaps.end(), media) != localCaps.end();
+            if (!supported) {
+                Queue(c, Msg::CallEnd, {{"call", id}, {"reason", "unsupported"}});
+                AddSystemMessage(c->peerId, "Missed call - calls are not installed on this device (voice module missing)");
+                break;
+            }
+            if (call.state != CallState::None) {
+                if (call.id == id) break;  // duplicate
+                Queue(c, Msg::CallEnd, {{"call", id}, {"reason", "busy"}});
+                AddSystemMessage(c->peerId, "Missed call (you were in another call)");
+                break;
+            }
+            call = CallInfo();
+            call.id = id;
+            call.peer = c->peerId;
+            call.outgoing = false;
+            call.state = CallState::IncomingRinging;
+            call.started = SteadyMs();
+            call.media = media;
+            Emit({EventType::CallIncoming, c->peerId, "Incoming call", id});
+            break;
+        }
+        case Msg::CallAccept: {
+            uint64_t id = j.value("call", (uint64_t)0);
+            if (call.id != id || call.state != CallState::OutgoingRinging || call.peer != c->peerId) break;
+            call.state = CallState::Active;
+            call.answered = SteadyMs();
+            {
+                std::lock_guard<std::mutex> l(mediaMtx_);
+                activeCallPeer_ = call.peer;
+                activeCallConn_ = ReadyConn(call.peer);
+            }
+            activeCallId_ = id;
+            c->callPriority = true;
+            Emit({EventType::CallStarted, c->peerId, "Call started", id});
+            break;
+        }
+        case Msg::CallEnd: {
+            uint64_t id = j.value("call", (uint64_t)0);
+            if (call.id != id || call.peer != c->peerId) break;
+            FinishCall(j.value("reason", "hangup"), false);
             break;
         }
         case Msg::WifiCreds:
@@ -1444,6 +1515,11 @@ void Engine::MaintenanceLoop() {
                     else reconnect.emplace_back(d->second.lastIp, d->second.lastPort ? d->second.lastPort : kDefaultTcpPort);
                 }
             }
+        }
+        {
+            auto lk = Lock();
+            if ((call.state == CallState::OutgoingRinging || call.state == CallState::IncomingRinging) && now - call.started > 45000)
+                FinishCall(call.outgoing ? "no answer" : "missed", call.outgoing);
         }
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();
@@ -1940,6 +2016,131 @@ void Engine::BtRefresh(bool inquiry) {
 
 void Engine::SendWifiCreds(const std::string& peer, const std::string& ssid, const std::string& pass) {
     QueueToPeer(peer, Msg::WifiCreds, {{"ssid", ssid}, {"pass", pass}});
+}
+
+// ============================================================================ calls
+
+bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {
+    auto c = ReadyConn(peer);
+    return c && std::find(c->caps.begin(), c->caps.end(), cap) != c->caps.end();
+}
+
+uint64_t Engine::StartCall(const std::string& peer, const std::string& media) {
+    auto lk = Lock();
+    if (call.state != CallState::None || !PeerHasCap(peer, media) ||
+        std::find(localCaps.begin(), localCaps.end(), media) == localCaps.end())
+        return 0;
+    call = CallInfo();
+    call.id = RandomU64();
+    call.peer = peer;
+    call.outgoing = true;
+    call.state = CallState::OutgoingRinging;
+    call.started = SteadyMs();
+    call.media = media;
+    QueueToPeer(peer, Msg::CallInvite, {{"call", call.id}, {"media", media}});
+    return call.id;
+}
+
+void Engine::AcceptCall() {
+    auto lk = Lock();
+    if (call.state != CallState::IncomingRinging) return;
+    auto c = ReadyConn(call.peer);
+    if (!c) {
+        FinishCall("connection lost", false);
+        return;
+    }
+    call.state = CallState::Active;
+    call.answered = SteadyMs();
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        activeCallPeer_ = call.peer;
+        activeCallConn_ = c;
+    }
+    activeCallId_ = call.id;
+    c->callPriority = true;
+    Queue(c, Msg::CallAccept, {{"call", call.id}});
+    Emit({EventType::CallStarted, call.peer, "Call started", call.id});
+}
+
+void Engine::EndCall(const std::string& reason) {
+    auto lk = Lock();
+    if (call.state == CallState::None) return;
+    std::string r = reason;
+    if (call.state == CallState::IncomingRinging && reason == "hangup") r = "declined";
+    FinishCall(r, true);
+}
+
+void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
+    // called with the engine lock held
+    if (call.state == CallState::None) return;
+    CallInfo c = call;
+    if (notifyPeer) QueueToPeer(c.peer, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
+    activeCallId_ = 0;
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        activeCallPeer_.clear();
+        activeCallConn_.reset();
+    }
+    for (auto& cn : conns)
+        if (cn->peerId == c.peer) cn->callPriority = false;
+    call = CallInfo();
+    std::string text;
+    if (c.state == CallState::Active) {
+        int secs = (int)((SteadyMs() - c.answered) / 1000);
+        char b[64];
+        snprintf(b, sizeof(b), "%d:%02d", secs / 60, secs % 60);
+        text = std::string(c.outgoing ? "Outgoing" : "Incoming") + " call - " + b;
+        if (reason == "connection lost") text += " (connection lost)";
+    } else if (c.outgoing) {
+        text = reason == "busy" ? "Call not answered - busy" : reason == "declined" ? "Call declined"
+             : reason == "unsupported" ? "Call failed - the other device has no voice module" : reason == "no answer" ? "No answer"
+             : "Call cancelled";
+    } else {
+        text = reason == "declined" ? "Declined call" : "Missed call";
+    }
+    AddSystemMessage(c.peer, text);
+    Emit({EventType::CallEnded, c.peer, text, c.id, reason});
+}
+
+void Engine::SendMedia(const void* data, size_t len) {
+    uint64_t id = activeCallId_.load();
+    if (!id || len > 4000) return;
+    std::shared_ptr<Connection> c;
+    std::string peer;
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        peer = activeCallPeer_;
+        c = activeCallConn_.lock();
+    }
+    if (!c || c->closed) {
+        // the connection was replaced (e.g. LAN came back): look it up once, under the engine lock
+        auto lk = Lock();
+        c = ReadyConn(peer);
+        if (!c) return;
+        c->callPriority = true;
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        activeCallConn_ = c;
+    }
+    std::string payload(8 + len, '\0');
+    PutU64((uint8_t*)payload.data(), id);
+    memcpy(&payload[8], data, len);
+    {
+        std::lock_guard<std::mutex> l(c->qm);
+        // never let voice pile up: if the link stalls, drop the oldest media instead of growing latency
+        size_t media = 0;
+        for (auto& q : c->ctrl) if (q.first == Msg::Media) media++;
+        if (media > 25) {
+            for (auto it = c->ctrl.begin(); it != c->ctrl.end(); ++it)
+                if (it->first == Msg::Media) { c->ctrl.erase(it); break; }
+        }
+        c->ctrl.emplace_back(Msg::Media, std::move(payload));
+    }
+    c->qcv.notify_one();
+}
+
+std::string Engine::activeCallPeerSnapshot() {
+    std::lock_guard<std::mutex> l(mediaMtx_);
+    return activeCallPeer_;
 }
 
 void Engine::SetHotspotInfo(const HotspotInfo& h) {

@@ -72,6 +72,21 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Each pair of devices has a **safety number** (30 digits, identical on both screens). Compare it once and mark the device as *verified*.
 - Bluetooth links and hotspot logins sent over them are encrypted the same way. Only the discovery beacons (name, ID, port) are plain.
 
+**Voice calls (optional module)**
+- Calls live in a separate plug-in, `lunashare_media` (`lunashare_media.dll` / `liblunashare_media.so` / `.dylib`), which is loaded at
+  startup only if it's present. Without it LunaShare is the plain chat + file app, and the call button doesn't appear. Delete the file to remove calls.
+- The call button sits in the chat header. It's only shown when **both** devices have the module, since each device announces its capabilities.
+- Calls go peer-to-peer over the same encrypted connection as chat (LAN, hotspot, internet/KCP, and in principle Bluetooth, though there it can be choppy).
+- Audio: Opus (16 kHz, 12–48 kbit/s, in-band FEC), an adaptive jitter buffer with loss concealment, and SpeexDSP for echo cancellation, noise suppression and auto gain.
+- During a call, file transfers to that device are throttled so they don't cause audio stutter.
+- Call bar: timer, mic/speaker levels, link stats (loss, jitter, delay), and buttons for mute, speaker (phones) and hang up. Incoming calls get a ringtone and a full-screen answer screen on phones.
+- Calls are logged in the chat (*Outgoing call – 2:31*, *Missed call*, …).
+- *Settings → Calls*: choose input and output devices, turn echo cancellation, noise suppression and auto gain on or off, set quality, and run a microphone test.
+- Android ships as two APKs: **lite** (no module, no microphone permission) and **calls** (`org.lunamoo.lunashare.calls`, includes the module).
+- The module has a small, versioned C ABI (`src/media_api/lunashare_media.h`), so a video module can be added later the same way.
+
+![Voice call](docs/voice-call.png)
+
 **Settings**
 - Download folder, auto-accept rules, discovery, port, speed limit, chunk size, parallel files, Bluetooth, theme (dark/light/classic), UI scale.
 - Layout: *automatic*, *desktop*, or *phone*. Phones get a vertical UI with large buttons, a bottom navigation bar, drag-to-scroll with inertia, and long-press menus.
@@ -94,8 +109,12 @@ cmake --build build --config Release
 - **Android:** open `android/` in Android Studio, or run `gradle assembleRelease` in `android/`. The Gradle build fetches SDL's Java glue
   and builds the native code through the same top-level `CMakeLists.txt`. Needs NDK 27 and minSdk 24.
   On Android 11+ the app asks for *All files access* so it can send any file and save to `Download/LunaShare`.
-- Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only).
-- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`.
+  There are two flavors: `gradle assembleLiteRelease` (without calls) and `gradle assembleCallsRelease` (with the voice module and microphone permission).
+- Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only),
+  `-DLUNASHARE_BUILD_VOICE=OFF` (skip the voice module, along with Opus and SpeexDSP).
+- The voice module builds next to the executable. To ship it, put it next to `LunaShare.exe` or in a `modules/` folder (Windows/Linux),
+  or in `LunaShare.app/Contents/MacOS` (macOS). `./build/lunashare_voice_tests` checks the audio pipeline (packet loss, jitter, echo cancellation).
+- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`.
 
 The GitHub Actions workflow builds Windows, Linux, macOS and the Android APK on every push and uploads them as artifacts.
 
@@ -117,7 +136,10 @@ opnsense/      OPNsense plugin (Services > LunaShare rendezvous) + install.sh
   bluetooth.*    RFCOMM per platform + HostBridge hooks for Android
   model.*        settings / devices / messages / transfers / history + JSON
   platform.*     paths, MACs, interfaces, UTF-8 file I/O
+src/media_api/ lunashare_media.h - the C ABI between the app and media modules
+modules/voice/ voice module: Opus + SpeexDSP + jitter buffer (built as lunashare_media)
 src/app/       SDL2 + Dear ImGui front end
+  media_host.*   loads the media module, audio devices, ring tones, call state
   ui.cpp         desktop & phone layouts, chat, transfers, history, devices, connect, settings
   ui_viewer.cpp  thumbnails + full-screen picture viewer
   image_cache.*  async stb_image decoding, EXIF orientation, GL texture cache
@@ -147,9 +169,12 @@ tests/         engine tests (pause/resume, receiver restart, corruption detectio
 - The identity secret is stored in `settings.json` in the user's config folder, with the same protection as an SSH key. A settings export only includes it
   when you choose *include identity*.
 - Protocol v2 (encrypted) can't talk to builds from before encryption was added.
+- Voice calls are tested in code (signalling, packet loss/jitter, echo cancellation) but not yet with real microphones and speakers on every platform.
+  Calls are one-to-one, and there's no video yet.
 
 ## License
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
-QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT).
+QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
+and in the voice module Opus (BSD-3-Clause) and SpeexDSP (BSD-3-Clause).

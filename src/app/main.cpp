@@ -13,6 +13,7 @@
 #include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
+#include "media_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
 
@@ -224,6 +225,8 @@ int main(int argc, char** argv) {
 
     ls::Engine engine;
     AndroidBridgeInit(&engine);
+    Media().Load();          // optional calls module; must happen before Start() so the capability is announced
+    Media().Attach(&engine);
     engine.Start();
 #if defined(__ANDROID__)
     {
@@ -321,6 +324,7 @@ int main(int argc, char** argv) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
         app.Frame();
+        Media().Update();
         ImGui::Render();
 
         if (app.windowTitle != lastTitle) {
@@ -362,6 +366,7 @@ int main(int argc, char** argv) {
 
     }
 
+    Media().Shutdown();
     engine.Stop();
     Images().Shutdown();
     ImGui_ImplOpenGL3_Shutdown();

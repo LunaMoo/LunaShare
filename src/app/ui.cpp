@@ -7,6 +7,7 @@
 #include "crypto.h"
 #include "hash.h"
 #include "image_cache.h"
+#include "media_host.h"
 #include "wan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -111,6 +112,12 @@ void App::Frame() {
         browser.Open(FileBrowser::Mode::OpenMulti, "Send to ...", autoBrowse);
         if (const char* n = getenv("LUNASHARE_BROWSE_SELECT")) browser.SelectFirstFiles(atoi(n));
     }
+    static const char* autoAnswer = getenv("LUNASHARE_AUTOANSWER");
+    static int64_t ringSince = 0;
+    if (autoAnswer && eng.call.state == CallState::IncomingRinging) {
+        if (!ringSince) ringSince = SteadyMs();
+        if (SteadyMs() - ringSince > 1500) { eng.AcceptCall(); ringSince = 0; }
+    }
     static const char* autoView = getenv("LUNASHARE_AUTOVIEW");
     static bool autoViewDone = false;
     if (autoView && !autoViewDone && !selectedPeer.empty()) {
@@ -139,12 +146,14 @@ void App::Frame() {
     ImGui::Begin("##main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar(2);
+    DrawCallBar();
     if (m.mobile) DrawMobile();
     else DrawDesktop();
     DrawPopups();
     DrawViewer();
     ImGui::End();
     DrawToasts();
+    if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
     // Touch scrolling everywhere (phone layout or a touch screen on desktop); the picture viewer handles its own drags.
     ui::TouchScrollUpdate((m.mobile || ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen) && !viewer.open);
     Images().Update();
@@ -202,6 +211,19 @@ void App::PullEvents() {
                 t.title = "Error";
                 t.text = e.text;
                 t.ttl = 8.0f;
+                break;
+            case EventType::CallIncoming:
+                openIncomingCall = true;
+                wantAttention = true;
+                continue;
+            case EventType::CallStarted:
+                continue;
+            case EventType::CallEnded:
+                if (e.a == "hangup" || e.a == "declined") continue;  // the user did it or sees it in the chat
+                t.title = who;
+                t.text = e.text;
+                t.ttl = 8.0f;
+                if (e.text.rfind("Missed", 0) == 0) wantAttention = true;
                 break;
         }
         // merge consecutive chat messages from the same device into one toast
@@ -507,7 +529,12 @@ void App::DrawMobile() {
     ImGui::TextUnformatted(title);
     ImGui::PopFont();
     if (screen == MScreen::Chat) {
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - rowH);
+        bool callable = Media().Available();
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - rowH * (callable ? 2.0f : 1.0f) - (callable ? ImGui::GetStyle().ItemSpacing.x : 0));
+        if (callable) {
+            CallButton(selectedPeer, rowH);
+            ImGui::SameLine();
+        }
         if (ui::IconButton("attach", Icon::Attach, nullptr, rowH)) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, "Send to " + peerTitle, browser.lastDir);
@@ -625,7 +652,13 @@ void App::DrawChat(const std::string& peer) {
     }
     if (!mobile) {
         float bw = ImGui::GetFrameHeight();
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * 3 - ImGui::GetStyle().ItemSpacing.x * 2);
+        bool callable = Media().Available();
+        int nb = callable ? 4 : 3;
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
+        if (callable) {
+            CallButton(peer, bw);
+            ImGui::SameLine();
+        }
         if (ui::IconButton("sendfiles", Icon::Attach, "Send files or folders")) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, "Send to " + eng.PeerName(peer), browser.lastDir);
@@ -1625,6 +1658,7 @@ void App::DrawNearby() {
 // ============================================================================ settings
 
 void App::DrawSettings() {
+    settingsShownFrame = ImGui::GetFrameCount();
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH : 0;
     ImGui::BeginChild("settings");
@@ -1683,6 +1717,8 @@ void App::DrawSettings() {
     changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, "Files at once per device: %d");
     ImGui::SetNextItemWidth(fieldW);
     changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, "Chunk size: %d KB", ImGuiSliderFlags_Logarithmic);
+
+    DrawCallSettings(fieldW, h, changed);
 
     ImGui::SeparatorText("Internet (optional)");
     ImGui::PushTextWrapPos(0);
@@ -1844,6 +1880,8 @@ void App::DrawPopups() {
         edit = eng.settings;
         browseFor = BrowseFor::None;
     }
+
+    DrawIncomingCall();
 
     // ---- send to device picker
     if (openSendTo) { ImGui::OpenPopup("Send to device"); openSendTo = false; }
@@ -2015,4 +2053,201 @@ void App::DrawToasts() {
         y -= ImGui::GetWindowHeight() + ImGui::GetStyle().ItemSpacing.y;
         ImGui::End();
     }
+}
+
+// ============================================================================ calls
+
+bool App::CallButton(const std::string& peer, float size) {
+    bool connected = eng.IsConnected(peer);
+    bool capable = connected && eng.PeerHasCap(peer, "voice");
+    bool busy = eng.call.state != CallState::None;
+    const char* tip = !connected ? "Voice call (device is offline)"
+                    : !capable ? "Voice call - the other device does not have the voice module"
+                    : busy ? "Already in a call" : "Voice call";
+    ImGui::BeginDisabled(!capable || busy);
+    bool clicked = ui::IconButton("call", Icon::Phone, tip, size);
+    ImGui::EndDisabled();
+    if (clicked) eng.StartCall(peer, "voice");
+    return clicked;
+}
+
+void App::DrawCallBar() {
+    const CallInfo& c = eng.call;
+    if (c.state == CallState::None || c.state == CallState::IncomingRinging) return;
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 1.2f;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, c.state == CallState::Active ? IM_COL32(30, 110, 70, 255) : IM_COL32(60, 70, 120, 255));
+    ImGui::BeginChild("callbar", ImVec2(0, h + ImGui::GetStyle().WindowPadding.y * 2), ImGuiChildFlags_AlwaysUseWindowPadding);
+    std::string who = eng.PeerName(c.peer);
+    char status[160];
+    if (c.state == CallState::Active) {
+        int secs = (int)((SteadyMs() - c.answered) / 1000);
+        auto conn = eng.ReadyConn(c.peer);
+        snprintf(status, sizeof(status), "%s  %d:%02d%s%s", who.c_str(), secs / 60, secs % 60, conn ? "  via " : "", conn ? TransportName(conn->transport) : "");
+    } else {
+        snprintf(status, sizeof(status), "Calling %s...", who.c_str());
+    }
+    ImGui::AlignTextToFramePadding();
+    float ih = ImGui::GetTextLineHeight();
+    ImVec2 ip = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(ih, h));
+    ui::DrawIcon(ImGui::GetWindowDrawList(), Icon::Phone, ImVec2(ip.x + ih * 0.5f, ip.y + h * 0.5f), ih, IM_COL32_WHITE);
+    ImGui::SameLine();
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ImGui::GetTextLineHeight()) * 0.5f);
+    ImGui::TextUnformatted(status);
+    if (c.state == CallState::Active) {
+        LsmStats st = Media().Stats();
+        if (!mobile) {
+            ImGui::SameLine();
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ImGui::GetTextLineHeight()) * 0.5f);
+            ImGui::TextColored(ImVec4(0.85f, 0.95f, 0.9f, 1), "mic");
+            ImGui::SameLine();
+            ui::ProgressBarText(Media().Muted() ? 0.f : st.mic_level, "", ImVec2(ImGui::GetFontSize() * 4, ImGui::GetTextLineHeight() * 0.5f), IM_COL32(150, 240, 170, 255));
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.85f, 0.95f, 0.9f, 1), "spk");
+            ImGui::SameLine();
+            ui::ProgressBarText(st.speaker_level, "", ImVec2(ImGui::GetFontSize() * 4, ImGui::GetTextLineHeight() * 0.5f), IM_COL32(150, 240, 170, 255));
+        }
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && !mobile)
+            ImGui::SetTooltip("Packet loss %.1f%%  jitter %d ms  delay %d ms  %d kbps\nsent %d / received %d packets%s%s", st.loss_percent,
+                              st.jitter_ms, st.buffered_ms, st.bitrate_kbps, st.packets_out, st.packets_in,
+                              Media().audioError.empty() ? "" : "\n", Media().audioError.c_str());
+    }
+    // buttons on the right
+    int nb = c.state == CallState::Active ? (IsMobilePlatform() ? 3 : 2) : 1;
+    float bw = h;
+    ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
+    ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y);
+    if (c.state == CallState::Active) {
+        bool muted = Media().Muted();
+        if (muted) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
+        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? "Unmute" : "Mute", bw)) Media().SetMute(!muted);
+        if (muted) ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (IsMobilePlatform()) {
+            bool spk = Media().Speaker();
+            if (spk) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ui::IconButton("speaker", Icon::Speaker, "Loudspeaker", bw)) Media().SetSpeaker(!spk);
+            if (spk) ImGui::PopStyleColor();
+            ImGui::SameLine();
+        }
+    }
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(200, 50, 50, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(230, 70, 70, 255));
+    if (ui::IconButton("hangup", Icon::HangUp, "Hang up", bw)) eng.EndCall();
+    ImGui::PopStyleColor(2);
+    if (!Media().audioError.empty() && c.state == CallState::Active) {
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.6f, 1), "%s", Media().audioError.c_str());
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+}
+
+void App::DrawIncomingCall() {
+    bool ringing = eng.call.state == CallState::IncomingRinging;
+    if (openIncomingCall && ringing) ImGui::OpenPopup("Incoming call");
+    openIncomingCall = false;
+    bool mobile = ui::M().mobile;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    if (mobile) {
+        ImGui::SetNextWindowPos(vp->WorkPos);
+        ImGui::SetNextWindowSize(vp->WorkSize);
+    } else {
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 22, 0));
+    }
+    if (!ImGui::BeginPopupModal("Incoming call", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                                              (mobile ? 0 : ImGuiWindowFlags_AlwaysAutoResize)))
+        return;
+    if (!ringing) {
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+    std::string who = eng.PeerName(eng.call.peer);
+    float avail = ImGui::GetContentRegionAvail().x;
+    if (mobile) ImGui::Dummy(ImVec2(0, vp->WorkSize.y * 0.2f));
+    // pulsing phone icon
+    float sz = ImGui::GetFontSize() * (mobile ? 5.0f : 3.0f);
+    float pulse = 0.85f + 0.15f * sinf((float)ImGui::GetTime() * 6.0f);
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(avail, sz * 1.3f));
+    ImVec2 cc(p.x + avail * 0.5f, p.y + sz * 0.65f);
+    ImGui::GetWindowDrawList()->AddCircleFilled(cc, sz * 0.6f * pulse, IM_COL32(40, 150, 90, 255));
+    ui::DrawIcon(ImGui::GetWindowDrawList(), Icon::Phone, cc, sz * 0.6f, IM_COL32_WHITE);
+    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.4f);
+    ImVec2 ts = ImGui::CalcTextSize(who.c_str());
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ts.x) * 0.5f));
+    ImGui::TextUnformatted(who.c_str());
+    ImGui::PopFont();
+    const char* sub = "is calling you";
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ImGui::CalcTextSize(sub).x) * 0.5f));
+    ImGui::TextDisabled("%s", sub);
+    ImGui::Spacing();
+    if (mobile) ImGui::Dummy(ImVec2(0, vp->WorkSize.y * 0.15f));
+    float bh = mobile ? ui::M().rowH * 1.3f : ImGui::GetFrameHeight() * 1.6f;
+    float bw = (avail - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 50, 50, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(220, 70, 70, 255));
+    if (ui::IconTextButton("Decline", Icon::HangUp, ImVec2(bw, bh)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) eng.EndCall();
+    ImGui::PopStyleColor(2);
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 150, 90, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 180, 110, 255));
+    if (ui::IconTextButton("Accept", Icon::Phone, ImVec2(bw, bh))) {
+        eng.AcceptCall();
+        SelectPeer(eng.call.peer);
+        if (mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+        else { tab = Tab::Chat; tabForce = true; }
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::EndPopup();
+}
+
+void App::DrawCallSettings(float fieldW, float h, bool& changed) {
+    ImGui::SeparatorText("Calls");
+    if (!Media().Available()) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("Voice calls are an optional module and are not installed (%s). To enable them, put the "
+                            "lunashare_media library next to the LunaShare program (or install the \"LunaShare + Calls\" app on Android) "
+                            "and restart.", Media().loadInfo.c_str());
+        ImGui::PopTextWrapPos();
+        return;
+    }
+    ImGui::TextDisabled("%s - %s", Media().ModuleName().c_str(), Media().loadInfo.c_str());
+    auto deviceCombo = [&](const char* label, bool capture, std::string& value) {
+        static std::vector<std::string> devs[2];
+        static double lastScan[2] = {-100, -100};
+        if (ImGui::GetTime() - lastScan[capture] > 5) {
+            devs[capture] = MediaHost::Devices(capture);
+            lastScan[capture] = ImGui::GetTime();
+        }
+        ImGui::SetNextItemWidth(fieldW);
+        std::string preview = value.empty() ? std::string(label) + ": system default" : std::string(label) + ": " + value;
+        if (ImGui::BeginCombo((std::string("##") + label).c_str(), preview.c_str())) {
+            if (ImGui::Selectable("System default", value.empty())) { value.clear(); changed = true; }
+            for (auto& d : devs[capture])
+                if (ImGui::Selectable(d.c_str(), value == d)) { value = d; changed = true; }
+            ImGui::EndCombo();
+        }
+    };
+    deviceCombo("Microphone", true, edit.callInputDevice);
+    deviceCombo("Speaker", false, edit.callOutputDevice);
+    changed |= ImGui::Checkbox("Echo cancellation", &edit.callEchoCancel);
+    ui::HelpMarker("Removes your speaker's sound from the microphone so the other side does not hear themselves. Keep it on unless you use headphones.");
+    changed |= ImGui::Checkbox("Noise suppression", &edit.callNoiseSuppress);
+    changed |= ImGui::Checkbox("Automatic microphone level", &edit.callAutoGain);
+    int kbps = edit.callBitrate / 1000;
+    ImGui::SetNextItemWidth(fieldW);
+    if (ImGui::SliderInt("##callbr", &kbps, 12, 48, "Voice quality: %d kbps")) { edit.callBitrate = kbps * 1000; editDirty = true; }
+    if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+    bool testing = Media().MicTesting();
+    if (eng.call.state == CallState::None) {
+        if (ImGui::Button(testing ? "Stop microphone test" : "Test microphone", ImVec2(0, h))) testing ? Media().StopMicTest() : Media().StartMicTest();
+        if (testing) {
+            ImGui::SameLine();
+            ui::ProgressBarText(Media().MicTestLevel(), "", ImVec2(ImGui::GetFontSize() * 8, ImGui::GetFrameHeight() * 0.5f), ui::ColOk());
+        }
+    }
+    if (!Media().audioError.empty()) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColErr()), "%s", Media().audioError.c_str());
 }

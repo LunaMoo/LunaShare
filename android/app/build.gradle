@@ -37,6 +37,22 @@ android {
         }
     }
 
+    // Two variants of the same app: "lite" (chat + files only, no microphone permission) and "calls"
+    // (adds the optional voice module liblunashare_media.so and the RECORD_AUDIO permission).
+    flavorDimensions 'features'
+    productFlavors {
+        lite {
+            dimension 'features'
+            externalNativeBuild { cmake { arguments '-DLUNASHARE_BUILD_VOICE=OFF' } }
+        }
+        calls {
+            dimension 'features'
+            applicationIdSuffix '.calls'
+            versionNameSuffix '-calls'
+            externalNativeBuild { cmake { arguments '-DLUNASHARE_BUILD_VOICE=ON' } }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false

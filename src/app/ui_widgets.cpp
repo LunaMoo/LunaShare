@@ -165,6 +165,41 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->AddPolyline(c4, 3, col, 0, t);
             break;
         }
+        case Icon::Phone:
+        case Icon::HangUp: {
+            // handset: two ear/mouth pieces joined by an arc
+            float rot = icon == Icon::HangUp ? 2.36f : 0.0f;
+            auto R = [&](float x, float y) {
+                float cs = cosf(rot), sn = sinf(rot);
+                return ImVec2(c.x + (x * cs - y * sn) * h, c.y + (x * sn + y * cs) * h);
+            };
+            for (int i = 0; i <= 12; i++) {
+                float a = 2.4f + (float)i / 12.0f * 1.9f;
+                dl->PathLineTo(R(0.25f + cosf(a) * 0.75f, -0.25f - sinf(a) * 0.75f));
+            }
+            dl->PathStroke(col, 0, t * 2.2f);
+            dl->AddCircleFilled(R(-0.62f, -0.05f), h * 0.2f, col);
+            dl->AddCircleFilled(R(0.05f, 0.62f), h * 0.2f, col);
+            break;
+        }
+        case Icon::Mic:
+        case Icon::MicOff:
+            dl->AddRectFilled(P(-0.22f, -0.8f), P(0.22f, 0.15f), col, h * 0.22f);
+            dl->PathArcTo(P(0, -0.05f), h * 0.45f, 0.0f, 3.14159f, 12);
+            dl->PathStroke(col, 0, t);
+            dl->AddLine(P(0, 0.4f), P(0, 0.75f), col, t);
+            dl->AddLine(P(-0.3f, 0.75f), P(0.3f, 0.75f), col, t);
+            if (icon == Icon::MicOff) dl->AddLine(P(-0.75f, -0.75f), P(0.75f, 0.75f), IM_COL32(230, 70, 70, 255), t * 1.4f);
+            break;
+        case Icon::Speaker:
+            dl->AddRectFilled(P(-0.8f, -0.25f), P(-0.45f, 0.25f), col);
+            dl->AddTriangleFilled(P(-0.45f, -0.25f), P(0.0f, -0.65f), P(0.0f, 0.65f), col);
+            dl->AddTriangleFilled(P(-0.45f, -0.25f), P(0.0f, 0.65f), P(-0.45f, 0.25f), col);
+            dl->PathArcTo(P(0.05f, 0), h * 0.35f, -0.8f, 0.8f, 8);
+            dl->PathStroke(col, 0, t);
+            dl->PathArcTo(P(0.05f, 0), h * 0.65f, -0.8f, 0.8f, 10);
+            dl->PathStroke(col, 0, t);
+            break;
         case Icon::List:
             for (int i = -1; i <= 1; i++) {
                 dl->AddRectFilled(P(-0.75f, i * 0.55f - 0.1f), P(-0.5f, i * 0.55f + 0.1f), col);

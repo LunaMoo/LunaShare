@@ -50,6 +50,12 @@ struct Settings {
     float uiScale = 0.0f;          // 0 = automatic (DPI based)
     int theme = 0;                 // 0 dark, 1 light, 2 classic
     std::string lastBrowseDir;
+    // calls (used only when the optional media module is installed)
+    bool callEchoCancel = true;
+    bool callNoiseSuppress = true;
+    bool callAutoGain = true;
+    int callBitrate = 24000;
+    std::string callInputDevice, callOutputDevice;  // empty = system default
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list
     bool browserPicturesOnly = false;

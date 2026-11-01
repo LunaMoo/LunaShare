@@ -33,6 +33,8 @@ struct HostBridge {
     std::function<void(const std::string& path)> openFile;
     std::function<void(const std::string& path)> openFolder;
     std::function<void()> requestPermissions;
+    std::function<void(bool inCall)> callAudioMode;   // Android: MODE_IN_COMMUNICATION (earpiece routing, system AEC)
+    std::function<void(bool on)> setSpeakerphone;
 };
 HostBridge& Bridge();
 

@@ -67,6 +67,11 @@ private:
 
     // popups / overlays
     void DrawPopups();
+    // calls (only when the optional media module is installed)
+    void DrawCallBar();
+    void DrawIncomingCall();
+    bool CallButton(const std::string& peer, float size);
+    void DrawCallSettings(float fieldW, float h, bool& changed);
     // picture viewer (ui_viewer.cpp)
     void OpenViewer(const std::string& peer, const std::string& path, bool all);
     void RebuildViewerList();
@@ -145,6 +150,8 @@ private:
         float uiAlpha = 1.0f;
     } viewer;
 
+    bool openIncomingCall = false;
+    int settingsShownFrame = -100;
     ls::Settings edit;
     bool editDirty = false;
 };

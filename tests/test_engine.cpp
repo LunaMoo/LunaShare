@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <random>
+#include <atomic>
 #include <thread>
 
 #include "crypto.h"
@@ -60,7 +61,7 @@ static void WriteRandomFile(const std::string& path, int64_t size, uint32_t seed
 
 static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port, bool autoAcceptAll, bool discovery,
                                           bool broadcast = true, bool mdnsOn = true, const std::string& wanServer = "",
-                                          const std::string& wanRoom = "") {
+                                          const std::string& wanRoom = "", std::vector<std::string> caps = {}) {
     std::string cfg = JoinPath(Root(), name + "/config");
     MakeDirs(cfg);
     json j;
@@ -84,6 +85,7 @@ static std::unique_ptr<Engine> MakeEngine(const std::string& name, uint16_t port
     }
     auto e = std::make_unique<Engine>();
     e->configDir = cfg;
+    e->localCaps = caps;
     e->Start();
     return e;
 }
@@ -531,6 +533,61 @@ int main() {
         F->Stop();
         CHECK(WaitFor([&] { return srv.DeviceCount() == 0; }, 7000), "devices unregister on exit (%d left)", (int)srv.DeviceCount());
         srv.Stop();
+    }
+
+    printf("[calls: signalling + media]\n");
+    {
+        auto P = MakeEngine("paula", 48210, false, false, false, false, "", "", {"voice"});
+        auto Q = MakeEngine("quinn", 48220, false, false, false, false, "", "", {"voice"});
+        auto N = MakeEngine("nocalls", 48230, false, false, false, false);  // no voice module
+        std::string idP = P->settings.deviceId, idQ = Q->settings.deviceId, idN = N->settings.deviceId;
+        P->ConnectAddress("127.0.0.1", Q->boundPort);
+        P->ConnectAddress("127.0.0.1", N->boundPort);
+        CHECK(WaitFor([&] { return P->IsConnected(idQ) && P->IsConnected(idN); }, 5000), "connected");
+        CHECK(P->PeerHasCap(idQ, "voice") && !P->PeerHasCap(idN, "voice"), "capabilities exchanged");
+        CHECK(P->StartCall(idN) == 0, "cannot call a device without the module");
+        std::atomic<int> gotP{0}, gotQ{0};
+        P->onMedia = [&](uint64_t, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'q') gotP++; };
+        Q->onMedia = [&](uint64_t, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'p') gotQ++; };
+        uint64_t cid = P->StartCall(idQ);
+        CHECK(cid != 0, "call started");
+        CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging && Q->call.id == cid; }, 3000), "ringing");
+        Q->SendMedia("qqq", 3);  // not active yet: must be ignored
+        Q->AcceptCall();
+        CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 3000), "active on caller");
+        for (int i = 0; i < 50; i++) {
+            P->SendMedia("ppp", 3);
+            Q->SendMedia("qqq", 3);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        CHECK(WaitFor([&] { return gotP >= 45 && gotQ >= 45; }, 3000), "media both ways (%d / %d)", gotP.load(), gotQ.load());
+        // a third device calling now gets "busy"
+        N->localCaps = {"voice"};
+        P->EndCall();
+        CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::None; }, 3000), "hang up reaches the other side");
+        {
+            auto l = Q->Lock();
+            auto& msgs = Q->chats[idP].messages;
+            CHECK(!msgs.empty() && msgs.back().text.find("Incoming call - 0:0") == 0, "call logged: %s", msgs.empty() ? "" : msgs.back().text.c_str());
+        }
+        // declined
+        cid = P->StartCall(idQ);
+        CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging; }, 3000), "ringing again");
+        Q->EndCall();
+        CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::None; }, 3000), "declined");
+        {
+            auto l = P->Lock();
+            CHECK(P->chats[idQ].messages.back().text == "Call declined", "declined logged: %s", P->chats[idQ].messages.back().text.c_str());
+        }
+        // connection loss ends an active call
+        P->StartCall(idQ);
+        CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging; }, 3000), "ringing 3");
+        Q->AcceptCall();
+        CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 3000), "active 3");
+        Q->Stop();
+        CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::None; }, 5000), "connection loss ends the call");
+        N->Stop();
+        P->Stop();
     }
 
     std::error_code ec;

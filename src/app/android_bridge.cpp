@@ -125,6 +125,8 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.openFile = [](const std::string& path) { CallStr1("openFile", path); };
     b.openFolder = [](const std::string& path) { CallStr1("openFolder", path); };
     b.requestPermissions = [] { CallV("requestPermissions", "()V"); };
+    b.callAudioMode = [](bool on) { CallV("callAudioMode", "(Z)V", (jboolean)on); };
+    b.setSpeakerphone = [](bool on) { CallV("setSpeakerphone", "(Z)V", (jboolean)on); };
     CallV("requestPermissions", "()V");
 }
 

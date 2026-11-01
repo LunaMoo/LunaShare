@@ -58,7 +58,9 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"keepHistory", s.keepHistory},
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
-        {"browserTile", s.browserTile},
+        {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callInputDevice", s.callInputDevice},
+        {"callOutputDevice", s.callOutputDevice},
     };
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
@@ -107,6 +109,13 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "browserPicturesOnly", s.browserPicturesOnly);
     Get(j, "browserSort", s.browserSort);
     Get(j, "browserTile", s.browserTile);
+    Get(j, "callEchoCancel", s.callEchoCancel);
+    Get(j, "callNoiseSuppress", s.callNoiseSuppress);
+    Get(j, "callAutoGain", s.callAutoGain);
+    Get(j, "callBitrate", s.callBitrate);
+    Get(j, "callInputDevice", s.callInputDevice);
+    Get(j, "callOutputDevice", s.callOutputDevice);
+    if (s.callBitrate < 8000 || s.callBitrate > 64000) s.callBitrate = 24000;
     if (s.browserSort < 0 || s.browserSort > 2) s.browserSort = 0;
     if (s.browserTile < 64 || s.browserTile > 400) s.browserTile = 130;
     if (s.chunkKB < 16) s.chunkKB = 16;

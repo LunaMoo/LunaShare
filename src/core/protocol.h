@@ -35,6 +35,10 @@ enum class Msg : uint8_t {
     FileDone = 27,    // {tid}  sender: all bytes sent
     FileVerify = 28,  // {tid, ok, sha256}  receiver: result of hashing the received file
     WifiCreds = 40,   // {ssid, pass}  hotspot handoff over a slow link (Bluetooth)
+    CallInvite = 50,  // {call, media}
+    CallAccept = 51,  // {call}
+    CallEnd = 52,     // {call, reason}  (hangup / declined / busy / no answer / unsupported)
+    Media = 53,       // binary: [u64 LE call id][codec payload, interpreted by the media module]
     Bye = 99,
 };
 

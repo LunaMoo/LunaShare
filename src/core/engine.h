@@ -40,6 +40,9 @@ struct Connection {
     std::atomic<int64_t> lastRecv{0};
     std::atomic<int64_t> bytesIn{0}, bytesOut{0};
     std::atomic<bool> closed{false};
+    std::vector<std::string> caps;  // optional features the peer has (e.g. "voice"), from its Hello
+    std::atomic<bool> callPriority{false};  // a call runs over this connection: keep file data small
+    int64_t lastChunkMs = 0;
     std::atomic<int> alive{2};  // reader + writer; the last one to exit closes the socket
     std::unique_ptr<SecureChannel> sec;
 
@@ -64,7 +67,19 @@ struct OnlinePeer {
     }
 };
 
-enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error };
+enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error,
+                       CallIncoming, CallStarted, CallEnded };
+
+enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
+struct CallInfo {
+    uint64_t id = 0;
+    std::string peer;
+    bool outgoing = false;
+    CallState state = CallState::None;
+    int64_t started = 0;   // ringing began (steady ms)
+    int64_t answered = 0;  // became active (steady ms)
+    std::string media = "voice";
+};
 struct Event {
     EventType type;
     std::string peer;
@@ -129,6 +144,17 @@ public:
 
     void BtRefresh(bool inquiry);  // async
     void SendWifiCreds(const std::string& peer, const std::string& ssid, const std::string& pass);
+
+    // ---- calls (signalling only; audio/video are handled by an optional media module in the app)
+    std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
+    bool PeerHasCap(const std::string& peer, const std::string& cap);
+    uint64_t StartCall(const std::string& peer, const std::string& media = "voice");
+    void AcceptCall();
+    void EndCall(const std::string& reason = "hangup");
+    void SendMedia(const void* data, size_t len);  // thread-safe, called from audio threads
+    // Called on a network thread (never with the engine lock held) for each media packet of the active call.
+    std::function<void(uint64_t call, const uint8_t* data, size_t len)> onMedia;
+    CallInfo call;
     void SetHotspotInfo(const HotspotInfo& h);
 
     std::vector<Event> PopEvents();
@@ -195,6 +221,12 @@ private:
     void Emit(Event e);
     KnownDevice& Device(const std::string& id);
     void InterruptPeerTransfers(const std::string& peer);
+    void FinishCall(const std::string& reason, bool notifyPeer);
+    std::atomic<uint64_t> activeCallId_{0};
+    std::string activeCallPeer_;
+    std::weak_ptr<Connection> activeCallConn_;  // guarded by mediaMtx_; lets audio threads send without the engine lock
+    std::mutex mediaMtx_;
+    std::string activeCallPeerSnapshot();
     std::string PartDir();
 
     void Load();

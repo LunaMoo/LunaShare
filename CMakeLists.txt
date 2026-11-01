@@ -8,6 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(LUNASHARE_BUILD_APP   "Build the Dear ImGui application" ON)
 option(LUNASHARE_BUILD_TESTS "Build headless engine tests" ON)
 option(LUNASHARE_BUILD_SERVER "Build the lunashare-rendezvous server" ON)
+option(LUNASHARE_BUILD_VOICE "Build the optional voice call module (separate library)" ON)
 option(LUNASHARE_SYSTEM_SDL  "Use an installed SDL2 instead of fetching it" OFF)
 set(LUNASHARE_GL_API "GL3" CACHE STRING "Renderer API: GL3 (desktop), GLES3 (Android/iOS), GLES2")
 
@@ -56,6 +57,49 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND CMAKE_CXX_COMPILER_ID 
     target_link_libraries(lunashare_core PUBLIC stdc++fs)
 endif()
 
+# ---------------------------------------------------------------- optional voice module
+# A separate shared library (Opus + SpeexDSP). The app loads it at runtime if it sits next to the executable;
+# without it LunaShare is chat + files only. The DSP code is also built as a static lib for the tests.
+if(LUNASHARE_BUILD_VOICE)
+    set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(opus GIT_REPOSITORY https://github.com/xiph/opus.git GIT_TAG v1.5.2 GIT_SHALLOW TRUE)
+    FetchContent_Declare(speexdsp GIT_REPOSITORY https://github.com/xiph/speexdsp.git GIT_TAG SpeexDSP-1.2.1 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+    FetchContent_MakeAvailable(opus speexdsp)
+    file(WRITE ${CMAKE_BINARY_DIR}/speexdsp_cfg/speexdsp_config_types.h
+        "#ifndef __SPEEX_TYPES_H__\n#define __SPEEX_TYPES_H__\n#include <stdint.h>\ntypedef int16_t spx_int16_t;\ntypedef uint16_t spx_uint16_t;\ntypedef int32_t spx_int32_t;\ntypedef uint32_t spx_uint32_t;\n#endif\n")
+    set(SPEEXDSP_SOURCES
+        ${speexdsp_SOURCE_DIR}/libspeexdsp/mdf.c ${speexdsp_SOURCE_DIR}/libspeexdsp/preprocess.c
+        ${speexdsp_SOURCE_DIR}/libspeexdsp/fftwrap.c ${speexdsp_SOURCE_DIR}/libspeexdsp/kiss_fft.c
+        ${speexdsp_SOURCE_DIR}/libspeexdsp/kiss_fftr.c ${speexdsp_SOURCE_DIR}/libspeexdsp/filterbank.c)
+    add_library(lunashare_speexdsp STATIC ${SPEEXDSP_SOURCES})
+    target_compile_definitions(lunashare_speexdsp PUBLIC FLOATING_POINT USE_KISS_FFT EXPORT= DISABLE_WARNINGS)
+    target_include_directories(lunashare_speexdsp PUBLIC ${speexdsp_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/speexdsp_cfg)
+    if(NOT MSVC)
+        target_compile_options(lunashare_speexdsp PRIVATE -w)
+        target_link_libraries(lunashare_speexdsp PUBLIC m)
+    endif()
+
+    add_library(lunashare_media SHARED modules/voice/voice.cpp)
+    set_target_properties(lunashare_media PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    target_include_directories(lunashare_media PRIVATE src/media_api)
+    target_link_libraries(lunashare_media PRIVATE opus lunashare_speexdsp Threads::Threads)
+    if(WIN32 AND NOT MSVC)
+        target_link_options(lunashare_media PRIVATE -static)
+    elseif(APPLE)
+        target_link_options(lunashare_media PRIVATE -Wl,-exported_symbol,_lunashare_media_module)
+    elseif(NOT WIN32)
+        target_link_options(lunashare_media PRIVATE -Wl,--exclude-libs,ALL)  # export only lunashare_media_module
+    endif()
+
+    add_library(lunashare_voice_static STATIC modules/voice/voice.cpp)  # same code, for tests
+    target_include_directories(lunashare_voice_static PUBLIC src/media_api)
+    target_link_libraries(lunashare_voice_static PUBLIC opus lunashare_speexdsp Threads::Threads)
+endif()
+
 # ---------------------------------------------------------------- rendezvous server
 if(LUNASHARE_BUILD_SERVER AND NOT ANDROID AND NOT IOS)
     add_executable(lunashare-rendezvous server/main.cpp)
@@ -69,8 +113,17 @@ if(LUNASHARE_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     target_link_libraries(lunashare_tests PRIVATE lunashare_core)
     enable_testing()
     add_test(NAME engine COMMAND lunashare_tests)
+    if(LUNASHARE_BUILD_VOICE)
+        add_executable(lunashare_voice_tests tests/test_voice.cpp)
+        target_link_libraries(lunashare_voice_tests PRIVATE lunashare_voice_static opus)
+        add_test(NAME voice COMMAND lunashare_voice_tests)
+    endif()
     add_executable(lunashare_demo_peer tests/demo_peer.cpp)
     target_link_libraries(lunashare_demo_peer PRIVATE lunashare_core)
+    if(LUNASHARE_BUILD_VOICE)
+        target_link_libraries(lunashare_demo_peer PRIVATE lunashare_voice_static)
+        target_compile_definitions(lunashare_demo_peer PRIVATE LS_DEMO_VOICE)
+    endif()
 endif()
 
 # ---------------------------------------------------------------- application
@@ -108,6 +161,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_viewer.cpp
         src/app/image_cache.cpp
         src/app/gl_funcs.cpp
+        src/app/media_host.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp
         ${imgui_SOURCE_DIR}/imgui_draw.cpp
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
@@ -140,7 +194,7 @@ if(LUNASHARE_BUILD_APP)
         endif()
     endif()
 
-    target_include_directories(${APP_TARGET} PRIVATE src/app ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends
+    target_include_directories(${APP_TARGET} PRIVATE src/app src/media_api ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends
         ${imgui_SOURCE_DIR}/misc/cpp ${qrcodegen_SOURCE_DIR}/cpp ${stb_SOURCE_DIR})
     if(LUNASHARE_GL_API STREQUAL "GLES3")
         target_compile_definitions(${APP_TARGET} PRIVATE IMGUI_IMPL_OPENGL_ES3)

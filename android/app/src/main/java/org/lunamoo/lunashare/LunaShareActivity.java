@@ -166,6 +166,30 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
+    // ------------------------------------------------------------------ calls (used by the optional voice module)
+    /** Voice-call audio mode: earpiece routing and the platform's own echo cancellation where available. */
+    public static void callAudioMode(final boolean inCall) {
+        ui(() -> {
+            try {
+                android.media.AudioManager am = (android.media.AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
+                am.setMode(inCall ? android.media.AudioManager.MODE_IN_COMMUNICATION : android.media.AudioManager.MODE_NORMAL);
+                if (!inCall) am.setSpeakerphoneOn(false);
+                self.setVolumeControlStream(inCall ? android.media.AudioManager.STREAM_VOICE_CALL : android.media.AudioManager.USE_DEFAULT_STREAM_TYPE);
+            } catch (Exception e) {
+                nativeOnError("audio mode: " + e.getMessage());
+            }
+        });
+    }
+
+    public static void setSpeakerphone(final boolean on) {
+        ui(() -> {
+            try {
+                android.media.AudioManager am = (android.media.AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
+                am.setSpeakerphoneOn(on);
+            } catch (Exception ignored) {}
+        });
+    }
+
     // ------------------------------------------------------------------ Bluetooth
     @SuppressLint("MissingPermission")
     public static boolean btAvailable() {
