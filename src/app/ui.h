@@ -104,6 +104,11 @@ private:
     std::string textViewBuf;
     bool openTextView = false;
     std::string contextMid;
+    std::vector<std::string> deleteMids;  // waiting for confirmation
+    bool deleteEveryoneOk = false;        // all of them are ours, so "delete for everyone" is possible
+    bool openDeleteConfirm = false;
+    void AskDelete(const std::string& peer, const std::vector<std::string>& mids);
+    void DrawDeleteConfirm(const std::string& peer);
 
     std::vector<std::string> pendingSend;
     bool openSendTo = false;

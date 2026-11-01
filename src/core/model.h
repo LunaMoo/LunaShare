@@ -101,6 +101,7 @@ struct Conversation {
     std::string peer;
     std::vector<ChatMessage> messages;
     int unread = 0;
+    std::vector<std::string> pendingDeletes;  // "delete for everyone" not yet confirmed by the other device
 };
 
 enum class TState : int {

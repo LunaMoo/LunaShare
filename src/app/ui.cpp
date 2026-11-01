@@ -160,6 +160,8 @@ void App::Frame() {
 
     // Ctrl+C copies selected chat messages (when no text field has focus)
     if (!selMsgs.empty() && !ImGui::GetIO().WantTextInput && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) CopySelectedMessages(selectedPeer);
+    if (!selMsgs.empty() && !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup))
+        AskDelete(selectedPeer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
     if (!selMsgs.empty() && ImGui::IsKeyPressed(ImGuiKey_Escape) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup)) {
         selMsgs.clear();
         selectionMode = false;
@@ -180,6 +182,8 @@ void App::PullEvents() {
                 t.text = e.text.size() > 120 ? e.text.substr(0, 117) + "..." : e.text;
                 wantAttention = true;
                 break;
+            case EventType::ChatDeleted:
+                continue;  // the chat view simply redraws without it
             case EventType::IncomingOffer:
                 t.title = who + " wants to send";
                 t.text = e.text;
@@ -682,6 +686,8 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SameLine();
         if (ImGui::Button("Copy", ImVec2(0, h))) CopySelectedMessages(peer);
         ImGui::SameLine();
+        if (ImGui::Button("Delete", ImVec2(0, h))) AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
+        ImGui::SameLine();
         if (ImGui::Button("Select all", ImVec2(0, h))) {
             auto it = eng.chats.find(peer);
             if (it != eng.chats.end())
@@ -724,6 +730,50 @@ void App::DrawChat(const std::string& peer) {
         chatInput.clear();
         if (!mobile) focusInput = true;
     }
+    DrawDeleteConfirm(peer);
+}
+
+void App::AskDelete(const std::string& peer, const std::vector<std::string>& mids) {
+    deleteMids = mids;
+    deleteEveryoneOk = !mids.empty();
+    auto it = eng.chats.find(peer);
+    if (it != eng.chats.end())
+        for (auto& m : it->second.messages)
+            if (std::find(mids.begin(), mids.end(), m.mid) != mids.end() && (!m.outgoing || m.kind == MsgKind::System)) deleteEveryoneOk = false;
+    openDeleteConfirm = true;
+}
+
+void App::DrawDeleteConfirm(const std::string& peer) {
+    if (openDeleteConfirm) {
+        ImGui::OpenPopup("Delete messages?");
+        openDeleteConfirm = false;
+    }
+    bool mobile = ui::M().mobile;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Delete messages?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    float h = mobile ? ui::M().rowH : 0;
+    float w = mobile ? ImGui::GetMainViewport()->Size.x * 0.8f : ImGui::GetFontSize() * 16;
+    size_t n = deleteMids.size();
+    ImGui::TextUnformatted(n == 1 ? "Delete this message?" : ("Delete " + std::to_string(n) + " messages?").c_str());
+    if (deleteEveryoneOk)
+        ImGui::TextDisabled("\"For everyone\" also removes it from %s\n(as soon as that device is reachable).", eng.PeerName(peer).c_str());
+    else
+        ImGui::TextDisabled("Messages you received can only be deleted on this device.");
+    ImGui::Spacing();
+    auto done = [&] {
+        for (auto& mid : deleteMids) selMsgs.erase(mid);
+        if (selMsgs.empty()) selectionMode = false;
+        deleteMids.clear();
+        ImGui::CloseCurrentPopup();
+    };
+    if (deleteEveryoneOk) {
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 60, 60, 255));
+        if (ImGui::Button("Delete for everyone", ImVec2(w, h))) { eng.DeleteMessages(peer, deleteMids, true); done(); }
+        ImGui::PopStyleColor();
+    }
+    if (ImGui::Button("Delete for me", ImVec2(w, h))) { eng.DeleteMessages(peer, deleteMids, false); done(); }
+    if (ImGui::Button("Cancel", ImVec2(w, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) { deleteMids.clear(); ImGui::CloseCurrentPopup(); }
+    ImGui::EndPopup();
 }
 
 void App::DrawMessages(const std::string& peer) {
@@ -874,6 +924,9 @@ void App::DrawMessages(const std::string& peer) {
             }
             if (!selMsgs.empty() && ImGui::Selectable(("Copy " + std::to_string(selMsgs.size()) + " selected").c_str(), false, 0, ImVec2(0, h)))
                 CopySelectedMessages(peer);
+            if (ImGui::Selectable("Delete...", false, 0, ImVec2(0, h))) AskDelete(peer, {m.mid});
+            if (selMsgs.size() > 1 && ImGui::Selectable(("Delete " + std::to_string(selMsgs.size()) + " selected...").c_str(), false, 0, ImVec2(0, h)))
+                AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
             if (m.kind == MsgKind::Files) {
                 if (ImGui::Selectable("Share these files with...", false, 0, ImVec2(0, h))) {
                     std::vector<std::string> paths;

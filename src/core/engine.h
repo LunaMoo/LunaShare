@@ -68,7 +68,7 @@ struct OnlinePeer {
 };
 
 enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error,
-                       CallIncoming, CallStarted, CallEnded };
+                       CallIncoming, CallStarted, CallEnded, ChatDeleted };
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
 struct CallInfo {
@@ -133,6 +133,9 @@ public:
     std::string SafetyNumberWith(const std::string& peer);
     void ForgetDevice(const std::string& peer);
     void ClearChat(const std::string& peer);
+    // Removes messages from this conversation. forEveryone: also asks the other device to remove the ones we sent
+    // (delivered as soon as it is reachable).
+    void DeleteMessages(const std::string& peer, const std::vector<std::string>& mids, bool forEveryone);
     void MarkRead(const std::string& peer);
     void RemoveHistory(size_t index);
     void ClearHistory();

@@ -158,6 +158,10 @@ void Engine::Load() {
                 cv.peer = peer;
                 for (auto& m : arr) cv.messages.push_back(MessageFromJson(m));
             }
+        if (j.contains("pendingDeletes") && j["pendingDeletes"].is_object())
+            for (auto& [peer, arr] : j["pendingDeletes"].items())
+                for (auto& mid : arr)
+                    if (mid.is_string()) chats[peer].pendingDeletes.push_back(mid.get<std::string>());
         if (j.contains("files") && j["files"].is_array())
             for (auto& h : j["files"]) history.push_back(HistoryFromJson(h));
     }
@@ -205,6 +209,9 @@ void Engine::Save() {
                 jh["chats"][peer] = arr;
             }
         }
+        jh["pendingDeletes"] = json::object();
+        for (auto& [peer, cv] : chats)
+            if (!cv.pendingDeletes.empty()) jh["pendingDeletes"][peer] = cv.pendingDeletes;
         jh["files"] = json::array();
         for (auto& h : history) jh["files"].push_back(ToJson(h));
         jt = json::array();
@@ -782,6 +789,40 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             Queue(c, Msg::ChatAck, {{"mid", mid}});
             break;
         }
+        case Msg::ChatDelete: {
+            // only messages this device sent us can be removed this way
+            json mids = j.value("mids", json::array());
+            auto it = chats.find(c->peerId);
+            if (it != chats.end() && mids.is_array()) {
+                auto& msgs = it->second.messages;
+                size_t before = msgs.size();
+                msgs.erase(std::remove_if(msgs.begin(), msgs.end(), [&](const ChatMessage& m) {
+                               if (m.outgoing || m.kind == MsgKind::System) return false;
+                               for (auto& x : mids)
+                                   if (x.is_string() && x.get<std::string>() == m.mid) return true;
+                               return false;
+                           }),
+                           msgs.end());
+                if (msgs.size() != before) {
+                    it->second.unread = std::max(0, it->second.unread - (int)(before - msgs.size()));
+                    Emit({EventType::ChatDeleted, c->peerId, ""});
+                    MarkDirty();
+                }
+            }
+            Queue(c, Msg::ChatDeleteAck, {{"mids", mids}});
+            break;
+        }
+        case Msg::ChatDeleteAck: {
+            json mids = j.value("mids", json::array());
+            auto it = chats.find(c->peerId);
+            if (it != chats.end() && mids.is_array()) {
+                auto& pd = it->second.pendingDeletes;
+                for (auto& x : mids)
+                    if (x.is_string()) pd.erase(std::remove(pd.begin(), pd.end(), x.get<std::string>()), pd.end());
+                MarkDirty();
+            }
+            break;
+        }
         case Msg::ChatAck: {
             std::string mid = j.value("mid", "");
             auto it = chats.find(c->peerId);
@@ -1108,10 +1149,12 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
     auto it = chats.find(peer);
-    if (it != chats.end())
+    if (it != chats.end()) {
         for (auto& m : it->second.messages)
             if (m.outgoing && !m.delivered && m.kind == MsgKind::Text)
                 Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
+        if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
+    }
     std::vector<std::shared_ptr<Transfer>> outs;
     for (auto& [id, t] : transfers)
         if (t->peer == peer && t->outgoing && !TStateFinal(t->state) && t->state != TState::Hashing) outs.push_back(t);
@@ -1862,6 +1905,28 @@ void Engine::ClearChat(const std::string& peer) {
     auto lk = Lock();
     auto it = chats.find(peer);
     if (it != chats.end()) it->second.messages.clear();
+    MarkDirty();
+}
+
+void Engine::DeleteMessages(const std::string& peer, const std::vector<std::string>& mids, bool forEveryone) {
+    auto lk = Lock();
+    auto it = chats.find(peer);
+    if (it == chats.end() || mids.empty()) return;
+    std::vector<std::string> remote;
+    auto& msgs = it->second.messages;
+    msgs.erase(std::remove_if(msgs.begin(), msgs.end(), [&](const ChatMessage& m) {
+                   if (std::find(mids.begin(), mids.end(), m.mid) == mids.end()) return false;
+                   // an undelivered text never reached the other side - just drop it
+                   if (forEveryone && m.outgoing && m.kind != MsgKind::System && (m.delivered || m.kind == MsgKind::Files)) remote.push_back(m.mid);
+                   return true;
+               }),
+               msgs.end());
+    if (!remote.empty()) {
+        auto& pd = it->second.pendingDeletes;
+        pd.insert(pd.end(), remote.begin(), remote.end());
+        if (pd.size() > 500) pd.erase(pd.begin(), pd.begin() + (ptrdiff_t)(pd.size() - 500));
+        QueueToPeer(peer, Msg::ChatDelete, {{"mids", remote}});
+    }
     MarkDirty();
 }
 

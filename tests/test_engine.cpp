@@ -261,6 +261,46 @@ int main() {
         CHECK(B->devices[idA].name == "alice", "device name from hello");
     }
 
+    // ------------------------------------------------------------ delete messages
+    printf("[delete messages]\n");
+    A->SendChat(idB, "oops, wrong chat");
+    A->SendChat(idB, "keep this one");
+    CHECK(WaitFor([&] { auto l = B->Lock(); return B->chats[idA].messages.size() >= 3; }, 3000), "two more chats arrive");
+    CHECK(WaitFor([&] { auto l = A->Lock(); auto& m = A->chats[idB].messages; return m.size() >= 3 && m[m.size() - 2].delivered; }, 3000), "delivered");
+    std::string oops, keep;
+    {
+        auto l = A->Lock();
+        auto& m = A->chats[idB].messages;
+        oops = m[m.size() - 2].mid;
+        keep = m.back().mid;
+    }
+    A->DeleteMessages(idB, {oops}, true);
+    {
+        auto l = A->Lock();
+        for (auto& m : A->chats[idB].messages) CHECK(m.mid != oops, "deleted locally");
+    }
+    CHECK(WaitFor([&] {
+        auto l = B->Lock();
+        for (auto& m : B->chats[idA].messages) if (m.mid == oops) return false;
+        return true;
+    }, 3000), "deleted on the other device");
+    CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[idB].pendingDeletes.empty(); }, 3000), "delete acknowledged");
+    {
+        auto l = B->Lock();
+        bool kept = false;
+        for (auto& m : B->chats[idA].messages) kept |= m.mid == keep;
+        CHECK(kept, "other message kept");
+    }
+    // "for me" only: stays on the other side
+    A->DeleteMessages(idB, {keep}, false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    {
+        auto l = B->Lock();
+        bool kept = false;
+        for (auto& m : B->chats[idA].messages) kept |= m.mid == keep;
+        CHECK(kept, "delete for me stays local");
+    }
+
     // ------------------------------------------------------------ pause / resume
     printf("[pause/resume]\n");
     const int64_t SZ = 24 << 20;
