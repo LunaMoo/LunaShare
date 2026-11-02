@@ -1248,11 +1248,13 @@ void App::DrawTransferRow(const std::shared_ptr<Transfer>& t, bool compact) {
 void App::DrawTransfers() {
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH : 0;
-    if (ui::IconTextButton("Pause all", Icon::Pause, ImVec2(0, h))) eng.PauseAll(true);
+    // phones: three equal buttons sharing the width, with short labels, so the row always fits
+    float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3 : 0;
+    if (ui::IconTextButton(mobile ? "Pause" : "Pause all", Icon::Pause, ImVec2(bw, h))) eng.PauseAll(true);
     ImGui::SameLine();
-    if (ui::IconTextButton("Resume all", Icon::Play, ImVec2(0, h))) eng.PauseAll(false);
+    if (ui::IconTextButton(mobile ? "Resume" : "Resume all", Icon::Play, ImVec2(bw, h))) eng.PauseAll(false);
     ImGui::SameLine();
-    if (ui::IconTextButton("Clear finished", Icon::Trash, ImVec2(0, h))) eng.ClearFinishedTransfers();
+    if (ui::IconTextButton(mobile ? "Clear" : "Clear finished", Icon::Trash, ImVec2(bw, h))) eng.ClearFinishedTransfers();
     ImGui::Separator();
     std::vector<std::shared_ptr<Transfer>> list;
     for (auto& [id, t] : eng.transfers) list.push_back(t);

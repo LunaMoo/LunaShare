@@ -1,5 +1,6 @@
 // LunaShare - file sharing chat for LAN, phone hotspots and Bluetooth.
 // SDL2 + OpenGL3/GLES3 + Dear ImGui.
+#include <algorithm>
 #include <SDL.h>
 
 #include <cstdio>
@@ -128,7 +129,14 @@ static float DetectScale(SDL_Window* window) {
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
     float ddpi = 160, hdpi, vdpi;
     if (SDL_GetDisplayDPI(SDL_GetWindowDisplayIndex(window), &ddpi, &hdpi, &vdpi) != 0 || ddpi <= 0) ddpi = 320;
-    return ddpi / 160.0f;
+    float s = ddpi / 160.0f;
+    // the phone layout needs ~540 logical pixels across: high-density phones (DPI/160 = 3 on a 1280 px wide screen)
+    // would otherwise cut off buttons and text, so cap the scale by the screen's short side
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(window, &ww, &wh);  // pixels on Android
+    int shortSide = std::min(ww, wh);
+    if (shortSide > 0) s = std::min(s, (float)shortSide / 540.0f);
+    return std::max(1.0f, s);
 #else
     (void)window;
     float s = ImGui_ImplSDL2_GetContentScaleForDisplay(0);
