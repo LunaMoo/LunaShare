@@ -4,3 +4,5 @@ out/
 .vscode/
 *.ppm
 CMakeUserPresets.json
+voice_message_test.ogg
+video_message_test.mp4
