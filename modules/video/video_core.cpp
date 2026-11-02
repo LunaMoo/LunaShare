@@ -9,6 +9,7 @@
 //   [2][3][camera on u8]                                                                         camera state
 //   [2][4][max width u16][max height u16]                                                         "too big for my decoder"
 //   [2][5][decode codecs u8][encode codecs u8]                                                    what this side can do
+//   [2][6][last seq u32][decode queue u8][received kbps u16]                                      receiver report (10/s)
 // Byte 12 of a frame packet is the codec (0 H.264, 1 HEVC, 2 AV1). The sender picks the best codec both sides have.
 //
 // Loss handling: a frame refused by the congested link or a gap in sequence numbers makes the decoder wait for the
@@ -167,6 +168,7 @@ public:
             return;
         }
         needKey = false;
+        sentAt[seq & (kSentRing - 1)] = NowMs();
         framesOut++;
         bytesOut += (int)pkt.size();
         sentTick += (int)pkt.size();
@@ -316,10 +318,19 @@ public:
             LsvSettings run = LevelSettings(level);
             int cur = curBitrate, target = run.bitrate;
             size_t budget = std::max<size_t>(12000, (size_t)cur / 8 * 12 / 100);  // ~120 ms of video
-            bool congested = q > budget || skippedNow > 0;
+            bool fresh = gotReport && now - lastReportIn < 1500;
+            bool stalled = gotReport && !fresh && framesOut.load() > 0;    // reports stopped: the path is jammed
+            bool delayed = fresh && queueDelay > 150;                       // video waits somewhere on the way
+            bool slowDecoder = fresh && peerQueue >= 3;                     // their device can't keep up
+            bool congested = q > budget || skippedNow > 0 || delayed || stalled;
+            devMs = slowDecoder ? devMs + 250 : 0;
             if (congested && now - lastAdjust >= 250) {
                 // well under what the link manages, so the queue empties quickly (smooth beats sharp)
                 int next = drainBps > 0 ? (int)(drainBps * 0.7) : cur / 2;
+                if (delayed || stalled) {  // our queue looks fine, the delay is further down the path
+                    int byPeer = peerKbps > 0 ? peerKbps * 1000 * 8 / 10 : cur / 2;
+                    next = std::min(cur * 7 / 10, std::max(minBitrate, byPeer));
+                }
                 next = std::clamp(next, minBitrate, cur * 3 / 4);
                 curBitrate = next;
                 lastAdjust = now;
@@ -341,9 +352,10 @@ public:
             // ---- picture size / frame rate: what fits the bitrate the link allows
             double bpp = (double)curBitrate / std::max(1.0, (double)run.width * run.height * run.fps);
             lowMs = bpp < 0.035 ? lowMs + 250 : 0;                                   // too few bits: blocky + stutter
-            fullMs = !congested && curBitrate >= target * 95 / 100 ? fullMs + 250 : 0;  // link keeps up at full rate
+            fullMs = !congested && !slowDecoder && curBitrate >= target * 95 / 100 ? fullMs + 250 : 0;  // link keeps up at full rate
             int want = level;
-            if (lowMs >= 2000 && level < kMaxLevel && !SameShape(LevelSettings(level + 1), run)) want = level + 1;
+            bool canDown = level < kMaxLevel && !SameShape(LevelSettings(level + 1), run);
+            if ((lowMs >= 2000 || devMs >= 1000) && canDown) want = level + 1;  // too few bits, or their decoder is behind
             else if (fullMs >= 12000 && level > 0 && now - lastLevelChange > 20000) want = level - 1;
             if (want != level && now - lastLevelChange > 3000) {
                 std::lock_guard<std::mutex> l(m);
@@ -365,6 +377,16 @@ public:
         }
     }
     static constexpr int minBitrate = 100000;
+    // receiver reports: delay that builds up anywhere on the way (also in buffers the host can't see) and a
+    // decoder that can't keep up
+    static constexpr uint32_t kSentRing = 1024;
+    int64_t sentAt[kSentRing] = {};
+    std::mutex rm;
+    int64_t lastReportOut = 0, lastReportIn = 0, minRotate = 0;
+    int minCur = 1 << 30, minPrev = 1 << 30;
+    std::atomic<int> queueDelay{0}, peerQueue{0}, peerKbps{0};
+    std::atomic<bool> gotReport{false};
+    int devMs = 0;
     int lowMs = 0, fullMs = 0;
     int64_t upHoldUntil = 0, lastLevelChange = 0;
 
@@ -420,6 +442,11 @@ public:
         curBitrate = settings.bitrate;
         level = 0;
         seqOut = 0;
+        gotReport = false;
+        queueDelay = 0;
+        peerQueue = 0;
+        minCur = minPrev = 1 << 30;
+        memset(sentAt, 0, sizeof(sentAt));
         needKey = false;
         haveSeq = false;
         waitingKey = true;
@@ -461,7 +488,8 @@ public:
             p.height = (int)Get16(d + 10);
             p.codec = d[12] <= kAV1 ? d[12] : 0;
             p.data.assign(d + kHeader, d + n);
-            std::lock_guard<std::mutex> l(qm);
+            uint32_t seqIn = p.seq;
+            std::unique_lock<std::mutex> l(qm);
             if (queue.size() > 20) {  // the decoder can't keep up: skip ahead to the next keyframe
                 queue.clear();
                 waitingKey = true;
@@ -479,6 +507,18 @@ public:
             }
             queue.push_back(std::move(p));
             qcv.notify_one();
+            // tell the sender how far we got and how busy the decoder is (it measures the delay from that)
+            size_t qn = queue.size();
+            l.unlock();
+            int64_t now = NowMs();
+            if (now - lastReportOut >= 100) {
+                lastReportOut = now;
+                uint8_t r[9] = {2, 6};
+                Put32(r + 2, seqIn);
+                r[6] = (uint8_t)std::min<size_t>(qn, 255);
+                Put16(r + 7, (uint32_t)std::min(65535, (int)sKbpsIn));
+                Send(r, sizeof(r));
+            }
         } else if (d[1] == 2) {
             if (camOn && backend) backend->RequestKeyframe();
         } else if (d[1] == 4 && n >= 6) {
@@ -487,6 +527,27 @@ public:
         } else if (d[1] == 5 && n >= 4) {
             unsigned dec = d[2];
             if (dec != peerDec.exchange(dec)) codecRecheck = true;
+        } else if (d[1] == 6 && n >= 9) {
+            uint32_t seq = Get32(d + 2);
+            uint32_t out = seqOut;
+            if (out - seq <= kSentRing - 1 && out != seq) {
+                int64_t now = NowMs();
+                int64_t sent = sentAt[seq & (kSentRing - 1)];
+                int dly = sent ? (int)(now - sent) : 0;  // one way + the report's way back
+                std::lock_guard<std::mutex> l(rm);
+                if (now - minRotate > 5000) {  // base delay: lowest of the last 5-10 s
+                    minRotate = now;
+                    minPrev = minCur;
+                    minCur = dly;
+                }
+                minCur = std::min(minCur, dly);
+                int base = std::min(minPrev, minCur);
+                queueDelay = std::max(0, dly - base);
+                peerQueue = d[6];
+                peerKbps = (int)Get16(d + 7);
+                lastReportIn = now;
+                gotReport = true;
+            }
         } else if (d[1] == 3 && n >= 3) {
             if (host.remote_state) host.remote_state(host.user, d[2] ? 1 : 0);
         }

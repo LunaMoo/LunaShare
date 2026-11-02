@@ -2927,7 +2927,9 @@ void App::DrawVideoOverlay() {
                                              ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
-    if (!camPanel) ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+    // keep the call above the app - but never above its own dropdowns / popups (they'd end up hidden behind it)
+    bool popupOpen = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    if (!camPanel && !popupOpen) ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
     ImVec2 full = ImGui::GetContentRegionAvail();
     ImVec2 top = ImGui::GetCursorPos();
     DrawVideoStage(full, true);
@@ -3007,7 +3009,8 @@ void App::DrawCameraPanel() {
         ImGui::End();
         return;
     }
-    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+    if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());  // not over its own dropdowns (white balance, size...)
     if (mobile) ui::TouchScroll();
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     float w = ImGui::GetContentRegionAvail().x;

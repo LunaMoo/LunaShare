@@ -154,6 +154,10 @@ void WanTransport::UpdateName(const std::string& name) {
 
 namespace {
 
+// KCP segments (~1.2 KB) allowed to wait for the network per session. Small, so a slow path shows up as a full
+// socket / engine queue right away (calls adapt to that) instead of seconds of hidden delay. ~600 KB.
+constexpr int kMaxKcpQueue = 512;
+
 struct Session {
     uint32_t conv = 0;
     ikcpcb* kcp = nullptr;
@@ -411,7 +415,7 @@ void WanTransport::Loop() {
         for (auto& [conv, s] : sessions) {
             ls_pollfd p{};
             p.fd = (decltype(p.fd))s->local;
-            p.events = (short)((ikcp_waitsnd(s->kcp) < 2048 ? POLLIN : 0) | (!s->toLocal.empty() ? POLLOUT : 0));
+            p.events = (short)((ikcp_waitsnd(s->kcp) < kMaxKcpQueue ? POLLIN : 0) | (!s->toLocal.empty() ? POLLOUT : 0));
             fds.push_back(p);
             order.push_back(conv);
         }
@@ -546,7 +550,7 @@ void WanTransport::Loop() {
             Session* s = sp.get();
             ikcp_update(s->kcp, (IUINT32)(now & 0xFFFFFFFF));
             // engine -> peer
-            while (ikcp_waitsnd(s->kcp) < 2048) {
+            while (ikcp_waitsnd(s->kcp) < kMaxKcpQueue) {
                 int r = (int)recv((sock_t)s->local, buf.data(), 32768, 0);
                 if (r > 0) { ikcp_send(s->kcp, buf.data(), r); continue; }
                 if (r == 0 || !WouldBlock()) s->closed = true;

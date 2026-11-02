@@ -32,6 +32,7 @@ struct Link {
     double lossRate = 0;
     int kbps = 0;  // 0 = unlimited
     size_t refuseAbove = 768 * 1024;
+    std::atomic<bool> hideQueue{false};  // like a buffer further down the path (KCP, kernel): the host can't see it
     std::mt19937 rng{42};
     std::atomic<int> local{0}, remote{0}, keyAsks{0}, stateOn{-1};
     std::atomic<int> remoteW{0}, remoteH{0}, remoteRot{-1}, localMirror{-1}, remoteMirror{-1}, lastCodec{-1};
@@ -62,7 +63,7 @@ static void Image(void*, int src, const LsvImage* img) {
 static void State(void*, int on) { L.stateOn = on; }
 static size_t Queued(void*) {
     std::lock_guard<std::mutex> l(L.m);
-    return L.bytes;
+    return L.hideQueue ? 0 : L.bytes;
 }
 static void Log(void*, const char* m) { printf("    [%s]\n", m); }
 
@@ -170,6 +171,28 @@ int main() {
         CHECK(L.remote - before2 > 10, "pictures keep coming after the step (%d in 2 s)", L.remote - before2);
         L.kbps = 0;
         m->set_settings(&s);  // back to the test's normal size
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
+
+    printf("[video: slow link behind a buffer the host can't see (receiver reports)]\n");
+    {
+        L.hideQueue = true;
+        L.refuseAbove = 64u << 20;
+        L.kbps = 300;
+        std::this_thread::sleep_for(std::chrono::milliseconds(7000));
+        LsvStats st2;
+        m->get_stats(&st2);
+        size_t backlog;
+        {
+            std::lock_guard<std::mutex> l(L.m);
+            backlog = L.bytes;
+        }
+        printf("    sending %d kbps, backlog %zu bytes\n", st2.send_kbps, backlog);
+        CHECK(st2.send_kbps < 330, "bitrate follows the link (%d kbps)", st2.send_kbps);
+        CHECK(backlog < 300 * 1000 / 8, "delay stays under a second (%zu bytes waiting)", backlog);
+        L.kbps = 0;
+        L.hideQueue = false;
+        L.refuseAbove = 768 * 1024;
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
 

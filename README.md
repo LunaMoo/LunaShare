@@ -146,7 +146,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   8K (7680x4320) is offered as well. H.264 at 8K is beyond most decoders, so if the receiving device can't decode
   a size, it automatically asks the sender for 4K (or 1080p) instead. With *Lower quality when the connection is slow* on (the default), smoothness comes
   first: the bitrate follows what the link actually carries (measured four times a second, cut as soon as about 120 ms of
-  video is waiting, raised slowly), and if the link stays too slow for the picture size, the camera steps down - 60 to
+  video is waiting - the receiving device reports ten times a second how far it got, so delay that builds up anywhere
+  on the way counts, not only in this app - and raised slowly), a receiving device whose decoder falls behind makes the
+  sender step down right away, and if the link stays too slow for the picture size, the camera steps down - 60 to
   30 fps first, then 1080p, 720p, 540p, 360p, then fewer frames - and steps back up once the link has kept up for a while.
   Voice always goes ahead of video.
 - **Camera panel (during a call):**
