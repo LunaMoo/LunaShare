@@ -15,4 +15,12 @@ bool FfDecoder::Open(int, bool, std::string* err) {
 void FfDecoder::Close() {}
 std::string FfDecoder::Name() const { return ""; }
 bool FfDecoder::Decode(const uint8_t*, size_t, const std::function<void(const LsvImage&)>&) { return false; }
+bool FfDecoder::HasSoftwareAv1() { return false; }
+bool FfEncoder::Open(int, int, int, int, std::string* err) {
+    if (err) *err = "built without FFmpeg";
+    return false;
+}
+void FfEncoder::Close() {}
+void FfEncoder::SetBitrate(int) {}
+bool FfEncoder::Encode(const LsvImage&, bool, const std::function<void(const uint8_t*, size_t, bool)>&) { return false; }
 }  // namespace lsv

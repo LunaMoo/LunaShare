@@ -143,6 +143,24 @@ void App::Frame() {
 
     static bool emojiPanelEnv = getenv("LUNASHARE_EMOJIPANEL") != nullptr;  // dev: start with the emoji panel open
     if (emojiPanelEnv) emojiOpen = true, emojiPanelEnv = false;
+    // dev: LUNASHARE_CONNECT=host:port connects once; LUNASHARE_AUTOCALL=video|voice calls the selected device once
+    static const char* autoConnect = getenv("LUNASHARE_CONNECT");
+    if (autoConnect) {
+        std::string hp = autoConnect;
+        size_t c = hp.rfind(':');
+        if (c != std::string::npos) eng.ConnectAddress(hp.substr(0, c), (uint16_t)atoi(hp.c_str() + c + 1));
+        autoConnect = nullptr;
+    }
+    static const char* autoCall = getenv("LUNASHARE_AUTOCALL");
+    static int64_t autoCallAt = 0;
+    if (autoCall && !selectedPeer.empty() && eng.IsConnected(selectedPeer) && eng.call.state == CallState::None) {
+        if (!autoCallAt) autoCallAt = SteadyMs() + 1500;
+        if (SteadyMs() > autoCallAt) {
+            Media().WantCameraAtStart(std::string(autoCall) == "video");
+            eng.StartCall(selectedPeer, autoCall);
+            autoCall = nullptr;
+        }
+    }
     static const char* autoReact = getenv("LUNASHARE_AUTOREACT");  // dev: react to the first two messages
     if (autoReact && !selectedPeer.empty()) {
         auto it = eng.chats.find(selectedPeer);
@@ -2660,7 +2678,7 @@ bool App::WebcamButtonShown(const std::string& peer) const {
     if (Media().VcamOn()) return true;  // this PC has LunaShare Camera: ask the other device for its camera
     // a phone offering its camera to a Windows PC
     auto it = eng.devices.find(peer);
-    return IsMobilePlatform() && it != eng.devices.end() && it->second.platform.find("Windows") != std::string::npos;
+    return IsMobilePlatform() && it != eng.devices.end() && (it->second.platform.find("Windows") != std::string::npos || it->second.platform.find("Linux") != std::string::npos);
 }
 
 bool App::WebcamButton(const std::string& peer, float size) {
@@ -3286,12 +3304,26 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
                 Media().SetVirtualCamera(v);
             }
             ImGui::EndDisabled();
+#if defined(_WIN32)
             ui::HelpMarker(T("Other apps (Teams, Zoom, OBS, Discord...) can pick \"LunaShare Camera\". It shows the video from the other "
                            "device during a video call - for example your phone's camera - and a dark picture otherwise. The first "
                            "time Windows asks for administrator permission to install it."));
+#else
+            ui::HelpMarker(T("Other apps (browsers, Zoom, OBS, Discord...) can pick \"LunaShare Camera\". It shows the video from the "
+                           "other device during a video call - for example your phone's camera - and a dark picture otherwise. It uses "
+                           "the v4l2loopback kernel module; LunaShare asks for your password once per boot to load it."));
+#endif
             std::string st = Media().VcamStatus();
             if (!st.empty()) ImGui::TextDisabled("%s", st.c_str());
         }
+#if defined(__linux__) && !defined(__ANDROID__)
+        else if (Media().VideoAvailable()) {
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextDisabled("%s", T("\"LunaShare Camera\" for other apps (for example your phone as a webcam): install the v4l2loopback "
+                                        "kernel module (package v4l2loopback-dkms) and restart LunaShare."));
+            ImGui::PopTextWrapPos();
+        }
+#endif
         auto cams = Media().Cameras();
         if (cams.size() > 1) {
             std::string cur = T("Front camera (default)");

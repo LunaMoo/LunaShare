@@ -11,7 +11,7 @@
 
 namespace lsv {
 
-enum Codec { kH264 = 0, kHEVC = 1, kAV1 = 2 };
+enum Codec { kH264 = 0, kHEVC = 1, kAV1 = 2, kMJPEG = 3 /* cameras only, never negotiated */ };
 inline unsigned CodecBit(int c) { return 1u << c; }
 inline const char* CodecName(int c) { return c == kHEVC ? "HEVC" : c == kAV1 ? "AV1" : "H.264"; }
 
@@ -22,6 +22,7 @@ public:
     static bool Loaded();
 
     ~FfDecoder() { Close(); }
+    static bool HasSoftwareAv1();  // libdav1d in this FFmpeg build (Linux)
     // hw: try the GPU first (Windows D3D11VA); falls back to the CPU where FFmpeg can
     bool Open(int codec, bool hw, std::string* err);
     void Close();
@@ -40,6 +41,28 @@ private:
     void* hwdev_ = nullptr;   // AVBufferRef*
     int codec_ = -1;
     bool hw_ = false;
+    std::vector<uint8_t> conv_;  // 4:2:2 pictures (MJPEG cameras) turned into 4:2:0
+};
+
+// H.264 encoding through FFmpeg (libx264 where the build has it), Annex B with SPS/PPS on every keyframe.
+class FfEncoder {
+public:
+    ~FfEncoder() { Close(); }
+    bool Open(int width, int height, int fps, int bitrate, std::string* err);
+    void Close();
+    bool IsOpen() const { return ctx_ != nullptr; }
+    std::string Name() const { return name_; }
+    void SetBitrate(int bps);
+    // I420 picture; out() gets the encoded frames (zero or more)
+    bool Encode(const LsvImage& img, bool forceKey, const std::function<void(const uint8_t*, size_t, bool key)>& out);
+
+private:
+    void* ctx_ = nullptr;
+    void* frame_ = nullptr;
+    void* pkt_ = nullptr;
+    int64_t pts_ = 0;
+    int bitrate_ = 0, fps_ = 30;
+    std::string name_;
 };
 
 }  // namespace lsv

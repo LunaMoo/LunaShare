@@ -88,6 +88,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - **Windows:** `lunashare_player.dll` plus the shared trimmed FFmpeg in `modules/` (about 8 MB together with the video module's files).
   Video is decoded on the graphics card where possible.
 - **Android:** the phone's own hardware decoders, so it adds almost nothing to the app and is included in both the lite and the calls APK.
+- **Linux:** `liblunashare_player.so` with the same FFmpeg as the Linux video module, in `modules/`.
 
 ![Video in chat](docs/player.png)
 
@@ -131,11 +132,17 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 
 ![Voice call](docs/voice-call.png)
 
-**Video calls (optional module, Windows and Android for now)**
+**Video calls (optional module: Windows, Linux and Android)**
 - A second plug-in, `lunashare_video` (`lunashare_video.dll` / `liblunashare_video.so`), sits next to the voice module. It adds the
   video call button when both devices have it, and any call between two video-capable devices can turn the camera on or off.
-- The module bundles no codec library and uses the system's own H.264: Media Foundation on Windows (a GPU encoder when one works,
-  otherwise Microsoft's software encoder) and MediaCodec on Android (hardware).
+- Windows and Android use the system's own H.264: Media Foundation on Windows (a GPU encoder when one works, otherwise
+  Microsoft's software encoder) and MediaCodec on Android (hardware).
+- **Linux:** cameras through V4L2 (raw YUYV/NV12 or MJPEG, whichever gives the asked size and frame rate), H.264 encoding with
+  x264 (low-latency settings) and H.264 / HEVC / AV1 decoding through the FFmpeg bundled in `modules/` (dav1d for AV1).
+  Zoom, exposure, focus, white balance and brightness are offered when the webcam has them.
+  **LunaShare Camera** for other apps (browsers, Zoom, OBS...) uses the v4l2loopback kernel module (package `v4l2loopback-dkms`);
+  LunaShare loads it with `pkexec` the first time it's switched on after a reboot, so phones can be used as webcams on Linux too.
+  Your user needs access to `/dev/video*` (the `video` group on most distributions).
 - **Android battery use:** the camera feeds the hardware encoder directly, so frames never pass through the CPU. The self-view is a
   small 15 fps stream, and the camera runs at a fixed frame rate.
 - **Quality:** choose the resolution (360p, 540p, 720p, 1080p, 1440p or 4K) and frame rate (15, 24, 30, 60 or 120 fps) in *Settings → Calls*
@@ -269,9 +276,14 @@ tests/         engine tests (pause/resume, receiver restart, corruption detectio
 - Protocol v2 (encrypted) can't talk to builds from before encryption was added.
 - Voice calls are tested in code (signalling, packet loss/jitter, echo cancellation) but not yet with real microphones and speakers on every platform.
   Calls are one-to-one. Video calls are tested in code (packets, loss recovery, bitrate adaptation, and the full pipeline on a test-pattern camera),
-  but the Windows and Android camera/codec code hasn't been tried on real devices yet. There's no video on Linux and macOS yet.
+  and Windows and Android have been used on real devices. The Linux camera code (V4L2, v4l2loopback) hasn't met real webcams yet;
+  its encoder and decoder have been tested end to end. There's no video on macOS yet.
 
 ## License
+
+On Linux the bundled FFmpeg is built with x264 and is therefore GPL-2.0-or-later (compatible with LunaShare's GPL-3.0);
+dav1d is BSD-2-Clause. Their license files are in `modules/`. FFmpeg on Windows is the LGPL build.
+
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
