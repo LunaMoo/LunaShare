@@ -12,7 +12,12 @@
 // Byte 12 of a frame packet is the codec (0 H.264, 1 HEVC, 2 AV1). The sender picks the best codec both sides have.
 //
 // Loss handling: a frame refused by the congested link or a gap in sequence numbers makes the decoder wait for the
-// next keyframe (asked for at most twice a second). Bitrate adapts once a second from the host's media queue size.
+// next keyframe (asked for at most twice a second).
+//
+// Adaptation puts smoothness first: the bitrate follows what the link actually carries (checked four times a second,
+// cut hard as soon as ~120 ms of video waits in the queue, raised slowly), and when the bitrate stays too low for the
+// picture size, the camera steps down (first to 30 fps, then smaller sizes) instead of sending a blurry, stuttering
+// picture; it steps back up after the link has kept up for a while.
 //
 // SPDX-License-Identifier: GPL-3.0-only
 #include <algorithm>
@@ -307,32 +312,90 @@ public:
             prevQ = q;
             int skippedNow = skipped.exchange(0);
             statsSkipped += skippedNow;
-            if (!camOn || !settings.adaptive) { calmMs = 0; continue; }
-            int cur = curBitrate, target = settings.bitrate;
-            size_t budget = std::max<size_t>(16000, (size_t)cur / 8 * 3 / 10);  // ~300 ms of video
-            if ((q > budget || skippedNow > 0) && now - lastAdjust >= 500) {
-                // send a bit less than the link manages, so the queue drains
-                int next = drainBps > 0 ? (int)(drainBps * 0.8) : cur / 2;
-                next = std::clamp(next, minBitrate, cur * 9 / 10);
+            if (!camOn || !settings.adaptive) { calmMs = 0; lowMs = 0; fullMs = 0; continue; }
+            LsvSettings run = LevelSettings(level);
+            int cur = curBitrate, target = run.bitrate;
+            size_t budget = std::max<size_t>(12000, (size_t)cur / 8 * 12 / 100);  // ~120 ms of video
+            bool congested = q > budget || skippedNow > 0;
+            if (congested && now - lastAdjust >= 250) {
+                // well under what the link manages, so the queue empties quickly (smooth beats sharp)
+                int next = drainBps > 0 ? (int)(drainBps * 0.7) : cur / 2;
+                next = std::clamp(next, minBitrate, cur * 3 / 4);
                 curBitrate = next;
                 lastAdjust = now;
                 calmMs = 0;
+                upHoldUntil = now + 4000;  // don't probe upwards right after congestion
                 if (backend) backend->SetBitrate(next);
-            } else if (q < budget / 4 && cur < target) {
+            } else if (!congested && q < budget / 4 && cur < target && now >= upHoldUntil) {
                 calmMs += 250;
-                if (calmMs >= 1000) {  // probe upwards, a step a second
-                    int next = std::min(target, std::max(cur + 50000, cur * 115 / 100));
+                if (calmMs >= 1500) {  // probe upwards slowly
+                    int next = std::min(target, std::max(cur + 40000, cur * 108 / 100));
                     curBitrate = next;
                     calmMs = 0;
                     lastAdjust = now;
                     if (backend) backend->SetBitrate(next);
                 }
-            } else {
+            } else if (congested) {
                 calmMs = 0;
+            }
+            // ---- picture size / frame rate: what fits the bitrate the link allows
+            double bpp = (double)curBitrate / std::max(1.0, (double)run.width * run.height * run.fps);
+            lowMs = bpp < 0.035 ? lowMs + 250 : 0;                                   // too few bits: blocky + stutter
+            fullMs = !congested && curBitrate >= target * 95 / 100 ? fullMs + 250 : 0;  // link keeps up at full rate
+            int want = level;
+            if (lowMs >= 2000 && level < kMaxLevel && !SameShape(LevelSettings(level + 1), run)) want = level + 1;
+            else if (fullMs >= 12000 && level > 0 && now - lastLevelChange > 20000) want = level - 1;
+            if (want != level && now - lastLevelChange > 3000) {
+                std::lock_guard<std::mutex> l(m);
+                if (camOn) {
+                    bool up = want < level;
+                    level = want;
+                    LsvSettings ns = LevelSettings(want);
+                    Log(std::string("quality ") + (up ? "up" : "down") + " to " + std::to_string(ns.width) + "x" + std::to_string(ns.height) +
+                        " @" + std::to_string(ns.fps) + " fps");
+                    if (up) curBitrate = std::min((int)curBitrate, ns.bitrate * 3 / 4);  // up: start gently
+                    else curBitrate = std::min((int)curBitrate, ns.bitrate);
+                    backend->StopCamera();
+                    camOn = StartCameraLocked();
+                    if (!camOn) SendState();
+                }
+                lastLevelChange = now;
+                lowMs = fullMs = 0;
             }
         }
     }
     static constexpr int minBitrate = 100000;
+    int lowMs = 0, fullMs = 0;
+    int64_t upHoldUntil = 0, lastLevelChange = 0;
+
+    // ---- quality ladder (level 0 = what the user picked)
+    std::atomic<int> level{0};
+    static constexpr int kMaxLevel = 6;
+    LsvSettings LevelSettings(int lv) const {
+        LsvSettings s = settings;
+        if (lv <= 0) return s;
+        int fps = s.fps;
+        bool portrait = s.height > s.width;
+        int longSide = std::max(s.width, s.height), shortSide = std::min(s.width, s.height);
+        int h = shortSide;
+        static const int kHeights[] = {2160, 1440, 1080, 720, 540, 360};
+        for (int i = 0; i < lv; i++) {
+            if (fps > 30) { fps = 30; continue; }  // first: fewer frames, same size
+            int next = 0;
+            for (int k : kHeights)
+                if (k < h) { next = k; break; }
+            if (next) { h = next; continue; }       // then the next smaller standard size, down to 360p
+            if (fps > 15) fps = fps > 20 ? 20 : 15; // then fewer frames again
+        }
+        int w = (int)((double)longSide * h / shortSide + 0.5) & ~1;
+        s.width = portrait ? h : w;
+        s.height = portrait ? w : h;
+        double ratio = (double)s.width * s.height * fps / ((double)settings.width * settings.height * std::max(1, settings.fps));
+        s.bitrate = std::max(minBitrate * 3, (int)(settings.bitrate * std::min(1.0, ratio * 1.15)));
+        s.fps = fps;
+        return s;
+    }
+    bool SameShape(const LsvSettings& a, const LsvSettings& b) const { return a.width == b.width && a.height == b.height && a.fps == b.fps; }
     std::atomic<int> sentTick{0};
     std::atomic<int> statsSkipped{0};
 
@@ -355,6 +418,7 @@ public:
         if (!backend || running) return backend ? 1 : 0;
         if (s) settings = *s;
         curBitrate = settings.bitrate;
+        level = 0;
         seqOut = 0;
         needKey = false;
         haveSeq = false;
@@ -445,8 +509,8 @@ public:
             return false;
         }
         cameraId = id;
-        LsvSettings s = settings;
-        s.bitrate = curBitrate;
+        LsvSettings s = LevelSettings(level);
+        s.bitrate = std::min((int)curBitrate, s.bitrate);
         std::string err;
         int codec = ChooseCodec();
         if (!backend->StartCamera(id, s, codec, &err)) {
@@ -494,6 +558,7 @@ public:
         std::lock_guard<std::mutex> l(m);
         bool sizeChanged = s->width != settings.width || s->height != settings.height || s->fps != settings.fps;
         settings = *s;
+        if (sizeChanged) level = 0;  // the user picked something new: start from it
         curBitrate = std::min((int)curBitrate, s->bitrate);
         if (!s->adaptive) curBitrate = s->bitrate;
         if (!camOn || !backend) return;

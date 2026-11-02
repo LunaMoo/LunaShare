@@ -13,6 +13,7 @@
 #include "mdns.h"
 #include "rendezvous_server.h"
 #include "wan.h"
+#include "upnp.h"
 #include "hash.h"
 #include "platform.h"
 
@@ -552,6 +553,18 @@ int main() {
         CHECK(gone, "goodbye removes the device");
         D->Stop();
     }
+    printf("[upnp description]\n");
+    {
+        std::string xml = "<root><device><serviceList><service><serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>"
+                          "<controlURL>/l3f</controlURL></service></serviceList><deviceList><device><deviceList><device><serviceList>"
+                          "<service>\n<serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>\n"
+                          "<serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId><controlURL>ctl/IPConn</controlURL></service>"
+                          "</serviceList></device></deviceList></device></deviceList></device></root>";
+        std::string ctl, svc;
+        CHECK(UpnpMapper::ParseControlUrl(xml, "http://192.168.1.1:5000/rootDesc.xml", &ctl, &svc), "finds the WAN service");
+        CHECK(ctl == "http://192.168.1.1:5000/ctl/IPConn", "control URL made absolute (%s)", ctl.c_str());
+        CHECK(svc == "urn:schemas-upnp-org:service:WANIPConnection:1", "service type (%s)", svc.c_str());
+    }
     printf("[internet rendezvous]\n");
     {
         RendezvousServer srv;
@@ -593,6 +606,33 @@ int main() {
         auto tg = GetT(*G, tw);
         CHECK(tg && Sha256File(tg->localPath) == shaw, "internet transfer verified");
         printf("  24 MB over KCP/UDP loopback: %.2f s\n", (double)(SteadyMs() - t0) / 1000.0);
+        // relay: when no direct path works, the server carries the (encrypted) packets
+#ifdef _WIN32
+        _putenv_s("LUNASHARE_TEST_NO_DIRECT", "1");
+#else
+        setenv("LUNASHARE_TEST_NO_DIRECT", "1", 1);
+#endif
+        auto R1 = MakeEngine("rita", 48172, true, false, false, false, "127.0.0.1:48190", "relayroom");
+        auto R2 = MakeEngine("rob", 48174, true, false, false, false, "127.0.0.1:48190", "relayroom");
+        std::string idR1 = R1->settings.deviceId, idR2 = R2->settings.deviceId;
+        bool relayed = WaitFor([&] {
+            auto c = R1->ReadyConn(idR2);
+            return c && c->transport == Transport::Internet && c->addr == "relay" && R2->IsConnected(idR1);
+        }, 20000);
+        CHECK(relayed, "relayed connection when punching fails (R1: %s)", R1->WanStatus().c_str());
+        std::string fr = JoinPath(Root(), "src/relay.bin");
+        WriteRandomFile(fr, 4 << 20, 12);
+        uint64_t trl = FirstTid(*R1, R1->SendPaths(idR2, {fr}));
+        CHECK(WaitFor([&] { return StateOf(*R2, trl) == TState::Completed; }, 30000), "file over the relay: %s", TStateName(StateOf(*R2, trl)));
+        auto trr = GetT(*R2, trl);
+        CHECK(trr && Sha256File(trr->localPath) == Sha256File(fr), "relayed transfer verified");
+        R1->Stop();
+        R2->Stop();
+#ifdef _WIN32
+        _putenv_s("LUNASHARE_TEST_NO_DIRECT", "");
+#else
+        unsetenv("LUNASHARE_TEST_NO_DIRECT");
+#endif
         // allow-list: a server that only accepts another room rejects us
         RendezvousServer locked;
         RendezvousServer::Options lo;

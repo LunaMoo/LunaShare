@@ -3,13 +3,15 @@
 // The server only introduces devices that share a room (BLAKE2b hash of room name + password): it learns each
 // device's public UDP endpoint and, on request, tells two devices to punch through their NATs towards each other.
 // Everything after that is peer-to-peer: KCP (reliable, ordered) over the punched UDP path, carrying the normal
-// end-to-end encrypted LunaShare protocol. The server never sees or relays chat or file data.
+// end-to-end encrypted LunaShare protocol. If no direct path works within a few seconds (carrier-grade NAT on both
+// sides, strict firewalls), the server can relay the KCP packets instead ('Y'); they stay end-to-end encrypted.
 //
 // One UDP socket per engine carries everything; the first byte of every datagram says what it is:
 //   'R' JSON rendezvous message (client <-> server)
 //   'P' JSON punch probe / ack (client <-> client)
 //   'K' KCP segment            (client <-> client)
 //   'X' u32 conv: session closed
+//   'Y' KCP segment through the server (relay)
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -44,7 +46,8 @@ public:
         std::string id, name, platform, pub;
         uint16_t localPort = 0;   // fixed UDP port (0 = automatic); useful with a manual port forward
         uint16_t forwardedPort = 0;  // external port forwarded to localPort on the router (0 = none)
-        bool natpmp = true;       // ask the router for a mapping with NAT-PMP (miniupnpd, OPNsense os-upnp, ...)
+        bool natpmp = true;       // ask the router for a mapping (NAT-PMP / PCP, and UPnP IGD)
+        bool relay = true;        // allow the server to relay when a direct connection fails
     };
     using OnPeers = std::function<void(const std::vector<WanPeer>&)>;
     using OnSocket = std::function<void(SocketHandle s, const std::string& peerId, const std::string& addr, bool initiator)>;

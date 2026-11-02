@@ -60,7 +60,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice},
     };
     if (withIdentity) {
@@ -118,6 +118,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "callAutoGain", s.callAutoGain);
     Get(j, "callBitrate", s.callBitrate);
     Get(j, "callMicBoost", s.callMicBoost);
+    Get(j, "wanRelay", s.wanRelay);
     Get(j, "callVideoRes", s.callVideoRes);
     Get(j, "callVideoFps", s.callVideoFps);
     Get(j, "callVideoAdaptive", s.callVideoAdaptive);

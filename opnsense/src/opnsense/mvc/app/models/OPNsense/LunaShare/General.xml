@@ -1,7 +1,7 @@
 <model>
     <mount>//OPNsense/lunashare/general</mount>
     <description>LunaShare rendezvous server</description>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <items>
         <enabled type="BooleanField">
             <Default>0</Default>
@@ -23,6 +23,16 @@
             <Mask>/^([0-9a-fA-F]{64},)*([0-9a-fA-F]{64})?$/</Mask>
             <ValidationMessage>Each entry must be a 64 character room hash (shown in LunaShare under Settings, Internet).</ValidationMessage>
         </rooms>
+        <relay type="BooleanField">
+            <Default>1</Default>
+            <Required>Y</Required>
+        </relay>
+        <relaylimit type="IntegerField">
+            <Default>0</Default>
+            <MinimumValue>0</MinimumValue>
+            <MaximumValue>10000000</MaximumValue>
+            <Required>Y</Required>
+        </relaylimit>
         <maxdevices type="IntegerField">
             <Default>200</Default>
             <MinimumValue>1</MinimumValue>

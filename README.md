@@ -61,7 +61,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Manual connect by `ip[:port]`.
 - **Over the internet (optional):** run the small **rendezvous server**. There's a ready-made **OPNsense plugin**, or it runs on
   any Linux/Windows/macOS box. Devices with the same room name and password find each other through it and then connect
-  **directly peer-to-peer** (UDP hole punching + KCP, NAT-PMP / port-forward assisted). The server never relays chat or files.
+  **directly peer-to-peer** (UDP hole punching + KCP, helped by UPnP / NAT-PMP port mappings). When no direct path
+  exists (a router you can't configure, carrier-grade NAT on both sides), the server relays the still end-to-end
+  encrypted packets. Only your name and the server need to be set; everything else is under *Settings → Advanced*.
   See [docs/INTERNET.md](docs/INTERNET.md).
 
 **Security**
@@ -136,8 +138,11 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   On Android, 120 fps uses the camera's high-speed mode, which has no self-view stream; the other side still gets the full rate.
   Colour conversion, rotation and mirroring run on the GPU. On Windows, received video is decoded by the graphics card.
   8K (7680x4320) is offered as well. H.264 at 8K is beyond most decoders, so if the receiving device can't decode
-  a size, it automatically asks the sender for 4K (or 1080p) instead. With *Lower quality when the connection is slow* on, the bitrate follows what the link can actually carry
-  (measured four times a second), so the picture gets softer instead of lagging. Voice always goes ahead of video.
+  a size, it automatically asks the sender for 4K (or 1080p) instead. With *Lower quality when the connection is slow* on (the default), smoothness comes
+  first: the bitrate follows what the link actually carries (measured four times a second, cut as soon as about 120 ms of
+  video is waiting, raised slowly), and if the link stays too slow for the picture size, the camera steps down - 60 to
+  30 fps first, then 1080p, 720p, 540p, 360p, then fewer frames - and steps back up once the link has kept up for a while.
+  Voice always goes ahead of video.
 - **Camera panel (during a call):**
   - Phones: zoom (including the ultra-wide lens, e.g. 0.6x, where the phone has one), switching between cameras, exposure
     compensation, manual ISO and shutter, auto or manual focus, flashlight, white balance and stabilization. What's available
@@ -210,7 +215,8 @@ src/core/      engine (no UI dependencies)
   hash.*         SHA-256, CRC-32
   crypto.*       handshake, frame encryption, identity keys, safety numbers
   mdns.*         Bonjour/mDNS service discovery (dns_sd on Apple, built-in elsewhere)
-  wan.*          internet transport: rendezvous client, hole punching, NAT-PMP, KCP sessions
+  wan.*          internet transport: rendezvous client, hole punching, NAT-PMP, relay fallback, KCP sessions
+  upnp.*         UPnP IGD port mapping
   rendezvous_server.*  the optional rendezvous server (also used by the tests)
 server/        lunashare-rendezvous daemon + systemd unit
 opnsense/      OPNsense plugin (Services > LunaShare rendezvous) + install.sh

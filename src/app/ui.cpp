@@ -386,7 +386,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     if (d != eng.devices.end()) sub = d->second.platform;
     else if (online) sub = eng.online[peer].platform;
     auto conn = eng.ReadyConn(peer);
-    if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + "via " + TransportName(conn->transport);
+    if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + "via " + TransportName(conn->transport) + (conn->addr == "relay" ? " (relay)" : "");
     else if (online) sub += "  online (" + eng.online[peer].Via() + ")";
     else sub += sub.empty() ? "offline" : "  offline";
 
@@ -728,7 +728,8 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SameLine();
     }
     auto conn = eng.ReadyConn(peer);
-    if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), "connected via %s", conn ? TransportName(conn->transport) : "?");
+    if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), "connected via %s%s", conn ? TransportName(conn->transport) : "?",
+                                      conn && conn->addr == "relay" ? " (relay through the server)" : "");
     else if (eng.online.count(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "online - connecting...");
     else ImGui::TextDisabled("offline - messages and files are queued");
     if (d != eng.devices.end() && !d->second.pendingKey.empty()) {
@@ -2202,7 +2203,25 @@ void App::DrawSettings() {
     if (ImGui::IsItemActive()) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 
-    ImGui::SeparatorText("Receiving");
+    ImGui::SeparatorText("Internet");
+    ImGui::TextUnformatted("Rendezvous server (optional)");
+    ImGui::SetNextItemWidth(fieldW);
+    ImGui::InputTextWithHint("##wanserver", "home.example.com", &edit.wanServer);
+    if (ImGui::IsItemActive()) editDirty = true;
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        edit.wanEnabled = !edit.wanServer.empty();  // a server set = use it
+        changed = true;
+    }
+    ui::HelpMarker("Lets your devices find each other outside the local network. The server only introduces them; chat and "
+                   "files are end-to-end encrypted and go directly between the devices (through the server only when no direct "
+                   "path is possible). Leave empty for local network, hotspot and Bluetooth only.");
+    if (eng.settings.wanEnabled && !eng.settings.wanServer.empty()) {
+        ImGui::TextDisabled("Status: %s", eng.WanStatus().c_str());
+        std::string mp = eng.WanMappedEndpoint();
+        if (!mp.empty()) ImGui::TextDisabled("Reachable through the router at %s", mp.c_str());
+    }
+
+    ImGui::SeparatorText("Received files");
     ImGui::TextUnformatted("Save received files to");
     ImGui::SetNextItemWidth(mobile ? -1 : fieldW);
     ImGui::InputText("##dldir", &edit.downloadDir);
@@ -2215,90 +2234,6 @@ void App::DrawSettings() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Open folder", ImVec2(0, h))) RevealPath(edit.downloadDir);
-    changed |= ImGui::Checkbox("Automatically accept files from trusted devices", &edit.autoAcceptTrusted);
-    changed |= ImGui::Checkbox("Automatically accept files from everyone", &edit.autoAcceptAll);
-    ui::HelpMarker("Anyone on your network could send you files without asking. Only enable on networks you trust.");
-    changed |= ImGui::Checkbox("Resume interrupted transfers automatically", &edit.autoResume);
-
-    ImGui::SeparatorText("Network");
-    changed |= ImGui::Checkbox("Find devices on the local network", &edit.discovery);
-    ImGui::BeginDisabled(!edit.discovery);
-    ImGui::Indent();
-    changed |= ImGui::Checkbox("Bonjour / mDNS", &edit.mdns);
-    ui::HelpMarker("Standard service discovery (_lunashare._tcp). Works on most routers and is the only method iPhones/iPads can use.");
-    changed |= ImGui::Checkbox("UDP broadcast beacons", &edit.broadcast);
-    ui::HelpMarker("Fast discovery that also works on networks without multicast. Not available on iOS.");
-    ImGui::Unindent();
-    ImGui::EndDisabled();
-    changed |= ImGui::Checkbox("Connect to found devices automatically", &edit.autoConnect);
-    int port = edit.tcpPort;
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-    if (ImGui::InputInt("TCP port", &port, 0)) { edit.tcpPort = (uint16_t)std::clamp(port, 1, 65535); editDirty = true; }
-    if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-    ImGui::SameLine();
-    ImGui::TextDisabled("(listening on %u)", eng.boundPort);
-
-    ImGui::SeparatorText("Transfers");
-    int limit = (int)(edit.speedLimitKBs / 1024);
-    ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::SliderInt("##limit", &limit, 0, 200, limit == 0 ? "Upload speed: unlimited" : "Upload limit: %d MB/s")) { edit.speedLimitKBs = (int64_t)limit * 1024; changed = true; }
-    ImGui::SetNextItemWidth(fieldW);
-    changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, "Files at once per device: %d");
-    ImGui::SetNextItemWidth(fieldW);
-    changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, "Chunk size: %d KB", ImGuiSliderFlags_Logarithmic);
-
-    DrawCallSettings(fieldW, h, changed);
-
-    ImGui::SeparatorText("Internet (optional)");
-    ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("Reach your devices outside the local network through a LunaShare rendezvous server (for example on your "
-                        "OPNsense router). The server only introduces devices that use the same room name and password; chat and "
-                        "files go directly between the devices, end-to-end encrypted.");
-    ImGui::PopTextWrapPos();
-    changed |= ImGui::Checkbox("Use a rendezvous server", &edit.wanEnabled);
-    ImGui::BeginDisabled(!edit.wanEnabled);
-    auto wanField = [&](const char* label, const char* hint, std::string* v, ImGuiInputTextFlags f) {
-        ImGui::TextUnformatted(label);
-        ImGui::SetNextItemWidth(fieldW);
-        ImGui::InputTextWithHint((std::string("##") + label).c_str(), hint, v, f);
-        if (ImGui::IsItemActive()) editDirty = true;
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-    };
-    wanField("Server", "home.example.com:47830", &edit.wanServer, 0);
-    wanField("Room name", "family", &edit.wanRoom, 0);
-    wanField("Room password", "shared by your devices", &edit.wanPassword, ImGuiInputTextFlags_Password);
-    if (ImGui::TreeNode("Connection help for strict routers")) {
-        changed |= ImGui::Checkbox("Ask the router for a port mapping (NAT-PMP)", &edit.wanNatPmp);
-        ui::HelpMarker("Needed behind routers that change the port for every destination (OPNsense/pfSense, many business firewalls). "
-                       "Works when the router supports NAT-PMP (OPNsense: os-upnp plugin with NAT-PMP allowed).");
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt("Fixed local UDP port", &edit.wanLocalPort, 0)) { edit.wanLocalPort = std::clamp(edit.wanLocalPort, 0, 65535); editDirty = true; }
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt("Port forwarded on the router", &edit.wanForwardedPort, 0)) { edit.wanForwardedPort = std::clamp(edit.wanForwardedPort, 0, 65535); editDirty = true; }
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ui::HelpMarker("If you forward a UDP port on your router to this device, enter the local port above and the external port here.");
-        ImGui::TreePop();
-    }
-    ImGui::EndDisabled();
-    if (eng.settings.wanEnabled) {
-        ImGui::TextDisabled("Status: %s", eng.WanStatus().c_str());
-        std::string ep = eng.WanPublicEndpoint();
-        if (!ep.empty()) ImGui::TextDisabled("Seen by the server as %s", ep.c_str());
-        std::string mp = eng.WanMappedEndpoint();
-        if (!mp.empty()) ImGui::TextDisabled("Router mapping (NAT-PMP): %s", mp.c_str());
-        if (!eng.settings.wanRoom.empty() && ImGui::Button("Copy room hash (for the server's allow-list)", ImVec2(0, h)))
-            ImGui::SetClipboardText(RoomHash(eng.settings.wanRoom, eng.settings.wanPassword).c_str());
-    }
-
-    ImGui::SeparatorText("Bluetooth");
-    changed |= ImGui::Checkbox("Accept Bluetooth connections##s", &edit.bluetooth);
-#if defined(__linux__) && !defined(__ANDROID__)
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-    changed |= ImGui::SliderInt("RFCOMM channel", &edit.btChannel, 1, 30);
-    ui::HelpMarker("Linux uses a fixed RFCOMM channel. Use the same channel on both Linux machines.");
-#endif
-
     ImGui::SeparatorText("Appearance");
     int layout = (int)edit.layout;
     ImGui::SetNextItemWidth(fieldW);
@@ -2316,29 +2251,114 @@ void App::DrawSettings() {
     if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; styleGeneration++; }
     ImGui::SetNextItemWidth(fieldW);
     if (ImGui::Combo("##theme", &edit.theme, "Theme: dark\0Theme: light\0Theme: classic\0")) { changed = true; styleGeneration++; }
-    ImGui::TextDisabled(Emoji().Available() ? "Colour emoji: %s" : "Colour emoji: off (optional module %s)", Emoji().loadInfo.c_str());
+    ImGui::TextDisabled("%s", Emoji().Available() ? "Colour emoji: on" : "Colour emoji: off (module not installed)");
 
-    ImGui::SeparatorText("History & privacy");
-    changed |= ImGui::Checkbox("Keep chat and shared-file history", &edit.keepHistory);
-    if (ImGui::Button("Clear shared files history", ImVec2(0, h))) eng.ClearHistory();
+    ImGui::Spacing();
+    // everything below works automatically: hidden until asked for
+    if (ImGui::CollapsingHeader("Advanced", ImGuiTreeNodeFlags_None)) {
+        ImGui::SeparatorText("Receiving");
+        changed |= ImGui::Checkbox("Automatically accept files from trusted devices", &edit.autoAcceptTrusted);
+        changed |= ImGui::Checkbox("Automatically accept files from everyone", &edit.autoAcceptAll);
+        ui::HelpMarker("Anyone on your network could send you files without asking. Only enable on networks you trust.");
+        changed |= ImGui::Checkbox("Resume interrupted transfers automatically", &edit.autoResume);
 
-    ImGui::SeparatorText("Backup / move to another device");
-    ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("Exports all settings plus your list of known devices with their nicknames, trust and block state.");
-    ImGui::PopTextWrapPos();
-    ImGui::Checkbox("Include chat & shared files history", &exportHistory);
-    ImGui::Checkbox("Include this device's identity (only for restoring THIS device)", &exportIdentity);
-    if (ui::IconTextButton("Export settings...", Icon::Up, ImVec2(0, h))) {
-        browseFor = BrowseFor::Export;
-        std::string name = "lunashare-settings-" + FormatTime(NowMs(), true).substr(0, 10) + ".json";
-        browser.Open(FileBrowser::Mode::SaveFile, "Export settings", eng.settings.downloadDir, name, ".json");
+        ImGui::SeparatorText("Network");
+        changed |= ImGui::Checkbox("Find devices on the local network", &edit.discovery);
+        ImGui::BeginDisabled(!edit.discovery);
+        ImGui::Indent();
+        changed |= ImGui::Checkbox("Bonjour / mDNS", &edit.mdns);
+        ui::HelpMarker("Standard service discovery (_lunashare._tcp). Works on most routers and is the only method iPhones/iPads can use.");
+        changed |= ImGui::Checkbox("UDP broadcast beacons", &edit.broadcast);
+        ui::HelpMarker("Fast discovery that also works on networks without multicast. Not available on iOS.");
+        ImGui::Unindent();
+        ImGui::EndDisabled();
+        changed |= ImGui::Checkbox("Connect to found devices automatically", &edit.autoConnect);
+        int port = edit.tcpPort;
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputInt("TCP port", &port, 0)) { edit.tcpPort = (uint16_t)std::clamp(port, 1, 65535); editDirty = true; }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::SameLine();
+        ImGui::TextDisabled("(listening on %u)", eng.boundPort);
+
+        ImGui::SeparatorText("Transfers");
+        int limit = (int)(edit.speedLimitKBs / 1024);
+        ImGui::SetNextItemWidth(fieldW);
+        if (ImGui::SliderInt("##limit", &limit, 0, 200, limit == 0 ? "Upload speed: unlimited" : "Upload limit: %d MB/s")) { edit.speedLimitKBs = (int64_t)limit * 1024; changed = true; }
+        ImGui::SetNextItemWidth(fieldW);
+        changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, "Files at once per device: %d");
+        ImGui::SetNextItemWidth(fieldW);
+        changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, "Chunk size: %d KB", ImGuiSliderFlags_Logarithmic);
+
+        DrawCallSettings(fieldW, h, changed);
+
+        ImGui::SeparatorText("Internet");
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("Devices that use the same server, room name and password see each other. Without a room name, every "
+                            "device on the server is in one shared room - set a name and password to keep your devices to yourself.");
+        ImGui::PopTextWrapPos();
+        changed |= ImGui::Checkbox("Use the rendezvous server", &edit.wanEnabled);
+        ImGui::BeginDisabled(!edit.wanEnabled);
+        auto wanField = [&](const char* label, const char* hint, std::string* v, ImGuiInputTextFlags f) {
+            ImGui::TextUnformatted(label);
+            ImGui::SetNextItemWidth(fieldW);
+            ImGui::InputTextWithHint((std::string("##") + label).c_str(), hint, v, f);
+            if (ImGui::IsItemActive()) editDirty = true;
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        };
+        wanField("Room name", "family", &edit.wanRoom, 0);
+        wanField("Room password", "shared by your devices", &edit.wanPassword, ImGuiInputTextFlags_Password);
+        changed |= ImGui::Checkbox("Relay through the server when a direct connection fails", &edit.wanRelay);
+        ui::HelpMarker("Some networks can't be reached directly at all (mobile data and other carrier-grade NAT on both sides, "
+                       "strict firewalls). The server then passes the data along. It stays end-to-end encrypted, the server can't read it.");
+        changed |= ImGui::Checkbox("Ask the router for a port mapping (UPnP / NAT-PMP)", &edit.wanNatPmp);
+        ui::HelpMarker("Most home routers allow this automatically. It makes direct connections work behind routers that change the "
+                       "port for every destination.");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputInt("Fixed local UDP port", &edit.wanLocalPort, 0)) { edit.wanLocalPort = std::clamp(edit.wanLocalPort, 0, 65535); editDirty = true; }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        if (ImGui::InputInt("Port forwarded on the router", &edit.wanForwardedPort, 0)) { edit.wanForwardedPort = std::clamp(edit.wanForwardedPort, 0, 65535); editDirty = true; }
+        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+        ui::HelpMarker("Only if you forward a UDP port on your router to this device by hand: the local port above, the external port here.");
+        ImGui::EndDisabled();
+        if (eng.settings.wanEnabled) {
+            std::string ep = eng.WanPublicEndpoint();
+            if (!ep.empty()) ImGui::TextDisabled("Seen by the server as %s", ep.c_str());
+            if (ImGui::Button("Copy room hash (for the server's allow-list)", ImVec2(0, h)))
+                ImGui::SetClipboardText(RoomHash(eng.settings.wanRoom, eng.settings.wanPassword).c_str());
+        }
+
+        ImGui::SeparatorText("Bluetooth");
+        changed |= ImGui::Checkbox("Accept Bluetooth connections##s", &edit.bluetooth);
+    #if defined(__linux__) && !defined(__ANDROID__)
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+        changed |= ImGui::SliderInt("RFCOMM channel", &edit.btChannel, 1, 30);
+        ui::HelpMarker("Linux uses a fixed RFCOMM channel. Use the same channel on both Linux machines.");
+    #endif
+
+        ImGui::SeparatorText("History & privacy");
+        changed |= ImGui::Checkbox("Keep chat and shared-file history", &edit.keepHistory);
+        if (ImGui::Button("Clear shared files history", ImVec2(0, h))) eng.ClearHistory();
+
+        ImGui::SeparatorText("Backup / move to another device");
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("Exports all settings plus your list of known devices with their nicknames, trust and block state.");
+        ImGui::PopTextWrapPos();
+        ImGui::Checkbox("Include chat & shared files history", &exportHistory);
+        ImGui::Checkbox("Include this device's identity (only for restoring THIS device)", &exportIdentity);
+        if (ui::IconTextButton("Export settings...", Icon::Up, ImVec2(0, h))) {
+            browseFor = BrowseFor::Export;
+            std::string name = "lunashare-settings-" + FormatTime(NowMs(), true).substr(0, 10) + ".json";
+            browser.Open(FileBrowser::Mode::SaveFile, "Export settings", eng.settings.downloadDir, name, ".json");
+        }
+        ImGui::SameLine();
+        if (ui::IconTextButton("Import settings...", Icon::Down, ImVec2(0, h))) {
+            browseFor = BrowseFor::Import;
+            browser.Open(FileBrowser::Mode::OpenFile, "Import settings", eng.settings.downloadDir, "", ".json");
+        }
+        ImGui::Checkbox("When importing, also take over the device identity", &importIdentity);
+
     }
-    ImGui::SameLine();
-    if (ui::IconTextButton("Import settings...", Icon::Down, ImVec2(0, h))) {
-        browseFor = BrowseFor::Import;
-        browser.Open(FileBrowser::Mode::OpenFile, "Import settings", eng.settings.downloadDir, "", ".json");
-    }
-    ImGui::Checkbox("When importing, also take over the device identity", &importIdentity);
 
     ImGui::SeparatorText("About");
     ImGui::TextDisabled("LunaShare 0.1  -  %s  -  protocol v%d", PlatformName(), kProtocolVersion);
@@ -3228,6 +3248,8 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call.");
         changed |= ImGui::Checkbox("Lower video quality automatically when the connection is slow", &edit.callVideoAdaptive);
+        ui::HelpMarker("Keeps the picture smooth: less bitrate first, then a lower frame rate and a smaller picture while the "
+                       "connection is slow, back up when it recovers.");
         changed |= ImGui::Checkbox("Use only H.264 (if HEVC/AV1 video shows problems)", &edit.callVideoH264Only);
         if (Media().VcamAvailable()) {
             bool v = edit.virtualCamera;

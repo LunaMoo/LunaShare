@@ -11,7 +11,9 @@ OPNsense router.
 - When two devices want to talk, the server tells both to send packets to each other at the same moment
   ("UDP hole punching"). From then on they talk **directly, peer-to-peer**, with the same end-to-end encryption as on
   the LAN (X25519 + XChaCha20-Poly1305, pinned device keys). KCP gives reliable delivery over UDP.
-- The server **never relays chat or files** and can't read them. If it goes down, existing connections keep working.
+- Only if no direct path works (see below) does the server **relay** the packets between the two devices. They
+  are still end-to-end encrypted, so the server can't read chat or files. Relaying can be turned off on the server
+  (`--no-relay`, or the OPNsense checkbox) and on each device. If the server goes down, direct connections keep working.
 - Stored per device, in memory only: ID, display name, platform, public key, public and LAN addresses. Entries
   expire 60 s after the device goes away.
 
@@ -38,10 +40,13 @@ systemd unit in `server/lunashare-rendezvous.service`. Open UDP 47830 in front o
 
 ## In LunaShare (each device)
 
-*Settings → Internet (optional)*:
-- **Server:** your public address or DynDNS name plus port, e.g. `home.example.com:47830`
-- **Room name** and **room password:** the same on all your devices
-- Optional: *Copy room hash* to put it on the server's allow-list.
+*Settings → Internet*: enter the **server** (your public address or DynDNS name, e.g. `home.example.com`; add
+`:port` only if it isn't 47830). That's all - everything else works automatically.
+
+Under *Settings → Advanced → Internet*:
+- **Room name** and **room password:** the same on all your devices. Without them, every device using that server is
+  in one shared room; set them on a server other people use.
+- *Copy room hash* to put it on the server's allow-list.
 
 Devices in the room show up in the device list as *online (internet)* and connect automatically when needed (if
 *Connect to found devices automatically* is on), or when you open the chat. The chat header shows *via Internet*.
@@ -53,9 +58,14 @@ Hole punching works with most home routers and many mobile networks. It fails wh
 pick a new random port for every destination: carrier-grade NAT on some mobile networks, and pf-based firewalls
 like OPNsense/pfSense with default outbound NAT. Fixes, any one is enough:
 
-- **NAT-PMP** (on by default in LunaShare): the device asks its router for a port mapping. On OPNsense install
-  **os-upnp**, enable it with *Allow NAT-PMP port mapping*, and restrict it to your LAN. Many home routers support it too.
-- **Forward a port:** in *Settings → Internet → Connection help* set a fixed local UDP port (e.g. 47831) and
+- **UPnP / NAT-PMP** (on by default in LunaShare): the device asks its router for a port mapping. Most home routers
+  allow this out of the box (UPnP). On OPNsense install **os-upnp**, enable it (UPnP and/or *Allow NAT-PMP port
+  mapping*), and restrict it to your LAN.
+- **Relay** (on by default, nothing to set up): when no direct path is found within about five seconds, the server
+  carries the packets. This is what makes it work on networks you can't configure at all (a router you have no
+  access to, carrier-grade NAT, a hotel or office firewall). It is slower than a direct connection and uses the
+  server's bandwidth. The chat header shows *via Internet (relay through the server)*.
+- **Forward a port:** in *Settings → Advanced → Internet* set a fixed local UDP port (e.g. 47831) and
   forward that UDP port on your router to the device. Enter the external port as *Port forwarded on the router*.
 - On OPNsense you can also make outbound NAT keep source ports for the device (Firewall → NAT → Outbound,
   hybrid mode, a rule with *Static port* for that device's address).
@@ -64,4 +74,4 @@ Devices on the same LAN as the server: register using the router's public name l
 side is outside, at least one of the fixes above is usually needed on the OPNsense side, because pf NAT is
 port-randomising.
 
-Not supported yet: IPv6 candidates, and relaying through the server when no direct path exists.
+Not supported yet: IPv6 candidates.

@@ -147,9 +147,31 @@ int main() {
 
     printf("[video: link recovers]\n");
     L.kbps = 0;
-    std::this_thread::sleep_for(std::chrono::milliseconds(9000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10000));
     m->get_stats(&st);
-    CHECK(st.send_kbps > congestedKbps * 3 / 2, "bitrate climbs back (%d kbps, was %d)", st.send_kbps, congestedKbps);
+    // climbing is deliberately slow (smoothness first), and a stepped-down picture caps it until it steps back up
+    CHECK(st.send_kbps > congestedKbps * 5 / 4 || st.send_kbps >= 450, "bitrate climbs back (%d kbps, was %d)", st.send_kbps, congestedKbps);
+
+    printf("[video: slow link makes the picture smaller (smoothness first)]\n");
+    {
+        LsvSettings hd{1280, 720, 30, 2500000, 1, 0};
+        m->set_settings(&hd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        CHECK(L.remoteW == 1280, "HD at first (%dx%d)", L.remoteW.load(), L.remoteH.load());
+        L.kbps = 300;
+        bool smaller = false;
+        for (int i = 0; i < 40 && !smaller; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            smaller = L.remoteW > 0 && L.remoteW < 1280;
+        }
+        CHECK(smaller, "stepped down to %dx%d within 10 s", L.remoteW.load(), L.remoteH.load());
+        int before2 = L.remote;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        CHECK(L.remote - before2 > 10, "pictures keep coming after the step (%d in 2 s)", L.remote - before2);
+        L.kbps = 0;
+        m->set_settings(&s);  // back to the test's normal size
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
 
     printf("[video: receiver asks for a smaller picture]\n");
     {

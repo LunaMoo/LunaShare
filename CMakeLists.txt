@@ -41,6 +41,7 @@ add_library(lunashare_core STATIC
     src/core/crypto.cpp
     src/core/mdns.cpp
     src/core/wan.cpp
+    src/core/upnp.cpp
     src/core/rendezvous_server.cpp
     ${kcp_SOURCE_DIR}/ikcp.c
     ${monocypher_SOURCE_DIR}/src/monocypher.c

@@ -1,5 +1,6 @@
 #include "rendezvous_server.h"
 
+#include <algorithm>
 #include <cstring>
 #include <random>
 
@@ -35,7 +36,19 @@ struct Device {
     sockaddr_in pubEp{};    // what other devices are told to use (differs for devices on the server's own LAN)
     std::vector<std::string> locals;
     std::vector<std::string> extra;  // router mappings / forwarded port, already "ip:port"
+    bool relayOk = true;             // the device allows its connections to be relayed
     int64_t lastSeen = 0;
+};
+
+// a relayed connection: 'Y' packets from one side go to the other
+struct Relay {
+    sockaddr_in a{}, b{};
+    in_addr viaA{}, viaB{};
+    std::string room, idA, idB;
+    int64_t lastSeen = 0;
+    double tokA = 0, tokB = 0;  // byte buckets for the bandwidth limit
+    int64_t ts = 0;
+    uint64_t bytes = 0;
 };
 
 std::string Ep(const sockaddr_in& a) {
@@ -189,6 +202,7 @@ void RendezvousServer::Loop() {
     std::map<uint32_t, Bucket> limits;                             // per source IP
     std::mt19937_64 rng(std::random_device{}() ^ (uint64_t)NowMs());
     char buf[8192];
+    std::map<uint32_t, Relay> relays;  // conv -> relay
     int64_t lastSweep = SteadyMs();
     auto log = [&](const std::string& m) { if (opt_.log) opt_.log(m); };
     in_addr via{};  // local address of the packet being handled
@@ -237,11 +251,45 @@ void RendezvousServer::Loop() {
                 else ++rit;
             }
             if (limits.size() > 10000) limits.clear();
+            for (auto it = relays.begin(); it != relays.end();) {
+                if (now - it->second.lastSeen > 90000) {
+                    log("relay " + std::to_string(it->first) + " closed (" + std::to_string(it->second.bytes / 1024) + " KB)");
+                    it = relays.erase(it);
+                } else {
+                    ++it;
+                }
+            }
             counts();
         }
         if (WaitReadable((SocketHandle)s, 500) != 1) continue;
         sockaddr_in from{};
         int n = RecvFromTo(s, buf, (int)sizeof(buf), from, via);
+        if (n >= 6 && buf[0] == 'Y') {  // relayed data: ['Y'][conv u32][payload]
+            const uint8_t* cb = (const uint8_t*)buf + 1;
+            uint32_t conv = cb[0] | (uint32_t)cb[1] << 8 | (uint32_t)cb[2] << 16 | (uint32_t)cb[3] << 24;  // KCP header
+            auto it = relays.find(conv);
+            if (it == relays.end()) continue;
+            Relay& r = it->second;
+            bool fromA = from.sin_addr.s_addr == r.a.sin_addr.s_addr && from.sin_port == r.a.sin_port;
+            bool fromB = from.sin_addr.s_addr == r.b.sin_addr.s_addr && from.sin_port == r.b.sin_port;
+            if (!fromA && !fromB) continue;
+            if (opt_.relayKbps > 0) {
+                double rate = opt_.relayKbps * 125.0;  // bytes per second
+                if (r.ts) {
+                    double add = (double)(now - r.ts) * rate / 1000.0;
+                    r.tokA = std::min(rate, r.tokA + add);
+                    r.tokB = std::min(rate, r.tokB + add);
+                }
+                r.ts = now;
+                double& tok = fromA ? r.tokA : r.tokB;
+                if (tok < n) continue;  // over the limit: dropped, KCP slows down
+                tok -= n;
+            }
+            r.lastSeen = now;
+            r.bytes += (uint64_t)n;
+            SendFrom(s, std::string(buf, (size_t)n), fromA ? r.b : r.a, fromA ? r.viaB : r.viaA);
+            continue;
+        }
         if (n < 2 || buf[0] != 'R') continue;
         // rate limit: 20 packets/s per source address, burst 40
         Bucket& b = limits[from.sin_addr.s_addr];
@@ -290,7 +338,14 @@ void RendezvousServer::Loop() {
                 inet_ntop(AF_INET, &d.pubEp.sin_addr, ip, sizeof(ip));
                 d.extra.push_back(std::string(ip) + ":" + std::to_string(fwd));
             }
+            d.relayOk = j.value("relay", true);
             d.lastSeen = now;
+            // a device whose address changed (NAT rebinding) keeps its relayed connections
+            if (moved)
+                for (auto& [conv, rl] : relays) {
+                    if (rl.room == room && rl.idA == id) rl.a = from, rl.viaA = via;
+                    if (rl.room == room && rl.idB == id) rl.b = from, rl.viaB = via;
+                }
             sendJson(from, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}});
             if (isNew) counts();
             if (isNew || moved) {
@@ -315,6 +370,37 @@ void RendezvousServer::Loop() {
                 sendTo(other.ep, other.via, {{"t", "punch"}, {"nonce", nonce}, {"initiator", false},
                                     {"peer", {{"id", me->id}, {"ep", Ep(me->pubEp)}, {"local", me->locals}, {"extra", me->extra}}}});
                 log("introduced " + me->name + " <-> " + other.name);
+                break;
+            }
+        } else if (t == "relay") {
+            // direct connection failed: carry this pair's packets (only within a room, only if both allow it)
+            std::string to = j.value("to", ""), nonce = Clip(j.value("nonce", ""), 64);
+            uint32_t conv = j.value("conv", 0u);
+            if (!conv || nonce.empty()) continue;
+            for (auto& [room, r] : rooms) {
+                Device* me = nullptr;
+                for (auto& [id, d] : r)
+                    if (d.ep.sin_addr.s_addr == from.sin_addr.s_addr && d.ep.sin_port == from.sin_port) me = &d;
+                if (!me) continue;
+                auto it = r.find(to);
+                if (it == r.end()) break;
+                Device& other = it->second;
+                if (!opt_.relay || !me->relayOk || !other.relayOk || (relays.size() >= opt_.maxRelays && !relays.count(conv))) {
+                    sendTo(me->ep, me->via, {{"t", "error"}, {"msg", !opt_.relay ? "this server doesn't relay connections" : !other.relayOk ? "the other device doesn't allow relayed connections" : "relay busy"}});
+                    break;
+                }
+                Relay& rl = relays[conv];
+                rl.a = me->ep;
+                rl.viaA = me->via;
+                rl.b = other.ep;
+                rl.viaB = other.via;
+                rl.room = room;
+                rl.idA = me->id;
+                rl.idB = other.id;
+                rl.lastSeen = now;
+                sendTo(me->ep, me->via, {{"t", "relayed"}, {"nonce", nonce}, {"conv", conv}, {"initiator", true}, {"peer", other.id}});
+                sendTo(other.ep, other.via, {{"t", "relayed"}, {"nonce", nonce}, {"conv", conv}, {"initiator", false}, {"peer", me->id}});
+                log("relaying " + me->name + " <-> " + other.name);
                 break;
             }
         } else if (t == "bye") {

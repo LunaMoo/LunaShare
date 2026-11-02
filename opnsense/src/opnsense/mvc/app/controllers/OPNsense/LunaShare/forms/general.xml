@@ -33,6 +33,19 @@
         <help>Optional. Only devices using one of these rooms may register. Copy the room hash from LunaShare (Settings, Internet, "Copy room hash"). Leave empty to allow any room; room names and passwords still keep different groups apart.</help>
     </field>
     <field>
+        <id>general.relay</id>
+        <label>Relay when direct fails</label>
+        <type>checkbox</type>
+        <help>When two devices can't reach each other directly (for example both on mobile data behind carrier-grade NAT), pass their packets through this server. The data stays end-to-end encrypted; the server can't read it, but it does use your upload bandwidth.</help>
+    </field>
+    <field>
+        <id>general.relaylimit</id>
+        <label>Relay limit (kbit/s)</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Bandwidth limit per relayed connection and direction. 0 = unlimited.</help>
+    </field>
+    <field>
         <id>general.maxdevices</id>
         <label>Maximum devices</label>
         <type>text</type>

@@ -1,6 +1,9 @@
 // LunaShare rendezvous server: introduces devices that share a room so they can connect peer-to-peer.
 // It only stores, per room: device id, display name, platform, identity public key, public + LAN endpoints.
-// It never relays chat or files. Rooms are 64-hex BLAKE2b hashes of (room name, password) computed by clients,
+// When two devices can't reach each other directly (both behind NATs that can't be punched: carrier-grade NAT,
+// strict firewalls) it can relay their UDP packets - those carry the end-to-end encrypted LunaShare protocol, so
+// the server sees only ciphertext. Relaying can be turned off or limited. Rooms are 64-hex BLAKE2b hashes of
+// (room name, password) computed by clients,
 // so the server never learns the password. An optional allow-list restricts which rooms may be used.
 #pragma once
 #include <atomic>
@@ -23,6 +26,9 @@ public:
         size_t maxDevices = 5000;
         size_t maxPerRoom = 64;
         std::set<std::string> allowedRooms;  // empty = any room
+        bool relay = true;                   // relay for devices that can't connect directly
+        int relayKbps = 0;                   // per relayed connection and direction, 0 = unlimited
+        size_t maxRelays = 64;
         std::function<void(const std::string&)> log;
     };
     ~RendezvousServer() { Stop(); }

@@ -1455,7 +1455,7 @@ void Engine::StartWan() {
     bool on;
     {
         auto lk = Lock();
-        on = settings.wanEnabled && !settings.wanServer.empty() && !settings.wanRoom.empty() && running_;
+        on = settings.wanEnabled && !settings.wanServer.empty() && running_;  // no room name: the server's shared room
         cfg.server = settings.wanServer;
         cfg.roomHash = RoomHash(settings.wanRoom, settings.wanPassword);
         cfg.id = settings.deviceId;
@@ -1463,6 +1463,7 @@ void Engine::StartWan() {
         cfg.platform = PlatformName();
         cfg.pub = identity_.PubHex();
         cfg.natpmp = settings.wanNatPmp;
+        cfg.relay = settings.wanRelay;
         cfg.localPort = (uint16_t)std::clamp(settings.wanLocalPort, 0, 65535);
         cfg.forwardedPort = (uint16_t)std::clamp(settings.wanForwardedPort, 0, 65535);
         for (auto& [id, p] : online) p.lastWan = 0;
@@ -2017,7 +2018,7 @@ void Engine::ApplySettings(const Settings& s) {
     // Restarting these joins their threads, which may be waiting for our lock: do it from the maintenance thread.
     if (running_ && (settings.discovery != old.discovery || settings.mdns != old.mdns || settings.displayName != old.displayName)) restartMdns_ = true;
     if (running_ && (settings.wanEnabled != old.wanEnabled || settings.wanServer != old.wanServer || settings.wanRoom != old.wanRoom ||
-                     settings.wanPassword != old.wanPassword || settings.wanNatPmp != old.wanNatPmp ||
+                     settings.wanPassword != old.wanPassword || settings.wanNatPmp != old.wanNatPmp || settings.wanRelay != old.wanRelay ||
                      settings.wanLocalPort != old.wanLocalPort || settings.wanForwardedPort != old.wanForwardedPort))
         restartWan_ = true;
     else if (running_ && settings.displayName != old.displayName)

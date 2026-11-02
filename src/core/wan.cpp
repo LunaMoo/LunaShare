@@ -9,6 +9,7 @@
 #include "ikcp.h"
 #include "monocypher.h"
 #include "platform.h"
+#include "upnp.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -163,13 +164,14 @@ struct Session {
     int64_t lastRecv = 0;
     std::string peerId;
     bool closed = false;
+    bool relayed = false;  // peer is the server, packets are 'Y'
 };
 
 int KcpOutput(const char* buf, int len, ikcpcb*, void* user) {
     Session* s = (Session*)user;
     char pkt[2048];
     if (len + 1 > (int)sizeof(pkt)) return -1;
-    pkt[0] = 'K';
+    pkt[0] = s->relayed ? 'Y' : 'K';
     memcpy(pkt + 1, buf, (size_t)len);
     sendto(s->udp, pkt, len + 1, 0, (sockaddr*)&s->peer, sizeof(s->peer));
     return 0;
@@ -180,7 +182,7 @@ struct Punch {
     bool initiator = false;
     std::vector<sockaddr_in> candidates;
     int64_t started = 0, lastSend = 0;
-    bool done = false;
+    bool done = false, relayAsked = false;
 };
 
 uint32_t ConvFromNonce(const std::string& n) {
@@ -212,6 +214,8 @@ void WanTransport::Loop() {
     getsockname(udp, (sockaddr*)&any, &al);
     uint16_t localPort = ntohs(any.sin_port);
 
+    // tests: pretend the NATs can't be punched (probes ignored), so the relay is used
+    const bool noDirect = getenv("LUNASHARE_TEST_NO_DIRECT") != nullptr;
     std::map<uint32_t, std::unique_ptr<Session>> sessions;
     std::map<std::string, Punch> punches;
     sockaddr_in server{};
@@ -237,6 +241,12 @@ void WanTransport::Loop() {
         }
         sendto(udp, (const char*)req, len, 0, (const sockaddr*)&gw, sizeof(gw));
     };
+
+    // UPnP IGD as well (more home routers speak it than NAT-PMP); runs on its own thread
+    UpnpMapper upnp;
+    std::string upnpEp;
+    int64_t upnpCheck = 0;
+    if (cfg_.natpmp) upnp.Start(localPort);
 
     auto send = [&](const sockaddr_in& to, char type, const std::string& body) {
         std::string pkt(1, type);
@@ -271,11 +281,12 @@ void WanTransport::Loop() {
         for (auto& a : LocalIPv4Addresses()) locals.push_back(a.ip + ":" + std::to_string(localPort));
         json extra = json::array();
         if (!natExtIp.empty() && natExtPort) extra.push_back(natExtIp + ":" + std::to_string(natExtPort));
+        if (!upnpEp.empty() && (extra.empty() || extra[0] != upnpEp)) extra.push_back(upnpEp);
         json j;
         {
             std::lock_guard<std::mutex> l(m_);
             j = {{"t", "reg"}, {"v", 1}, {"room", cfg_.roomHash}, {"id", cfg_.id}, {"name", cfg_.name}, {"pf", cfg_.platform},
-                 {"pub", cfg_.pub}, {"local", locals}, {"extra", extra}, {"fwd", cfg_.forwardedPort}};
+                 {"pub", cfg_.pub}, {"local", locals}, {"extra", extra}, {"fwd", cfg_.forwardedPort}, {"relay", cfg_.relay}};
             nameChanged_ = false;
         }
         send(server, 'R', j.dump());
@@ -294,7 +305,7 @@ void WanTransport::Loop() {
         sessions.erase(it);
         sessions_ = (int)sessions.size();
     };
-    auto openSession = [&](uint32_t conv, const sockaddr_in& peer, const std::string& peerId, bool initiator) {
+    auto openSession = [&](uint32_t conv, const sockaddr_in& peer, const std::string& peerId, bool initiator, bool relayed) {
         if (sessions.count(conv)) return;
         SocketHandle pair[2];
         if (!LocalSocketPair(pair)) return;
@@ -305,6 +316,7 @@ void WanTransport::Loop() {
         s->local = pair[0];
         s->peerId = peerId;
         s->lastRecv = SteadyMs();
+        s->relayed = relayed;
         SetNonBlock(s->local);
         s->kcp = ikcp_create(conv, s.get());
         s->kcp->output = KcpOutput;
@@ -314,7 +326,7 @@ void WanTransport::Loop() {
         ikcp_wndsize(s->kcp, 1024, 1024);
         sessions[conv] = std::move(s);
         sessions_ = (int)sessions.size();
-        if (onSocket_) onSocket_(pair[1], peerId, EpStr(peer), initiator);
+        if (onSocket_) onSocket_(pair[1], peerId, relayed ? "relay" : EpStr(peer), initiator);
     };
 
     SetStatus("connecting to server");
@@ -328,6 +340,16 @@ void WanTransport::Loop() {
         {
             std::lock_guard<std::mutex> l(m_);
             renamed = nameChanged_;
+        }
+        if (cfg_.natpmp && now - upnpCheck > 2000) {
+            upnpCheck = now;
+            std::string m = upnp.Mapping();
+            if (m != upnpEp) {
+                upnpEp = m;
+                lastReg = -100000;  // tell the server about the new way in
+                std::lock_guard<std::mutex> l(m_);
+                if (natExtPort == 0) mappedEp_ = m;
+            }
         }
         if (now - lastReg > 15000 || renamed) {
             registerNow();
@@ -367,6 +389,12 @@ void WanTransport::Loop() {
         for (auto it = punches.begin(); it != punches.end();) {
             Punch& p = it->second;
             if (p.done || now - p.started > 15000) { it = punches.erase(it); continue; }
+            // no direct path after a few seconds: ask the server to relay (the dialling side asks; keeps punching
+            // meanwhile - whichever comes first is used)
+            if (p.initiator && !p.relayAsked && cfg_.relay && serverOk && now - p.started > 5000) {
+                p.relayAsked = true;
+                send(server, 'R', json{{"t", "relay"}, {"to", p.peerId}, {"nonce", p.nonce}, {"conv", ConvFromNonce(p.nonce)}}.dump());
+            }
             if (now - p.lastSend > 250) {
                 std::string body = json{{"n", p.nonce}, {"id", cfg_.id}}.dump();
                 for (auto& c : p.candidates) send(c, 'P', body);
@@ -466,10 +494,20 @@ void WanTransport::Loop() {
                         if (l.is_string() && EpParse(l.get<std::string>(), a)) p.candidates.push_back(a);
                     p.started = now;
                     if (!p.nonce.empty() && !p.peerId.empty() && !sessions.count(ConvFromNonce(p.nonce))) punches[p.nonce] = p;
+                } else if (t == "relayed") {
+                    std::string nonce = j.value("nonce", "");
+                    uint32_t conv = j.value("conv", 0u);
+                    std::string peerId = j.value("peer", "");
+                    auto it = punches.find(nonce);
+                    // only for a connection we're actually setting up with that device
+                    if (conv && conv == ConvFromNonce(nonce) && it != punches.end() && it->second.peerId == peerId && !sessions.count(conv)) {
+                        it->second.done = true;
+                        openSession(conv, server, peerId, j.value("initiator", false), true);
+                    }
                 } else if (t == "error") {
                     SetStatus("server: " + j.value("msg", std::string("error")));
                 }
-            } else if (type == 'P') {
+            } else if (type == 'P' && !noDirect) {
                 json j = json::parse(std::string(buf.data() + 1, (size_t)n - 1), nullptr, false);
                 if (j.is_discarded()) continue;
                 std::string nonce = j.value("n", "");
@@ -477,16 +515,23 @@ void WanTransport::Loop() {
                 auto it = punches.find(nonce);
                 if (it != punches.end() && !it->second.done && j.value("id", "") == it->second.peerId) {
                     it->second.done = true;  // first working path wins
-                    openSession(ConvFromNonce(nonce), from, it->second.peerId, it->second.initiator);
+                    openSession(ConvFromNonce(nonce), from, it->second.peerId, it->second.initiator, false);
                 }
             } else if (type == 'K' && n > 5) {
                 uint32_t conv = ikcp_getconv(buf.data() + 1);
                 auto it = sessions.find(conv);
                 if (it == sessions.end()) continue;
                 Session* s = it->second.get();
+                if (s->relayed) continue;
                 s->peer = from;  // follow NAT rebinding
                 s->lastRecv = now;
                 ikcp_input(s->kcp, buf.data() + 1, n - 1);
+            } else if (type == 'Y' && n > 5 && serverOk && SameEp(from, server)) {
+                uint32_t conv = ikcp_getconv(buf.data() + 1);
+                auto it = sessions.find(conv);
+                if (it == sessions.end() || !it->second->relayed) continue;
+                it->second->lastRecv = now;
+                ikcp_input(it->second->kcp, buf.data() + 1, n - 1);
             } else if (type == 'X' && n >= 5) {
                 uint32_t conv;
                 memcpy(&conv, buf.data() + 1, 4);
@@ -537,6 +582,7 @@ void WanTransport::Loop() {
     sessions_ = 0;
     if (serverOk) send(server, 'R', json{{"t", "bye"}, {"room", cfg_.roomHash}, {"id", cfg_.id}}.dump());
     if (natGwKnown && natExtPort) natRequest(natGw, 1, 0);  // release the router mapping
+    upnp.Stop();
     CloseSocket((SocketHandle)udp);
     SetStatus("off");
 }

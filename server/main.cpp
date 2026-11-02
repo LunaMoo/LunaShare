@@ -1,5 +1,6 @@
 // lunashare-rendezvous: optional server that lets LunaShare devices find each other over the internet.
-// Only introductions pass through it; chat and files go directly between the devices (end-to-end encrypted).
+// Introductions pass through it; chat and files go directly between the devices (end-to-end encrypted), or through
+// it as an encrypted relay when two devices can't reach each other directly.
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,8 @@ static void Usage() {
         "  -b, --bind ADDR        IPv4 address to listen on (default 0.0.0.0)\n"
         "  -r, --rooms FILE       only allow the room hashes listed in FILE (one per line, # comments)\n"
         "      --max-devices N    limit registered devices (default 5000)\n"
+        "      --no-relay         never relay connections (devices that can't connect directly then can't connect)\n"
+        "      --relay-limit KBPS bandwidth limit per relayed connection and direction (default: unlimited)\n"
         "  -q, --quiet            no log output\n"
         "      --hash-room NAME PASSWORD   print the hash of a room (for the --rooms file) and exit\n");
 }
@@ -34,6 +37,8 @@ int main(int argc, char** argv) {
         if (a == "-p" || a == "--port") o.port = (uint16_t)atoi(next().c_str());
         else if (a == "-b" || a == "--bind") o.bind = next();
         else if (a == "--max-devices") o.maxDevices = (size_t)atol(next().c_str());
+        else if (a == "--no-relay") o.relay = false;
+        else if (a == "--relay-limit") o.relayKbps = atoi(next().c_str());
         else if (a == "-q" || a == "--quiet") quiet = true;
         else if (a == "--hash-room" && i + 2 < argc) {
             printf("%s\n", ls::RoomHash(argv[i + 1], argv[i + 2]).c_str());
