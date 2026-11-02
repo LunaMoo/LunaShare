@@ -410,7 +410,7 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
     };
     static int curGroup = 0;
     if (iconButton("##recent", "\xF0\x9F\x95\x98", curGroup == -1)) scrollToGroup_ = -1, search_.clear();
-    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Recently used"));
+    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Recently used"));
     for (int g = 0; g < groups; g++) {
         ImGui::SameLine();
         ImGui::PushID(g);
@@ -421,7 +421,7 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
     ImGui::SameLine();
     static const char* hand = "\xE2\x9C\x8B";
     if (iconButton("##tone", WithTone(hand, tone), false)) ImGui::OpenPopup("tones");
-    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Skin tone"));
+    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Skin tone"));
     if (ImGui::BeginPopup("tones")) {
         for (int t = 0; t <= 5; t++) {
             if (t) ImGui::SameLine();
@@ -549,7 +549,7 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
             }
         }
     }
-    if (rows.empty()) ImGui::TextDisabled(T("No emoji found"));
+    if (rows.empty()) ImGui::TextDisabled("%s", T("No emoji found"));
     ImGui::EndChild();
     ImGui::EndChild();
     return chosen;

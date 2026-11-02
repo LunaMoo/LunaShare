@@ -123,7 +123,7 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + barW);
         ImGui::TextDisabled("%s", label.c_str());
         ImGui::PopTextWrapPos();
-        if (meta.done && !meta.ok) ImGui::TextDisabled(T("can't play this file here"));
+        if (meta.done && !meta.ok) ImGui::TextDisabled("%s", T("can't play this file here"));
         ImGui::EndGroup();
         ImGui::PopID();
     }
@@ -522,7 +522,7 @@ void App::DrawViewer() {
             float h = aw * 0.275f, t = std::max(1.5f, aw * 0.55f * 0.11f) * 1.3f;
             ImVec2 pts[3] = {ImVec2(cc.x - h * 0.35f, cc.y - h * 0.7f), ImVec2(cc.x + h * 0.35f, cc.y), ImVec2(cc.x - h * 0.35f, cc.y + h * 0.7f)};
             dl->AddPolyline(pts, 3, IM_COL32(240, 240, 240, 255), 0, t);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Next (Right)"));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Next (Right)"));
             ImGui::PopID();
             if (nx) ViewerGo(1);
         }

@@ -435,7 +435,7 @@ bool FileBrowser::Draw() {
     if (resetScroll_) { ImGui::SetScrollY(0); resetScroll_ = false; }
     if (!error_.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", error_.c_str());
     std::string navigateTo;
-    if (entries_.empty()) ImGui::TextDisabled(prefs.picturesOnly ? T("No pictures or folders here.") : T("This folder is empty."));
+    if (entries_.empty()) ImGui::TextDisabled("%s", prefs.picturesOnly ? T("No pictures or folders here.") : T("This folder is empty."));
     else if (prefs.grid && mode_ != Mode::SelectDir) DrawGrid(navigateTo, confirmed);
     else DrawList(navigateTo, confirmed);
     ImGui::EndChild();
@@ -454,7 +454,7 @@ bool FileBrowser::Draw() {
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
         if (!selected_.empty()) ImGui::TextDisabled("%d - %s", (int)selected_.size(), FormatBytes((double)SelectedBytes()).c_str());
-        else ImGui::TextDisabled(T("Tap to select"));
+        else ImGui::TextDisabled("%s", T("Tap to select"));
     }
     if (mode_ == Mode::SaveFile) {
         ImGui::SetNextItemWidth(-1);

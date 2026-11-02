@@ -541,7 +541,7 @@ void App::DrawSidebar() {
     ImGui::BeginChild("peers", ImVec2(0, -footer));
     if (peers.empty()) {
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled(T("Looking for devices on your network...\n\nStart LunaShare on another device in the same Wi-Fi/LAN (or phone hotspot). It appears here automatically."));
+        ImGui::TextDisabled("%s", T("Looking for devices on your network...\n\nStart LunaShare on another device in the same Wi-Fi/LAN (or phone hotspot). It appears here automatically."));
         ImGui::PopTextWrapPos();
     }
     for (auto& p : peers) {
@@ -665,7 +665,7 @@ void App::DrawMobileHome() {
     if (peers.empty()) {
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled(T("Looking for devices...\n\nOpen LunaShare on another phone or computer connected to the same Wi-Fi. "
+        ImGui::TextDisabled("%s", T("Looking for devices...\n\nOpen LunaShare on another phone or computer connected to the same Wi-Fi. "
                             "No Wi-Fi? Use Connect > Hotspot or Bluetooth."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
@@ -732,12 +732,12 @@ void App::DrawChat(const std::string& peer) {
     auto conn = eng.ReadyConn(peer);
     if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
                                       conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
-    else if (eng.online.count(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), T("online - connecting..."));
-    else ImGui::TextDisabled(T("offline - messages and files are queued"));
+    else if (eng.online.count(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
+    else ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
     if (d != eng.devices.end() && !d->second.pendingKey.empty()) {
         ImGui::SameLine();
         ui::Badge(T("KEY CHANGED"), ui::ColErr());
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("This device presented a different identity key. Review it in the device details."));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("This device presented a different identity key. Review it in the device details."));
     } else if (connected) {
         ImGui::SameLine();
         bool verified = d != eng.devices.end() && d->second.verified;
@@ -885,7 +885,7 @@ void App::DrawChat(const std::string& peer) {
         if (emojiOpen) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetColorU32(ImGuiCol_ButtonActive));
         if (ImGui::Button("##emojibtn", ImVec2(bw, inputH))) emojiOpen = !emojiOpen;
         if (emojiOpen) ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Emoji"));
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Emoji"));
         std::string g = Emoji().Glyph("\xF0\x9F\x99\x82");
         float es = std::min(bw, inputH) * 0.55f;
         ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(es, FLT_MAX, 0, g.c_str());
@@ -904,7 +904,7 @@ void App::DrawChat(const std::string& peer) {
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap |
                                               ImGuiInputTextFlags_CallbackEdit | ImGuiInputTextFlags_CallbackAlways,
                                           EmojiHost::InputCallback);
-    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Enter = send, Ctrl+Enter = new line, drop files to send"));
+    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Enter = send, Ctrl+Enter = new line, drop files to send"));
     ImGui::SameLine();
     if (showVmsg) {
         if (ui::IconButton("vmsg", Icon::Video, T("Record a video message"), inputH)) {
@@ -934,7 +934,7 @@ void App::DrawChat(const std::string& peer) {
             if (!Media().StartRecording(recPath))
                 toasts.push_back({EventType::Error, T("Microphone"), T("Could not start recording (microphone permission?)"), "", 0, 4.0f});
         }
-        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Record a voice message"));
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Record a voice message"));
     } else if (ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH))) send = true;
     if (send) {
         std::string t = chatInput;
@@ -1053,7 +1053,7 @@ void App::DrawDeleteConfirm(const std::string& peer) {
     if (deleteEveryoneOk)
         ImGui::TextDisabled(T("\"For everyone\" also removes it from %s (as soon as that device is reachable)."), eng.PeerName(peer).c_str());
     else
-        ImGui::TextDisabled(T("Messages you received can only be deleted on this device."));
+        ImGui::TextDisabled("%s", T("Messages you received can only be deleted on this device."));
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     auto done = [&] {
@@ -1075,7 +1075,7 @@ void App::DrawDeleteConfirm(const std::string& peer) {
 void App::DrawMessages(const std::string& peer) {
     auto it = eng.chats.find(peer);
     if (it == eng.chats.end() || it->second.messages.empty()) {
-        ImGui::TextDisabled(T("No messages yet. Say hi or drop some files here."));
+        ImGui::TextDisabled("%s", T("No messages yet. Say hi or drop some files here."));
         return;
     }
     Conversation& cv = it->second;
@@ -1306,7 +1306,7 @@ bool App::QuickReactionRow(const std::string& peer, const std::string& mid, cons
         }
         if (ImGui::IsItemHovered()) {
             dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), ImGui::GetColorU32(ImGuiCol_HeaderHovered), s * 0.5f);
-            if (!mobile) ImGui::SetTooltip(T("More emoji"));
+            if (!mobile) ImGui::SetTooltip("%s", T("More emoji"));
         }
         ui::DrawIcon(dl, Icon::Plus, ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.45f, ImGui::GetColorU32(ImGuiCol_Text));
     } else {
@@ -1333,7 +1333,7 @@ void App::ReactHoverButton(const ChatMessage& m, ImVec2 b0, ImVec2 b1) {
         openReactPick = true;
     }
     bool hov = ImGui::IsItemHovered();
-    if (hov) ImGui::SetTooltip(T("React"));
+    if (hov) ImGui::SetTooltip("%s", T("React"));
     ImGui::PopID();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddCircleFilled(ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.5f, ImGui::GetColorU32(hov ? ImGuiCol_ButtonHovered : ImGuiCol_Button));
@@ -1483,7 +1483,7 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
     ImGui::TextUnformatted(Emoji().Display(m.text).c_str());
     ImGui::PopTextWrapPos();
     if (items.empty()) {
-        ImGui::TextDisabled(T("(transfer details removed)"));
+        ImGui::TextDisabled("%s", T("(transfer details removed)"));
         return;
     }
     ImGui::TextDisabled("%s  -  %s", TF(m.outgoing ? "Sending %s" : "Receiving %s", FormatBytes((double)total).c_str()).c_str(),
@@ -1679,7 +1679,7 @@ void App::DrawTransfers() {
     });
     if (list.empty()) {
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled(T("No transfers. Drop files on the window or use the + button in a chat."));
+        ImGui::TextDisabled("%s", T("No transfers. Drop files on the window or use the + button in a chat."));
         ImGui::PopTextWrapPos();
         return;
     }
@@ -1776,7 +1776,7 @@ void App::DrawHistory() {
         rows.push_back(i);
     }
     if (rows.empty()) {
-        ImGui::TextDisabled(eng.history.empty() ? T("Files you send or receive will be listed here so you can share them again.") : T("No matches."));
+        ImGui::TextDisabled("%s", eng.history.empty() ? T("Files you send or receive will be listed here so you can share them again.") : T("No matches."));
         return;
     }
     ImGui::BeginChild("hlist");
@@ -1819,7 +1819,7 @@ void App::DrawHistory() {
             ImGui::TextUnformatted(e.name.c_str());
             ImGui::TextDisabled("%s %s  -  %s  -  %s %s", e.outgoing ? T("Sent to") : T("From"), eng.PeerName(e.peer).c_str(), FormatBytes((double)e.size).c_str(),
                                 FormatTime(e.ts).c_str(), e.verified ? T("- verified") : "");
-            if (!FileExists(e.path)) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColWarn()), T("File moved or deleted"));
+            if (!FileExists(e.path)) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColWarn()), "%s", T("File moved or deleted"));
             else if (ImageCache::IsImagePath(e.path)) {
                 const ImageTex& t = Images().Get(e.path, false);
                 if (t.state == ImageTex::Ready) {
@@ -1889,7 +1889,7 @@ void App::DrawDevices() {
     bool mobile = ui::M().mobile;
     auto peers = SortedPeers();
     if (peers.empty()) {
-        ImGui::TextDisabled(T("No devices yet."));
+        ImGui::TextDisabled("%s", T("No devices yet."));
         return;
     }
     if (mobile) {
@@ -1917,7 +1917,7 @@ void App::DrawDeviceDetails(const std::string& peer) {
     if (it == eng.devices.end()) {
         auto o = eng.online.find(peer);
         ImGui::Text("%s", o != eng.online.end() ? o->second.name.c_str() : peer.c_str());
-        ImGui::TextDisabled(T("Seen on the network but never connected."));
+        ImGui::TextDisabled("%s", T("Seen on the network but never connected."));
         if (ui::IconTextButton(T("Connect"), Icon::Link, ImVec2(0, h))) eng.ConnectPeer(peer);
         return;
     }
@@ -1954,10 +1954,10 @@ void App::DrawDeviceDetails(const std::string& peer) {
     }
     ImGui::SeparatorText(T("Security"));
     if (d.pubKey.empty()) {
-        ImGui::TextDisabled(T("No identity key yet - it is exchanged on the first connection."));
+        ImGui::TextDisabled("%s", T("No identity key yet - it is exchanged on the first connection."));
     } else {
         std::string safety = SafetyNumber(eng.MyPublicKey(), d.pubKey);
-        ImGui::TextDisabled(T("Safety number (identical on both devices when nobody is in between):"));
+        ImGui::TextDisabled("%s", T("Safety number (identical on both devices when nobody is in between):"));
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.35f);
         ImGui::TextUnformatted(safety.substr(0, 17).c_str());
         ImGui::TextUnformatted(safety.size() > 18 ? safety.substr(18).c_str() : "");
@@ -2000,7 +2000,7 @@ void App::DrawDeviceDetails(const std::string& peer) {
         row(T("Shared"), TF("%d sent, %d received (%s)", (int)sent, (int)recv, FormatBytes((double)bytes).c_str()));
         ImGui::EndTable();
     }
-    ImGui::TextDisabled(T("Click a value to copy it."));
+    ImGui::TextDisabled("%s", T("Click a value to copy it."));
     ImGui::Spacing();
     ImGui::TextUnformatted(T("Notes"));
     std::string notes = d.notes;
@@ -2066,14 +2066,14 @@ void App::DrawNearby() {
         ImGui::SameLine();
         ImGui::TextDisabled("(%s)", a.iface.c_str());
     }
-    if (addrs.empty()) ImGui::TextDisabled(T("No network connection."));
-    ImGui::TextDisabled(T("Devices on the same network find each other automatically:"));
+    if (addrs.empty()) ImGui::TextDisabled("%s", T("No network connection."));
+    ImGui::TextDisabled("%s", T("Devices on the same network find each other automatically:"));
     ImGui::BulletText(T("Bonjour / mDNS (_lunashare._tcp): %s"), eng.settings.discovery && eng.settings.mdns ? eng.MdnsStatus().c_str() : "off");
     ImGui::BulletText(T("UDP broadcast beacons (port %u): %s"), kDiscoveryPort, eng.settings.discovery && eng.settings.broadcast ? "on" : "off");
     ImGui::BulletText(T("Internet rendezvous: %s"), eng.settings.wanEnabled ? TDynamic(eng.WanStatus()).c_str() : T("off (Settings > Advanced > Internet)"));
     if (ui::IconTextButton(T("Search again"), Icon::Retry, ImVec2(0, h))) eng.RefreshDiscovery();
     if (!eng.online.empty()) {
-        ImGui::TextDisabled(T("Found on the network:"));
+        ImGui::TextDisabled("%s", T("Found on the network:"));
         for (auto& [id, p] : eng.online) {
             if (p.OnLan()) ImGui::BulletText("%s  %s:%u", eng.PeerName(id).c_str(), p.ip.c_str(), p.port);
             else ImGui::BulletText("%s", eng.PeerName(id).c_str());
@@ -2113,7 +2113,7 @@ void App::DrawNearby() {
             if (bt && Bridge().requestPermissions) Bridge().requestPermissions();
         }
         ImGui::TextDisabled("%s", eng.btStatus.c_str());
-        ImGui::TextDisabled(T("Pair the devices in the system Bluetooth settings first. Bluetooth is slow (~100-300 KB/s) - good for chat, small files, or handing over hotspot credentials."));
+        ImGui::TextDisabled("%s", T("Pair the devices in the system Bluetooth settings first. Bluetooth is slow (~100-300 KB/s) - good for chat, small files, or handing over hotspot credentials."));
         if (ui::IconTextButton(eng.btScanning ? T("Searching...") : T("Paired devices"), Icon::Bluetooth, ImVec2(0, h)) && !eng.btScanning) eng.BtRefresh(false);
         ImGui::SameLine();
         if (ui::IconTextButton(T("Scan nearby"), Icon::Retry, ImVec2(0, h)) && !eng.btScanning) eng.BtRefresh(true);
@@ -2132,7 +2132,7 @@ void App::DrawNearby() {
     // ---- hotspot
     ImGui::SeparatorText(T("Phone-to-phone (Wi-Fi hotspot)"));
     ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled(T("No shared Wi-Fi? One phone starts a hotspot, the other joins it - then they find each other automatically "
+    ImGui::TextDisabled("%s", T("No shared Wi-Fi? One phone starts a hotspot, the other joins it - then they find each other automatically "
                         "at full Wi-Fi speed. The other phone can join by scanning the QR code with its camera, or automatically "
                         "when both are connected over Bluetooth."));
     ImGui::PopTextWrapPos();
@@ -2168,7 +2168,7 @@ void App::DrawNearby() {
 #ifdef _WIN32
         if (ImGui::Button(T("Open Windows Mobile hotspot settings"))) OpenWithDefaultApp("ms-settings:network-mobilehotspot");
 #endif
-        ImGui::TextDisabled(T("Sharing this computer's hotspot? Enter its name and password to show a QR code phones can scan:"));
+        ImGui::TextDisabled("%s", T("Sharing this computer's hotspot? Enter its name and password to show a QR code phones can scan:"));
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12);
         ImGui::InputTextWithHint("##qssid", T("SSID"), &qrSsid);
         ImGui::SameLine();
@@ -2316,7 +2316,7 @@ void App::DrawSettings() {
 
         ImGui::SeparatorText(T("Internet"));
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled(T("Devices that use the same server, room name and password see each other. Without a room name, every "
+        ImGui::TextDisabled("%s", T("Devices that use the same server, room name and password see each other. Without a room name, every "
                             "device on the server is in one shared room - set a name and password to keep your devices to yourself."));
         ImGui::PopTextWrapPos();
         changed |= ImGui::Checkbox(T("Use the rendezvous server"), &edit.wanEnabled);
@@ -2365,7 +2365,7 @@ void App::DrawSettings() {
 
         ImGui::SeparatorText(T("Backup / move to another device"));
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled(T("Exports all settings plus your list of known devices with their nicknames, trust and block state."));
+        ImGui::TextDisabled("%s", T("Exports all settings plus your list of known devices with their nicknames, trust and block state."));
         ImGui::PopTextWrapPos();
         ImGui::Checkbox(T("Include chat & shared files history"), &exportHistory);
         ImGui::Checkbox(T("Include this device's identity (only for restoring THIS device)"), &exportIdentity);
@@ -2386,8 +2386,8 @@ void App::DrawSettings() {
     ImGui::SeparatorText(T("About"));
     ImGui::TextDisabled(T("LunaShare 0.1  -  %s  -  protocol v%d"), PlatformName(), kProtocolVersion);
     ImGui::TextDisabled(T("Settings folder: %s"), (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());
-    ImGui::TextDisabled(T("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts."));
-    ImGui::TextDisabled(T("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact)."));
+    ImGui::TextDisabled("%s", T("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts."));
+    ImGui::TextDisabled("%s", T("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact)."));
     ImGui::TextDisabled(T("This device's key fingerprint: %s"), KeyFingerprint(eng.MyPublicKey()).c_str());
     ImGui::Dummy(ImVec2(0, h));
     ImGui::EndChild();
@@ -2489,7 +2489,7 @@ void App::DrawPopups() {
                 ImGui::CloseCurrentPopup();
             }
         }
-        if (peers.empty()) ImGui::TextDisabled(T("No devices known yet."));
+        if (peers.empty()) ImGui::TextDisabled("%s", T("No devices known yet."));
         ImGui::EndChild();
         if (ImGui::Button(T("Cancel"), ImVec2(mobile ? -1 : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             pendingSend.clear();
@@ -2502,7 +2502,7 @@ void App::DrawPopups() {
     if (openTextView) { ImGui::OpenPopup(T("Message text")); openTextView = false; }
     centerNext(0.5f);
     if (ImGui::BeginPopupModal(T("Message text"), nullptr, 0)) {
-        ImGui::TextDisabled(T("Select any part of the text and press Ctrl+C, or copy everything:"));
+        ImGui::TextDisabled("%s", T("Select any part of the text and press Ctrl+C, or copy everything:"));
         ImGui::InputTextMultiline("##tv", &textViewBuf, ImVec2(-1, ImGui::GetTextLineHeight() * (mobile ? 12 : 10)), ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
         if (ImGui::Button(T("Copy all"), ImVec2(0, h))) ImGui::SetClipboardText(textViewBuf.c_str());
         ImGui::SameLine();
@@ -2539,7 +2539,7 @@ void App::DrawPopups() {
             if (ImGui::Button(T("Join now"), ImVec2(0, h))) { Bridge().wifiJoin(o.ssid, o.pass); wifiOffers.erase(wifiOffers.begin()); ImGui::CloseCurrentPopup(); }
             ImGui::SameLine();
         } else {
-            ImGui::TextDisabled(T("Join this network in your system Wi-Fi settings."));
+            ImGui::TextDisabled("%s", T("Join this network in your system Wi-Fi settings."));
         }
         if (ImGui::Button(T("Copy password"), ImVec2(0, h))) ImGui::SetClipboardText(o.pass.c_str());
         ImGui::SameLine();
@@ -2982,9 +2982,9 @@ bool App::VideoQualityControls(Settings& s, float w, float h) {
     ImGui::TextDisabled(T("Up to about %s.%s"), MediaHost::RateText(p.bitrate).c_str(),
                         p.bitrate > 20000000 ? T(" Needs fast Wi-Fi or a cable.") : p.height >= 1080 || p.fps >= 60 ? T(" Best on Wi-Fi.") : "");
     if (s.callVideoFps > 60 || s.callVideoRes >= 4)
-        ImGui::TextDisabled(T("If a camera can't do this, the closest it can do is sent."));
+        ImGui::TextDisabled("%s", T("If a camera can't do this, the closest it can do is sent."));
     if (s.callVideoRes >= 6)
-        ImGui::TextDisabled(T("8K in H.264: if the receiving device can't decode it, it asks for 4K instead."));
+        ImGui::TextDisabled("%s", T("8K in H.264: if the receiving device can't decode it, it asks for 4K instead."));
     return changed;
 }
 
@@ -3053,7 +3053,7 @@ void App::DrawCameraPanel() {
         Media().ApplyVideoQuality();
     }
     ImGui::Separator();
-    if (camCtl.empty()) ImGui::TextDisabled(T("This camera has no adjustable settings."));
+    if (camCtl.empty()) ImGui::TextDisabled("%s", T("This camera has no adjustable settings."));
     if (LsvControl* z = find(LSV_CTL_ZOOM)) {
         float v = z->value;
         ImGui::SetNextItemWidth(w);
@@ -3107,7 +3107,7 @@ void App::DrawCameraPanel() {
         float v = fo->value;
         ImGui::SetNextItemWidth(w);
         if (ImGui::SliderFloat("##focus", &v, fo->min, fo->max, T("Focus %.1f"))) set(fo, v);
-        if (mobile) ImGui::TextDisabled(T("Left = far away, right = close up"));
+        if (mobile) ImGui::TextDisabled("%s", T("Left = far away, right = close up"));
     }
     if (LsvControl* wb = find(LSV_CTL_WHITE_BALANCE)) {
         static const char* names[] = {"Auto", "Daylight", "Cloudy", "Shade", "Tungsten (indoor lamps)", "Fluorescent"};
