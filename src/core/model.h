@@ -65,6 +65,8 @@ struct Settings {
     std::string callInputDevice, callOutputDevice;  // empty = system default
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list
+    std::string emojiRecent;       // emoji picker: recently used, '\n' separated
+    int emojiTone = 0;             // emoji picker: skin tone 0 (none) .. 5
     bool browserPicturesOnly = false;
     int browserSort = 0;           // 0 name, 1 newest first, 2 largest first
     int browserTile = 130;         // tile size (unscaled px)

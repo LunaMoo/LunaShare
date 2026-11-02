@@ -41,6 +41,7 @@ struct HostBridge {
     std::function<void*()> javaVm;
     std::function<void*()> videoClass;
     std::function<void*()> playerClass;  // global ref to PlayerEngine (all builds)
+    std::function<void*()> emojiClass;   // global ref to EmojiRenderer (all builds)
 };
 HostBridge& Bridge();
 

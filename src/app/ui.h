@@ -124,6 +124,7 @@ private:
     std::string recPath, recPeer;  // voice / video message being recorded
     void DrawVideoMessage(const std::string& peer, float inputH);
     int vmsgCams = 0;
+    bool emojiOpen = false;  // emoji panel under the messages
     std::vector<std::string> deleteMids;  // waiting for confirmation
     bool deleteEveryoneOk = false;        // all of them are ours, so "delete for everyone" is possible
     bool openDeleteConfirm = false;

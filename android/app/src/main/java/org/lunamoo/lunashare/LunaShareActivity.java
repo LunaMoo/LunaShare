@@ -191,6 +191,7 @@ public class LunaShareActivity extends SDLActivity {
 
     /** Plays audio/video files in chat (all builds). */
     public static Class<?> playerClass() { return PlayerEngine.class; }
+    public static Class<?> emojiClass() { return EmojiRenderer.class; }
 
     /** The video call engine class, present only in the "calls" build. */
     public static Class<?> videoClass() {

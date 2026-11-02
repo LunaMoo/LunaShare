@@ -83,6 +83,16 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 
 ![Video in chat](docs/player.png)
 
+**Emoji (optional emoji module)**
+- Colour emoji in messages, drawn with the system's own emoji font, so they look like everywhere else on that device:
+  Segoe UI Emoji through DirectWrite on Windows, the phone's emoji font on Android, and Noto Color Emoji (or any colour
+  emoji font) through FreeType on Linux. Sequences work: skin tones, families and other ZWJ emoji, flags, keycaps.
+- The smiley button left of the text box opens a picker with categories, search, recently used emoji and a skin tone
+  choice. Emoji typed or pasted from the phone keyboard turn into pictures right away.
+- A message of only one to three emoji is shown big.
+- The module (`lunashare_emoji`) is tiny, because it ships no font. It is in both Android APKs; without it emoji
+  show as before.
+
 **Voice messages (needs the voice module)**
 - With nothing typed, the Send button becomes **Voice**. Tap it to record: the bar shows a timer and a level meter, with
   **Discard** and **Send**. Recordings are Opus in Ogg (about 3 KB per second, noise-suppressed and levelled), up to 10 minutes,

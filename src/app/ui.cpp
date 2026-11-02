@@ -11,6 +11,7 @@
 #include "image_cache.h"
 #include "media_host.h"
 #include "player_host.h"
+#include "emoji_host.h"
 #include "wan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -58,6 +59,8 @@ App::App(Engine& e) : eng(e) {
     browser.prefs.picturesOnly = eng.settings.browserPicturesOnly;
     browser.prefs.sort = eng.settings.browserSort;
     browser.prefs.tile = eng.settings.browserTile;
+    Emoji().recent = eng.settings.emojiRecent;
+    Emoji().tone = eng.settings.emojiTone;
 }
 
 bool App::IsMobileLayout() {
@@ -136,6 +139,8 @@ void App::Frame() {
             }
     }
 
+    static bool emojiPanelEnv = getenv("LUNASHARE_EMOJIPANEL") != nullptr;  // dev: start with the emoji panel open
+    if (emojiPanelEnv) emojiOpen = true, emojiPanelEnv = false;
     static const char* autoRec = getenv("LUNASHARE_AUTOREC");  // dev: start a voice ("1") or video ("video") message
     static bool autoRecDone = false;
     if (autoRec && !autoRecDone && !selectedPeer.empty() && Media().CanRecordMessages()) {
@@ -788,11 +793,26 @@ void App::DrawChat(const std::string& peer) {
         DrawVideoMessage(peer, inputH);
         return;
     }
-    ImGui::BeginChild("messages", ImVec2(0, -(inputH + ImGui::GetStyle().ItemSpacing.y * 2)), ImGuiChildFlags_None);
+    if (!Emoji().Available()) emojiOpen = false;
+    float pickerH = 0;
+    if (emojiOpen) {
+        float availY = ImGui::GetContentRegionAvail().y;
+        pickerH = mobile ? availY * 0.5f : std::min(ImGui::GetFontSize() * 17, availY * 0.5f);
+    }
+    ImGui::BeginChild("messages", ImVec2(0, -(inputH + pickerH + ImGui::GetStyle().ItemSpacing.y * (emojiOpen ? 3 : 2))), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
     ImGui::EndChild();
     ImGui::Separator();
+    if (emojiOpen) {
+        std::string picked;
+        if (Emoji().DrawPicker(ImVec2(-1, pickerH), &picked)) {
+            // insert where the cursor was (the box isn't active while the picker is used)
+            size_t at = Emoji().InputCursor() >= 0 ? std::min((size_t)Emoji().InputCursor(), chatInput.size()) : chatInput.size();
+            chatInput.insert(at, picked);
+            Emoji().SetInputCursor((int)(at + picked.size()));  // the next one goes after it
+        }
+    }
 
     // input row
     float sendW = mobile ? ui::M().rowH * 1.4f : ImGui::GetFontSize() * 6;
@@ -833,15 +853,32 @@ void App::DrawChat(const std::string& peer) {
         DrawDeleteConfirm(peer);
         return;
     }
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - sendW - ImGui::GetStyle().ItemSpacing.x);
+    float emojiW = 0;
+    if (Emoji().Available()) {  // emoji panel toggle, left of the text box
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float bw = mobile ? inputH * 0.9f : inputH * 0.8f;
+        if (emojiOpen) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetColorU32(ImGuiCol_ButtonActive));
+        if (ImGui::Button("##emojibtn", ImVec2(bw, inputH))) emojiOpen = !emojiOpen;
+        if (emojiOpen) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Emoji");
+        std::string g = Emoji().Glyph("\xF0\x9F\x99\x82");
+        float es = std::min(bw, inputH) * 0.55f;
+        ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(es, FLT_MAX, 0, g.c_str());
+        ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), es, ImVec2(p.x + (bw - ts.x) * 0.5f, p.y + (inputH - ts.y) * 0.5f), IM_COL32_WHITE, g.c_str());
+        ImGui::SameLine();
+        emojiW = bw + ImGui::GetStyle().ItemSpacing.x;
+    }
     if (focusInput) {
         ImGui::SetKeyboardFocusHere();
         focusInput = false;
     }
     bool showVmsg = chatInput.empty() && Media().CanRecordVideoMessages() && !Media().Recording();
     float vmsgW = showVmsg ? inputH + ImGui::GetStyle().ItemSpacing.x : 0;
+    (void)emojiW;
     bool send = ImGui::InputTextMultiline("##input", &chatInput, ImVec2(ImGui::GetContentRegionAvail().x - sendW - vmsgW - ImGui::GetStyle().ItemSpacing.x, inputH),
-                                          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap);
+                                          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap |
+                                              ImGuiInputTextFlags_CallbackEdit | ImGuiInputTextFlags_CallbackAlways,
+                                          EmojiHost::InputCallback);
     if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Enter = send, Ctrl+Enter = new line, drop files to send");
     ImGui::SameLine();
     if (showVmsg) {
@@ -878,10 +915,11 @@ void App::DrawChat(const std::string& peer) {
         std::string t = chatInput;
         while (!t.empty() && (t.back() == '\n' || t.back() == ' ')) t.pop_back();
         if (!t.empty()) {
-            eng.SendChat(peer, t);
+            eng.SendChat(peer, Emoji().Restore(t));
             scrollToBottom = true;
         }
         chatInput.clear();
+        Emoji().SetInputCursor(-1);
         if (!mobile) focusInput = true;
     }
     DrawDeleteConfirm(peer);
@@ -1045,7 +1083,7 @@ void App::DrawMessages(const std::string& peer) {
         }
         if (m.kind == MsgKind::System) {
             ImGui::PushTextWrapPos(avail);
-            ImGui::TextDisabled("%s", m.text.c_str());
+            ImGui::TextDisabled("%s", Emoji().Display(m.text).c_str());
             ImGui::PopTextWrapPos();
             ImGui::PopID();
             continue;
@@ -1078,7 +1116,10 @@ void App::DrawMessages(const std::string& peer) {
             ImGui::Dummy(ImVec2(0, pad * 0.3f));
         } else {
             float wrap = maxW - pad * 2;
-            ImVec2 ts = ImGui::CalcTextSize(m.text.c_str(), nullptr, false, wrap);
+            const std::string& shown = Emoji().Display(m.text);
+            int bigEmoji = Emoji().EmojiOnly(m.text);  // only 1-3 emoji: show them big
+            float textSize = ImGui::GetFontSize() * (bigEmoji == 1 ? 2.6f : bigEmoji ? 2.0f : 1.0f);
+            ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(textSize, FLT_MAX, wrap, shown.c_str());
             std::string meta = FormatTime(m.ts, false) + (m.outgoing ? (m.delivered ? "  delivered" : "  queued") : "");
             ImVec2 ms = ImGui::CalcTextSize(meta.c_str());
             float smallScale = 0.8f;
@@ -1107,7 +1148,7 @@ void App::DrawMessages(const std::string& peer) {
                 }
             }
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
-                textViewBuf = m.text;
+                textViewBuf = Emoji().Display(m.text);
                 openTextView = true;
             }
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || longPress) {
@@ -1124,7 +1165,7 @@ void App::DrawMessages(const std::string& peer) {
                                           m.outgoing && !sel ? 0.55f : 1.0f);
             if (hovered && !sel) bg = ImGui::GetColorU32(m.outgoing ? ImGuiCol_ButtonActive : ImGuiCol_FrameBgHovered, m.outgoing ? 0.7f : 1.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), bg, pad);
-            dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(p0.x + pad, p0.y + pad * 0.7f), ImGui::GetColorU32(ImGuiCol_Text), m.text.c_str(), nullptr, wrap);
+            dl->AddText(ImGui::GetFont(), textSize, ImVec2(p0.x + pad, p0.y + pad * 0.7f), ImGui::GetColorU32(ImGuiCol_Text), shown.c_str(), nullptr, wrap);
             ImU32 metaCol = m.outgoing && !m.delivered ? ui::ColWarn() : ui::ColMuted();
             dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale,
                         ImVec2(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + ts.y + pad * 0.2f), metaCol, meta.c_str());
@@ -1145,7 +1186,7 @@ void App::DrawMessages(const std::string& peer) {
                 ImGui::SetClipboardText(text.c_str());
             }
             if (m.kind == MsgKind::Text && ImGui::Selectable("Select text...", false, 0, ImVec2(0, h))) {
-                textViewBuf = m.text;
+                textViewBuf = Emoji().Display(m.text);
                 openTextView = true;
             }
             bool s2 = selMsgs.count(m.mid) > 0;
@@ -1235,7 +1276,7 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
     ui::DrawIcon(dl, items.size() > 1 ? Icon::Folder : Icon::File, ImVec2(ip.x + ih * 0.5f, ip.y + ih * 0.5f), ih, ImGui::GetColorU32(ImGuiCol_Text));
     ImGui::SameLine();
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width - ih * 1.5f);
-    ImGui::TextUnformatted(m.text.c_str());
+    ImGui::TextUnformatted(Emoji().Display(m.text).c_str());
     ImGui::PopTextWrapPos();
     if (items.empty()) {
         ImGui::TextDisabled("(transfer details removed)");
@@ -2074,6 +2115,7 @@ void App::DrawSettings() {
     if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; styleGeneration++; }
     ImGui::SetNextItemWidth(fieldW);
     if (ImGui::Combo("##theme", &edit.theme, "Theme: dark\0Theme: light\0Theme: classic\0")) { changed = true; styleGeneration++; }
+    ImGui::TextDisabled(Emoji().Available() ? "Colour emoji: %s" : "Colour emoji: off (optional module %s)", Emoji().loadInfo.c_str());
 
     ImGui::SeparatorText("History & privacy");
     changed |= ImGui::Checkbox("Keep chat and shared-file history", &edit.keepHistory);
@@ -2136,6 +2178,13 @@ void App::DrawPopups() {
         s.browserTile = browser.prefs.tile;
         eng.ApplySettings(s);
         edit = eng.settings;
+    }
+    if (Emoji().settingsChanged) {  // picker: recent emoji / skin tone
+        Emoji().settingsChanged = false;
+        Settings s = eng.settings;
+        s.emojiRecent = edit.emojiRecent = Emoji().recent;
+        s.emojiTone = edit.emojiTone = Emoji().tone;
+        eng.ApplySettings(s);
     }
     if (browserDone) {
         auto res = browser.result;
@@ -2299,7 +2348,7 @@ void App::DrawToasts() {
         ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + 4, p.y + ImGui::GetWindowHeight()), col);
         ImGui::TextUnformatted(t.title.c_str());
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", t.text.c_str());
+        ImGui::TextDisabled("%s", Emoji().Display(t.text).c_str());
         ImGui::PopTextWrapPos();
         float bh = mobile ? ui::M().rowH * 0.8f : 0;
         if (t.type == EventType::IncomingOffer) {

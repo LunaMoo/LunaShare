@@ -104,6 +104,11 @@ int main(int argc, char** argv) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     e.SendChat(peer, u8"Zażółć gęślą jaźń - Polish characters work too. Long-press or right-click a message to copy it.");
     if (!other.empty()) e.SendPaths(peer, other);
+    if (getenv("DEMO_EMOJI")) {
+        e.SendChat(peer, u8"Emoji too \U0001F389 \U0001F44D\U0001F3FD family \U0001F468\u200D\U0001F469\u200D\U0001F467 flag \U0001F1F5\U0001F1F1 keycap 1\uFE0F\u20E3 and text \u00A9 stays text");
+        e.SendChat(peer, u8"\u2764\uFE0F");
+        e.SendChat(peer, u8"\U0001F602\U0001F602\U0001F525");
+    }
     int secs = getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30;
     std::this_thread::sleep_for(std::chrono::seconds(secs));
     e.Stop();

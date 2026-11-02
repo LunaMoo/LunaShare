@@ -58,7 +58,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
         {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"keepHistory", s.keepHistory},
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
-        {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
+        {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
         {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice},
@@ -107,6 +107,9 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "theme", s.theme);
     Get(j, "lastBrowseDir", s.lastBrowseDir);
     Get(j, "browserGrid", s.browserGrid);
+    Get(j, "emojiRecent", s.emojiRecent);
+    Get(j, "emojiTone", s.emojiTone);
+    if (s.emojiTone < 0 || s.emojiTone > 5) s.emojiTone = 0;
     Get(j, "browserPicturesOnly", s.browserPicturesOnly);
     Get(j, "browserSort", s.browserSort);
     Get(j, "browserTile", s.browserTile);

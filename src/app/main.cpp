@@ -16,6 +16,7 @@
 #include "ui_widgets.h"
 #include "media_host.h"
 #include "player_host.h"
+#include "emoji_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
 
@@ -235,6 +236,9 @@ int main(int argc, char** argv) {
 
     ls::Engine engine;
     AndroidBridgeInit(&engine);
+    Emoji().Load();          // optional colour emoji module (needs the Android bridge for the system font)
+    Emoji().AddToFont(io.Fonts);
+    Emoji().InstallClipboardHook();
     Player().Load();         // optional player module (audio/video files in chat)
     Media().Load();          // optional calls module; must happen before Start() so the capability is announced
     Media().Attach(&engine);

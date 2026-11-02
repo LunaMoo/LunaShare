@@ -192,6 +192,45 @@ if(LUNASHARE_BUILD_PLAYER)
     endif()
 endif()
 
+# ---------------------------------------------------------------- optional emoji module
+# lunashare_emoji: colour emoji drawn with the system's emoji font (Windows: DirectWrite, Android: android.graphics
+# via android/app/src/main/java/.../EmojiRenderer.java, elsewhere: FreeType) and the picker's emoji list.
+option(LUNASHARE_BUILD_EMOJI "Build the optional emoji module" ON)
+if(LUNASHARE_BUILD_EMOJI)
+    set(LSE_PLATFORM "")
+    if(WIN32)
+        set(LSE_PLATFORM modules/emoji/emoji_win.cpp)
+    elseif(ANDROID)
+        set(LSE_PLATFORM modules/emoji/emoji_android.cpp)
+    else()
+        find_package(Freetype QUIET)
+        if(FREETYPE_FOUND)
+            set(LSE_PLATFORM modules/emoji/emoji_ft.cpp)
+        endif()
+    endif()
+    if(LSE_PLATFORM)
+        add_library(lunashare_emoji SHARED modules/emoji/emoji_core.cpp ${LSE_PLATFORM})
+        set_target_properties(lunashare_emoji PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+        target_include_directories(lunashare_emoji PRIVATE src/media_api modules/emoji)
+        if(WIN32)
+            target_link_libraries(lunashare_emoji PRIVATE d2d1 dwrite windowscodecs ole32)
+            if(NOT MSVC)
+                target_link_options(lunashare_emoji PRIVATE -static)
+            endif()
+        elseif(ANDROID)
+            target_link_libraries(lunashare_emoji PRIVATE log)
+        else()
+            target_link_libraries(lunashare_emoji PRIVATE Freetype::Freetype)
+            if(APPLE)
+                target_link_options(lunashare_emoji PRIVATE -Wl,-exported_symbol,_lunashare_emoji_module)
+            else()
+                target_link_options(lunashare_emoji PRIVATE -Wl,--exclude-libs,ALL)
+            endif()
+        endif()
+    endif()
+endif()
+
 # ---------------------------------------------------------------- rendezvous server
 if(LUNASHARE_BUILD_SERVER AND NOT ANDROID AND NOT IOS)
     add_executable(lunashare-rendezvous server/main.cpp)
@@ -262,7 +301,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_viewer.cpp
         src/app/image_cache.cpp
         src/app/gl_funcs.cpp
-        src/app/media_host.cpp src/app/player_host.cpp
+        src/app/media_host.cpp src/app/player_host.cpp src/app/emoji_host.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp
         ${imgui_SOURCE_DIR}/imgui_draw.cpp
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
@@ -295,6 +334,7 @@ if(LUNASHARE_BUILD_APP)
         endif()
     endif()
 
+    target_compile_definitions(${APP_TARGET} PRIVATE IMGUI_USE_WCHAR32)  # emoji and other characters beyond U+FFFF
     target_include_directories(${APP_TARGET} PRIVATE src/app src/media_api ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends
         ${imgui_SOURCE_DIR}/misc/cpp ${qrcodegen_SOURCE_DIR}/cpp ${stb_SOURCE_DIR})
     if(LUNASHARE_GL_API STREQUAL "GLES3")
