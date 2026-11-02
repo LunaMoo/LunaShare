@@ -8,6 +8,7 @@
 #include "engine.h"
 #include "lunashare_media.h"
 #include "lunashare_video.h"
+#include "imgui.h"
 
 class MediaHost {
 public:
@@ -54,14 +55,25 @@ public:
     void SetControl(int id, float v);
     LsvStats VideoStats();
     void ApplyVideoQuality();                              // after the quality setting changed
-    static LsvSettings Preset(int quality, bool adaptive);
-    static const char* QualityName(int q);
+    static LsvSettings Preset(int res, int fps, bool adaptive);
+    static constexpr int kResCount = 6;
+    static const char* ResName(int r);       // "720p (1280x720)" ...
+    static const int* FpsList(int* n);       // 15, 24, 30, 60, 120
+    static std::string RateText(int bps);    // "5.0 Mbit/s"
     struct VideoTex {
-        unsigned tex = 0;
-        int w = 0, h = 0;
+        unsigned tex = 0;    // RGBA (CPU path) or the Y plane (GPU path)
+        unsigned uvTex = 0;  // GPU path: interleaved U/V plane
+        bool gpu = false;
+        int w = 0, h = 0;    // upright display size
+        int sw = 0, sh = 0;  // texture size
+        int rotation = 0;
+        bool mirror = false;
         bool valid = false;
         int64_t lastMs = 0;
     };
+    // Draws a video picture into [p0,p1]: fit (letterbox) or cover (crop). Converts YUV on the GPU when it can.
+    void DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover);
+    void SetGlsl(const char* glslVersion);  // after the GL context exists; enables the GPU path
     const VideoTex& RemoteVideo() const { return tex_[LSV_REMOTE]; }
     const VideoTex& LocalVideo() const { return tex_[LSV_LOCAL]; }
 
@@ -90,10 +102,17 @@ private:
     // video
     struct Slot {
         std::mutex m;
-        std::vector<uint8_t> rgba;
-        int w = 0, h = 0;
         bool fresh = false;
+        bool gpu = false;
+        std::vector<uint8_t> rgba;  // CPU path: upright RGBA, w x h
+        int w = 0, h = 0;
+        std::vector<uint8_t> y, uv; // GPU path: tight Y (sw x sh) and U/V pairs ((sw+1)/2 x (sh+1)/2)
+        int sw = 0, sh = 0, rotation = 0;
+        bool mirror = false;
     };
+    static void CopyPlanes(const LsvImage& img, Slot& s);
+    std::atomic<bool> gpuYuv_{false};
+    std::string glsl_;
     void LoadVideo();
     void StartVideo();
     void StopVideo();

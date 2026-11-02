@@ -221,6 +221,7 @@ int main(int argc, char** argv) {
     io.IniFilename = iniPath.c_str();
     ImGui_ImplSDL2_InitForOpenGL(window, gl);
     ImGui_ImplOpenGL3_Init(glsl);
+    Media().SetGlsl(glsl);  // video: YUV -> RGB in a shader
     LoadFonts();
 
     ls::Engine engine;

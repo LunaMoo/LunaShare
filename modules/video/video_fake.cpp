@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 
@@ -100,7 +101,8 @@ private:
                         uvp[(size_t)(y / 2) * w + x + 1] = ball ? 200 : (uint8_t)(180 - (y * 110) / h);
                     }
                 }
-            LsvImage im{w, h, yp.data(), uvp.data(), uvp.data() + 1, w, w, 2, 0, front_ ? 1 : 0};
+            int rot = getenv("LSV_FAKE_ROTATION") ? atoi(getenv("LSV_FAKE_ROTATION")) : 0;  // pretend to be a phone sensor
+            LsvImage im{w, h, yp.data(), uvp.data(), uvp.data() + 1, w, w, 2, rot, front_ ? 1 : 0};
             sink_->OnLocalImage(im);
             bool key = key_.exchange(false) || frame % (fps * 2) == 0;
             // "quality" follows the bitrate: the coarsest grid that fits it
@@ -127,7 +129,7 @@ private:
             ef.key = key;
             ef.width = w;
             ef.height = h;
-            ef.rotation = 0;
+            ef.rotation = rot;
             ef.mirror = front_;
             sink_->OnEncoded(ef);
             frame++;

@@ -94,8 +94,11 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   otherwise Microsoft's software encoder) and MediaCodec on Android (hardware).
 - **Android battery use:** the camera feeds the hardware encoder directly, so frames never pass through the CPU. The self-view is a
   small 15 fps stream, and the camera runs at a fixed frame rate.
-- **Quality:** pick Low (360p, 15 fps), Medium (540p, 24 fps), High (720p, 30 fps) or Full HD (1080p, 30 fps) in *Settings → Calls*
-  or during a call. With *Lower quality when the connection is slow* on, the bitrate follows what the link can actually carry
+- **Quality:** choose the resolution (360p, 540p, 720p, 1080p, 1440p or 4K) and frame rate (15, 24, 30, 60 or 120 fps) in *Settings → Calls*
+  or during a call. The bitrate follows from both: about 5 Mbit/s for 1080p at 30 fps, and about 60 Mbit/s for 4K at 120 fps, which needs fast Wi-Fi.
+  If a camera or encoder can't do a combination, the closest one it can do is sent, and the call stats show the actual numbers.
+  On Android, 120 fps uses the camera's high-speed mode, which has no self-view stream; the other side still gets the full rate.
+  Colour conversion, rotation and mirroring run on the GPU. On Windows, received video is decoded by the graphics card. With *Lower quality when the connection is slow* on, the bitrate follows what the link can actually carry
   (measured four times a second), so the picture gets softer instead of lagging. Voice always goes ahead of video.
 - **Camera panel (during a call):**
   - Phones: zoom (including the ultra-wide lens, e.g. 0.6x, where the phone has one), switching between cameras, exposure

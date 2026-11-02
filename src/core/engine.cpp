@@ -2189,7 +2189,7 @@ std::shared_ptr<Connection> Engine::CallConn() {
 
 bool Engine::SendMedia(const void* data, size_t len) {
     uint64_t id = activeCallId_.load();
-    if (!id || len < 1 || len > (1u << 20)) return false;
+    if (!id || len < 1 || len > (8u << 20)) return false;  // 4K keyframes can be several hundred KB
     bool video = ((const uint8_t*)data)[0] == 2;
     if (!video && len > 4000) return false;
     auto c = CallConn();
@@ -2207,7 +2207,7 @@ bool Engine::SendMedia(const void* data, size_t len) {
         }
         if (video) {
             // keep latency bounded: the module adapts its bitrate from MediaQueuedBytes() and skips frames on refusal
-            if (videoBytes > 768 * 1024) return false;
+            if (videoBytes > 8u * 1024 * 1024) return false;  // hard stop; normally the module adapts long before
             c->ctrl.emplace_back(Msg::Media, std::move(payload));
         } else {
             // never let voice pile up: if the link stalls, drop the oldest audio instead of growing latency

@@ -77,6 +77,7 @@ private:
     void DrawVideoStage(ImVec2 size, bool phone);
     void DrawVideoOverlay();  // phone: full-screen video call
     void DrawCameraPanel();
+    bool VideoQualityControls(ls::Settings& s, float w, float h);  // resolution + frame rate; true when changed
     bool VideoVisible() const;
     bool videoFull = false;       // phone: full-screen video shown
     bool videoAutoOpened = false; // opened once per call

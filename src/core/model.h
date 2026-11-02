@@ -56,7 +56,8 @@ struct Settings {
     bool callAutoGain = true;
     int callBitrate = 24000;
     int callMicBoost = 0;
-    int callVideoQuality = 1;      // 0 low (360p/15) 1 medium (540p/24) 2 high (720p/30) 3 full HD (1080p/30)
+    int callVideoRes = 1;          // 0 360p 1 540p 2 720p 3 1080p 4 1440p 5 4K
+    int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
     std::string callCamera;        // preferred camera id (empty: front camera)      // dB added to the microphone before processing (quiet PC mics)
     std::string callInputDevice, callOutputDevice;  // empty = system default

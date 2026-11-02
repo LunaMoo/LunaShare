@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include <codecapi.h>
+#include <d3d11.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -528,6 +529,7 @@ public:
             return false;
         }
         if (auto api = dec_.As<ICodecAPI>()) SetCodecBool(api.get(), CODECAPI_AVLowLatencyMode, true);
+        decGpu_ = EnableGpuDecoding();
         Com<IMFMediaType> it;
         MFCreateMediaType(&it);
         it->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -574,8 +576,12 @@ public:
     void StopDecoder() override {
         if (dec_) {
             dec_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+            if (dxgiMgr_) dec_->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
             dec_.Reset();
         }
+        dxgiMgr_.Reset();
+        d3d_.Reset();
+        decGpu_ = false;
         decCom_.reset();
     }
 
@@ -583,7 +589,7 @@ public:
         std::lock_guard<std::mutex> l(nameM_);
         return encName_;
     }
-    std::string DecoderName() override { return dec_ ? "Microsoft H.264 decoder" : ""; }
+    std::string DecoderName() override { return dec_ ? (decGpu_ ? "Microsoft H.264 decoder (GPU)" : "Microsoft H.264 decoder (software)") : ""; }
 
 private:
     // ---------------------------------------------------------------- capture
@@ -758,6 +764,31 @@ private:
     }
 
     // ---------------------------------------------------------------- decoding
+    // Hardware decoding (DXVA) through a D3D11 device: needed for 4K / high frame rates. Frames are read back to
+    // system memory when locked, so the rest of the pipeline stays the same.
+    bool EnableGpuDecoding() {
+        Com<IMFAttributes> a;
+        UINT32 aware = 0;
+        if (FAILED(dec_->GetAttributes(&a)) || !a || FAILED(a->GetUINT32(MF_SA_D3D11_AWARE, &aware)) || !aware) return false;
+        D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
+        HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels,
+                                       (UINT)(sizeof(levels) / sizeof(levels[0])), D3D11_SDK_VERSION, &d3d_, nullptr, nullptr);
+        if (FAILED(hr)) return false;
+        if (auto mt = d3d_.As<ID3D10Multithread>()) mt->SetMultithreadProtected(TRUE);
+        UINT token = 0;
+        if (FAILED(MFCreateDXGIDeviceManager(&token, &dxgiMgr_)) || FAILED(dxgiMgr_->ResetDevice(d3d_.get(), token))) {
+            dxgiMgr_.Reset();
+            d3d_.Reset();
+            return false;
+        }
+        if (FAILED(dec_->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)dxgiMgr_.get()))) {
+            dxgiMgr_.Reset();
+            d3d_.Reset();
+            return false;
+        }
+        return true;
+    }
+
     void SetDecoderOutput() {
         for (DWORD i = 0;; i++) {
             Com<IMFMediaType> t;
@@ -783,7 +814,7 @@ private:
         for (;;) {
             MFT_OUTPUT_STREAM_INFO info{};
             dec_->GetOutputStreamInfo(0, &info);
-            bool provides = (info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) != 0;
+            bool provides = (info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES | (decGpu_ ? MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES : 0))) != 0;
             Com<IMFSample> s;
             if (!provides) s = MakeSample(std::max<DWORD>(info.cbSize, (DWORD)(std::max(outW_, 16) * std::max(outH_, 16) * 3 / 2)));
             MFT_OUTPUT_DATA_BUFFER ob{};
@@ -839,6 +870,9 @@ private:
     // decoder
     std::unique_ptr<ComInit> decCom_;
     Com<IMFTransform> dec_;
+    Com<ID3D11Device> d3d_;
+    Com<IMFDXGIDeviceManager> dxgiMgr_;
+    bool decGpu_ = false;
     int outW_ = 0, outH_ = 0, outStride_ = 0, dispW_ = 0, dispH_ = 0;
     LONGLONG decTs_ = 0;
 };

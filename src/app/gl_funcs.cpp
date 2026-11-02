@@ -16,6 +16,25 @@ void (*TexSubImage2D)(Enum, int, int, int, int, int, Enum, Enum, const void*);
 void (*PixelStorei)(Enum, int);
 void (*GetIntegerv)(Enum, int*);
 
+unsigned int (*CreateShader)(Enum);
+void (*ShaderSource)(unsigned int, int, const char* const*, const int*);
+void (*CompileShader)(unsigned int);
+void (*GetShaderiv)(unsigned int, Enum, int*);
+void (*GetShaderInfoLog)(unsigned int, int, int*, char*);
+void (*DeleteShader)(unsigned int);
+unsigned int (*CreateProgram)();
+void (*AttachShader)(unsigned int, unsigned int);
+void (*BindAttribLocation)(unsigned int, unsigned int, const char*);
+void (*LinkProgram)(unsigned int);
+void (*GetProgramiv)(unsigned int, Enum, int*);
+void (*UseProgram)(unsigned int);
+int (*GetUniformLocation)(unsigned int, const char*);
+int (*GetAttribLocation)(unsigned int, const char*);
+void (*Uniform1i)(int, int);
+void (*UniformMatrix4fv)(int, int, unsigned char, const float*);
+void (*GetUniformfv)(unsigned int, int, float*);
+void (*ActiveTexture)(Enum);
+
 template <class T>
 static bool L(T& fn, const char* name) {
     fn = (T)SDL_GL_GetProcAddress(name);
@@ -36,6 +55,30 @@ bool Load() {
     ok &= L(TexSubImage2D, "glTexSubImage2D");
     ok &= L(PixelStorei, "glPixelStorei");
     ok &= L(GetIntegerv, "glGetIntegerv");
+    return ok;
+}
+bool LoadShaders() {
+    bool ok = true;
+#define L(fn, name) (L(fn, name) || (SDL_Log("missing %s", name), false))
+    ok &= L(CreateShader, "glCreateShader");
+    ok &= L(ShaderSource, "glShaderSource");
+    ok &= L(CompileShader, "glCompileShader");
+    ok &= L(GetShaderiv, "glGetShaderiv");
+    ok &= L(GetShaderInfoLog, "glGetShaderInfoLog");
+    ok &= L(DeleteShader, "glDeleteShader");
+    ok &= L(CreateProgram, "glCreateProgram");
+    ok &= L(AttachShader, "glAttachShader");
+    ok &= L(BindAttribLocation, "glBindAttribLocation");
+    ok &= L(LinkProgram, "glLinkProgram");
+    ok &= L(GetProgramiv, "glGetProgramiv");
+    ok &= L(UseProgram, "glUseProgram");
+    ok &= L(GetUniformLocation, "glGetUniformLocation");
+    ok &= L(GetAttribLocation, "glGetAttribLocation");
+    ok &= L(Uniform1i, "glUniform1i");
+    ok &= L(UniformMatrix4fv, "glUniformMatrix4fv");
+    ok &= L(GetUniformfv, "glGetUniformfv");
+    ok &= L(ActiveTexture, "glActiveTexture");
+#undef L
     return ok;
 }
 }  // namespace glf

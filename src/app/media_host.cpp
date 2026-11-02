@@ -128,19 +128,36 @@ void MediaHost::LoadVideo() {
 #endif
 }
 
-LsvSettings MediaHost::Preset(int q, bool adaptive) {
-    switch (q) {
-        case 0: return {640, 360, 15, 400000, adaptive ? 1 : 0};
-        case 2: return {1280, 720, 30, 1800000, adaptive ? 1 : 0};
-        case 3: return {1920, 1080, 30, 3500000, adaptive ? 1 : 0};
-        default: return {960, 540, 24, 900000, adaptive ? 1 : 0};
-    }
+static const int kRes[6][2] = {{640, 360}, {960, 540}, {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+
+LsvSettings MediaHost::Preset(int res, int fps, bool adaptive) {
+    res = std::max(0, std::min(kResCount - 1, res));
+    fps = std::max(10, std::min(120, fps));
+    int w = kRes[res][0], h = kRes[res][1];
+    // H.264 needs fewer bits per pixel the larger the picture: ~0.1 at 360p, ~0.06 at 4K
+    double bpp = res <= 1 ? 0.10 : res <= 3 ? 0.08 : 0.06;
+    double bps = (double)w * h * fps * bpp;
+    int bitrate = (int)std::max(250000.0, std::min(80e6, bps));
+    return {w, h, fps, bitrate, adaptive ? 1 : 0};
 }
 
-const char* MediaHost::QualityName(int q) {
-    static const char* n[] = {"Low - 360p, 15 fps (saves battery and data)", "Medium - 540p, 24 fps", "High - 720p, 30 fps",
-                              "Full HD - 1080p, 30 fps"};
-    return n[std::max(0, std::min(3, q))];
+const char* MediaHost::ResName(int r) {
+    static const char* n[] = {"360p (640x360)", "540p (960x540)", "720p HD (1280x720)", "1080p Full HD (1920x1080)",
+                              "1440p QHD (2560x1440)", "4K UHD (3840x2160)"};
+    return n[std::max(0, std::min(kResCount - 1, r))];
+}
+
+const int* MediaHost::FpsList(int* n) {
+    static const int f[] = {15, 24, 30, 60, 120};
+    *n = 5;
+    return f;
+}
+
+std::string MediaHost::RateText(int bps) {
+    char b[32];
+    if (bps >= 1000000) snprintf(b, sizeof(b), "%.1f Mbit/s", bps / 1e6);
+    else snprintf(b, sizeof(b), "%d kbit/s", bps / 1000);
+    return b;
 }
 
 int MediaHost::VSend(void* u, const uint8_t* d, size_t n) {
@@ -162,7 +179,40 @@ void MediaHost::VImage(void* u, int src, const LsvImage* img) {
         std::lock_guard<std::mutex> l(s.m);
         if (s.fresh) return;  // the UI hasn't shown the previous picture yet: don't convert one it would never show
     }
-    Convert(*img, s);
+    if (self->gpuYuv_) CopyPlanes(*img, s);
+    else Convert(*img, s);
+}
+
+// GPU path: only copy the planes (tight Y, interleaved U/V); colour conversion, rotation and mirroring happen when drawing
+void MediaHost::CopyPlanes(const LsvImage& im, Slot& s) {
+    int W = im.width, H = im.height;
+    if (W <= 0 || H <= 0 || W > 8192 || H > 8192) return;
+    int cw = (W + 1) / 2, ch = (H + 1) / 2;
+    std::vector<uint8_t> y((size_t)W * H), uv((size_t)cw * ch * 2);
+    for (int r = 0; r < H; r++) memcpy(&y[(size_t)r * W], im.y + (size_t)r * im.y_stride, (size_t)W);
+    int ps = im.uv_pixel_stride;
+    if (ps == 2 && im.v == im.u + 1) {  // NV12: already U,V pairs
+        for (int r = 0; r < ch; r++) memcpy(&uv[(size_t)r * cw * 2], im.u + (size_t)r * im.uv_stride, (size_t)cw * 2);
+    } else {
+        for (int r = 0; r < ch; r++) {
+            const uint8_t* u = im.u + (size_t)r * im.uv_stride;
+            const uint8_t* v = im.v + (size_t)r * im.uv_stride;
+            uint8_t* d = &uv[(size_t)r * cw * 2];
+            for (int c = 0; c < cw; c++) {
+                d[c * 2] = u[(size_t)c * ps];
+                d[c * 2 + 1] = v[(size_t)c * ps];
+            }
+        }
+    }
+    std::lock_guard<std::mutex> l(s.m);
+    s.y.swap(y);
+    s.uv.swap(uv);
+    s.sw = W;
+    s.sh = H;
+    s.rotation = ((im.rotation % 360) + 360) % 360;
+    s.mirror = im.mirror != 0;
+    s.gpu = true;
+    s.fresh = true;
 }
 
 // YUV 4:2:0 -> RGBA, turning the picture upright (and mirroring the self-view) on the way
@@ -200,7 +250,24 @@ void MediaHost::Convert(const LsvImage& im, Slot& s) {
     s.rgba.swap(out);
     s.w = ow;
     s.h = oh;
+    s.gpu = false;
     s.fresh = true;
+}
+
+static void MakeTex(unsigned& t) {
+    if (t) return;
+    glf::GenTextures(1, &t);
+    glf::BindTexture(glf::TEXTURE_2D, t);
+    glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_MIN_FILTER, glf::LINEAR);
+    glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_MAG_FILTER, glf::LINEAR);
+    glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_WRAP_S, glf::CLAMP_TO_EDGE);
+    glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_WRAP_T, glf::CLAMP_TO_EDGE);
+}
+
+static void Upload(unsigned tex, bool resize, int internalFmt, unsigned fmt, int w, int h, const void* data) {
+    glf::BindTexture(glf::TEXTURE_2D, tex);
+    if (resize) glf::TexImage2D(glf::TEXTURE_2D, 0, internalFmt, w, h, 0, fmt, glf::UNSIGNED_BYTE, data);
+    else glf::TexSubImage2D(glf::TEXTURE_2D, 0, 0, 0, w, h, fmt, glf::UNSIGNED_BYTE, data);
 }
 
 void MediaHost::UploadVideo() {
@@ -210,26 +277,169 @@ void MediaHost::UploadVideo() {
         std::lock_guard<std::mutex> l(s.m);
         if (!s.fresh) continue;
         s.fresh = false;
-        if (!t.tex) {
-            glf::GenTextures(1, &t.tex);
-            glf::BindTexture(glf::TEXTURE_2D, t.tex);
-            glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_MIN_FILTER, glf::LINEAR);
-            glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_MAG_FILTER, glf::LINEAR);
-            glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_WRAP_S, glf::CLAMP_TO_EDGE);
-            glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_WRAP_T, glf::CLAMP_TO_EDGE);
-        }
-        glf::BindTexture(glf::TEXTURE_2D, t.tex);
-        glf::PixelStorei(glf::UNPACK_ALIGNMENT, 4);
-        if (t.w != s.w || t.h != s.h) {
-            glf::TexImage2D(glf::TEXTURE_2D, 0, glf::RGBA, s.w, s.h, 0, glf::RGBA, glf::UNSIGNED_BYTE, s.rgba.data());
-            t.w = s.w;
-            t.h = s.h;
+        int prevAlign = 4;
+        glf::GetIntegerv(glf::UNPACK_ALIGNMENT, &prevAlign);
+        glf::PixelStorei(glf::UNPACK_ALIGNMENT, 1);
+        if (s.gpu) {
+            bool resize = !t.gpu || t.sw != s.sw || t.sh != s.sh || !t.uvTex;
+            MakeTex(t.tex);
+            MakeTex(t.uvTex);
+            Upload(t.tex, resize, glf::R8, glf::RED, s.sw, s.sh, s.y.data());
+            Upload(t.uvTex, resize, glf::RG8, glf::RG, (s.sw + 1) / 2, (s.sh + 1) / 2, s.uv.data());
+            t.gpu = true;
+            t.sw = s.sw;
+            t.sh = s.sh;
+            t.rotation = s.rotation;
+            t.mirror = s.mirror;
+            bool swap = s.rotation == 90 || s.rotation == 270;
+            t.w = swap ? s.sh : s.sw;
+            t.h = swap ? s.sw : s.sh;
         } else {
-            glf::TexSubImage2D(glf::TEXTURE_2D, 0, 0, 0, s.w, s.h, glf::RGBA, glf::UNSIGNED_BYTE, s.rgba.data());
+            MakeTex(t.tex);
+            bool resize = t.gpu || t.w != s.w || t.h != s.h;
+            Upload(t.tex, resize, glf::RGBA, glf::RGBA, s.w, s.h, s.rgba.data());
+            t.gpu = false;
+            t.w = t.sw = s.w;
+            t.h = t.sh = s.h;
+            t.rotation = 0;
+            t.mirror = false;
         }
+        glf::PixelStorei(glf::UNPACK_ALIGNMENT, prevAlign);
         t.valid = true;
         t.lastMs = (int64_t)SDL_GetTicks64();
     }
+}
+
+// ---------------------------------------------------------------- YUV -> RGB shader
+// Swapped in for one draw command through an ImDrawList callback; uses the same vertex layout and projection as the
+// ImGui OpenGL backend (read from its program), then ImDrawCallback_ResetRenderState switches back.
+namespace {
+struct YuvGl {
+    unsigned prog = 0;
+    int proj = -1, texY = -1, texUV = -1;
+    bool failed = false;
+};
+YuvGl g_yuv;
+std::string g_glsl;
+
+unsigned Compile(unsigned type, const std::string& src) {
+    unsigned sh = glf::CreateShader(type);
+    const char* p = src.c_str();
+    glf::ShaderSource(sh, 1, &p, nullptr);
+    glf::CompileShader(sh);
+    int ok = 0;
+    glf::GetShaderiv(sh, glf::COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512] = {0};
+        glf::GetShaderInfoLog(sh, sizeof(log), nullptr, log);
+        SDL_Log("video shader: %s", log);
+        glf::DeleteShader(sh);
+        return 0;
+    }
+    return sh;
+}
+
+bool BuildYuv(unsigned backendProg) {
+    bool es = g_glsl.find(" es") != std::string::npos;
+    std::string vs = g_glsl + "\n" + (es ? "precision highp float;\n" : "") +
+                     "uniform mat4 ProjMtx;\nin vec2 Position;\nin vec2 UV;\nin vec4 Color;\nout vec2 Frag_UV;\nout vec4 Frag_Color;\n"
+                     "void main() { Frag_UV = UV; Frag_Color = Color; gl_Position = ProjMtx * vec4(Position.xy, 0, 1); }\n";
+    std::string fs = g_glsl + "\n" + (es ? "precision mediump float;\n" : "") +
+                     "uniform sampler2D TexY;\nuniform sampler2D TexUV;\nin vec2 Frag_UV;\nin vec4 Frag_Color;\nout vec4 Out_Color;\n"
+                     "void main() {\n"
+                     "  float y = 1.16438 * (texture(TexY, Frag_UV).r - 0.0625);\n"
+                     "  vec2 c = texture(TexUV, Frag_UV).rg - vec2(0.5);\n"
+                     "  vec3 rgb = vec3(y + 1.59603 * c.y, y - 0.39176 * c.x - 0.81297 * c.y, y + 2.01723 * c.x);\n"
+                     "  Out_Color = vec4(clamp(rgb, 0.0, 1.0), 1.0) * Frag_Color;\n"
+                     "}\n";
+    unsigned v = Compile(glf::VERTEX_SHADER, vs), f = Compile(glf::FRAGMENT_SHADER, fs);
+    if (!v || !f) return false;
+    unsigned p = glf::CreateProgram();
+    glf::AttachShader(p, v);
+    glf::AttachShader(p, f);
+    // same attribute slots as the ImGui backend, so its vertex array setup works for us too
+    const char* attrs[] = {"Position", "UV", "Color"};
+    for (auto* a : attrs) {
+        int loc = glf::GetAttribLocation(backendProg, a);
+        if (loc >= 0) glf::BindAttribLocation(p, (unsigned)loc, a);
+    }
+    glf::LinkProgram(p);
+    glf::DeleteShader(v);
+    glf::DeleteShader(f);
+    int ok = 0;
+    glf::GetProgramiv(p, glf::LINK_STATUS, &ok);
+    if (!ok) return false;
+    SDL_Log("video: converting YUV on the GPU");
+    g_yuv.prog = p;
+    g_yuv.proj = glf::GetUniformLocation(p, "ProjMtx");
+    g_yuv.texY = glf::GetUniformLocation(p, "TexY");
+    g_yuv.texUV = glf::GetUniformLocation(p, "TexUV");
+    return true;
+}
+
+void YuvBegin(const ImDrawList*, const ImDrawCmd* cmd) {
+    unsigned uvTex = *(const unsigned*)cmd->UserCallbackData;
+    int backend = 0;
+    glf::GetIntegerv(glf::CURRENT_PROGRAM, &backend);
+    if (!g_yuv.prog && !g_yuv.failed && !BuildYuv((unsigned)backend)) {
+        g_yuv.failed = true;
+        Media().SetGlsl(nullptr);  // fall back to converting on the CPU from now on
+    }
+    if (!g_yuv.prog) return;
+    float m[16];
+    glf::GetUniformfv((unsigned)backend, glf::GetUniformLocation((unsigned)backend, "ProjMtx"), m);
+    glf::UseProgram(g_yuv.prog);
+    glf::UniformMatrix4fv(g_yuv.proj, 1, 0, m);
+    glf::Uniform1i(g_yuv.texY, 0);
+    glf::Uniform1i(g_yuv.texUV, 1);
+    glf::ActiveTexture(glf::TEXTURE1);
+    glf::BindTexture(glf::TEXTURE_2D, uvTex);
+    glf::ActiveTexture(glf::TEXTURE0);
+}
+}  // namespace
+
+void MediaHost::SetGlsl(const char* glsl) {
+    if (!glsl) {
+        gpuYuv_ = false;
+        return;
+    }
+    glsl_ = glsl;
+    g_glsl = glsl;
+    // GLES 2 has no single/two-channel textures to sample like this: keep the CPU conversion there
+    gpuYuv_ = std::string(glsl) != "#version 100" && glf::LoadShaders();
+    if (!gpuYuv_) SDL_Log("video: converting YUV on the CPU (%s)", glsl);
+}
+
+void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover) {
+    float bw = p1.x - p0.x, bh = p1.y - p0.y;
+    if (!t.valid || t.w <= 0 || t.h <= 0 || bw <= 0 || bh <= 0) return;
+    float s = cover ? std::max(bw / t.w, bh / t.h) : std::min(bw / t.w, bh / t.h);
+    float w = t.w * s, h = t.h * s;
+    ImVec2 c((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+    ImVec2 a(c.x - w * 0.5f, c.y - h * 0.5f), b(c.x + w * 0.5f, c.y + h * 0.5f);
+    // the part of the upright picture that is visible (cover crops it to the box)
+    float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+    if (cover) {
+        if (a.x < p0.x) { float f = (p0.x - a.x) / w; u0 = f; u1 = 1 - f; a.x = p0.x; b.x = p1.x; }
+        if (a.y < p0.y) { float f = (p0.y - a.y) / h; v0 = f; v1 = 1 - f; a.y = p0.y; b.y = p1.y; }
+    }
+    // upright (display) coordinates -> texture coordinates: mirror first, then undo the rotation
+    auto tc = [&](float u, float v) {
+        if (t.mirror) u = 1 - u;
+        switch (t.rotation) {
+            case 90: return ImVec2(v, 1 - u);
+            case 180: return ImVec2(1 - u, 1 - v);
+            case 270: return ImVec2(1 - v, u);
+            default: return ImVec2(u, v);
+        }
+    };
+    ImTextureID id = (ImTextureID)(intptr_t)t.tex;
+    if (t.gpu) {
+        unsigned uv = t.uvTex;
+        dl->AddCallback(YuvBegin, &uv, sizeof(uv));
+    }
+    dl->AddImageQuad(id, a, ImVec2(b.x, a.y), b, ImVec2(a.x, b.y), tc(u0, v0), tc(u1, v0), tc(u1, v1), tc(u0, v1));
+    if (t.gpu) dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
 }
 
 void MediaHost::StartVideo() {
@@ -241,7 +451,7 @@ void MediaHost::StartVideo() {
     }
     if (!eng_->PeerHasCap(peer, "video")) return;
     Settings s = eng_->GetSettings();
-    LsvSettings vs = Preset(s.callVideoQuality, s.callVideoAdaptive);
+    LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
     if (!vmod_->start(&vs)) return;
     videoRunning_ = true;
     remoteCam_ = false;
@@ -345,7 +555,7 @@ LsvStats MediaHost::VideoStats() {
 void MediaHost::ApplyVideoQuality() {
     if (!vmod_ || !videoRunning_ || !eng_) return;
     Settings s = eng_->GetSettings();
-    LsvSettings vs = Preset(s.callVideoQuality, s.callVideoAdaptive);
+    LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
     vmod_->set_settings(&vs);
 }
 

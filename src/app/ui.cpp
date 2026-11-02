@@ -1,5 +1,7 @@
 #include "ui.h"
 
+#include <SDL.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -2306,22 +2308,6 @@ void App::DrawCallBar() {
 }
 
 // ---------------------------------------------------------------- video
-static void DrawFit(ImDrawList* dl, unsigned tex, int tw, int th, ImVec2 p0, ImVec2 p1, bool cover) {
-    float bw = p1.x - p0.x, bh = p1.y - p0.y;
-    if (tw <= 0 || th <= 0 || bw <= 0 || bh <= 0) return;
-    float s = cover ? std::max(bw / tw, bh / th) : std::min(bw / tw, bh / th);
-    float w = tw * s, h = th * s;
-    ImVec2 c((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
-    ImVec2 a(c.x - w * 0.5f, c.y - h * 0.5f), b(c.x + w * 0.5f, c.y + h * 0.5f);
-    // crop to the box when covering
-    ImVec2 uv0(0, 0), uv1(1, 1);
-    if (cover) {
-        if (a.x < p0.x) { float f = (p0.x - a.x) / w; uv0.x = f; uv1.x = 1 - f; a.x = p0.x; b.x = p1.x; }
-        if (a.y < p0.y) { float f = (p0.y - a.y) / h; uv0.y = f; uv1.y = 1 - f; a.y = p0.y; b.y = p1.y; }
-    }
-    dl->AddImage((ImTextureID)(intptr_t)tex, a, b, uv0, uv1);
-}
-
 void App::DrawVideoStage(ImVec2 size, bool phone) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(12, 12, 14, 255));
     ImGui::BeginChild("videostage", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -2329,13 +2315,14 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
     ImVec2 p0 = ImGui::GetWindowPos(), p1(p0.x + size.x, p0.y + size.y);
     const auto& rv = Media().RemoteVideo();
     const auto& lv = Media().LocalVideo();
+    int64_t nowMs = (int64_t)SDL_GetTicks64();
     bool remote = Media().RemoteCameraOn() && rv.valid;
-    bool local = Media().CameraOn() && lv.valid;
+    bool local = Media().CameraOn() && lv.valid && nowMs - lv.lastMs < 1500;  // stale = no self-view stream (120 fps)
     std::string who = eng.PeerName(eng.call.peer);
     if (remote) {
-        DrawFit(dl, rv.tex, rv.w, rv.h, p0, p1, false);
+        Media().DrawVideo(dl, rv, p0, p1, false);
     } else if (local) {
-        DrawFit(dl, lv.tex, lv.w, lv.h, p0, p1, false);  // nothing from them: show yourself big
+        Media().DrawVideo(dl, lv, p0, p1, false);  // nothing from them: show yourself big
     }
     if (!remote) {
         // their camera is off: initial + hint
@@ -2351,6 +2338,14 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         ImVec2 ms = ImGui::CalcTextSize(msg.c_str());
         dl->AddText(ImVec2(c.x - ms.x * 0.5f, c.y + r + ImGui::GetStyle().ItemSpacing.y), IM_COL32(220, 220, 220, 255), msg.c_str());
     }
+    if (remote && !local && Media().CameraOn()) {
+        const char* t = eng.settings.callVideoFps > 60 ? "No self-view at 120 fps" : "Starting camera...";
+        ImVec2 ts = ImGui::CalcTextSize(t);
+        float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
+        ImVec2 a(p1.x - ts.x - m * 3, p1.y - ts.y - m * 3 - (phone ? ui::M().rowH * 1.6f : 0));
+        dl->AddRectFilled(a, ImVec2(a.x + ts.x + m * 2, a.y + ts.y + m * 2), IM_COL32(0, 0, 0, 150), 6);
+        dl->AddText(ImVec2(a.x + m, a.y + m), IM_COL32(230, 230, 230, 255), t);
+    }
     if (remote && local) {
         // self-view in the corner
         float pw = size.x * (phone ? 0.3f : 0.22f);
@@ -2359,7 +2354,7 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
         ImVec2 a(p1.x - pw - m, p1.y - ph - m - (phone ? ui::M().rowH * 1.6f : 0)), b(a.x + pw, a.y + ph);
         dl->AddRectFilled(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), IM_COL32(255, 255, 255, 90), 6);
-        DrawFit(dl, lv.tex, lv.w, lv.h, a, b, true);
+        Media().DrawVideo(dl, lv, a, b, true);
     }
     if (!phone) {
         // corner buttons: bigger / smaller
@@ -2404,6 +2399,41 @@ void App::DrawVideoOverlay() {
     DrawCallButtons(bb, bb, true);
     ImGui::PopStyleColor();
     ImGui::End();
+}
+
+bool App::VideoQualityControls(Settings& s, float w, float h) {
+    bool changed = false;
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("##vres", (std::string("Video: ") + MediaHost::ResName(s.callVideoRes)).c_str())) {
+        for (int r = 0; r < MediaHost::kResCount; r++)
+            if (ImGui::Selectable(MediaHost::ResName(r), r == s.callVideoRes, 0, ImVec2(0, h))) {
+                s.callVideoRes = r;
+                changed = true;
+            }
+        ImGui::EndCombo();
+    }
+    int nf = 0;
+    const int* fl = MediaHost::FpsList(&nf);
+    char cur[32];
+    snprintf(cur, sizeof(cur), "Frame rate: %d fps", s.callVideoFps);
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("##vfps", cur)) {
+        for (int i = 0; i < nf; i++) {
+            char l[16];
+            snprintf(l, sizeof(l), "%d fps", fl[i]);
+            if (ImGui::Selectable(l, fl[i] == s.callVideoFps, 0, ImVec2(0, h))) {
+                s.callVideoFps = fl[i];
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    LsvSettings p = MediaHost::Preset(s.callVideoRes, s.callVideoFps, true);
+    ImGui::TextDisabled("Up to about %s.%s", MediaHost::RateText(p.bitrate).c_str(),
+                        p.bitrate > 20000000 ? " Needs fast Wi-Fi or a cable." : p.height >= 1080 || p.fps >= 60 ? " Best on Wi-Fi." : "");
+    if (s.callVideoFps > 60 || s.callVideoRes >= 4)
+        ImGui::TextDisabled("If a camera can't do this, the closest it can do is sent.");
+    return changed;
 }
 
 void App::DrawCameraPanel() {
@@ -2456,17 +2486,12 @@ void App::DrawCameraPanel() {
         }
     }
     Settings s = eng.GetSettings();
-    ImGui::SetNextItemWidth(w);
-    if (ImGui::BeginCombo("##vq", MediaHost::QualityName(s.callVideoQuality))) {
-        for (int q = 0; q < 4; q++)
-            if (ImGui::Selectable(MediaHost::QualityName(q), q == s.callVideoQuality, 0, ImVec2(0, h))) {
-                s.callVideoQuality = q;
-                eng.ApplySettings(s);
-                edit.callVideoQuality = q;
-                Media().ApplyVideoQuality();
-                camCtlTime = -1;
-            }
-        ImGui::EndCombo();
+    if (VideoQualityControls(s, w, h)) {
+        eng.ApplySettings(s);
+        edit.callVideoRes = s.callVideoRes;
+        edit.callVideoFps = s.callVideoFps;
+        Media().ApplyVideoQuality();
+        camCtlTime = -1;
     }
     if (ImGui::Checkbox("Lower quality when the connection is slow", &s.callVideoAdaptive)) {
         eng.ApplySettings(s);
@@ -2682,15 +2707,7 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     ui::HelpMarker("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar.");
     if (Media().VideoAvailable()) {
-        ImGui::SetNextItemWidth(fieldW);
-        if (ImGui::BeginCombo("##vqual", (std::string("Video: ") + MediaHost::QualityName(edit.callVideoQuality)).c_str())) {
-            for (int q = 0; q < 4; q++)
-                if (ImGui::Selectable(MediaHost::QualityName(q), q == edit.callVideoQuality, 0, ImVec2(0, h))) {
-                    edit.callVideoQuality = q;
-                    changed = true;
-                }
-            ImGui::EndCombo();
-        }
+        changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call.");
         changed |= ImGui::Checkbox("Lower video quality automatically when the connection is slow", &edit.callVideoAdaptive);
         auto cams = Media().Cameras();
