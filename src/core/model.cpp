@@ -119,7 +119,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "callVideoFps", s.callVideoFps);
     Get(j, "callVideoAdaptive", s.callVideoAdaptive);
     Get(j, "callCamera", s.callCamera);
-    s.callVideoRes = std::clamp(s.callVideoRes, 0, 5);
+    s.callVideoRes = std::clamp(s.callVideoRes, 0, 6);
     s.callVideoFps = std::clamp(s.callVideoFps, 10, 120);
     if (s.callMicBoost < 0 || s.callMicBoost > 30) s.callMicBoost = 0;
     Get(j, "callInputDevice", s.callInputDevice);

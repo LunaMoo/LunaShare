@@ -2433,6 +2433,8 @@ bool App::VideoQualityControls(Settings& s, float w, float h) {
                         p.bitrate > 20000000 ? " Needs fast Wi-Fi or a cable." : p.height >= 1080 || p.fps >= 60 ? " Best on Wi-Fi." : "");
     if (s.callVideoFps > 60 || s.callVideoRes >= 4)
         ImGui::TextDisabled("If a camera can't do this, the closest it can do is sent.");
+    if (s.callVideoRes >= 6)
+        ImGui::TextDisabled("8K in H.264: if the receiving device can't decode it, it asks for 4K instead.");
     return changed;
 }
 

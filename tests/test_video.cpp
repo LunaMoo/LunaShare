@@ -143,6 +143,14 @@ int main() {
     m->get_stats(&st);
     CHECK(st.send_kbps > 600, "bitrate climbs back (%d kbps)", st.send_kbps);
 
+    printf("[video: receiver asks for a smaller picture]\n");
+    {
+        uint8_t lim[6] = {2, 4, 0x40, 0x01, 0xF0, 0x00};  // at most 320x240
+        m->receive(lim, sizeof(lim));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        CHECK(L.remoteW == 320 && L.remoteH == 240, "sender stepped down to %dx%d", L.remoteW.load(), L.remoteH.load());
+    }
+
     printf("[video: camera off]\n");
     CHECK(m->set_camera_on(0) == 1, "camera off");
     std::this_thread::sleep_for(std::chrono::milliseconds(300));

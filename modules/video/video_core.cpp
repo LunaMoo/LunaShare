@@ -7,6 +7,7 @@
 //   [2][1][seq u32][flags u8: 1 = keyframe][rotation/90 u8][width u16][height u16][Annex B data]   one encoded frame
 //   [2][2]                                                                                       please send a keyframe
 //   [2][3][camera on u8]                                                                         camera state
+//   [2][4][max width u16][max height u16]                                                         "too big for my decoder"
 //
 // Loss handling: a frame refused by the congested link or a gap in sequence numbers makes the decoder wait for the
 // next keyframe (asked for at most twice a second). Bitrate adapts once a second from the host's media queue size.
@@ -170,7 +171,29 @@ public:
             waitingKey = true;
         }
         AskKeyframe();
+        // a decoder that keeps failing on a big picture probably can't do that size: ask the sender for less
+        int64_t now = NowMs();
+        int w = recvW, h = recvH;
+        if (now - errWindowStart > 4000) {
+            errWindowStart = now;
+            errCount = 0;
+        }
+        if (++errCount >= 4 && (int64_t)w * h > 1920 * 1088 && now - lastLimitAsk > 5000) {
+            lastLimitAsk = now;
+            errCount = 0;
+            int mw = (int64_t)w * h > 3840 * 2176 ? 3840 : 1920, mh = mw == 3840 ? 2160 : 1080;
+            if (w < h) std::swap(mw, mh);
+            uint8_t p[6] = {2, 4};
+            Put16(p + 2, (uint32_t)mw);
+            Put16(p + 4, (uint32_t)mh);
+            Send(p, 6);
+            Log("decoder can't keep up with " + std::to_string(w) + "x" + std::to_string(h) + ", asked for at most " +
+                std::to_string(mw) + "x" + std::to_string(mh));
+        }
     }
+    int64_t errWindowStart = 0, lastLimitAsk = 0;
+    int errCount = 0;
+    std::atomic<int> limitW{0}, limitH{0};
 
     void OnCameraError(const std::string& msg) override {
         Log("camera: " + msg);
@@ -227,6 +250,20 @@ public:
                 sKbpsOut = (int)(bytesOut.exchange(0) * 8 / 1000 / sec);
                 sFpsIn = (int)(framesIn.exchange(0) / sec + 0.5);
                 sKbpsIn = (int)(bytesIn.exchange(0) * 8 / 1000 / sec);
+            }
+            if (int lw = limitW.exchange(0)) {
+                int lh = limitH.exchange(0);
+                // the receiver can't decode what we send: fit our capture size into its limit (orientation-free)
+                int big = std::max(lw, lh), small = std::min(lw, lh);
+                LsvSettings s = settings;
+                if (s.width > big || s.height > small) {
+                    double f = std::min((double)big / s.width, (double)small / s.height);
+                    s.width = (int)(s.width * f) & ~1;
+                    s.height = (int)(s.height * f) & ~1;
+                    s.bitrate = (int)(s.bitrate * f * f);
+                    Log("peer asked for at most " + std::to_string(big) + "x" + std::to_string(small));
+                    SetSettings(&s);
+                }
             }
             if (now - lastState > 2000) {  // repeat the camera state now and then, in case a packet got lost
                 lastState = now;
@@ -298,16 +335,20 @@ public:
     }
 
     void Stop() {
-        std::lock_guard<std::mutex> l(m);
-        if (!running) return;
-        if (camOn) {
-            camOn = false;
-            backend->StopCamera();
+        {
+            std::lock_guard<std::mutex> l(m);
+            if (!running) return;
+            if (camOn) {
+                camOn = false;
+                backend->StopCamera();
+            }
+            running = false;
         }
-        running = false;
+        // join without holding m: the timer thread may be waiting for it
         qcv.notify_all();
         if (decodeThread.joinable()) decodeThread.join();
         if (timerThread.joinable()) timerThread.join();
+        std::lock_guard<std::mutex> l(qm);
         queue.clear();
     }
 
@@ -330,6 +371,9 @@ public:
             qcv.notify_one();
         } else if (d[1] == 2) {
             if (camOn && backend) backend->RequestKeyframe();
+        } else if (d[1] == 4 && n >= 6) {
+            limitW = (int)Get16(d + 2);  // applied by the timer thread (restarting the camera takes a moment)
+            limitH = (int)Get16(d + 4);
         } else if (d[1] == 3 && n >= 3) {
             if (host.remote_state) host.remote_state(host.user, d[2] ? 1 : 0);
         }

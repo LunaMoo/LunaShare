@@ -128,22 +128,22 @@ void MediaHost::LoadVideo() {
 #endif
 }
 
-static const int kRes[6][2] = {{640, 360}, {960, 540}, {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+static const int kRes[7][2] = {{640, 360}, {960, 540}, {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}, {7680, 4320}};
 
 LsvSettings MediaHost::Preset(int res, int fps, bool adaptive) {
     res = std::max(0, std::min(kResCount - 1, res));
     fps = std::max(10, std::min(120, fps));
     int w = kRes[res][0], h = kRes[res][1];
     // H.264 needs fewer bits per pixel the larger the picture: ~0.1 at 360p, ~0.06 at 4K
-    double bpp = res <= 1 ? 0.10 : res <= 3 ? 0.08 : 0.06;
+    double bpp = res <= 1 ? 0.10 : res <= 3 ? 0.08 : res <= 5 ? 0.06 : 0.05;
     double bps = (double)w * h * fps * bpp;
-    int bitrate = (int)std::max(250000.0, std::min(80e6, bps));
+    int bitrate = (int)std::max(250000.0, std::min(100e6, bps));
     return {w, h, fps, bitrate, adaptive ? 1 : 0};
 }
 
 const char* MediaHost::ResName(int r) {
     static const char* n[] = {"360p (640x360)", "540p (960x540)", "720p HD (1280x720)", "1080p Full HD (1920x1080)",
-                              "1440p QHD (2560x1440)", "4K UHD (3840x2160)"};
+                              "1440p QHD (2560x1440)", "4K UHD (3840x2160)", "8K (7680x4320)"};
     return n[std::max(0, std::min(kResCount - 1, r))];
 }
 

@@ -80,6 +80,7 @@ jobs:
           unzip -l "$calls" | grep -q "arm64-v8a/liblunashare_video.so" || { echo "video module missing from calls APK"; exit 1; }
           unzip -l "$calls" | grep -q "arm64-v8a/liblunashare_media.so" || { echo "voice module missing from calls APK"; exit 1; }
           if unzip -l "$lite" | grep -qE "lunashare_(media|video)"; then echo "lite APK must not contain call modules"; exit 1; fi
+          unzip -p "$calls" 'classes*.dex' | grep -aq "Lorg/lunamoo/lunashare/VideoEngine;" || { echo "VideoEngine missing from calls APK"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: LunaShare-android
