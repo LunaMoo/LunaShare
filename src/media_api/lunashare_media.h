@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define LSM_API_VERSION 2
+#define LSM_API_VERSION 3
 #define LSM_SAMPLE_RATE 16000 /* audio exchanged with the host: 16 kHz, mono, signed 16-bit */
 
 #if defined(_WIN32)
@@ -74,6 +74,10 @@ typedef struct LsmModule {
     void (*rec_push)(const int16_t* pcm, int samples);      /* 16 kHz mono microphone samples */
     float (*rec_level)(void);                               /* 0..1, for a level meter */
     double (*rec_stop)(int keep);                           /* finishes (or deletes) the file; returns seconds */
+    /* --- since version 3: the same recorder, but the Opus packets (20 ms each, 48 kHz timestamps, mono) go to a
+     * callback instead of a file (video messages: the host puts them into an MP4). pre_skip receives the decoder
+     * delay in 48 kHz samples. Ended with rec_stop(). The callback runs on the thread that calls rec_push. */
+    int (*rec_start_stream)(int bitrate, void (*packet)(void* user, const uint8_t* data, int len), void* user, int* pre_skip);
 } LsmModule;
 
 /* The only exported symbol. */

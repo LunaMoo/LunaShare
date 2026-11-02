@@ -304,9 +304,14 @@ bool IconTextButton(const char* label, Icon icon, ImVec2 size) {
     ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     float contentW = ih * 0.75f + ts.x;
-    float x0 = mn.x + std::max(ImGui::GetStyle().FramePadding.x, (mx.x - mn.x - contentW) * 0.5f);
     float cy = (mn.y + mx.y) * 0.5f;
     ImU32 col = ImGui::GetColorU32(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+    if (contentW + ImGui::GetStyle().FramePadding.x * 2 > mx.x - mn.x) {  // too narrow for the text: icon only
+        DrawIcon(dl, icon, ImVec2((mn.x + mx.x) * 0.5f, cy), ih * 0.5f, col);
+        if (ImGui::IsItemHovered() && !M().mobile && ts.x > 0) ImGui::SetTooltip("%.*s", (int)(ImGui::FindRenderedTextEnd(label) - label), label);
+        return r;
+    }
+    float x0 = mn.x + std::max(ImGui::GetStyle().FramePadding.x, (mx.x - mn.x - contentW) * 0.5f);
     DrawIcon(dl, icon, ImVec2(x0 + ih * 0.25f, cy), ih * 0.5f, col);
     const char* end = ImGui::FindRenderedTextEnd(label);
     dl->AddText(ImVec2(x0 + ih * 0.65f, cy - ts.y * 0.5f), col, label, end);

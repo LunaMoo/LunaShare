@@ -355,6 +355,9 @@ struct Recorder {
     int preSkip = 0, packetsInPage = 0;
     double seconds = 0;
     float level = 0;
+    void (*sink)(void*, const uint8_t*, int) = nullptr;  // stream mode: packets go here instead of a file
+    void* sinkUser = nullptr;
+    bool Active() const { return f || sink; }
 };
 Recorder rec;
 
@@ -407,18 +410,11 @@ void OggFlush(Recorder& r, bool last) {
     r.packetsInPage = 0;
 }
 
-int RecStart(const char* path, int bitrate) {
-    std::lock_guard<std::mutex> l(rec.m);
-    if (rec.f) return -1;
-    rec.f = OpenUtf8(path);
-    if (!rec.f) return -2;
+// encoder + preprocessor shared by both recorder modes (rec.m held)
+bool RecOpen(int bitrate) {
     int err = 0;
     rec.enc = opus_encoder_create(kRate, 1, OPUS_APPLICATION_VOIP, &err);
-    if (!rec.enc) {
-        fclose(rec.f);
-        rec.f = nullptr;
-        return -3;
-    }
+    if (!rec.enc) return false;
     opus_encoder_ctl(rec.enc, OPUS_SET_BITRATE(bitrate > 0 ? bitrate : 24000));
     opus_encoder_ctl(rec.enc, OPUS_SET_COMPLEXITY(9));
     opus_int32 look = 0;
@@ -431,12 +427,36 @@ int RecStart(const char* path, int bitrate) {
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &sup);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_AGC, &on);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_AGC_LEVEL, &lvl);
+    rec.seconds = 0;
+    rec.level = 0;
+    rec.buf.clear();
+    return true;
+}
+
+int RecStartStream(int bitrate, void (*packet)(void*, const uint8_t*, int), void* user, int* preSkip) {
+    std::lock_guard<std::mutex> l(rec.m);
+    if (rec.Active() || !packet) return -1;
+    if (!RecOpen(bitrate)) return -3;
+    rec.sink = packet;
+    rec.sinkUser = user;
+    if (preSkip) *preSkip = rec.preSkip;
+    return 0;
+}
+
+int RecStart(const char* path, int bitrate) {
+    std::lock_guard<std::mutex> l(rec.m);
+    if (rec.Active()) return -1;
+    rec.f = OpenUtf8(path);
+    if (!rec.f) return -2;
+    if (!RecOpen(bitrate)) {
+        fclose(rec.f);
+        rec.f = nullptr;
+        return -3;
+    }
     rec.path = path;
     rec.serial = (uint32_t)std::chrono::steady_clock::now().time_since_epoch().count();
     rec.pageSeq = 0;
     rec.granule = 0;
-    rec.seconds = 0;
-    rec.buf.clear();
     rec.page.clear();
     rec.lacing.clear();
     rec.packetsInPage = 0;
@@ -461,7 +481,7 @@ int RecStart(const char* path, int bitrate) {
 
 void RecPush(const int16_t* pcm, int n) {
     std::lock_guard<std::mutex> l(rec.m);
-    if (!rec.f) return;
+    if (!rec.Active()) return;
     rec.buf.insert(rec.buf.end(), pcm, pcm + n);
     size_t off = 0;
     while (rec.buf.size() - off >= (size_t)kFrame) {
@@ -473,11 +493,15 @@ void RecPush(const int16_t* pcm, int n) {
         uint8_t pkt[kMaxPacket];
         int len = opus_encode(rec.enc, frame, kFrame, pkt, kMaxPacket);
         if (len <= 0) continue;
+        rec.seconds += (double)kFrame / kRate;
+        if (rec.sink) {
+            rec.sink(rec.sinkUser, pkt, len);
+            continue;
+        }
         rec.page.insert(rec.page.end(), pkt, pkt + len);
         OggAddLacing(rec.lacing, (size_t)len);
         rec.granule += kFrame * 3;
         rec.packetsInPage++;
-        rec.seconds += (double)kFrame / kRate;
         if (rec.packetsInPage >= 50 || rec.lacing.size() > 200) OggFlush(rec, false);
     }
     rec.buf.erase(rec.buf.begin(), rec.buf.begin() + (ptrdiff_t)off);
@@ -487,23 +511,28 @@ float RecLevel() { return rec.level; }
 
 double RecStop(int keep) {
     std::lock_guard<std::mutex> l(rec.m);
-    if (!rec.f) return 0;
-    OggFlush(rec, true);
-    fclose(rec.f);
-    rec.f = nullptr;
+    if (!rec.Active()) return 0;
+    bool file = rec.f != nullptr;
+    if (file) {
+        OggFlush(rec, true);
+        fclose(rec.f);
+        rec.f = nullptr;
+    }
+    rec.sink = nullptr;
+    rec.sinkUser = nullptr;
     opus_encoder_destroy(rec.enc);
     rec.enc = nullptr;
     speex_preprocess_state_destroy(rec.pre);
     rec.pre = nullptr;
     double s = rec.seconds;
-    if (!keep) RemoveUtf8(rec.path.c_str());
+    if (file && !keep) RemoveUtf8(rec.path.c_str());
     return s;
 }
 
 const LsmModule kModule = {
-    LSM_API_VERSION, "LunaShare Voice", "1.1", "voice",
+    LSM_API_VERSION, "LunaShare Voice", "1.2", "voice",
     Start, Stop, Capture, Playback, Receive, SetMute, SetSettings, GetStats,
-    RecStart, RecPush, RecLevel, RecStop,
+    RecStart, RecPush, RecLevel, RecStop, RecStartStream,
 };
 
 }  // namespace

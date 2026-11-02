@@ -31,6 +31,7 @@ FetchContent_MakeAvailable(kcp)
 # ---------------------------------------------------------------- core library
 add_library(lunashare_core STATIC
     src/core/platform.cpp
+    src/core/mp4_writer.cpp
     src/core/hash.cpp
     src/core/net.cpp
     src/core/protocol.cpp
@@ -206,7 +207,7 @@ if(LUNASHARE_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     add_test(NAME engine COMMAND lunashare_tests)
     if(LUNASHARE_BUILD_VOICE)
         add_executable(lunashare_voice_tests tests/test_voice.cpp)
-        target_link_libraries(lunashare_voice_tests PRIVATE lunashare_voice_static opus)
+        target_link_libraries(lunashare_voice_tests PRIVATE lunashare_voice_static lunashare_core opus)
         add_test(NAME voice COMMAND lunashare_voice_tests)
     endif()
     if(LUNASHARE_BUILD_VIDEO AND NOT ANDROID)

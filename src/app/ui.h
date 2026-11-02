@@ -121,7 +121,9 @@ private:
     std::string textViewBuf;
     bool openTextView = false;
     std::string contextMid;
-    std::string recPath, recPeer;  // voice message being recorded
+    std::string recPath, recPeer;  // voice / video message being recorded
+    void DrawVideoMessage(const std::string& peer, float inputH);
+    int vmsgCams = 0;
     std::vector<std::string> deleteMids;  // waiting for confirmation
     bool deleteEveryoneOk = false;        // all of them are ours, so "delete for everyone" is possible
     bool openDeleteConfirm = false;

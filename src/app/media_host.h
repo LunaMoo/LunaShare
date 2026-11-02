@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "mp4_writer.h"
 #include "lunashare_media.h"
 #include "lunashare_video.h"
 #include "imgui.h"
@@ -95,11 +96,21 @@ public:
 
     // voice messages (not during a call)
     bool CanRecordMessages() const { return mod_ != nullptr && mode_ != Mode::Call; }
+    // video messages: camera preview first (OpenVideoMessage), then RecordVideoMessage writes camera + microphone
+    // into an MP4 (H.264 + Opus) until CloseVideoMessage
+    bool CanRecordVideoMessages() const {
+        return mod_ && mod_->rec_start_stream && vmod_ && mode_ != Mode::Call && !videoRunning_;
+    }
+    bool OpenVideoMessage(const std::string& path);
+    bool RecordVideoMessage();
+    double CloseVideoMessage(bool keep);  // returns the length in seconds (0 when discarded / too short)
+    bool VideoMessageOpen() const { return vmsgOpen_; }
+    bool VideoMessageRecording() const { return vmsgRec_; }
     bool StartRecording(const std::string& path);
     double StopRecording(bool keep);  // returns the length in seconds
-    bool Recording() const { return recording_; }
+    bool Recording() const { return recording_; }  // voice message
     double RecordingSeconds() const;
-    float RecordLevel() const { return mod_ && recording_ ? mod_->rec_level() : 0.f; }
+    float RecordLevel() const { return mod_ && (recording_ || vmsgRec_) ? mod_->rec_level() : 0.f; }
 
     // microphone test from the settings page
     void StartMicTest();
@@ -171,6 +182,13 @@ private:
     void ApplyMicGain(int16_t* pcm, int n);
     std::atomic<bool> micTest_{false};
     std::atomic<bool> recording_{false};
+    std::atomic<bool> vmsgOpen_{false}, vmsgRec_{false}, vmsgStarted_{false};
+    std::mutex vmsgM_;
+    ls::Mp4Writer vmsgWriter_;
+    std::string vmsgPath_;
+    int vmsgPreSkip_ = 0;
+    int64_t vmsgT0_ = 0;
+    static void VmsgAudio(void* u, const uint8_t* d, int n);
     uint32_t recStart_ = 0;
     std::atomic<float> micTestLevel_{0};
     uint64_t toneSample_ = 0;

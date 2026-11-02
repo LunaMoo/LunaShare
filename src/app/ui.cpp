@@ -136,12 +136,20 @@ void App::Frame() {
             }
     }
 
-    static const char* autoRec = getenv("LUNASHARE_AUTOREC");  // dev: start a voice message
+    static const char* autoRec = getenv("LUNASHARE_AUTOREC");  // dev: start a voice ("1") or video ("video") message
     static bool autoRecDone = false;
     if (autoRec && !autoRecDone && !selectedPeer.empty() && Media().CanRecordMessages()) {
-        recPath = JoinPath(ConfigDir(), "autorec.ogg");
         recPeer = selectedPeer;
-        Media().StartRecording(recPath);
+        if (std::string(autoRec) == "video") {
+            recPath = JoinPath(ConfigDir(), "autorec.mp4");
+            vmsgCams = (int)Media().Cameras().size();
+            bool o = Media().OpenVideoMessage(recPath);
+            bool r = o && getenv("LUNASHARE_AUTOREC_START") && Media().RecordVideoMessage();
+            SDL_Log("autorec video: open %d record %d at %u ms", o, r, SDL_GetTicks());
+        } else {
+            recPath = JoinPath(ConfigDir(), "autorec.ogg");
+            Media().StartRecording(recPath);
+        }
         autoRecDone = true;
     }
 
@@ -150,7 +158,7 @@ void App::Frame() {
     for (auto& [id, t] : eng.transfers)
         if (t->state == TState::Active || t->state == TState::Hashing || t->state == TState::Verifying) busy = true;
     for (auto& [peer, cv] : eng.chats) unread += cv.unread;
-    if (Media().Recording() || Player().Playing()) busy = true;  // keep the timer / seek bar moving
+    if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing()) busy = true;  // keep the timer / seek bar moving
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 
     ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -776,6 +784,10 @@ void App::DrawChat(const std::string& peer) {
         float vh = videoBig ? availH - ImGui::GetFrameHeight() * 3 : std::max(ImGui::GetFontSize() * 10, availH * 0.5f);
         DrawVideoStage(ImVec2(ImGui::GetContentRegionAvail().x, vh), false);
     }
+    if (Media().VideoMessageOpen() && recPeer == peer) {  // camera view instead of the messages
+        DrawVideoMessage(peer, inputH);
+        return;
+    }
     ImGui::BeginChild("messages", ImVec2(0, -(inputH + ImGui::GetStyle().ItemSpacing.y * 2)), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
@@ -826,10 +838,27 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SetKeyboardFocusHere();
         focusInput = false;
     }
-    bool send = ImGui::InputTextMultiline("##input", &chatInput, ImVec2(ImGui::GetContentRegionAvail().x - sendW - ImGui::GetStyle().ItemSpacing.x, inputH),
+    bool showVmsg = chatInput.empty() && Media().CanRecordVideoMessages() && !Media().Recording();
+    float vmsgW = showVmsg ? inputH + ImGui::GetStyle().ItemSpacing.x : 0;
+    bool send = ImGui::InputTextMultiline("##input", &chatInput, ImVec2(ImGui::GetContentRegionAvail().x - sendW - vmsgW - ImGui::GetStyle().ItemSpacing.x, inputH),
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap);
     if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Enter = send, Ctrl+Enter = new line, drop files to send");
     ImGui::SameLine();
+    if (showVmsg) {
+        if (ui::IconButton("vmsg", Icon::Video, "Record a video message", inputH)) {
+            std::string dir = JoinPath(ConfigDir(), "voice");
+            MakeDirs(dir);
+            time_t now = time(nullptr);
+            char name[96];
+            strftime(name, sizeof(name), "Video message %Y-%m-%d %H-%M-%S.mp4", localtime(&now));
+            recPath = JoinPath(dir, name);
+            recPeer = peer;
+            vmsgCams = (int)Media().Cameras().size();
+            if (!Media().OpenVideoMessage(recPath))
+                toasts.push_back({EventType::Error, "Camera", "Could not start the camera: " + Media().audioError, "", 0, 4.0f});
+        }
+        ImGui::SameLine();
+    }
     if (chatInput.empty() && Media().CanRecordMessages() && !Media().Recording()) {
         // nothing typed: the button records a voice message
         if (ui::IconTextButton(mobile ? "Voice" : "Voice", Icon::Mic, ImVec2(sendW, inputH))) {
@@ -856,6 +885,83 @@ void App::DrawChat(const std::string& peer) {
         if (!mobile) focusInput = true;
     }
     DrawDeleteConfirm(peer);
+}
+
+// Video message: camera preview filling the chat, then recording with a timer. Discard / flip / record / send.
+void App::DrawVideoMessage(const std::string& peer, float inputH) {
+    bool mobile = ui::M().mobile;
+    float sp = ImGui::GetStyle().ItemSpacing.y;
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImVec2 p1(p0.x + avail.x, p0.y + avail.y - inputH - sp * 2);
+    ImGui::Dummy(ImVec2(avail.x, p1.y - p0.y));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 255), 6);
+    const auto& t = Media().LocalVideo();
+    if (t.valid) Media().DrawVideo(dl, t, p0, p1, false);
+    else {
+        const char* s = "Starting camera...";
+        ImVec2 ts = ImGui::CalcTextSize(s);
+        dl->AddText(ImVec2((p0.x + p1.x - ts.x) * 0.5f, (p0.y + p1.y - ts.y) * 0.5f), IM_COL32(200, 200, 200, 255), s);
+    }
+    bool rec = Media().VideoMessageRecording();
+    double secs = Media().RecordingSeconds();
+    if (rec) {  // timer on the picture
+        char b[32];
+        snprintf(b, sizeof(b), "%d:%02d", (int)secs / 60, (int)secs % 60);
+        float fs = ImGui::GetFontSize(), r = fs * 0.35f;
+        ImVec2 tp(p0.x + fs, p0.y + fs * 0.8f), ts = ImGui::CalcTextSize(b);
+        dl->AddRectFilled(ImVec2(tp.x - fs * 0.4f, tp.y - fs * 0.3f), ImVec2(tp.x + r * 3 + ts.x + fs * 0.4f, tp.y + ts.y + fs * 0.3f),
+                          IM_COL32(0, 0, 0, 150), fs);
+        float blink = 0.5f + 0.5f * sinf((float)ImGui::GetTime() * 5.0f);
+        dl->AddCircleFilled(ImVec2(tp.x + r, tp.y + ts.y * 0.5f), r, IM_COL32(230, 60, 60, (int)(120 + 135 * blink)));
+        dl->AddText(ImVec2(tp.x + r * 3, tp.y), IM_COL32(255, 255, 255, 255), b);
+    }
+    ImGui::Separator();
+    float sendW = mobile ? ui::M().rowH * 1.4f : ImGui::GetFontSize() * 6;
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(150, 50, 50, 255));
+    bool cancel = ui::IconButton("vmcancel", Icon::Trash, "Discard", inputH);
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    bool canFlip = !rec && vmsgCams > 1;
+    if (canFlip) {
+        if (ui::IconButton("vmflip", Icon::FlipCamera, "Switch camera", inputH)) Media().NextCamera();
+        ImGui::SameLine();
+    }
+    // middle: hint or level meter
+    ImVec2 m0 = ImGui::GetCursorScreenPos();
+    float mw = ImGui::GetContentRegionAvail().x - sendW - ImGui::GetStyle().ItemSpacing.x;
+    ImGui::Dummy(ImVec2(std::max(1.0f, mw), inputH));
+    if (rec) {
+        float lvl = Media().RecordLevel(), pad = ImGui::GetFontSize() * 0.5f;
+        dl->AddRectFilled(ImVec2(m0.x + pad, m0.y + inputH * 0.42f), ImVec2(m0.x + mw - pad, m0.y + inputH * 0.58f), ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
+        dl->AddRectFilled(ImVec2(m0.x + pad, m0.y + inputH * 0.42f), ImVec2(m0.x + pad + (mw - 2 * pad) * lvl, m0.y + inputH * 0.58f), ui::ColOk(), 4);
+    } else {
+        const char* hint = mobile ? "Up to 3 minutes" : "Video message - up to 3 minutes, 720p";
+        ImVec2 ts = ImGui::CalcTextSize(hint);
+        if (ts.x < mw) dl->AddText(ImVec2(m0.x + (mw - ts.x) * 0.5f, m0.y + (inputH - ts.y) * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), hint);
+    }
+    ImGui::SameLine();
+    bool send = false;
+    if (!rec) {
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 60, 60, 255));
+        if (ui::IconTextButton("Record", Icon::Video, ImVec2(sendW, inputH)) && !Media().RecordVideoMessage())
+            toasts.push_back({EventType::Error, "Microphone", "Could not start recording (microphone permission?)", "", 0, 4.0f});
+        ImGui::PopStyleColor();
+    } else {
+        send = ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH)) || secs > 180;
+    }
+    if (cancel || (!mobile && ImGui::IsKeyPressed(ImGuiKey_Escape))) Media().CloseVideoMessage(false);
+    if (send) {
+        double len = Media().CloseVideoMessage(true);
+        if (len >= 0.5) {
+            eng.SendPaths(peer, {recPath});
+            scrollToBottom = true;
+        } else {
+            RemoveFile(recPath);
+            toasts.push_back({EventType::Error, "Video message", "Nothing was recorded", "", 0, 4.0f});
+        }
+    }
 }
 
 void App::AskDelete(const std::string& peer, const std::vector<std::string>& mids) {

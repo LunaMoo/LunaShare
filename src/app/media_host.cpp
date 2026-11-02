@@ -2,6 +2,7 @@
 
 #include <SDL.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -163,6 +164,23 @@ std::string MediaHost::RateText(int bps) {
 
 int MediaHost::VSend(void* u, const uint8_t* d, size_t n) {
     auto* self = (MediaHost*)u;
+    if (self->vmsgOpen_) {
+        // video message: frames go into the file (once recording), nothing goes to the network
+        if (!self->vmsgRec_ || n <= 13 || d[0] != 2 || d[1] != 1 || d[12] != 0) return 1;
+        bool key = d[6] & 1;
+        int64_t now = (int64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch()).count();
+        std::lock_guard<std::mutex> l(self->vmsgM_);
+        if (!self->vmsgStarted_) {
+            if (!key) return 1;
+            // the picture's turn is fixed for the whole message, from its first frame (like camera apps)
+            if (!self->vmsgWriter_.Open(self->vmsgPath_, (d[7] & 3) * 90, self->vmsgPreSkip_)) return 1;
+            self->vmsgT0_ = now;
+            self->vmsgStarted_ = true;
+        }
+        self->vmsgWriter_.AddVideo(d + 13, n - 13, key, now - self->vmsgT0_, (int)(d[8] | d[9] << 8), (int)(d[10] | d[11] << 8));
+        return 1;
+    }
     return self->eng_ && self->eng_->SendMedia(d, n) ? 1 : 0;
 }
 size_t MediaHost::VQueued(void* u) {
@@ -796,9 +814,10 @@ void MediaHost::Update() {
     if (st == CallState::Active && mod_) want = Mode::Call;
     else if (st == CallState::IncomingRinging) want = Mode::Ring;
     else if (st == CallState::OutgoingRinging) want = Mode::Ringback;
-    else if (recording_) want = Mode::Record;
+    else if (recording_ || vmsgRec_) want = Mode::Record;
     else if (micTest_) want = Mode::MicTest;
     if (recording_ && st != CallState::None) StopRecording(false);  // a call takes the microphone
+    if (vmsgOpen_ && st != CallState::None) CloseVideoMessage(false);  // ... and the camera
     if (st == CallState::None) wantCamera_ = false;
     if (want != Mode::Call && mode_ == Mode::Call) mute_ = false;
     SetMode(want);
@@ -810,6 +829,8 @@ void MediaHost::Update() {
 }
 
 void MediaHost::Shutdown() {
+    CloseVideoMessage(false);
+    if (recording_) StopRecording(false);
     SetMode(Mode::Off);
     if (vcamThread_.joinable()) vcamThread_.join();
     if (vcamOn_ && vmod_) vmod_->vcam_enable(0, nullptr, 0);
@@ -896,7 +917,97 @@ double MediaHost::StopRecording(bool keep) {
     return mod_->rec_stop(keep ? 1 : 0);
 }
 
-double MediaHost::RecordingSeconds() const { return recording_ ? (SDL_GetTicks() - recStart_) / 1000.0 : 0; }
+double MediaHost::RecordingSeconds() const {
+    return recording_ || vmsgRec_ ? (SDL_GetTicks() - recStart_) / 1000.0 : 0;
+}
+
+// ---- video messages
+void MediaHost::VmsgAudio(void* u, const uint8_t* d, int n) {
+    auto* self = (MediaHost*)u;
+    std::lock_guard<std::mutex> l(self->vmsgM_);
+    if (self->vmsgStarted_) self->vmsgWriter_.AddAudio(d, (size_t)n);  // sound before the first picture is dropped
+}
+
+bool MediaHost::OpenVideoMessage(const std::string& path) {
+    if (!CanRecordVideoMessages() || vmsgOpen_ || recording_) return false;
+#if defined(__ANDROID__)
+    if (!SDL_AndroidRequestPermission("android.permission.CAMERA")) {
+        audioError = "camera permission denied";
+        return false;
+    }
+#endif
+    // 720p30 H.264: plays everywhere and stays around 16 MB a minute
+    LsvSettings vs = Preset(2, 30, false);
+    vs.codec_pref = 1;
+    if (!vmod_->start(&vs)) return false;
+    vmsgPath_ = path;
+    vmsgStarted_ = false;
+    vmsgRec_ = false;
+    vmsgOpen_ = true;
+    // selfie camera unless one was picked for this before
+    if (camId_.empty())
+        for (auto& c : Cameras())
+            if (c.facing == LSV_FACING_FRONT) {
+                camId_ = c.id;
+                break;
+            }
+    if (!camId_.empty()) vmod_->select_camera(camId_.c_str());
+    if (!vmod_->set_camera_on(1)) {
+        vmod_->stop();
+        vmsgOpen_ = false;
+        audioError = "camera could not be started";
+        return false;
+    }
+    camOn_ = true;
+    return true;
+}
+
+bool MediaHost::RecordVideoMessage() {
+    if (!vmsgOpen_ || vmsgRec_) return false;
+    Settings s = eng_ ? eng_->GetSettings() : Settings();
+    if (mod_->rec_start_stream(std::max(32000, s.callBitrate), VmsgAudio, this, &vmsgPreSkip_) != 0) return false;
+    recStart_ = SDL_GetTicks();
+    vmsgRec_ = true;
+    SetMode(Mode::Record);  // microphone on
+    if (!capDev_) {
+        vmsgRec_ = false;
+        mod_->rec_stop(0);
+        SetMode(Mode::Off);
+        return false;
+    }
+    const uint8_t askKey[2] = {2, 2};  // start the file with a fresh keyframe
+    vmod_->receive(askKey, 2);
+    return true;
+}
+
+double MediaHost::CloseVideoMessage(bool keep) {
+    if (!vmsgOpen_) return 0;
+    vmod_->set_camera_on(0);
+    vmod_->stop();  // no more frames after this
+    camOn_ = false;
+    bool wasRec = vmsgRec_;
+    vmsgRec_ = false;
+    if (wasRec) {
+        SetMode(Mode::Off);  // microphone off
+        mod_->rec_stop(0);
+    }
+    double secs = 0;
+    {
+        std::lock_guard<std::mutex> l(vmsgM_);
+        if (vmsgStarted_) {
+            if (keep) secs = vmsgWriter_.Finish();
+            else vmsgWriter_.Abort();
+        }
+        vmsgStarted_ = false;
+    }
+    vmsgOpen_ = false;
+    tex_[LSV_LOCAL].valid = false;
+    {
+        std::lock_guard<std::mutex> l(slots_[LSV_LOCAL].m);
+        slots_[LSV_LOCAL].fresh = false;
+    }
+    return secs;
+}
 
 void MediaHost::StartMicTest() { micTest_ = true; }
 void MediaHost::StopMicTest() {

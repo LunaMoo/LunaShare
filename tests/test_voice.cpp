@@ -11,6 +11,7 @@
 #include <opus.h>
 
 #include "lunashare_media.h"
+#include "mp4_writer.h"
 
 static int g_fail = 0;
 #define CHECK(c, ...) do { if (!(c)) { printf("  FAIL %s:%d: %s  ", __FILE__, __LINE__, #c); printf(__VA_ARGS__); printf("\n"); g_fail++; } } while (0)
@@ -192,6 +193,73 @@ static void TestVoiceMessage() {
     if (g) fclose(g);
 }
 
+// video message: Opus packets from the stream recorder plus (synthetic) H.264 into an MP4
+static ls::Mp4Writer* g_mp4 = nullptr;
+static int g_streamPackets = 0;
+static void StreamPacket(void*, const uint8_t* d, int n) {
+    g_streamPackets++;
+    if (g_mp4) g_mp4->AddAudio(d, (size_t)n);
+}
+
+static void TestVideoMessageFile() {
+    printf("[video message: MP4 with H.264 + Opus]\n");
+    const LsmModule* m = lunashare_media_module();
+    ls::Mp4Writer w;
+    int preSkip = 0;
+    CHECK(m->rec_start_stream(32000, StreamPacket, nullptr, &preSkip) == 0 && preSkip > 0, "stream recorder starts (pre-skip %d)", preSkip);
+    CHECK(m->rec_start("x.ogg", 24000) != 0, "only one recording at a time");
+    std::string path = "video_message_test.mp4";
+    CHECK(w.Open(path, 90, preSkip), "mp4 opens");
+    g_mp4 = &w;
+    const uint8_t sps[] = {0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x01, 0x40};
+    const uint8_t pps[] = {0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80};
+    std::vector<int16_t> pcm(533);
+    for (int i = 0; i < 60; i++) {  // 2 s at 30 fps, keyframe every second
+        bool key = i % 30 == 0;
+        std::vector<uint8_t> au;
+        if (key) {
+            au.insert(au.end(), sps, sps + sizeof(sps));
+            au.insert(au.end(), pps, pps + sizeof(pps));
+        }
+        uint8_t slice[] = {0, 0, 1, (uint8_t)(key ? 0x65 : 0x41), 0x88, (uint8_t)i, 0x10, 0x20};
+        au.insert(au.end(), slice, slice + sizeof(slice));
+        if (i == 0) w.AddVideo(slice, sizeof(slice), false, 0, 1280, 720);  // a non-keyframe first is ignored
+        w.AddVideo(au.data(), au.size(), key, (int64_t)i * 33333, 1280, 720);
+        for (size_t k = 0; k < pcm.size(); k++) pcm[k] = (int16_t)(6000 * std::sin((i * 533 + (int)k) * 0.17));
+        m->rec_push(pcm.data(), (int)pcm.size());
+    }
+    m->rec_stop(0);
+    g_mp4 = nullptr;
+    double secs = w.Finish();
+    CHECK(std::fabs(secs - 2.0) < 0.1, "2 s written (%.2f)", secs);
+    CHECK(g_streamPackets >= 95, "%d Opus packets", g_streamPackets);
+    FILE* f = fopen(path.c_str(), "rb");
+    std::vector<uint8_t> data;
+    if (f) {
+        uint8_t b[4096];
+        size_t n;
+        while ((n = fread(b, 1, sizeof(b), f)) > 0) data.insert(data.end(), b, b + n);
+        fclose(f);
+    }
+    auto has = [&](const char* tag) {
+        return std::search(data.begin(), data.end(), tag, tag + 4) != data.end();
+    };
+    CHECK(data.size() > 32 && memcmp(&data[4], "ftyp", 4) == 0, "starts with ftyp");
+    CHECK(has("moov") && has("avcC") && has("dOps") && has("stss") && has("co64"), "index boxes present");
+    // the first video sample right after the mdat header: 4-byte length + IDR slice (SPS/PPS moved into avcC)
+    size_t mdat = 0;
+    for (size_t i = 0; i + 8 < data.size(); i++)
+        if (memcmp(&data[i], "mdat", 4) == 0) { mdat = i + 12; break; }
+    CHECK(mdat && data.size() > mdat + 5 && data[mdat] == 0 && data[mdat + 3] == 5 && data[mdat + 4] == 0x65, "Annex B converted to length prefixes");
+    remove(path.c_str());
+    ls::Mp4Writer w2;  // discarded recordings leave nothing behind
+    w2.Open("video_message_cancel.mp4", 0, 312);
+    w2.Abort();
+    FILE* g = fopen("video_message_cancel.mp4", "rb");
+    CHECK(g == nullptr, "discarded video message deleted");
+    if (g) fclose(g);
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const LsmModule* m = lunashare_media_module();
@@ -200,6 +268,7 @@ int main() {
     TestLoopback(0.10);
     TestEcho();
     TestVoiceMessage();
+    TestVideoMessageFile();
     printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL VOICE TESTS PASSED\n", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -88,6 +88,12 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   **Discard** and **Send**. Recordings are Opus in Ogg (about 3 KB per second, noise-suppressed and levelled), up to 10 minutes,
   and play in the chat like any other audio file. Anything under half a second is thrown away. A call ends a recording that is in progress.
 
+**Video messages (needs the voice and video modules)**
+- The camera button next to **Voice** opens a camera preview filling the chat (front camera on phones; switch cameras before
+  you start). **Record** starts, **Send** stops and sends. Messages are MP4 files (720p30 H.264 with Opus sound, about 16 MB
+  a minute, up to 3 minutes) that play in the chat with the player. The picture keeps the phone's orientation from the moment
+  recording starts, like a camera app.
+
 **Voice calls (optional module)**
 - Calls live in a separate plug-in, `lunashare_media` (`lunashare_media.dll` / `liblunashare_media.so` / `.dylib`), which is loaded at
   startup only if it's present. Without it LunaShare is the plain chat + file app, and the call button doesn't appear. Delete the file to remove calls.
