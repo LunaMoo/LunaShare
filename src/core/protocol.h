@@ -27,6 +27,8 @@ enum class Msg : uint8_t {
     ChatAck = 11,     // {mid}
     ChatDelete = 12,  // {mids[]}  "delete for everyone": remove these messages the sender sent earlier
     ChatDeleteAck = 13,  // {mids[]}
+    ChatReact = 14,   // {mid, emoji}  my reaction to a message (either side's); "" removes it. One per side.
+    ChatReactAck = 15,  // {mid, emoji}
     FileOffer = 20,   // {tid, name, rel, size, sha256, mtime, batch, batchCount, mid}
     FileAccept = 21,  // {tid, offset}  (also used to resume: receiver tells sender where to continue)
     FileReject = 22,  // {tid, reason}

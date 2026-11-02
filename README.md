@@ -90,6 +90,10 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - The smiley button left of the text box opens a picker with categories, search, recently used emoji and a skin tone
   choice. Emoji typed or pasted from the phone keyboard turn into pictures right away.
 - A message of only one to three emoji is shown big.
+- **Reactions:** hover a message and click the smiley next to it (on phones: long-press it, or right-click on desktop)
+  for 👍 ❤️ 😂 😮 😢 🙏 or **+** for any emoji. Each side has one reaction per message; picking it again or clicking your
+  pill under the bubble removes it, and clicking the other person's pill reacts the same. Reactions reach a device that
+  is offline once it is back, and you get a notification when someone reacts while you're in another chat.
 - The module (`lunashare_emoji`) is tiny, because it ships no font. It is in both Android APKs; without it emoji
   show as before.
 

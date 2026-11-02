@@ -301,6 +301,42 @@ int main() {
         CHECK(kept, "delete for me stays local");
     }
 
+    // ------------------------------------------------------------ reactions
+    printf("[reactions]\n");
+    A->SendChat(idB, "react to this");
+    {
+        auto l = A->Lock();
+        keep = A->chats[idB].messages.back().mid;
+    }
+    CHECK(WaitFor([&] {
+        auto l = B->Lock();
+        for (auto& m : B->chats[idA].messages) if (m.mid == keep) return true;
+        return false;
+    }, 3000), "message to react to arrives");
+    B->React(idA, keep, "\xE2\x9D\xA4\xEF\xB8\x8F");  // B reacts to A's message
+    auto theirOn = [&](Engine& e, const std::string& peer, const std::string& want) {
+        auto l = e.Lock();
+        for (auto& m : e.chats[peer].messages)
+            if (m.mid == keep) return m.theirReaction == want;
+        return false;
+    };
+    CHECK(WaitFor([&] { return theirOn(*A, idB, "\xE2\x9D\xA4\xEF\xB8\x8F"); }, 3000), "reaction arrives");
+    CHECK(WaitFor([&] {
+        auto l = B->Lock();
+        for (auto& m : B->chats[idA].messages)
+            if (m.mid == keep) return m.reactionSent && m.myReaction == "\xE2\x9D\xA4\xEF\xB8\x8F";
+        return false;
+    }, 3000), "reaction acknowledged");
+    A->React(idB, keep, "\xF0\x9F\x91\x8D");  // the sender reacts to its own message too
+    CHECK(WaitFor([&] { return theirOn(*B, idA, "\xF0\x9F\x91\x8D"); }, 3000), "reaction on own message arrives");
+    B->React(idA, keep, "");
+    CHECK(WaitFor([&] { return theirOn(*A, idB, ""); }, 3000), "reaction removed");
+    {
+        bool ev = false;
+        for (auto& e : A->PopEvents()) ev |= e.type == EventType::ChatReaction;
+        CHECK(ev, "reaction event");
+    }
+
     // ------------------------------------------------------------ pause / resume
     printf("[pause/resume]\n");
     const int64_t SZ = 24 << 20;

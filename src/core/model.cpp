@@ -170,8 +170,12 @@ KnownDevice DeviceFromJson(const json& j) {
 }
 
 json ToJson(const ChatMessage& m) {
-    return {{"mid", m.mid}, {"out", m.outgoing}, {"ts", m.ts}, {"kind", (int)m.kind}, {"text", m.text},
-            {"tids", m.tids}, {"batch", m.batch}, {"delivered", m.delivered}};
+    json j = {{"mid", m.mid}, {"out", m.outgoing}, {"ts", m.ts}, {"kind", (int)m.kind}, {"text", m.text},
+              {"tids", m.tids}, {"batch", m.batch}, {"delivered", m.delivered}};
+    if (!m.myReaction.empty() || !m.reactionSent) j["myReact"] = m.myReaction;
+    if (!m.reactionSent) j["reactPending"] = true;
+    if (!m.theirReaction.empty()) j["theirReact"] = m.theirReaction;
+    return j;
 }
 
 ChatMessage MessageFromJson(const json& j) {
@@ -186,6 +190,11 @@ ChatMessage MessageFromJson(const json& j) {
     Get(j, "tids", m.tids);
     Get(j, "batch", m.batch);
     Get(j, "delivered", m.delivered);
+    Get(j, "myReact", m.myReaction);
+    Get(j, "theirReact", m.theirReaction);
+    bool pending = false;
+    Get(j, "reactPending", pending);
+    m.reactionSent = !pending;
     return m;
 }
 

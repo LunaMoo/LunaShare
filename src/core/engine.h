@@ -68,7 +68,8 @@ struct OnlinePeer {
 };
 
 enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error,
-                       CallIncoming, CallStarted, CallEnded, ChatDeleted };
+                       CallIncoming, CallStarted, CallEnded, ChatDeleted,
+                       ChatReaction };  // text = emoji, a = the message text (shortened)
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
 std::string CapForMedia(const std::string& media);  // capability a call type needs ("webcam" -> "video")
@@ -137,6 +138,8 @@ public:
     // Removes messages from this conversation. forEveryone: also asks the other device to remove the ones we sent
     // (delivered as soon as it is reachable).
     void DeleteMessages(const std::string& peer, const std::vector<std::string>& mids, bool forEveryone);
+    // my reaction to a message (one per message; "" removes it); delivered when the device is reachable
+    void React(const std::string& peer, const std::string& mid, const std::string& emoji);
     void MarkRead(const std::string& peer);
     void RemoveHistory(size_t index);
     void ClearHistory();

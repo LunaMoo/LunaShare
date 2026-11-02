@@ -103,6 +103,8 @@ struct ChatMessage {
     std::vector<uint64_t> tids;  // for Files
     uint64_t batch = 0;
     bool delivered = false;
+    std::string myReaction, theirReaction;  // emoji (UTF-8), empty = none
+    bool reactionSent = true;               // false until the other device confirmed myReaction
 };
 
 struct Conversation {

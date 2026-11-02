@@ -823,6 +823,40 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             }
             break;
         }
+        case Msg::ChatReact: {
+            std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
+            if (emoji.size() > 64) break;  // one emoji, not a message
+            auto it = chats.find(c->peerId);
+            if (it != chats.end())
+                for (auto& m : it->second.messages)
+                    if (m.mid == mid && m.kind != MsgKind::System) {
+                        if (m.theirReaction != emoji) {
+                            m.theirReaction = emoji;
+                            MarkDirty();
+                            if (!emoji.empty()) {
+                                std::string about = m.kind == MsgKind::Files ? "[files] " + m.text : m.text;
+                                if (about.size() > 60) about = about.substr(0, 57) + "...";
+                                Event ev{EventType::ChatReaction, c->peerId, emoji};
+                                ev.a = about;
+                                Emit(ev);
+                            }
+                        }
+                        break;
+                    }
+            Queue(c, Msg::ChatReactAck, {{"mid", mid}, {"emoji", emoji}});
+            break;
+        }
+        case Msg::ChatReactAck: {
+            std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
+            auto it = chats.find(c->peerId);
+            if (it != chats.end())
+                for (auto& m : it->second.messages)
+                    if (m.mid == mid && m.myReaction == emoji && !m.reactionSent) {
+                        m.reactionSent = true;
+                        MarkDirty();
+                    }
+            break;
+        }
         case Msg::ChatAck: {
             std::string mid = j.value("mid", "");
             auto it = chats.find(c->peerId);
@@ -1154,6 +1188,8 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             if (m.outgoing && !m.delivered && m.kind == MsgKind::Text)
                 Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
+        for (auto& m : it->second.messages)
+            if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
     }
     std::vector<std::shared_ptr<Transfer>> outs;
     for (auto& [id, t] : transfers)
@@ -1928,6 +1964,21 @@ void Engine::DeleteMessages(const std::string& peer, const std::vector<std::stri
         QueueToPeer(peer, Msg::ChatDelete, {{"mids", remote}});
     }
     MarkDirty();
+}
+
+void Engine::React(const std::string& peer, const std::string& mid, const std::string& emoji) {
+    auto lk = Lock();
+    auto it = chats.find(peer);
+    if (it == chats.end()) return;
+    for (auto& m : it->second.messages)
+        if (m.mid == mid && m.kind != MsgKind::System) {
+            if (m.myReaction == emoji) return;
+            m.myReaction = emoji;
+            m.reactionSent = false;
+            QueueToPeer(peer, Msg::ChatReact, {{"mid", mid}, {"emoji", emoji}});
+            MarkDirty();
+            return;
+        }
 }
 
 void Engine::MarkRead(const std::string& peer) {

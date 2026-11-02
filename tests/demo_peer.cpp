@@ -108,6 +108,18 @@ int main(int argc, char** argv) {
         e.SendChat(peer, u8"Emoji too \U0001F389 \U0001F44D\U0001F3FD family \U0001F468\u200D\U0001F469\u200D\U0001F467 flag \U0001F1F5\U0001F1F1 keycap 1\uFE0F\u20E3 and text \u00A9 stays text");
         e.SendChat(peer, u8"\u2764\uFE0F");
         e.SendChat(peer, u8"\U0001F602\U0001F602\U0001F525");
+        std::string first, second;
+        {
+            auto l = e.Lock();
+            auto& ms = e.chats[peer].messages;
+            for (auto& m : ms)
+                if (m.kind == MsgKind::Text) {
+                    if (first.empty()) first = m.mid;
+                    else if (second.empty()) second = m.mid;
+                }
+        }
+        e.React(peer, first, u8"\u2764\uFE0F");
+        e.React(peer, second, u8"\U0001F44D");
     }
     int secs = getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30;
     std::this_thread::sleep_for(std::chrono::seconds(secs));

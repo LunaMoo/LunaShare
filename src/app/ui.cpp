@@ -141,6 +141,22 @@ void App::Frame() {
 
     static bool emojiPanelEnv = getenv("LUNASHARE_EMOJIPANEL") != nullptr;  // dev: start with the emoji panel open
     if (emojiPanelEnv) emojiOpen = true, emojiPanelEnv = false;
+    static const char* autoReact = getenv("LUNASHARE_AUTOREACT");  // dev: react to the first two messages
+    if (autoReact && !selectedPeer.empty()) {
+        auto it = eng.chats.find(selectedPeer);
+        std::vector<std::string> mids;
+        if (it != eng.chats.end())
+            for (auto& m : it->second.messages)
+                if (m.kind == MsgKind::Text && !m.outgoing) mids.push_back(m.mid);
+        if (mids.size() >= 2) {
+            eng.React(selectedPeer, mids[0], "\xE2\x9D\xA4\xEF\xB8\x8F");
+            eng.React(selectedPeer, mids[1], "\xF0\x9F\x98\x82");
+            reactMid = mids[0];
+            if (std::string(autoReact) == "pick") openReactPick = true;
+            if (std::string(autoReact) == "more") openReactMore = true;
+            autoReact = nullptr;
+        }
+    }
     static const char* autoRec = getenv("LUNASHARE_AUTOREC");  // dev: start a voice ("1") or video ("video") message
     static bool autoRecDone = false;
     if (autoRec && !autoRecDone && !selectedPeer.empty() && Media().CanRecordMessages()) {
@@ -224,6 +240,11 @@ void App::PullEvents() {
                 break;
             case EventType::ChatDeleted:
                 continue;  // the chat view simply redraws without it
+            case EventType::ChatReaction:
+                if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat)) continue;
+                t.title = who + " reacted " + e.text;
+                t.text = e.a;
+                break;
             case EventType::IncomingOffer:
                 t.title = who + " wants to send";
                 t.text = e.text;
@@ -802,6 +823,7 @@ void App::DrawChat(const std::string& peer) {
     ImGui::BeginChild("messages", ImVec2(0, -(inputH + pickerH + ImGui::GetStyle().ItemSpacing.y * (emojiOpen ? 3 : 2))), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
+    DrawReactionPopups(peer);
     ImGui::EndChild();
     ImGui::Separator();
     if (emojiOpen) {
@@ -1108,6 +1130,8 @@ void App::DrawMessages(const std::string& peer) {
             ImU32 bg = ImGui::GetColorU32(sel ? ImGuiCol_HeaderActive : (m.outgoing ? ImGuiCol_FrameBgActive : ImGuiCol_FrameBg));
             dl->AddRectFilled(p0, p1, bg, pad);
             dl->ChannelsMerge();
+            ReactHoverButton(m, p0, p1);
+            DrawReactions(peer, m, p0, p1);
             // selection by clicking the card background
             if (ImGui::IsMouseHoveringRect(p0, p1) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered()) {
                 if (ImGui::IsMouseClicked(1)) { contextMid = m.mid; ImGui::OpenPopup("msgctx"); }
@@ -1169,11 +1193,15 @@ void App::DrawMessages(const std::string& peer) {
             ImU32 metaCol = m.outgoing && !m.delivered ? ui::ColWarn() : ui::ColMuted();
             dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale,
                         ImVec2(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + ts.y + pad * 0.2f), metaCol, meta.c_str());
+            ReactHoverButton(m, p0, ImVec2(p0.x + bw, p0.y + bh));
+            DrawReactions(peer, m, p0, ImVec2(p0.x + bw, p0.y + bh));
             ImGui::Dummy(ImVec2(0, pad * 0.15f));
         }
 
         if (contextMid == m.mid && ImGui::BeginPopup("msgctx")) {
             float h = mobile ? ui::M().rowH * 0.85f : 0;
+            if (QuickReactionRow(peer, m.mid, m.myReaction)) ImGui::CloseCurrentPopup();
+            ImGui::Separator();
             if (ImGui::Selectable("Copy text", false, 0, ImVec2(0, h))) {
                 std::string text = m.text;
                 if (m.kind == MsgKind::Files) {
@@ -1219,6 +1247,164 @@ void App::DrawMessages(const std::string& peer) {
     }
     (void)myName;
     (void)theirName;
+}
+
+// ---------------------------------------------------------------- reactions
+static const char* kQuickReactions[] = {"\xF0\x9F\x91\x8D", "\xE2\x9D\xA4\xEF\xB8\x8F", "\xF0\x9F\x98\x82",
+                                        "\xF0\x9F\x98\xAE", "\xF0\x9F\x98\xA2", "\xF0\x9F\x99\x8F"};
+
+// draws an emoji (real text) centered in a box
+static void EmojiAt(ImDrawList* dl, const std::string& emoji, ImVec2 p0, ImVec2 p1, float size) {
+    std::string g = Emoji().Glyph(emoji);
+    ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0, g.c_str());
+    dl->AddText(ImGui::GetFont(), size, ImVec2((p0.x + p1.x - ts.x) * 0.5f, (p0.y + p1.y - ts.y) * 0.5f), ImGui::GetColorU32(ImGuiCol_Text), g.c_str());
+}
+
+bool App::QuickReactionRow(const std::string& peer, const std::string& mid, const std::string& current) {
+    bool mobile = ui::M().mobile;
+    float s = mobile ? ui::M().rowH * 0.9f : ImGui::GetFrameHeight() * 1.5f;
+    bool done = false;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (int i = 0; i < 6; i++) {
+        ImGui::PushID(i);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::InvisibleButton("##qr", ImVec2(s, s))) {
+            eng.React(peer, mid, current == kQuickReactions[i] ? "" : kQuickReactions[i]);  // same one again removes it
+            done = true;
+        }
+        bool on = current == kQuickReactions[i];
+        if (on || ImGui::IsItemHovered())
+            dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), ImGui::GetColorU32(on ? ImGuiCol_HeaderActive : ImGuiCol_HeaderHovered), s * 0.5f);
+        EmojiAt(dl, kQuickReactions[i], p, ImVec2(p.x + s, p.y + s), s * 0.6f);
+        ImGui::PopID();
+        ImGui::SameLine(0, s * 0.08f);
+    }
+    if (Emoji().Available()) {  // any emoji
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::InvisibleButton("##qrmore", ImVec2(s, s))) {
+            reactMid = mid;
+            openReactMore = true;
+            done = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), ImGui::GetColorU32(ImGuiCol_HeaderHovered), s * 0.5f);
+            if (!mobile) ImGui::SetTooltip("More emoji");
+        }
+        ui::DrawIcon(dl, Icon::Plus, ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.45f, ImGui::GetColorU32(ImGuiCol_Text));
+    } else {
+        ImGui::NewLine();
+    }
+    return done;
+}
+
+void App::ReactHoverButton(const ChatMessage& m, ImVec2 b0, ImVec2 b1) {
+    if (ui::M().mobile || m.kind == MsgKind::System) return;  // phones: long-press menu
+    float s = ImGui::GetFrameHeight();
+    ImVec2 wmin = ImGui::GetWindowPos(), wmax(wmin.x + ImGui::GetWindowWidth(), wmin.y + ImGui::GetWindowHeight());
+    // the whole row counts as hovering, so the button can be reached
+    bool rowHover = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+                    ImGui::IsMouseHoveringRect(ImVec2(wmin.x, b0.y), ImVec2(wmax.x, b1.y), false);
+    if (!rowHover && !(openReactPick && reactMid == m.mid)) return;
+    float x = m.outgoing ? b0.x - s * 1.25f : b1.x + s * 0.25f;
+    ImVec2 p(x, (b0.y + b1.y - s) * 0.5f);
+    ImVec2 back = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(p);
+    ImGui::PushID("reacthover");
+    if (ImGui::InvisibleButton("##rh", ImVec2(s, s))) {
+        reactMid = m.mid;
+        openReactPick = true;
+    }
+    bool hov = ImGui::IsItemHovered();
+    if (hov) ImGui::SetTooltip("React");
+    ImGui::PopID();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddCircleFilled(ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.5f, ImGui::GetColorU32(hov ? ImGuiCol_ButtonHovered : ImGuiCol_Button));
+    EmojiAt(dl, "\xF0\x9F\x99\x82", p, ImVec2(p.x + s, p.y + s), s * 0.55f);
+    ImGui::SetCursorScreenPos(back);
+}
+
+void App::DrawReactions(const std::string& peer, ChatMessage& m, ImVec2 b0, ImVec2 b1) {
+    if (m.myReaction.empty() && m.theirReaction.empty()) return;
+    float fs = ImGui::GetFontSize();
+    float ph = fs * 1.6f, es = fs * 1.05f;
+    struct Pill {
+        std::string emoji;
+        int count;
+        bool mine;
+    };
+    std::vector<Pill> pills;
+    if (!m.myReaction.empty() && m.myReaction == m.theirReaction) pills.push_back({m.myReaction, 2, true});
+    else {
+        if (!m.theirReaction.empty()) pills.push_back({m.theirReaction, 1, false});
+        if (!m.myReaction.empty()) pills.push_back({m.myReaction, 1, true});
+    }
+    float total = 0;
+    std::vector<float> widths;
+    for (auto& p : pills) {
+        float w = ph * 1.1f + (p.count > 1 ? ImGui::CalcTextSize("2").x + fs * 0.35f : 0);
+        widths.push_back(w);
+        total += w + fs * 0.3f;
+    }
+    float x = m.outgoing ? b1.x - total - fs * 0.3f : b0.x + fs * 0.5f;
+    float y = b1.y - ph * 0.3f;
+    ImVec2 back = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (size_t i = 0; i < pills.size(); i++) {
+        auto& p = pills[i];
+        ImVec2 a(x, y), b(x + widths[i], y + ph);
+        ImGui::SetCursorScreenPos(a);
+        ImGui::PushID((int)i + 1000);
+        bool click = ImGui::InvisibleButton("##pill", ImVec2(widths[i], ph));
+        bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+        if (hov && !ui::M().mobile)
+            ImGui::SetTooltip("%s", p.count > 1 ? "You both reacted - click to remove yours" : p.mine ? "Your reaction - click to remove" : "Click to react the same");
+        if (click) eng.React(peer, m.mid, p.mine ? "" : p.emoji);
+        ImU32 bg = ImGui::GetColorU32(hov ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
+        dl->AddRectFilled(a, b, bg, ph * 0.5f);
+        dl->AddRect(a, b, p.mine ? ImGui::GetColorU32(ImGuiCol_ButtonActive) : ImGui::GetColorU32(ImGuiCol_WindowBg), ph * 0.5f, 0, fs * 0.12f);
+        EmojiAt(dl, p.emoji, a, ImVec2(a.x + ph * 1.1f, b.y), es);
+        if (p.count > 1) dl->AddText(ImVec2(a.x + ph * 1.05f, a.y + (ph - ImGui::GetTextLineHeight()) * 0.5f), ImGui::GetColorU32(ImGuiCol_Text), "2");
+        if (p.mine && !m.reactionSent) dl->AddCircleFilled(ImVec2(b.x - fs * 0.15f, a.y + fs * 0.15f), fs * 0.13f, ui::ColWarn());  // not delivered yet
+        x += widths[i] + fs * 0.3f;
+    }
+    // make room below the bubble for the part of the pills that hangs out
+    ImGui::SetCursorScreenPos(ImVec2(back.x, std::max(back.y, y + ph + fs * 0.15f)));
+    ImGui::Dummy(ImVec2(0, 0));
+}
+
+void App::DrawReactionPopups(const std::string& peer) {
+    if (openReactPick) {
+        ImGui::OpenPopup("reactpick");
+        openReactPick = false;
+    }
+    if (ImGui::BeginPopup("reactpick")) {
+        std::string cur;
+        auto it = eng.chats.find(peer);
+        if (it != eng.chats.end())
+            for (auto& m : it->second.messages)
+                if (m.mid == reactMid) cur = m.myReaction;
+        if (QuickReactionRow(peer, reactMid, cur)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    if (openReactMore) {
+        ImGui::OpenPopup("reactmore");
+        openReactMore = false;
+    }
+    bool mobile = ui::M().mobile;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImVec2 sz = mobile ? ImVec2(vp->WorkSize.x * 0.96f, vp->WorkSize.y * 0.6f) : ImVec2(ImGui::GetFontSize() * 26, ImGui::GetFontSize() * 20);
+    ImGui::SetNextWindowSize(sz);
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    if (mobile) ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopup("reactmore")) {
+        std::string picked;
+        if (Emoji().DrawPicker(ImVec2(-1, -1), &picked)) {
+            eng.React(peer, reactMid, Emoji().Restore(picked));
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void App::CopySelectedMessages(const std::string& peer) {
@@ -2346,7 +2532,7 @@ void App::DrawToasts() {
                   : t.type == EventType::TransferDone ? ui::ColOk() : ui::ColAccent();
         ImVec2 p = ImGui::GetWindowPos();
         ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + 4, p.y + ImGui::GetWindowHeight()), col);
-        ImGui::TextUnformatted(t.title.c_str());
+        ImGui::TextUnformatted(Emoji().Display(t.title).c_str());
         ImGui::PushTextWrapPos(0);
         ImGui::TextDisabled("%s", Emoji().Display(t.text).c_str());
         ImGui::PopTextWrapPos();

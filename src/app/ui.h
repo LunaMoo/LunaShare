@@ -56,6 +56,13 @@ private:
     // screens (shared)
     void DrawChat(const std::string& peer);
     void DrawMessages(const std::string& peer);
+    // emoji reactions: pills under a bubble, hover button, quick row + full picker popups
+    void DrawReactions(const std::string& peer, ls::ChatMessage& m, ImVec2 b0, ImVec2 b1);
+    void ReactHoverButton(const ls::ChatMessage& m, ImVec2 b0, ImVec2 b1);
+    bool QuickReactionRow(const std::string& peer, const std::string& mid, const std::string& current);
+    void DrawReactionPopups(const std::string& peer);
+    std::string reactMid;
+    bool openReactPick = false, openReactMore = false;
     void DrawBatchCard(const std::string& peer, const ls::ChatMessage& m, float width);
     void DrawTransferRow(const std::shared_ptr<ls::Transfer>& t, bool compact);
     void DrawTransferActions(const std::shared_ptr<ls::Transfer>& t);
