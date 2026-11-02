@@ -30,8 +30,12 @@ public:
         return {a, b};
     }
 
-    bool StartCamera(const std::string& id, const LsvSettings& s, std::string*) override {
+    unsigned EncodeCodecs() override { return getenv("LSV_FAKE_CODECS") ? (unsigned)atoi(getenv("LSV_FAKE_CODECS")) : 1; }
+    unsigned DecodeCodecs() override { return EncodeCodecs(); }
+
+    bool StartCamera(const std::string& id, const LsvSettings& s, int codec, std::string*) override {
         StopCamera();
+        codec_ = codec;
         s_ = s;
         bitrate_ = s.bitrate;
         front_ = id == "front";
@@ -54,7 +58,7 @@ public:
         haveKey_ = false;
         return true;
     }
-    void Decode(const uint8_t* d, size_t n, bool key, int w, int h) override {
+    void Decode(const uint8_t* d, size_t n, bool key, int w, int h, int) override {
         if (n < 13 || d[4] != (key ? 0x65 : 0x41)) { sink_->OnDecoderError(); return; }
         if (key) haveKey_ = true;
         if (!haveKey_) { sink_->OnDecoderError(); return; }
@@ -130,6 +134,7 @@ private:
             ef.width = w;
             ef.height = h;
             ef.rotation = rot;
+            ef.codec = codec_;
             ef.mirror = front_;
             sink_->OnEncoded(ef);
             frame++;
@@ -143,6 +148,7 @@ private:
     std::atomic<int> bitrate_{0};
     std::atomic<bool> run_{false}, key_{false};
     bool front_ = true, haveKey_ = false;
+    int codec_ = 0;
     float zoom_ = 1;
     std::thread th_;
     std::vector<uint8_t> img_, uv_;

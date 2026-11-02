@@ -235,6 +235,24 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->AddLine(P(-0.75f, 0.75f), P(-0.25f, 0.75f), col, t);
             dl->AddLine(P(-0.75f, 0.75f), P(-0.75f, 0.25f), col, t);
             break;
+        case Icon::RotateLeft:
+        case Icon::RotateRight: {
+            float d = icon == Icon::RotateRight ? 1.f : -1.f;
+            dl->PathArcTo(P(0, 0.05f), h * 0.6f, d > 0 ? -2.6f : -0.54f, d > 0 ? 1.2f : 3.74f, 14);
+            dl->PathStroke(col, 0, t);
+            // arrow head at the start of the arc (top)
+            ImVec2 tip = P(d * -0.5f, -0.55f);
+            dl->AddTriangleFilled(ImVec2(tip.x - d * h * 0.05f, tip.y - h * 0.3f), ImVec2(tip.x + d * h * 0.3f, tip.y + h * 0.02f),
+                                  ImVec2(tip.x - d * h * 0.3f, tip.y + h * 0.15f), col);
+            break;
+        }
+        case Icon::Webcam:
+            // a monitor with a camera on top
+            dl->AddRect(P(-0.8f, -0.35f), P(0.8f, 0.55f), col, h * 0.08f, 0, t);
+            dl->AddLine(P(-0.3f, 0.8f), P(0.3f, 0.8f), col, t);
+            dl->AddLine(P(0, 0.55f), P(0, 0.8f), col, t);
+            dl->AddCircleFilled(P(0, -0.6f), h * 0.2f, col);
+            break;
         case Icon::List:
             for (int i = -1; i <= 1; i++) {
                 dl->AddRectFilled(P(-0.75f, i * 0.55f - 0.1f), P(-0.5f, i * 0.55f + 0.1f), col);

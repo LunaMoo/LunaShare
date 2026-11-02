@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit;
  * Control ids match LSV_CTL_* in src/media_api/lunashare_video.h.
  */
 public final class VideoEngine {
-    static native void nativeEncoded(ByteBuffer buf, int offset, int size, boolean key, int w, int h, int rotation);
+    static native void nativeEncoded(ByteBuffer buf, int offset, int size, boolean key, int w, int h, int rotation, int codec);
     static native void nativeImage(int source, ByteBuffer y, ByteBuffer u, ByteBuffer v, int yStride, int uvStride,
                                    int uvPixelStride, int w, int h, int rotation, boolean mirror);
     static native void nativeDecoderError();
@@ -64,6 +64,48 @@ public final class VideoEngine {
     private static boolean front;
     private static int sensorOrientation;
     private static int width, height, fps;
+    private static int encCodec;  // 0 H.264, 1 HEVC, 2 AV1 (matches lsv::Codec)
+    static final String[] MIMES = {MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC, "video/av01"};
+
+    /** Codecs with a hardware encoder (bit mask 1 << codec); H.264 always counts. */
+    public static int encoderCodecs() { return 1 | (hasCodec(1, true) ? 2 : 0) | (hasCodec(2, true) ? 4 : 0); }
+
+    /** Codecs this phone decodes in hardware (bit mask). */
+    public static int decoderCodecs() { return 1 | (hasCodec(1, false) ? 2 : 0) | (hasCodec(2, false) ? 4 : 0); }
+
+    private static boolean hasCodec(int codec, boolean encoder) {
+        try {
+            for (MediaCodecInfo i : new android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).getCodecInfos()) {
+                if (i.isEncoder() != encoder) continue;
+                if (Build.VERSION.SDK_INT >= 29 && !i.isHardwareAccelerated()) continue;  // software HEVC/AV1 would drain the battery
+                for (String t : i.getSupportedTypes()) if (t.equalsIgnoreCase(MIMES[codec])) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    // ---- device position from the motion sensor (works with auto-rotate off / the app locked to portrait)
+    private static android.view.OrientationEventListener orient;
+    private static volatile int deviceDeg = -1;  // clockwise from the natural (portrait) position, 0/90/180/270
+
+    private static void startOrientation() {
+        if (orient != null) return;
+        orient = new android.view.OrientationEventListener(ctx()) {
+            @Override public void onOrientationChanged(int o) {
+                if (o == ORIENTATION_UNKNOWN) return;  // lying flat: keep the last position
+                int snapped = ((o + 45) / 90 * 90) % 360;
+                // a little hysteresis so it doesn't flicker near 45 degrees
+                int d = Math.abs(((o - deviceDeg + 540) % 360) - 180);  // distance to the current position
+                if (deviceDeg < 0 || d > 55) deviceDeg = snapped;
+            }
+        };
+        if (orient.canDetectOrientation()) orient.enable();
+    }
+
+    private static void stopOrientation() {
+        if (orient != null) orient.disable();
+        orient = null;
+    }
     private static boolean highSpeed;  // > 60 fps: constrained high-speed session (encoder only, no self-view)
     private static String encName = "";
     private static byte[] config;  // SPS/PPS
@@ -119,7 +161,7 @@ public final class VideoEngine {
 
     /** Clockwise rotation that turns the (unmirrored) camera image upright for the current device orientation. */
     private static int rotation() {
-        int dev = (360 - displayDegrees()) % 360;
+        int dev = deviceDeg >= 0 ? deviceDeg : (360 - displayDegrees()) % 360;
         if (front) dev = -dev;
         return ((sensorOrientation + dev) % 360 + 360) % 360;
     }
@@ -137,8 +179,10 @@ public final class VideoEngine {
         return best != null ? best : new Size(w, h);
     }
 
-    public static boolean startCamera(String id, int w, int h, int frameRate, int bitrate) {
+    public static boolean startCamera(String id, int w, int h, int frameRate, int bitrate, int codec) {
         stopCamera();
+        encCodec = codec;
+        startOrientation();
         try {
             CameraManager m = mgr();
             chars = m.getCameraCharacteristics(id);
@@ -149,6 +193,7 @@ public final class VideoEngine {
             StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             fps = frameRate;
             highSpeed = false;
+        stopOrientation();
             Size size = null;
             if (frameRate > 60) {
                 // 120 fps only works in a constrained high-speed session, at the sizes the camera lists for it
@@ -259,8 +304,8 @@ public final class VideoEngine {
 
     private static MediaCodecInfo.VideoCapabilities avcCaps() {
         try {
-            MediaCodec c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
-            MediaCodecInfo.VideoCapabilities vc = c.getCodecInfo().getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).getVideoCapabilities();
+            MediaCodec c = MediaCodec.createEncoderByType(MIMES[encCodec]);
+            MediaCodecInfo.VideoCapabilities vc = c.getCodecInfo().getCapabilitiesForType(MIMES[encCodec]).getVideoCapabilities();
             c.release();
             return vc;
         } catch (Exception e) {
@@ -289,7 +334,8 @@ public final class VideoEngine {
 
     private static boolean openEncoder(int bitrate) {
         try {
-            MediaFormat fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height);
+            String mime = MIMES[encCodec];
+            MediaFormat fmt = MediaFormat.createVideoFormat(mime, width, height);
             fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
             fmt.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
             fmt.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
@@ -299,12 +345,12 @@ public final class VideoEngine {
                 if (fps > 30) fmt.setInteger(MediaFormat.KEY_OPERATING_RATE, fps);  // lets the codec clock up for 60/120 fps
             }
             if (Build.VERSION.SDK_INT >= 29) fmt.setInteger(MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1);
-            encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            encoder = MediaCodec.createEncoderByType(mime);
             MediaCodecInfo info = encoder.getCodecInfo();
-            MediaCodecInfo.EncoderCapabilities caps = info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).getEncoderCapabilities();
+            MediaCodecInfo.EncoderCapabilities caps = info.getCapabilitiesForType(mime).getEncoderCapabilities();
             if (caps != null && caps.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR))
                 fmt.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR);
-            MediaCodecInfo.VideoCapabilities vc = info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).getVideoCapabilities();
+            MediaCodecInfo.VideoCapabilities vc = info.getCapabilitiesForType(mime).getVideoCapabilities();
             if (vc != null) fmt.setInteger(MediaFormat.KEY_BIT_RATE, vc.getBitrateRange().clamp(bitrate));
             encName = info.getName() + (Build.VERSION.SDK_INT >= 29 && info.isHardwareAccelerated() ? " (hardware)" : "");
             config = null;
@@ -318,6 +364,9 @@ public final class VideoEngine {
                                 config = new byte[bi.size];
                                 b.position(bi.offset);
                                 b.get(config);
+                                // AV1: the config is an av1C box (4 header bytes, then the sequence header OBU)
+                                if (encCodec == 2 && config.length > 4 && (config[0] & 0xff) == 0x81)
+                                    config = Arrays.copyOfRange(config, 4, config.length);
                             } else {
                                 boolean key = (bi.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
                                 if (key && config != null && !hasSps(b, bi.offset, bi.size)) {
@@ -327,9 +376,9 @@ public final class VideoEngine {
                                     keyBuf.put(config);
                                     b.position(bi.offset).limit(bi.offset + bi.size);
                                     keyBuf.put(b);
-                                    nativeEncoded(keyBuf, 0, need, true, width, height, rotation());
+                                    nativeEncoded(keyBuf, 0, need, true, width, height, rotation(), encCodec);
                                 } else {
-                                    nativeEncoded(b, bi.offset, bi.size, key, width, height, rotation());
+                                    nativeEncoded(b, bi.offset, bi.size, key, width, height, rotation(), encCodec);
                                 }
                             }
                         }
@@ -353,9 +402,32 @@ public final class VideoEngine {
         }
     }
 
+    /** Does this keyframe already carry the stream headers (SPS / VPS / AV1 sequence header)? */
     private static boolean hasSps(ByteBuffer b, int off, int size) {
+        if (encCodec == 2) {
+            // AV1: OBUs; a temporal delimiter (type 2) may come first
+            int i = off, end = off + size;
+            for (int k = 0; k < 3 && i < end; k++) {
+                int h = b.get(i) & 0xff, type = (h >> 3) & 0xf;
+                if (type == 1) return true;
+                boolean ext = (h & 4) != 0, hasSize = (h & 2) != 0;
+                int p = i + 1 + (ext ? 1 : 0);
+                if (!hasSize) return false;
+                long len = 0;
+                for (int s = 0; s < 8 && p < end; s++) {
+                    int byt = b.get(p++) & 0xff;
+                    len |= (long) (byt & 0x7f) << (7 * s);
+                    if ((byt & 0x80) == 0) break;
+                }
+                i = (int) (p + len);
+            }
+            return false;
+        }
         for (int i = off; i < off + Math.min(size, 64) - 4; i++)
-            if (b.get(i) == 0 && b.get(i + 1) == 0 && b.get(i + 2) == 1 && (b.get(i + 3) & 0x1f) == 7) return true;
+            if (b.get(i) == 0 && b.get(i + 1) == 0 && b.get(i + 2) == 1) {
+                int x = b.get(i + 3) & 0xff;
+                if (encCodec == 1 ? ((x >> 1) & 0x3f) == 32 || ((x >> 1) & 0x3f) == 33 : (x & 0x1f) == 7) return true;
+            }
         return false;
     }
 
@@ -570,14 +642,17 @@ public final class VideoEngine {
 
     public static boolean startDecoder() { return true; }  // created on the first keyframe, when the size is known
 
-    private static boolean openDecoder(int w, int h) {
+    private static int decCodec = -1;
+
+    private static boolean openDecoder(int w, int h, int codec) {
         closeDecoder();
         try {
-            MediaFormat fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h);
+            MediaFormat fmt = MediaFormat.createVideoFormat(MIMES[codec], w, h);
             fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);
             if (Build.VERSION.SDK_INT >= 30) fmt.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
             if (Build.VERSION.SDK_INT >= 23) fmt.setInteger(MediaFormat.KEY_PRIORITY, 0);
-            decoder = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            decoder = MediaCodec.createDecoderByType(MIMES[codec]);
+            decCodec = codec;
             MediaCodecInfo info = decoder.getCodecInfo();
             decName = info.getName() + (Build.VERSION.SDK_INT >= 29 && info.isHardwareAccelerated() ? " (hardware)" : "");
             decoder.configure(fmt, null, null, 0);
@@ -597,10 +672,10 @@ public final class VideoEngine {
         decoder = null;
     }
 
-    public static void decode(ByteBuffer data, int len, boolean key, int w, int h) {
-        if (decoder == null || w != decW || h != decH) {
+    public static void decode(ByteBuffer data, int len, boolean key, int w, int h, int codec) {
+        if (decoder == null || w != decW || h != decH || codec != decCodec) {
             if (!key) { nativeDecoderError(); return; }
-            if (!openDecoder(w, h)) { nativeDecoderError(); return; }
+            if (!openDecoder(w, h, codec)) { nativeDecoderError(); return; }
         }
         try {
             int in = decoder.dequeueInputBuffer(20000);

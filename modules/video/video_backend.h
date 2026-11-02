@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ffdec.h"
 #include "lunashare_video.h"
 
 namespace lsv {
@@ -17,6 +18,7 @@ struct EncodedFrame {
     int width = 0, height = 0;      // coded size
     int rotation = 0;               // clockwise degrees to show it upright
     bool mirror = false;            // front camera (only used for the local preview)
+    int codec = 0;                  // lsv::Codec
 };
 
 // Implemented by the core; backends call it from any thread.
@@ -36,7 +38,7 @@ public:
     virtual ~Backend() = default;
     virtual std::vector<LsvCamera> Cameras() = 0;
     // starts capture + encoding; encoded frames and preview images go to the sink
-    virtual bool StartCamera(const std::string& id, const LsvSettings& s, std::string* err) = 0;
+    virtual bool StartCamera(const std::string& id, const LsvSettings& s, int codec, std::string* err) = 0;
     virtual void StopCamera() = 0;
     virtual void SetBitrate(int bps) = 0;
     virtual void RequestKeyframe() = 0;
@@ -44,7 +46,10 @@ public:
     virtual void SetControl(int id, float value) = 0;
     // decoding: called from the core's decode thread only
     virtual bool StartDecoder() = 0;
-    virtual void Decode(const uint8_t* annexb, size_t len, bool key, int width, int height) = 0;
+    virtual void Decode(const uint8_t* data, size_t len, bool key, int width, int height, int codec) = 0;
+    // codecs this device can encode / decode (bit masks of 1 << lsv::Codec)
+    virtual unsigned EncodeCodecs() { return 1; }
+    virtual unsigned DecodeCodecs() { return 1; }
     virtual void StopDecoder() = 0;
     virtual std::string EncoderName() = 0;
     virtual std::string DecoderName() = 0;

@@ -653,8 +653,12 @@ public:
         return out;
     }
 
-    bool StartCamera(const std::string& id, const LsvSettings& s, std::string* err) override {
+    bool StartCamera(const std::string& id, const LsvSettings& s, int codec, std::string* err) override {
         StopCamera();
+        if (codec != kH264) {
+            if (err) *err = "this PC only sends H.264";
+            return false;
+        }
         if (!mfOk_) {
             if (err) *err = "Media Foundation unavailable";
             return false;
@@ -797,7 +801,44 @@ public:
         return true;
     }
 
-    void Decode(const uint8_t* d, size_t n, bool, int w, int h) override {
+    // GPU decode profiles of this PC's graphics card (D3D11 video decoder)
+    static bool GpuHasProfile(const GUID& profile) {
+        Com<ID3D11Device> dev;
+        if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, nullptr, 0,
+                                     D3D11_SDK_VERSION, &dev, nullptr, nullptr)))
+            return false;
+        Com<ID3D11VideoDevice> vd = dev.As<ID3D11VideoDevice>();
+        if (!vd) return false;
+        UINT n = vd->GetVideoDecoderProfileCount();
+        for (UINT i = 0; i < n; i++) {
+            GUID g;
+            if (SUCCEEDED(vd->GetVideoDecoderProfile(i, &g)) && g == profile) return true;
+        }
+        return false;
+    }
+
+    unsigned EncodeCodecs() override { return CodecBit(kH264); }
+    unsigned DecodeCodecs() override {
+        if (decMask_) return decMask_;
+        unsigned m = CodecBit(kH264);
+        std::string err;
+        if (FfDecoder::Load({Narrow(ModuleDir().c_str())}, &err)) {
+            // HEVC: on the GPU when it can, else on the CPU (fine up to ~4K30); AV1 only with a GPU decoder
+            static const GUID kAv1 = {0xb8be4ccb, 0xcf53, 0x46ba, {0x8d, 0x59, 0xd6, 0xb8, 0xa6, 0xda, 0x5d, 0x2a}};
+            m |= CodecBit(kHEVC);
+            if (GpuHasProfile(kAv1)) m |= CodecBit(kAV1);
+        } else {
+            sink_->Log("no HEVC/AV1: " + err);
+        }
+        decMask_ = m;
+        return m;
+    }
+
+    void Decode(const uint8_t* d, size_t n, bool key, int w, int h, int codec) override {
+        if (codec != kH264) {
+            DecodeFf(d, n, key, w, h, codec);
+            return;
+        }
         if (!dec_) return;
         dispW_ = w;
         dispH_ = h;
@@ -824,7 +865,26 @@ public:
         DrainDecoder();
     }
 
+    void DecodeFf(const uint8_t* d, size_t n, bool key, int w, int h, int codec) {
+        if (!ff_.IsOpen() || ff_.OpenCodec() != codec) {
+            if (!key) {
+                sink_->OnDecoderError();
+                return;
+            }
+            std::string err;
+            if (!ff_.Open(codec, true, &err)) {
+                sink_->Log("decoder: " + err);
+                sink_->OnDecoderError();
+                return;
+            }
+        }
+        dispW_ = w;
+        dispH_ = h;
+        if (!ff_.Decode(d, n, [&](const LsvImage& im) { sink_->OnDecoded(im); })) sink_->OnDecoderError();
+    }
+
     void StopDecoder() override {
+        ff_.Close();
         if (dec_) {
             dec_->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
             if (dxgiMgr_) dec_->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
@@ -844,7 +904,10 @@ public:
     bool VcamEnable(bool on, std::string* err) override { return vcam_.Enable(on, err); }
     void VcamPush(const LsvImage& img) override { vcam_.Push(img); }
 
-    std::string DecoderName() override { return dec_ ? (decGpu_ ? "Microsoft H.264 decoder (GPU)" : "Microsoft H.264 decoder (software)") : ""; }
+    std::string DecoderName() override {
+        if (ff_.IsOpen()) return ff_.Name();
+        return dec_ ? (decGpu_ ? "Microsoft H.264 decoder (GPU)" : "Microsoft H.264 decoder (software)") : "";
+    }
 
 private:
     // ---------------------------------------------------------------- capture
@@ -988,6 +1051,7 @@ private:
                 f.key = key;
                 f.width = w_;
                 f.height = h_;
+                f.codec = kH264;
                 sink_->OnEncoded(f);
             });
             if (enc_->Failed()) {
@@ -1125,6 +1189,8 @@ private:
     // decoder
     std::unique_ptr<ComInit> decCom_;
     VirtualCamera vcam_;
+    FfDecoder ff_;
+    unsigned decMask_ = 0;
     Com<IMFTransform> dec_;
     Com<ID3D11Device> d3d_;
     Com<IMFDXGIDeviceManager> dxgiMgr_;

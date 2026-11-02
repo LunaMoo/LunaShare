@@ -72,6 +72,8 @@ private:
     void DrawCallBar();
     void DrawIncomingCall();
     bool CallButton(const std::string& peer, float size, bool video = false);
+    bool WebcamButton(const std::string& peer, float size);  // PC: "use this phone as webcam"; phone: "send my camera to this PC"
+    bool WebcamButtonShown(const std::string& peer) const;
     void DrawCallButtons(float bw, float h, bool withVideo);
     int CallButtonCount(bool withVideo) const;
     void DrawVideoStage(ImVec2 size, bool phone);

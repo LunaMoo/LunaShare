@@ -175,7 +175,11 @@ void MediaHost::VLog(void*, const char* m) { SDL_Log("%s", m); }
 void MediaHost::VImage(void* u, int src, const LsvImage* img) {
     auto* self = (MediaHost*)u;
     if (src != LSV_LOCAL && src != LSV_REMOTE) return;
-    if (src == LSV_REMOTE && self->vcamOn_) self->vmod_->vcam_push(img);  // to "LunaShare Camera" as well
+    if (src == LSV_REMOTE && self->vcamOn_) {  // to "LunaShare Camera" as well, turned the way the user chose
+        LsvImage v = *img;
+        v.rotation = (v.rotation + self->remoteRotAdj_) % 360;
+        self->vmod_->vcam_push(&v);
+    }
     Slot& s = self->slots_[src];
     {
         std::lock_guard<std::mutex> l(s.m);
@@ -412,11 +416,15 @@ void MediaHost::SetGlsl(const char* glsl) {
     if (!gpuYuv_) SDL_Log("video: converting YUV on the CPU (%s)", glsl);
 }
 
-void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover) {
+void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover, int extraRotation) {
     float bw = p1.x - p0.x, bh = p1.y - p0.y;
     if (!t.valid || t.w <= 0 || t.h <= 0 || bw <= 0 || bh <= 0) return;
-    float s = cover ? std::max(bw / t.w, bh / t.h) : std::min(bw / t.w, bh / t.h);
-    float w = t.w * s, h = t.h * s;
+    int extra = ((extraRotation % 360) + 360) % 360;
+    int rot = (t.rotation + extra) % 360;
+    float tw = (float)t.w, th = (float)t.h;
+    if (extra == 90 || extra == 270) std::swap(tw, th);
+    float s = cover ? std::max(bw / tw, bh / th) : std::min(bw / tw, bh / th);
+    float w = tw * s, h = th * s;
     ImVec2 c((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
     ImVec2 a(c.x - w * 0.5f, c.y - h * 0.5f), b(c.x + w * 0.5f, c.y + h * 0.5f);
     // the part of the upright picture that is visible (cover crops it to the box)
@@ -428,7 +436,7 @@ void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p
     // upright (display) coordinates -> texture coordinates: mirror first, then undo the rotation
     auto tc = [&](float u, float v) {
         if (t.mirror) u = 1 - u;
-        switch (t.rotation) {
+        switch (rot) {
             case 90: return ImVec2(v, 1 - u);
             case 180: return ImVec2(1 - u, 1 - v);
             case 270: return ImVec2(1 - v, u);
@@ -480,6 +488,7 @@ void MediaHost::StartVideo() {
     if (!eng_->PeerHasCap(peer, "video")) return;
     Settings s = eng_->GetSettings();
     LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
+    vs.codec_pref = s.callVideoH264Only ? 1 : 0;
     if (!vmod_->start(&vs)) return;
     videoRunning_ = true;
     remoteCam_ = false;
@@ -584,6 +593,7 @@ void MediaHost::ApplyVideoQuality() {
     if (!vmod_ || !videoRunning_ || !eng_) return;
     Settings s = eng_->GetSettings();
     LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
+    vs.codec_pref = s.callVideoH264Only ? 1 : 0;
     vmod_->set_settings(&vs);
 }
 
@@ -736,6 +746,11 @@ void MediaHost::SetMode(Mode m) {
         LsmHost h{LSM_API_VERSION, this, SendCb, LogCb};
         LsmSettings ls{s.callEchoCancel ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
         mod_->start(&h, &ls);
+        {
+            auto lk = eng_->Lock();
+            if (eng_->call.media.rfind("webcam", 0) == 0) mute_ = true;  // camera only: microphones start muted
+        }
+        remoteRotAdj_ = 0;
         mod_->set_mute(mute_ ? 1 : 0);
         mode_ = Mode::Call;
         OpenDevices(true, true);

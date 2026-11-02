@@ -73,7 +73,10 @@ public:
         int64_t lastMs = 0;
     };
     // Draws a video picture into [p0,p1]: fit (letterbox) or cover (crop). Converts YUV on the GPU when it can.
-    void DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover);
+    void DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover, int extraRotation = 0);
+    // turn the received picture by 90 degrees (dir -1 left, +1 right); also applies to the virtual camera
+    void RotateRemote(int dir) { remoteRotAdj_ = ((remoteRotAdj_ + dir * 90) % 360 + 360) % 360; }
+    int RemoteRotation() const { return remoteRotAdj_; }
     void SetGlsl(const char* glslVersion);  // after the GL context exists; enables the GPU path
     const VideoTex& RemoteVideo() const { return tex_[LSV_REMOTE]; }
     const VideoTex& LocalVideo() const { return tex_[LSV_LOCAL]; }
@@ -141,6 +144,7 @@ private:
     Slot slots_[2];
     VideoTex tex_[2];
     bool vcamAvail_ = false, vcamChecked_ = false;
+    std::atomic<int> remoteRotAdj_{0};
     std::atomic<bool> vcamOn_{false}, vcamBusy_{false};
     std::mutex vcamM_;
     std::string vcamStatus_;

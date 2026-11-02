@@ -6,7 +6,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Trimmed FFmpeg for the Windows video module: H.264/HEVC/AV1 decoders + D3D11VA (GPU) only, LGPL, as DLLs
+  # (avcodec-61.dll + avutil-59.dll) that the module loads at run time. Cached; rebuilt only when this changes.
+  ffmpeg-windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: ffwin
+          key: ffmpeg-n7.1-win64-h264-hevc-av1-d3d11va-v1
+      - name: Build FFmpeg (mingw-w64 cross)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y mingw-w64 nasm
+          git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
+          mkdir ffbuild && cd ffbuild
+          ../ffsrc/configure --prefix=$GITHUB_WORKSPACE/ffwin --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
+            --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-avformat --disable-swscale \
+            --disable-swresample --disable-avfilter --disable-network --disable-autodetect --enable-w32threads --enable-d3d11va \
+            --enable-decoder=h264,hevc,av1 --enable-parser=h264,hevc,av1 \
+            --enable-hwaccel=h264_d3d11va,h264_d3d11va2,hevc_d3d11va,hevc_d3d11va2,av1_d3d11va,av1_d3d11va2 \
+            --enable-shared --disable-static --disable-debug --extra-ldflags=-static-libgcc
+          make -j4 && make install
+          cp ../ffsrc/COPYING.LGPLv2.1 $GITHUB_WORKSPACE/ffwin/FFmpeg-LICENSE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-win64
+          path: ffwin
+
   desktop:
+    needs: [ffmpeg-windows]
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +50,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: ffmpeg-win64
+          path: ffwin
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -32,7 +67,7 @@ jobs:
         run: |
           EXTRA=""
           if [ "$RUNNER_OS" == "macOS" ]; then EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"; fi
-          if [ "$RUNNER_OS" == "Windows" ]; then EXTRA="-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"; fi
+          if [ "$RUNNER_OS" == "Windows" ]; then EXTRA="-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DLUNASHARE_FFMPEG_DIR=$(cygpath -m "$PWD")/ffwin"; fi
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -46,7 +81,7 @@ jobs:
           mkdir -p dist
           # the optional calls module goes into modules/ (delete that folder for a chat + files only install)
           mkdir -p dist/modules
-          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/;
+          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/; cp ffwin/bin/avcodec-61.dll ffwin/bin/avutil-59.dll ffwin/FFmpeg-LICENSE.txt dist/modules/;
           elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/; cp build/liblunashare_media.dylib dist/LunaShare.app/Contents/MacOS/; rmdir dist/modules;
           else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; cp build/liblunashare_media.so dist/modules/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true

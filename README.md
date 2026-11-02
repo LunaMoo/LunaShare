@@ -107,12 +107,23 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
     compensation, manual ISO and shutter, auto or manual focus, flashlight, white balance and stabilization. What's available
     depends on the camera.
   - Webcams: zoom, focus, exposure and brightness, when the camera supports them.
+- **Codecs:** H.264 always works. Devices also announce whether they can do HEVC and AV1, and the sender picks the best codec both sides support
+  (AV1, then HEVC, then H.264). Phones only offer codecs they encode and decode in hardware. On Windows, HEVC and AV1 are decoded with a
+  trimmed FFmpeg (`avcodec-61.dll` and `avutil-59.dll` in `modules/`, LGPL). It uses the graphics card's decoder through D3D11VA
+  when there is one, so the paid Microsoft HEVC extension isn't needed. Without a GPU decoder, HEVC is decoded on the CPU, and AV1 is
+  only offered when the GPU can decode it. *Use only H.264* in *Settings → Calls* turns this off if something misbehaves.
+- **Picture orientation:** phones read their position from the motion sensor, so the picture is upright even with auto-rotate off.
+  You can also turn the received picture left or right with the buttons in the corner of the video, and that also applies to the virtual camera.
 - **Lost or late video** isn't buffered for long. The receiver asks for a fresh keyframe, so the picture recovers within a moment.
 - **Virtual camera (Windows 11):** turn on *Settings → Calls → Virtual camera* and the PC gets a webcam called **LunaShare Camera**.
   Teams, Zoom, OBS, Discord and other apps can pick it. It shows the video received in a call, for example your phone's
   camera, and a dark picture otherwise. Windows asks for administrator permission once, to install the small camera
   component (`lunashare_vcam.dll`) into `%ProgramData%\LunaShare`, where the Windows camera service can load it.
   It offers 360p up to 4K, at 30 or 60 fps.
+  The **webcam button** in the chat header starts a camera-only session without a full call:
+  - On the PC (with the virtual camera on), it asks the other device for its camera. The phone has to allow it.
+  - On a phone chatting with a Windows PC, it offers the phone's camera to that PC.
+  - Microphones start muted on both sides, and LunaShare Camera shows the picture.
 - On phones a video call opens full screen with the call buttons at the bottom. On desktop the video sits above the chat and can be enlarged.
 
 ![Video call](docs/video-call.png)

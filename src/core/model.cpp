@@ -60,7 +60,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callInputDevice", s.callInputDevice},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice},
     };
     if (withIdentity) {
@@ -120,6 +120,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "callVideoAdaptive", s.callVideoAdaptive);
     Get(j, "callCamera", s.callCamera);
     Get(j, "virtualCamera", s.virtualCamera);
+    Get(j, "callVideoH264Only", s.callVideoH264Only);
     s.callVideoRes = std::clamp(s.callVideoRes, 0, 6);
     s.callVideoFps = std::clamp(s.callVideoFps, 10, 120);
     if (s.callMicBoost < 0 || s.callMicBoost > 30) s.callMicBoost = 0;

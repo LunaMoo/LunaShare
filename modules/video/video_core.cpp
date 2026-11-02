@@ -8,6 +8,8 @@
 //   [2][2]                                                                                       please send a keyframe
 //   [2][3][camera on u8]                                                                         camera state
 //   [2][4][max width u16][max height u16]                                                         "too big for my decoder"
+//   [2][5][decode codecs u8][encode codecs u8]                                                    what this side can do
+// Byte 12 of a frame packet is the codec (0 H.264, 1 HEVC, 2 AV1). The sender picks the best codec both sides have.
 //
 // Loss handling: a frame refused by the congested link or a gap in sequence numbers makes the decoder wait for the
 // next keyframe (asked for at most twice a second). Bitrate adapts once a second from the host's media queue size.
@@ -54,8 +56,9 @@ uint32_t Get32(const uint8_t* p) { return p[0] | (uint32_t)p[1] << 8 | (uint32_t
 constexpr size_t kHeader = 13;
 
 struct Packet {
-    std::vector<uint8_t> data;  // Annex B
+    std::vector<uint8_t> data;  // Annex B (H.264/HEVC) or AV1 temporal unit
     uint32_t seq = 0;
+    int codec = 0;
     bool key = false;
     int rotation = 0, width = 0, height = 0;
 };
@@ -102,6 +105,21 @@ public:
     void SendState() {
         uint8_t p[3] = {2, 3, (uint8_t)(camOn ? 1 : 0)};
         Send(p, 3);
+        uint8_t c[4] = {2, 5, (uint8_t)myDec, (uint8_t)myEnc};
+        Send(c, 4);
+    }
+
+    // codec negotiation
+    unsigned myEnc = 1, myDec = 1;
+    std::atomic<unsigned> peerDec{0};  // 0 = not heard yet (assume H.264 only)
+    std::atomic<int> curCodec{0};
+    std::atomic<bool> codecRecheck{false};
+    int ChooseCodec() {
+        unsigned m = myEnc & (peerDec ? (unsigned)peerDec : CodecBit(kH264));
+        if (settings.codec_pref == 1) m &= CodecBit(kH264);
+        if (m & CodecBit(kAV1)) return kAV1;
+        if (m & CodecBit(kHEVC)) return kHEVC;
+        return kH264;
     }
 
     void AskKeyframe() {
@@ -133,7 +151,7 @@ public:
         pkt[7] = (uint8_t)(((f.rotation % 360 + 360) % 360) / 90);
         Put16(&pkt[8], (uint32_t)f.width);
         Put16(&pkt[10], (uint32_t)f.height);
-        pkt[12] = 0;
+        pkt[12] = (uint8_t)f.codec;
         memcpy(&pkt[kHeader], f.data, f.len);
         if (!Send(pkt.data(), pkt.size())) {
             // the link is backed up: everything until the next keyframe would be undecodable, so skip to it
@@ -191,8 +209,9 @@ public:
                 std::to_string(mw) + "x" + std::to_string(mh));
         }
     }
-    int64_t errWindowStart = 0, lastLimitAsk = 0;
-    int errCount = 0;
+    int64_t errWindowStart = 0, lastLimitAsk = 0, overflowWindow = 0;
+    int errCount = 0, overflows = 0;
+    std::atomic<bool> pendingTooSlow{false};
     std::atomic<int> limitW{0}, limitH{0};
 
     void OnCameraError(const std::string& msg) override {
@@ -225,12 +244,13 @@ public:
                     continue;
                 }
             }
+            if (pendingTooSlow.exchange(false)) OnDecoderError();
             recvRot = p.rotation;
             recvW = p.width;
             recvH = p.height;
             framesIn++;
             bytesIn += (int)p.data.size() + (int)kHeader;
-            if (ok) backend->Decode(p.data.data(), p.data.size(), p.key, p.width, p.height);
+            if (ok) backend->Decode(p.data.data(), p.data.size(), p.key, p.width, p.height, p.codec);
         }
         if (backend) backend->StopDecoder();
     }
@@ -250,6 +270,15 @@ public:
                 sKbpsOut = (int)(bytesOut.exchange(0) * 8 / 1000 / sec);
                 sFpsIn = (int)(framesIn.exchange(0) / sec + 0.5);
                 sKbpsIn = (int)(bytesIn.exchange(0) * 8 / 1000 / sec);
+            }
+            if (codecRecheck.exchange(false) && camOn && ChooseCodec() != curCodec) {
+                std::lock_guard<std::mutex> l(m);
+                if (camOn) {
+                    Log(std::string("switching to ") + CodecName(ChooseCodec()));
+                    backend->StopCamera();
+                    camOn = StartCameraLocked();
+                    if (!camOn) SendState();
+                }
             }
             if (int lw = limitW.exchange(0)) {
                 int lh = limitH.exchange(0);
@@ -314,6 +343,10 @@ public:
         host = *h;
         hostSet = true;
         if (!backend) backend = CreateBackend(this, &host);
+        if (backend) {
+            myEnc = backend->EncodeCodecs() | CodecBit(kH264);
+            myDec = backend->DecodeCodecs() | CodecBit(kH264);
+        }
         return backend ? 1 : 0;
     }
 
@@ -328,6 +361,7 @@ public:
         waitingKey = true;
         statsSkipped = 0;
         queue.clear();
+        peerDec = 0;
         running = true;
         decodeThread = std::thread([this] { DecodeLoop(); });
         timerThread = std::thread([this] { TimerLoop(); });
@@ -361,11 +395,23 @@ public:
             p.rotation = (d[7] & 3) * 90;
             p.width = (int)Get16(d + 8);
             p.height = (int)Get16(d + 10);
+            p.codec = d[12] <= kAV1 ? d[12] : 0;
             p.data.assign(d + kHeader, d + n);
             std::lock_guard<std::mutex> l(qm);
             if (queue.size() > 20) {  // the decoder can't keep up: skip ahead to the next keyframe
                 queue.clear();
                 waitingKey = true;
+                // and if that keeps happening with a big picture, ask for a smaller one
+                int64_t now = NowMs();
+                if (now - overflowWindow > 5000) overflowWindow = now, overflows = 0;
+                if (++overflows >= 3) {
+                    overflows = 0;
+                    errCount = 3;  // OnDecoderError() then asks for a lower size
+                    errWindowStart = now;
+                    recvW = p.width;
+                    recvH = p.height;
+                    pendingTooSlow = true;
+                }
             }
             queue.push_back(std::move(p));
             qcv.notify_one();
@@ -374,6 +420,9 @@ public:
         } else if (d[1] == 4 && n >= 6) {
             limitW = (int)Get16(d + 2);  // applied by the timer thread (restarting the camera takes a moment)
             limitH = (int)Get16(d + 4);
+        } else if (d[1] == 5 && n >= 4) {
+            unsigned dec = d[2];
+            if (dec != peerDec.exchange(dec)) codecRecheck = true;
         } else if (d[1] == 3 && n >= 3) {
             if (host.remote_state) host.remote_state(host.user, d[2] ? 1 : 0);
         }
@@ -399,10 +448,16 @@ public:
         LsvSettings s = settings;
         s.bitrate = curBitrate;
         std::string err;
-        if (!backend->StartCamera(id, s, &err)) {
-            Log("cannot start camera: " + err);
-            return false;
+        int codec = ChooseCodec();
+        if (!backend->StartCamera(id, s, codec, &err)) {
+            if (codec == kH264 || !backend->StartCamera(id, s, kH264, &err)) {
+                Log("cannot start camera: " + err);
+                return false;
+            }
+            Log(std::string(CodecName(codec)) + " encoder failed (" + err + "), using H.264");
+            codec = kH264;
         }
+        curCodec = codec;
         needKey = false;
         backend->RequestKeyframe();
         return true;

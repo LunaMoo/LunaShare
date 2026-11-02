@@ -34,13 +34,14 @@ struct Link {
     size_t refuseAbove = 768 * 1024;
     std::mt19937 rng{42};
     std::atomic<int> local{0}, remote{0}, keyAsks{0}, stateOn{-1};
-    std::atomic<int> remoteW{0}, remoteH{0}, remoteRot{-1}, localMirror{-1}, remoteMirror{-1};
+    std::atomic<int> remoteW{0}, remoteH{0}, remoteRot{-1}, localMirror{-1}, remoteMirror{-1}, lastCodec{-1};
 };
 static Link L;
 
 static int Send(void*, const uint8_t* d, size_t n) {
     std::lock_guard<std::mutex> l(L.m);
     if (n >= 2 && d[1] == 2) L.keyAsks++;
+    if (n > 13 && d[1] == 1) L.lastCodec = d[12];
     if (L.bytes > L.refuseAbove && n > 2 && d[1] == 1) return 0;
     L.q.emplace_back(d, d + n);
     L.bytes += n;
@@ -66,6 +67,11 @@ static size_t Queued(void*) {
 static void Log(void*, const char* m) { printf("    [%s]\n", m); }
 
 int main() {
+#ifdef _WIN32
+    _putenv_s("LSV_FAKE_CODECS", "3");  // the test camera claims H.264 + HEVC
+#else
+    setenv("LSV_FAKE_CODECS", "3", 1);
+#endif
     const LsvModule* m = lunashare_video_module();
     static LsvHost host{LSV_API_VERSION, nullptr, Send, Image, State, Queued, Log, nullptr, nullptr};
     CHECK(m->init(&host) == 1, "init");
@@ -103,7 +109,7 @@ int main() {
     });
 
     printf("[video: loopback]\n");
-    LsvSettings s{640, 480, 20, 1000000, 1};
+    LsvSettings s{640, 480, 20, 1000000, 1, 0};
     CHECK(m->start(&s) == 1, "start");
     CHECK(m->set_camera_on(1) == 1, "camera on");
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
@@ -112,6 +118,7 @@ int main() {
     CHECK(L.remoteW == 640 && L.remoteH == 480, "remote size %dx%d", L.remoteW.load(), L.remoteH.load());
     CHECK(L.remoteRot == 0 && L.remoteMirror == 0 && L.localMirror == 1, "only the self-view is mirrored");
     CHECK(L.stateOn == 1, "peer told camera is on");
+    CHECK(L.lastCodec == 1, "both sides can do HEVC, so HEVC is used (codec %d)", L.lastCodec.load());
     LsvControl ctl[16];
     int n = m->get_controls(ctl, 16);
     CHECK(n == 1 && ctl[0].id == LSV_CTL_ZOOM, "controls");

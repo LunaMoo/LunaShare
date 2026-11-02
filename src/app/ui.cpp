@@ -551,8 +551,13 @@ void App::DrawMobile() {
     if (screen == MScreen::Chat) {
         bool callable = Media().Available();
         bool videoable = callable && Media().VideoAvailable();
-        int nb = 1 + (callable ? 1 : 0) + (videoable ? 1 : 0);
+        bool webcam = WebcamButtonShown(selectedPeer);
+        int nb = 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - rowH * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
+        if (webcam) {
+            WebcamButton(selectedPeer, rowH);
+            ImGui::SameLine();
+        }
         if (callable) {
             CallButton(selectedPeer, rowH);
             ImGui::SameLine();
@@ -680,8 +685,13 @@ void App::DrawChat(const std::string& peer) {
         float bw = ImGui::GetFrameHeight();
         bool callable = Media().Available();
         bool videoable = callable && Media().VideoAvailable();
-        int nb = 3 + (callable ? 1 : 0) + (videoable ? 1 : 0);
+        bool webcam = WebcamButtonShown(peer);
+        int nb = 3 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
+        if (webcam) {
+            WebcamButton(peer, bw);
+            ImGui::SameLine();
+        }
         if (callable) {
             CallButton(peer, bw);
             ImGui::SameLine();
@@ -2160,6 +2170,33 @@ bool App::CallButton(const std::string& peer, float size, bool video) {
     return clicked;
 }
 
+bool App::WebcamButtonShown(const std::string& peer) const {
+    if (!Media().VideoAvailable()) return false;
+    if (Media().VcamOn()) return true;  // this PC has LunaShare Camera: ask the other device for its camera
+    // a phone offering its camera to a Windows PC
+    auto it = eng.devices.find(peer);
+    return IsMobilePlatform() && it != eng.devices.end() && it->second.platform.find("Windows") != std::string::npos;
+}
+
+bool App::WebcamButton(const std::string& peer, float size) {
+    bool connected = eng.IsConnected(peer);
+    bool capable = connected && eng.PeerHasCap(peer, "video");
+    bool busy = eng.call.state != CallState::None;
+    bool pc = Media().VcamOn();
+    const char* tip = !connected ? "Webcam (device is offline)"
+                    : !capable ? "Webcam - the other device does not have the video module"
+                    : busy ? "Already in a call"
+                    : pc ? "Use this device's camera as a webcam (LunaShare Camera)" : "Send my camera to this PC as a webcam";
+    ImGui::BeginDisabled(!capable || busy);
+    bool clicked = ui::IconButton("webcam", Icon::Webcam, tip, size);
+    ImGui::EndDisabled();
+    if (clicked) {
+        Media().WantCameraAtStart(!pc);  // the side without the virtual camera sends its picture
+        eng.StartCall(peer, pc ? "webcam" : "webcam-offer");
+    }
+    return clicked;
+}
+
 bool App::VideoVisible() const {
     if (!Media().VideoRunning()) return false;
     const auto& r = Media().RemoteVideo();
@@ -2320,7 +2357,7 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
     bool local = Media().CameraOn() && lv.valid && nowMs - lv.lastMs < 1500;  // stale = no self-view stream (120 fps)
     std::string who = eng.PeerName(eng.call.peer);
     if (remote) {
-        Media().DrawVideo(dl, rv, p0, p1, false);
+        Media().DrawVideo(dl, rv, p0, p1, false, Media().RemoteRotation());
     } else if (local) {
         Media().DrawVideo(dl, lv, p0, p1, false);  // nothing from them: show yourself big
     }
@@ -2356,11 +2393,21 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         dl->AddRectFilled(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), IM_COL32(255, 255, 255, 90), 6);
         Media().DrawVideo(dl, lv, a, b, true);
     }
-    if (!phone) {
-        // corner buttons: bigger / smaller
-        float bw = ImGui::GetFrameHeight();
-        ImGui::SetCursorScreenPos(ImVec2(p1.x - bw - ImGui::GetStyle().ItemSpacing.x, p0.y + ImGui::GetStyle().ItemSpacing.y));
-        if (ui::IconButton("vbig", Icon::Expand, videoBig ? "Smaller video" : "Bigger video", bw)) videoBig = !videoBig;
+    {
+        // corner buttons: turn their picture (phones lying sideways...) and, on desktop, bigger / smaller
+        float bw = phone ? ui::M().rowH : ImGui::GetFrameHeight();
+        float sp = ImGui::GetStyle().ItemSpacing.x;
+        int n = (remote ? 2 : 0) + (phone ? 0 : 1);
+        ImGui::SetCursorScreenPos(ImVec2(p1.x - (bw + sp) * (float)n, p0.y + ImGui::GetStyle().ItemSpacing.y + (phone ? bw + sp : 0)));
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 110));
+        if (remote) {
+            if (ui::IconButton("rotl", Icon::RotateLeft, "Turn their picture left", bw)) Media().RotateRemote(-1);
+            ImGui::SameLine();
+            if (ui::IconButton("rotr", Icon::RotateRight, "Turn their picture right", bw)) Media().RotateRemote(1);
+            if (!phone) ImGui::SameLine();
+        }
+        if (!phone && ui::IconButton("vbig", Icon::Expand, videoBig ? "Smaller video" : "Bigger video", bw)) videoBig = !videoBig;
+        ImGui::PopStyleColor();
     }
     ImGui::EndChild();
     ImGui::PopStyleColor();
@@ -2627,13 +2674,15 @@ void App::DrawIncomingCall() {
     ImGui::TextUnformatted(who.c_str());
     ImGui::PopFont();
     bool videoCall = eng.call.media == "video" && Media().VideoAvailable();
-    const char* sub = videoCall ? "is video calling you" : "is calling you";
+    bool webcamAsk = eng.call.media == "webcam", webcamOffer = eng.call.media == "webcam-offer";
+    const char* sub = webcamAsk ? "wants to use your camera as a webcam" : webcamOffer ? "offers its camera as a webcam"
+                    : videoCall ? "is video calling you" : "is calling you";
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ImGui::CalcTextSize(sub).x) * 0.5f));
     ImGui::TextDisabled("%s", sub);
     ImGui::Spacing();
     if (mobile) ImGui::Dummy(ImVec2(0, vp->WorkSize.y * 0.15f));
     float bh = mobile ? ui::M().rowH * 1.3f : ImGui::GetFrameHeight() * 1.6f;
-    int nbtn = videoCall ? 3 : 2;
+    int nbtn = videoCall && !webcamAsk && !webcamOffer ? 3 : 2;
     float bw = (avail - ImGui::GetStyle().ItemSpacing.x * (float)(nbtn - 1)) / (float)nbtn;
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 50, 50, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(220, 70, 70, 255));
@@ -2643,7 +2692,12 @@ void App::DrawIncomingCall() {
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 150, 90, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 180, 110, 255));
     bool accept = false;
-    if (videoCall) {
+    if (webcamAsk || webcamOffer) {
+        if (ui::IconTextButton(webcamAsk ? "Allow" : "Accept", Icon::Webcam, ImVec2(bw, bh))) {
+            Media().WantCameraAtStart(webcamAsk);  // asked: we send our camera; offered: we only receive
+            accept = true;
+        }
+    } else if (videoCall) {
         if (ui::IconTextButton(mobile ? "Voice" : "Voice only", Icon::Phone, ImVec2(bw, bh))) {
             Media().WantCameraAtStart(false);
             accept = true;
@@ -2712,6 +2766,7 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call.");
         changed |= ImGui::Checkbox("Lower video quality automatically when the connection is slow", &edit.callVideoAdaptive);
+        changed |= ImGui::Checkbox("Use only H.264 (if HEVC/AV1 video shows problems)", &edit.callVideoH264Only);
         if (Media().VcamAvailable()) {
             bool v = edit.virtualCamera;
             ImGui::BeginDisabled(Media().VcamBusy());

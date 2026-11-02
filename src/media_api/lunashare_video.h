@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define LSV_API_VERSION 2
+#define LSV_API_VERSION 3
 
 #if defined(_WIN32)
 #define LSV_EXPORT __declspec(dllexport)
@@ -65,6 +65,7 @@ typedef struct LsvSettings {
     int fps;
     int bitrate;      /* target, bits per second */
     int adaptive;     /* 1: lower bitrate / frame rate when the link can't keep up */
+    int codec_pref;   /* 0: best codec both sides support (AV1 > HEVC > H.264), 1: H.264 only */
 } LsvSettings;
 
 enum { LSV_FACING_BACK = 0, LSV_FACING_FRONT = 1, LSV_FACING_EXTERNAL = 2 };

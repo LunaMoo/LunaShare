@@ -26,7 +26,8 @@ int main(int argc, char** argv) {
     if (!LoadJsonFile(JoinPath(argv[1], "settings.json"), existing)) SaveJsonFile(JoinPath(argv[1], "settings.json"), j);
     Engine e;
     e.configDir = argv[1];
-    bool videoCall = getenv("DEMO_CALL") && std::string(getenv("DEMO_CALL")) == "video";
+    std::string callKind = getenv("DEMO_CALL") ? getenv("DEMO_CALL") : "";
+    bool videoCall = callKind == "video" || callKind == "webcam-offer";
     if (getenv("DEMO_CALL")) e.localCaps = {"voice"};
 #ifdef LS_DEMO_VIDEO
     if (videoCall) e.localCaps.push_back("video");
@@ -47,7 +48,7 @@ int main(int argc, char** argv) {
     if (peer.empty()) { printf("could not connect\n"); return 1; }
     if (getenv("DEMO_CALL")) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-        uint64_t cid = e.StartCall(peer, videoCall ? "video" : "voice");
+        uint64_t cid = e.StartCall(peer, callKind == "webcam-offer" ? "webcam-offer" : videoCall ? "video" : "voice");
         (void)cid;
         fflush(stdout);
 #ifdef LS_DEMO_VOICE

@@ -71,6 +71,7 @@ enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed
                        CallIncoming, CallStarted, CallEnded, ChatDeleted };
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
+std::string CapForMedia(const std::string& media);  // capability a call type needs ("webcam" -> "video")
 struct CallInfo {
     uint64_t id = 0;
     std::string peer;

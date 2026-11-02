@@ -1038,7 +1038,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             uint64_t id = j.value("call", (uint64_t)0);
             if (!id) break;
             std::string media = j.value("media", "voice");
-            bool supported = std::find(localCaps.begin(), localCaps.end(), media) != localCaps.end();
+            bool supported = std::find(localCaps.begin(), localCaps.end(), CapForMedia(media)) != localCaps.end();
             if (!supported) {
                 Queue(c, Msg::CallEnd, {{"call", id}, {"reason", "unsupported"}});
                 AddSystemMessage(c->peerId, "Missed call - calls are not installed on this device (voice module missing)");
@@ -2085,6 +2085,11 @@ void Engine::SendWifiCreds(const std::string& peer, const std::string& ssid, con
 
 // ============================================================================ calls
 
+std::string CapForMedia(const std::string& media) {
+    // "webcam": the callee sends its camera (a PC asking a phone); "webcam-offer": the caller sends its camera
+    return media == "webcam" || media == "webcam-offer" ? "video" : media;
+}
+
 bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {
     auto c = ReadyConn(peer);
     return c && std::find(c->caps.begin(), c->caps.end(), cap) != c->caps.end();
@@ -2092,8 +2097,8 @@ bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {
 
 uint64_t Engine::StartCall(const std::string& peer, const std::string& media) {
     auto lk = Lock();
-    if (call.state != CallState::None || !PeerHasCap(peer, media) ||
-        std::find(localCaps.begin(), localCaps.end(), media) == localCaps.end())
+    if (call.state != CallState::None || !PeerHasCap(peer, CapForMedia(media)) ||
+        std::find(localCaps.begin(), localCaps.end(), CapForMedia(media)) == localCaps.end())
         return 0;
     call = CallInfo();
     call.id = RandomU64();

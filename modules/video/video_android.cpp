@@ -62,7 +62,7 @@ std::string CallStr(const char* name) {
 }
 
 // ------------------------------------------------------------------------ natives called by Java
-void JNICALL NEncoded(JNIEnv* env, jclass, jobject buf, jint off, jint size, jboolean key, jint w, jint h, jint rot) {
+void JNICALL NEncoded(JNIEnv* env, jclass, jobject buf, jint off, jint size, jboolean key, jint w, jint h, jint rot, jint codec) {
     auto* p = (const uint8_t*)env->GetDirectBufferAddress(buf);
     if (!p || !g_sink) return;
     EncodedFrame f;
@@ -72,6 +72,7 @@ void JNICALL NEncoded(JNIEnv* env, jclass, jobject buf, jint off, jint size, jbo
     f.width = w;
     f.height = h;
     f.rotation = rot;
+    f.codec = codec;
     g_sink->OnEncoded(f);
 }
 
@@ -129,13 +130,16 @@ public:
         return out;
     }
 
-    bool StartCamera(const std::string& id, const LsvSettings& s, std::string* err) override {
+    unsigned EncodeCodecs() override { return (unsigned)CallI("encoderCodecs"); }
+    unsigned DecodeCodecs() override { return (unsigned)CallI("decoderCodecs"); }
+
+    bool StartCamera(const std::string& id, const LsvSettings& s, int codec, std::string* err) override {
         Env e;
         if (!e || !g_cls) { if (err) *err = "no Java VM"; return false; }
-        jmethodID m = M(e.env, "startCamera", "(Ljava/lang/String;IIII)Z");
+        jmethodID m = M(e.env, "startCamera", "(Ljava/lang/String;IIIII)Z");
         if (!m) { Clear(e.env); if (err) *err = "VideoEngine.startCamera missing"; return false; }
         jstring js = e->NewStringUTF(id.c_str());
-        jboolean ok = e->CallStaticBooleanMethod(g_cls, m, js, s.width, s.height, s.fps, s.bitrate);
+        jboolean ok = e->CallStaticBooleanMethod(g_cls, m, js, s.width, s.height, s.fps, s.bitrate, codec);
         Clear(e.env);
         e->DeleteLocalRef(js);
         if (!ok && err) *err = "camera could not be opened (permission?)";
@@ -175,15 +179,15 @@ public:
     bool StartDecoder() override {
         if (!g_vm || !g_cls) return false;
         if (g_vm->AttachCurrentThread(&decEnv_, nullptr) != JNI_OK) return false;
-        decode_ = M(decEnv_, "decode", "(Ljava/nio/ByteBuffer;IZII)V");
+        decode_ = M(decEnv_, "decode", "(Ljava/nio/ByteBuffer;IZIII)V");
         Clear(decEnv_);
         return decode_ != nullptr;
     }
 
-    void Decode(const uint8_t* d, size_t n, bool key, int w, int h) override {
+    void Decode(const uint8_t* d, size_t n, bool key, int w, int h, int codec) override {
         if (!decEnv_ || !decode_) return;
         jobject buf = decEnv_->NewDirectByteBuffer((void*)d, (jlong)n);
-        decEnv_->CallStaticVoidMethod(g_cls, decode_, buf, (jint)n, (jboolean)key, w, h);
+        decEnv_->CallStaticVoidMethod(g_cls, decode_, buf, (jint)n, (jboolean)key, w, h, (jint)codec);
         Clear(decEnv_);
         decEnv_->DeleteLocalRef(buf);
     }
@@ -200,6 +204,15 @@ public:
     std::string DecoderName() override { return CallStr("decoderName"); }
 
 private:
+    int CallI(const char* name) {
+        Env e;
+        if (!e || !g_cls) return 1;
+        jmethodID m = M(e.env, name, "()I");
+        if (!m) { Clear(e.env); return 1; }
+        jint r = e->CallStaticIntMethod(g_cls, m);
+        Clear(e.env);
+        return (int)r;
+    }
     void CallV(const char* name) {
         Env e;
         if (!e || !g_cls) return;
@@ -221,7 +234,7 @@ std::unique_ptr<Backend> CreateBackend(Sink* sink, const LsvHost* host) {
     if (!e) return nullptr;
     g_cls = (jclass)e->NewGlobalRef((jobject)host->java_class);
     static const JNINativeMethod natives[] = {
-        {(char*)"nativeEncoded", (char*)"(Ljava/nio/ByteBuffer;IIZIII)V", (void*)NEncoded},
+        {(char*)"nativeEncoded", (char*)"(Ljava/nio/ByteBuffer;IIZIIII)V", (void*)NEncoded},
         {(char*)"nativeImage", (char*)"(ILjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIIZ)V", (void*)NImage},
         {(char*)"nativeDecoderError", (char*)"()V", (void*)NDecoderError},
         {(char*)"nativeCameraError", (char*)"(Ljava/lang/String;)V", (void*)NCameraError},
