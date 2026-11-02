@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "emoji_host.h"
+#include "i18n.h"
 
 #include <SDL.h>
 
@@ -409,18 +410,18 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
     };
     static int curGroup = 0;
     if (iconButton("##recent", "\xF0\x9F\x95\x98", curGroup == -1)) scrollToGroup_ = -1, search_.clear();
-    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Recently used");
+    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Recently used"));
     for (int g = 0; g < groups; g++) {
         ImGui::SameLine();
         ImGui::PushID(g);
         if (iconButton("##grp", GroupIcon(mod_->group_name(g)), curGroup == g)) scrollToGroup_ = g, search_.clear();
-        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", mod_->group_name(g));
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T(mod_->group_name(g)));
         ImGui::PopID();
     }
     ImGui::SameLine();
     static const char* hand = "\xE2\x9C\x8B";
     if (iconButton("##tone", WithTone(hand, tone), false)) ImGui::OpenPopup("tones");
-    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Skin tone");
+    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Skin tone"));
     if (ImGui::BeginPopup("tones")) {
         for (int t = 0; t <= 5; t++) {
             if (t) ImGui::SameLine();
@@ -436,7 +437,7 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
     }
     // ---- search
     ImGui::SetNextItemWidth(-1);
-    if (ImGui::InputTextWithHint("##emojisearch", "Search emoji", &search_)) scrollToGroup_ = -2;
+    if (ImGui::InputTextWithHint("##emojisearch", T("Search emoji"), &search_)) scrollToGroup_ = -2;
     std::string q = search_;
     for (auto& ch : q) ch = (char)tolower((unsigned char)ch);
 
@@ -501,7 +502,7 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
             }
             ImVec2 p = ImGui::GetCursorScreenPos();
             if (row.header) {
-                const char* title = row.group < 0 ? "Recently used" : mod_->group_name(row.group);
+                const char* title = row.group < 0 ? T("Recently used") : T(mod_->group_name(row.group));
                 ImGui::Dummy(ImVec2(gridW, cell));
                 dl = ImGui::GetWindowDrawList();
                 dl->AddText(ImVec2(p.x + fs * 0.3f, p.y + cell - fs * 1.4f), ImGui::GetColorU32(ImGuiCol_TextDisabled), title);
@@ -548,7 +549,7 @@ bool EmojiHost::DrawPicker(ImVec2 size, std::string* picked) {
             }
         }
     }
-    if (rows.empty()) ImGui::TextDisabled("No emoji found");
+    if (rows.empty()) ImGui::TextDisabled(T("No emoji found"));
     ImGui::EndChild();
     ImGui::EndChild();
     return chosen;

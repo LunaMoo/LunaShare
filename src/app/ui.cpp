@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "i18n.h"
 
 #include <SDL.h>
 
@@ -59,6 +60,7 @@ App::App(Engine& e) : eng(e) {
     browser.prefs.picturesOnly = eng.settings.browserPicturesOnly;
     browser.prefs.sort = eng.settings.browserSort;
     browser.prefs.tile = eng.settings.browserTile;
+    SetLanguage(eng.settings.language);
     Emoji().recent = eng.settings.emojiRecent;
     Emoji().tone = eng.settings.emojiTone;
 }
@@ -115,7 +117,7 @@ void App::Frame() {
     if (autoBrowse && !autoBrowseDone) {
         autoBrowseDone = true;
         browseFor = BrowseFor::SendFiles;
-        browser.Open(FileBrowser::Mode::OpenMulti, "Send to ...", autoBrowse);
+        browser.Open(FileBrowser::Mode::OpenMulti, T("Send to ..."), autoBrowse);
         if (const char* n = getenv("LUNASHARE_BROWSE_SELECT")) browser.SelectFirstFiles(atoi(n));
     }
     static const char* autoAnswer = getenv("LUNASHARE_AUTOANSWER");
@@ -242,22 +244,22 @@ void App::PullEvents() {
                 continue;  // the chat view simply redraws without it
             case EventType::ChatReaction:
                 if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat)) continue;
-                t.title = who + " reacted " + e.text;
+                t.title = TF("%s reacted %s", who.c_str(), e.text.c_str());
                 t.text = e.a;
                 break;
             case EventType::IncomingOffer:
-                t.title = who + " wants to send";
+                t.title = TF("%s wants to send", who.c_str());
                 t.text = e.text;
                 t.ttl = 20.0f;
                 wantAttention = true;
                 break;
             case EventType::TransferDone:
                 if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !ui::M().mobile) continue;
-                t.title = "Transfer complete (verified)";
+                t.title = T("Transfer complete (verified)");
                 t.text = e.text + (who.empty() ? "" : "  -  " + who);
                 break;
             case EventType::TransferFailed:
-                t.title = "Transfer problem";
+                t.title = T("Transfer problem");
                 t.text = e.text;
                 t.ttl = 10.0f;
                 break;
@@ -269,11 +271,11 @@ void App::PullEvents() {
                 wantAttention = true;
                 continue;
             case EventType::Info:
-                t.title = "Info";
+                t.title = T("Info");
                 t.text = e.text;
                 break;
             case EventType::Error:
-                t.title = "Error";
+                t.title = T("Error");
                 t.text = e.text;
                 t.ttl = 8.0f;
                 break;
@@ -386,9 +388,9 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     if (d != eng.devices.end()) sub = d->second.platform;
     else if (online) sub = eng.online[peer].platform;
     auto conn = eng.ReadyConn(peer);
-    if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + "via " + TransportName(conn->transport) + (conn->addr == "relay" ? " (relay)" : "");
-    else if (online) sub += "  online (" + eng.online[peer].Via() + ")";
-    else sub += sub.empty() ? "offline" : "  offline";
+    if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + TF("via %s", T(TransportName(conn->transport))) + (conn->addr == "relay" ? T(" (relay)") : "");
+    else if (online) sub += "  " + TF("online (%s)", TS(eng.online[peer].Via()).c_str());
+    else sub += sub.empty() ? T("offline") : std::string("  ") + T("offline");
 
     int unread = 0;
     auto cv = eng.chats.find(peer);
@@ -447,20 +449,20 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     if (rightClick) ImGui::OpenPopup("peerctx");
     if (ImGui::BeginPopup("peerctx")) {
         float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
-        if (ImGui::Selectable(connected ? "Disconnect" : "Connect", false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
-        if (ImGui::Selectable("Rename...", false, 0, ImVec2(0, h))) {
+        if (ImGui::Selectable(connected ? T("Disconnect") : T("Connect"), false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
+        if (ImGui::Selectable(T("Rename..."), false, 0, ImVec2(0, h))) {
             renamePeer = peer;
             renameBuf = d != eng.devices.end() ? d->second.customName : "";
             openRename = true;
         }
         bool trusted = d != eng.devices.end() && d->second.trusted;
-        if (ImGui::Selectable(trusted ? "Untrust" : "Trust (auto-accept files)", false, 0, ImVec2(0, h))) eng.SetTrusted(peer, !trusted);
-        if (ImGui::Selectable("Send files...", false, 0, ImVec2(0, h))) {
+        if (ImGui::Selectable(trusted ? T("Untrust") : T("Trust (auto-accept files)"), false, 0, ImVec2(0, h))) eng.SetTrusted(peer, !trusted);
+        if (ImGui::Selectable(T("Send files..."), false, 0, ImVec2(0, h))) {
             SelectPeer(peer);
             browseFor = BrowseFor::SendFiles;
-            browser.Open(FileBrowser::Mode::OpenMulti, "Send to " + name, browser.lastDir);
+            browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", name.c_str()), browser.lastDir);
         }
-        if (ImGui::Selectable("Device details", false, 0, ImVec2(0, h))) {
+        if (ImGui::Selectable(T("Device details"), false, 0, ImVec2(0, h))) {
             devicesSel = peer;
             if (ui::M().mobile) { backStack.push_back(screen); screen = MScreen::Devices; }
             else { tab = Tab::Devices; tabForce = true; }
@@ -492,13 +494,13 @@ void App::DrawDesktop() {
         int active = 0;
         for (auto& [id, t] : eng.transfers)
             if (!TStateFinal(t->state)) active++;
-        std::string tl = active ? "Transfers (" + std::to_string(active) + ")###transfers" : "Transfers###transfers";
-        item("Chat", Tab::Chat);
+        std::string tl = active ? TF("Transfers (%d)", active) + "###transfers" : std::string(T("Transfers")) + "###transfers";
+        item(T("Chat"), Tab::Chat);
         item(tl.c_str(), Tab::Transfers);
-        item("History", Tab::History);
-        item("Devices", Tab::Devices);
-        item("Connect", Tab::Nearby);
-        item("Settings", Tab::Settings);
+        item(T("History"), Tab::History);
+        item(T("Devices"), Tab::Devices);
+        item(T("Connect"), Tab::Nearby);
+        item(T("Settings"), Tab::Settings);
         tabForce = false;
         ImGui::EndTabBar();
     }
@@ -506,8 +508,8 @@ void App::DrawDesktop() {
         case Tab::Chat:
             if (selectedPeer.empty()) {
                 ImVec2 avail = ImGui::GetContentRegionAvail();
-                const char* t1 = "Select a device on the left to chat and share files.";
-                const char* t2 = "Drop files anywhere on this window to send them.";
+                const char* t1 = T("Select a device on the left to chat and share files.");
+                const char* t2 = T("Drop files anywhere on this window to send them.");
                 ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + (avail.x - ImGui::CalcTextSize(t1).x) * 0.5f, ImGui::GetCursorPosY() + avail.y * 0.4f));
                 ImGui::TextDisabled("%s", t1);
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail.x - ImGui::CalcTextSize(t2).x) * 0.5f);
@@ -527,11 +529,11 @@ void App::DrawDesktop() {
 
 void App::DrawSidebar() {
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
-    ImGui::TextUnformatted("LunaShare");
+    ImGui::TextUnformatted(T("LunaShare"));
     ImGui::PopFont();
     ImGui::TextDisabled("%s", eng.settings.displayName.c_str());
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("This device\nID: %s\nKey fingerprint: %s\nPort: %u", eng.settings.deviceId.c_str(), KeyFingerprint(eng.MyPublicKey()).c_str(), eng.boundPort);
+        ImGui::SetTooltip(T("This device\nID: %s\nKey fingerprint: %s\nPort: %u"), eng.settings.deviceId.c_str(), KeyFingerprint(eng.MyPublicKey()).c_str(), eng.boundPort);
     }
     ImGui::Separator();
     auto peers = SortedPeers();
@@ -539,7 +541,7 @@ void App::DrawSidebar() {
     ImGui::BeginChild("peers", ImVec2(0, -footer));
     if (peers.empty()) {
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("Looking for devices on your network...\n\nStart LunaShare on another device in the same Wi-Fi/LAN (or phone hotspot). It appears here automatically.");
+        ImGui::TextDisabled(T("Looking for devices on your network...\n\nStart LunaShare on another device in the same Wi-Fi/LAN (or phone hotspot). It appears here automatically."));
         ImGui::PopTextWrapPos();
     }
     for (auto& p : peers) {
@@ -551,14 +553,14 @@ void App::DrawSidebar() {
     }
     ImGui::EndChild();
     ImGui::Separator();
-    if (ui::IconTextButton("Connect...", Icon::Link, ImVec2(-1, 0))) {
+    if (ui::IconTextButton(T("Connect..."), Icon::Link, ImVec2(-1, 0))) {
         tab = Tab::Nearby;
         tabForce = true;
     }
     double up = 0, down = 0;
     for (auto& [id, t] : eng.transfers)
         if (t->state == TState::Active) (t->outgoing ? up : down) += t->speed;
-    ImGui::TextDisabled("Up %s/s   Down %s/s", FormatBytes(up).c_str(), FormatBytes(down).c_str());
+    ImGui::TextDisabled(T("Up %s/s   Down %s/s"), FormatBytes(up).c_str(), FormatBytes(down).c_str());
 }
 
 // ============================================================================ mobile
@@ -583,11 +585,11 @@ void App::DrawMobile() {
     switch (screen) {
         case MScreen::Home: title = "LunaShare"; break;
         case MScreen::Chat: peerTitle = eng.PeerName(selectedPeer); title = peerTitle.c_str(); break;
-        case MScreen::Transfers: title = "Transfers"; break;
-        case MScreen::History: title = "Shared files"; break;
-        case MScreen::Nearby: title = "Connect"; break;
-        case MScreen::Settings: title = "Settings"; break;
-        case MScreen::Devices: title = "Device"; break;
+        case MScreen::Transfers: title = T("Transfers"); break;
+        case MScreen::History: title = T("Shared files"); break;
+        case MScreen::Nearby: title = T("Connect"); break;
+        case MScreen::Settings: title = T("Settings"); break;
+        case MScreen::Devices: title = T("Device"); break;
     }
     // chat: buttons on the right; the title gets what's left (shortened with "..."), buttons shrink on tiny screens
     bool chatScreen = screen == MScreen::Chat;
@@ -634,7 +636,7 @@ void App::DrawMobile() {
         }
         if (ui::IconButton("attach", Icon::Attach, nullptr, hb)) {
             browseFor = BrowseFor::SendFiles;
-            browser.Open(FileBrowser::Mode::OpenMulti, "Send to " + peerTitle, browser.lastDir);
+            browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", peerTitle.c_str()), browser.lastDir);
         }
     }
     ImGui::Separator();
@@ -663,11 +665,11 @@ void App::DrawMobileHome() {
     if (peers.empty()) {
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("Looking for devices...\n\nOpen LunaShare on another phone or computer connected to the same Wi-Fi. "
-                            "No Wi-Fi? Use Connect > Hotspot or Bluetooth.");
+        ImGui::TextDisabled(T("Looking for devices...\n\nOpen LunaShare on another phone or computer connected to the same Wi-Fi. "
+                            "No Wi-Fi? Use Connect > Hotspot or Bluetooth."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        if (ui::BigButton("Connect / Hotspot / Bluetooth", Icon::Link)) screen = MScreen::Nearby;
+        if (ui::BigButton(T("Connect / Hotspot / Bluetooth"), Icon::Link)) screen = MScreen::Nearby;
     }
     for (auto& p : peers) {
         if (DevicePeerRow(p, false, ui::M().rowH * 1.35f)) {
@@ -682,9 +684,9 @@ void App::DrawMobileHome() {
 void App::DrawMobileNav() {
     ImGui::Separator();
     struct Item { const char* label; Icon icon; MScreen s; };
-    Item items[] = {{"Devices", Icon::Users, MScreen::Home}, {"Transfers", Icon::Transfers, MScreen::Transfers},
-                    {"Files", Icon::History, MScreen::History}, {"Connect", Icon::Link, MScreen::Nearby},
-                    {"Settings", Icon::Gear, MScreen::Settings}};
+    Item items[] = {{T("Devices"), Icon::Users, MScreen::Home}, {T("Transfers"), Icon::Transfers, MScreen::Transfers},
+                    {T("Files"), Icon::History, MScreen::History}, {T("Connect"), Icon::Link, MScreen::Nearby},
+                    {T("Settings"), Icon::Gear, MScreen::Settings}};
     float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 4) / 5.0f;
     float h = ui::M().rowH * 1.25f;
     for (int i = 0; i < 5; i++) {
@@ -728,21 +730,21 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SameLine();
     }
     auto conn = eng.ReadyConn(peer);
-    if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), "connected via %s%s", conn ? TransportName(conn->transport) : "?",
-                                      conn && conn->addr == "relay" ? " (relay through the server)" : "");
-    else if (eng.online.count(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "online - connecting...");
-    else ImGui::TextDisabled("offline - messages and files are queued");
+    if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
+                                      conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
+    else if (eng.online.count(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), T("online - connecting..."));
+    else ImGui::TextDisabled(T("offline - messages and files are queued"));
     if (d != eng.devices.end() && !d->second.pendingKey.empty()) {
         ImGui::SameLine();
-        ui::Badge("KEY CHANGED", ui::ColErr());
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("This device presented a different identity key. Review it in the device details.");
+        ui::Badge(T("KEY CHANGED"), ui::ColErr());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("This device presented a different identity key. Review it in the device details."));
     } else if (connected) {
         ImGui::SameLine();
         bool verified = d != eng.devices.end() && d->second.verified;
-        ui::Badge(verified ? "encrypted - verified" : "encrypted", verified ? IM_COL32(40, 150, 90, 255) : IM_COL32(70, 90, 140, 255));
+        ui::Badge(verified ? T("encrypted - verified") : T("encrypted"), verified ? IM_COL32(40, 150, 90, 255) : IM_COL32(70, 90, 140, 255));
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("End-to-end encrypted (X25519 + XChaCha20-Poly1305).\nSafety number: %s\n%s", eng.SafetyNumberWith(peer).c_str(),
-                              verified ? "You verified this device." : "Compare the safety number on both devices (Device details) to verify.");
+            ImGui::SetTooltip(T("End-to-end encrypted (X25519 + XChaCha20-Poly1305).\nSafety number: %s\n%s"), eng.SafetyNumberWith(peer).c_str(),
+                              verified ? T("You verified this device.") : T("Compare the safety number on both devices (Device details) to verify."));
     }
     if (d != eng.devices.end() && d->second.trusted) {
         ImGui::SameLine();
@@ -767,15 +769,15 @@ void App::DrawChat(const std::string& peer) {
             CallButton(peer, bw, true);
             ImGui::SameLine();
         }
-        if (ui::IconButton("sendfiles", Icon::Attach, "Send files or folders")) {
+        if (ui::IconButton("sendfiles", Icon::Attach, T("Send files or folders"))) {
             browseFor = BrowseFor::SendFiles;
-            browser.Open(FileBrowser::Mode::OpenMulti, "Send to " + eng.PeerName(peer), browser.lastDir);
+            browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", eng.PeerName(peer).c_str()), browser.lastDir);
         }
         ImGui::SameLine();
-        if (connected ? ui::IconButton("disc", Icon::Cancel, "Disconnect") : ui::IconButton("conn", Icon::Link, "Connect now"))
+        if (connected ? ui::IconButton("disc", Icon::Cancel, T("Disconnect")) : ui::IconButton("conn", Icon::Link, T("Connect now")))
             connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
         ImGui::SameLine();
-        if (ui::IconButton("details", Icon::Gear, "Device details / rename")) {
+        if (ui::IconButton("details", Icon::Gear, T("Device details / rename"))) {
             devicesSel = peer;
             tab = Tab::Devices;
             tabForce = true;
@@ -786,19 +788,19 @@ void App::DrawChat(const std::string& peer) {
     if (!selMsgs.empty()) {
         float h = mobile ? ui::M().rowH : 0;
         ImGui::AlignTextToFramePadding();
-        ImGui::Text("%d selected", (int)selMsgs.size());
+        ImGui::Text(T("%d selected"), (int)selMsgs.size());
         ImGui::SameLine();
-        if (ImGui::Button("Copy", ImVec2(0, h))) CopySelectedMessages(peer);
+        if (ImGui::Button(T("Copy"), ImVec2(0, h))) CopySelectedMessages(peer);
         ImGui::SameLine();
-        if (ImGui::Button("Delete", ImVec2(0, h))) AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
+        if (ImGui::Button(T("Delete"), ImVec2(0, h))) AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
         ImGui::SameLine();
-        if (ImGui::Button("Select all", ImVec2(0, h))) {
+        if (ImGui::Button(T("Select all"), ImVec2(0, h))) {
             auto it = eng.chats.find(peer);
             if (it != eng.chats.end())
                 for (auto& m : it->second.messages) selMsgs.insert(m.mid);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Clear", ImVec2(0, h))) {
+        if (ImGui::Button(T("Clear"), ImVec2(0, h))) {
             selMsgs.clear();
             selectionMode = false;
         }
@@ -844,7 +846,7 @@ void App::DrawChat(const std::string& peer) {
         double secs = Media().RecordingSeconds();
         float bw = inputH;
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(150, 50, 50, 255));
-        bool cancel = ui::IconButton("reccancel", Icon::Trash, "Discard", bw);
+        bool cancel = ui::IconButton("reccancel", Icon::Trash, T("Discard"), bw);
         ImGui::PopStyleColor();
         ImGui::SameLine();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -862,7 +864,7 @@ void App::DrawChat(const std::string& peer) {
         dl->AddRectFilled(ImVec2(lx, p.y + inputH * 0.42f), ImVec2(lx + lw, p.y + inputH * 0.58f), ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
         dl->AddRectFilled(ImVec2(lx, p.y + inputH * 0.42f), ImVec2(lx + lw * lvl, p.y + inputH * 0.58f), ui::ColOk(), 4);
         ImGui::SameLine();
-        bool send = ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH)) || secs > 600;  // 10 minutes max
+        bool send = ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH)) || secs > 600;  // 10 minutes max
         if (cancel) Media().StopRecording(false);
         if (send) {
             double len = Media().StopRecording(true);
@@ -883,7 +885,7 @@ void App::DrawChat(const std::string& peer) {
         if (emojiOpen) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetColorU32(ImGuiCol_ButtonActive));
         if (ImGui::Button("##emojibtn", ImVec2(bw, inputH))) emojiOpen = !emojiOpen;
         if (emojiOpen) ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Emoji");
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Emoji"));
         std::string g = Emoji().Glyph("\xF0\x9F\x99\x82");
         float es = std::min(bw, inputH) * 0.55f;
         ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(es, FLT_MAX, 0, g.c_str());
@@ -902,10 +904,10 @@ void App::DrawChat(const std::string& peer) {
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap |
                                               ImGuiInputTextFlags_CallbackEdit | ImGuiInputTextFlags_CallbackAlways,
                                           EmojiHost::InputCallback);
-    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Enter = send, Ctrl+Enter = new line, drop files to send");
+    if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Enter = send, Ctrl+Enter = new line, drop files to send"));
     ImGui::SameLine();
     if (showVmsg) {
-        if (ui::IconButton("vmsg", Icon::Video, "Record a video message", inputH)) {
+        if (ui::IconButton("vmsg", Icon::Video, T("Record a video message"), inputH)) {
             std::string dir = JoinPath(ConfigDir(), "voice");
             MakeDirs(dir);
             time_t now = time(nullptr);
@@ -915,13 +917,13 @@ void App::DrawChat(const std::string& peer) {
             recPeer = peer;
             vmsgCams = (int)Media().Cameras().size();
             if (!Media().OpenVideoMessage(recPath))
-                toasts.push_back({EventType::Error, "Camera", "Could not start the camera: " + Media().audioError, "", 0, 4.0f});
+                toasts.push_back({EventType::Error, T("Camera"), T("Could not start the camera: ") + Media().audioError, "", 0, 4.0f});
         }
         ImGui::SameLine();
     }
     if (chatInput.empty() && Media().CanRecordMessages() && !Media().Recording()) {
         // nothing typed: the button records a voice message
-        if (ui::IconTextButton(mobile ? "Voice" : "Voice", Icon::Mic, ImVec2(sendW, inputH))) {
+        if (ui::IconTextButton(mobile ? T("Voice") : T("Voice"), Icon::Mic, ImVec2(sendW, inputH))) {
             std::string dir = JoinPath(ConfigDir(), "voice");
             MakeDirs(dir);
             time_t now = time(nullptr);
@@ -930,10 +932,10 @@ void App::DrawChat(const std::string& peer) {
             recPath = JoinPath(dir, name);
             recPeer = peer;
             if (!Media().StartRecording(recPath))
-                toasts.push_back({EventType::Error, "Microphone", "Could not start recording (microphone permission?)", "", 0, 4.0f});
+                toasts.push_back({EventType::Error, T("Microphone"), T("Could not start recording (microphone permission?)"), "", 0, 4.0f});
         }
-        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Record a voice message");
-    } else if (ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH))) send = true;
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip(T("Record a voice message"));
+    } else if (ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH))) send = true;
     if (send) {
         std::string t = chatInput;
         while (!t.empty() && (t.back() == '\n' || t.back() == ' ')) t.pop_back();
@@ -961,7 +963,7 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
     const auto& t = Media().LocalVideo();
     if (t.valid) Media().DrawVideo(dl, t, p0, p1, false);
     else {
-        const char* s = "Starting camera...";
+        const char* s = T("Starting camera...");
         ImVec2 ts = ImGui::CalcTextSize(s);
         dl->AddText(ImVec2((p0.x + p1.x - ts.x) * 0.5f, (p0.y + p1.y - ts.y) * 0.5f), IM_COL32(200, 200, 200, 255), s);
     }
@@ -981,12 +983,12 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
     ImGui::Separator();
     float sendW = mobile ? ui::M().rowH * 1.4f : ImGui::GetFontSize() * 6;
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(150, 50, 50, 255));
-    bool cancel = ui::IconButton("vmcancel", Icon::Trash, "Discard", inputH);
+    bool cancel = ui::IconButton("vmcancel", Icon::Trash, T("Discard"), inputH);
     ImGui::PopStyleColor();
     ImGui::SameLine();
     bool canFlip = !rec && vmsgCams > 1;
     if (canFlip) {
-        if (ui::IconButton("vmflip", Icon::FlipCamera, "Switch camera", inputH)) Media().NextCamera();
+        if (ui::IconButton("vmflip", Icon::FlipCamera, T("Switch camera"), inputH)) Media().NextCamera();
         ImGui::SameLine();
     }
     // middle: hint or level meter
@@ -998,7 +1000,7 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
         dl->AddRectFilled(ImVec2(m0.x + pad, m0.y + inputH * 0.42f), ImVec2(m0.x + mw - pad, m0.y + inputH * 0.58f), ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
         dl->AddRectFilled(ImVec2(m0.x + pad, m0.y + inputH * 0.42f), ImVec2(m0.x + pad + (mw - 2 * pad) * lvl, m0.y + inputH * 0.58f), ui::ColOk(), 4);
     } else {
-        const char* hint = mobile ? "Up to 3 minutes" : "Video message - up to 3 minutes, 720p";
+        const char* hint = mobile ? T("Up to 3 minutes") : T("Video message - up to 3 minutes, 720p");
         ImVec2 ts = ImGui::CalcTextSize(hint);
         if (ts.x < mw) dl->AddText(ImVec2(m0.x + (mw - ts.x) * 0.5f, m0.y + (inputH - ts.y) * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), hint);
     }
@@ -1006,11 +1008,11 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
     bool send = false;
     if (!rec) {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 60, 60, 255));
-        if (ui::IconTextButton("Record", Icon::Video, ImVec2(sendW, inputH)) && !Media().RecordVideoMessage())
-            toasts.push_back({EventType::Error, "Microphone", "Could not start recording (microphone permission?)", "", 0, 4.0f});
+        if (ui::IconTextButton(T("Record"), Icon::Video, ImVec2(sendW, inputH)) && !Media().RecordVideoMessage())
+            toasts.push_back({EventType::Error, T("Microphone"), T("Could not start recording (microphone permission?)"), "", 0, 4.0f});
         ImGui::PopStyleColor();
     } else {
-        send = ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH)) || secs > 180;
+        send = ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH)) || secs > 180;
     }
     if (cancel || (!mobile && ImGui::IsKeyPressed(ImGuiKey_Escape))) Media().CloseVideoMessage(false);
     if (send) {
@@ -1020,7 +1022,7 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
             scrollToBottom = true;
         } else {
             RemoveFile(recPath);
-            toasts.push_back({EventType::Error, "Video message", "Nothing was recorded", "", 0, 4.0f});
+            toasts.push_back({EventType::Error, T("Video message"), T("Nothing was recorded"), "", 0, 4.0f});
         }
     }
 }
@@ -1037,21 +1039,21 @@ void App::AskDelete(const std::string& peer, const std::vector<std::string>& mid
 
 void App::DrawDeleteConfirm(const std::string& peer) {
     if (openDeleteConfirm) {
-        ImGui::OpenPopup("Delete messages?");
+        ImGui::OpenPopup(T("Delete messages?"));
         openDeleteConfirm = false;
     }
     bool mobile = ui::M().mobile;
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (!ImGui::BeginPopupModal("Delete messages?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    if (!ImGui::BeginPopupModal(T("Delete messages?"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
     float h = mobile ? ui::M().rowH : 0;
     float w = mobile ? ImGui::GetMainViewport()->Size.x * 0.8f : ImGui::GetFontSize() * 16;
     size_t n = deleteMids.size();
-    ImGui::TextUnformatted(n == 1 ? "Delete this message?" : ("Delete " + std::to_string(n) + " messages?").c_str());
+    ImGui::TextUnformatted(n == 1 ? T("Delete this message?") : TF("Delete %d messages?", (int)n).c_str());
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w);
     if (deleteEveryoneOk)
-        ImGui::TextDisabled("\"For everyone\" also removes it from %s (as soon as that device is reachable).", eng.PeerName(peer).c_str());
+        ImGui::TextDisabled(T("\"For everyone\" also removes it from %s (as soon as that device is reachable)."), eng.PeerName(peer).c_str());
     else
-        ImGui::TextDisabled("Messages you received can only be deleted on this device.");
+        ImGui::TextDisabled(T("Messages you received can only be deleted on this device."));
     ImGui::PopTextWrapPos();
     ImGui::Spacing();
     auto done = [&] {
@@ -1062,18 +1064,18 @@ void App::DrawDeleteConfirm(const std::string& peer) {
     };
     if (deleteEveryoneOk) {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 60, 60, 255));
-        if (ImGui::Button("Delete for everyone", ImVec2(w, h))) { eng.DeleteMessages(peer, deleteMids, true); done(); }
+        if (ImGui::Button(T("Delete for everyone"), ImVec2(w, h))) { eng.DeleteMessages(peer, deleteMids, true); done(); }
         ImGui::PopStyleColor();
     }
-    if (ImGui::Button("Delete for me", ImVec2(w, h))) { eng.DeleteMessages(peer, deleteMids, false); done(); }
-    if (ImGui::Button("Cancel", ImVec2(w, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) { deleteMids.clear(); ImGui::CloseCurrentPopup(); }
+    if (ImGui::Button(T("Delete for me"), ImVec2(w, h))) { eng.DeleteMessages(peer, deleteMids, false); done(); }
+    if (ImGui::Button(T("Cancel"), ImVec2(w, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) { deleteMids.clear(); ImGui::CloseCurrentPopup(); }
     ImGui::EndPopup();
 }
 
 void App::DrawMessages(const std::string& peer) {
     auto it = eng.chats.find(peer);
     if (it == eng.chats.end() || it->second.messages.empty()) {
-        ImGui::TextDisabled("No messages yet. Say hi or drop some files here.");
+        ImGui::TextDisabled(T("No messages yet. Say hi or drop some files here."));
         return;
     }
     Conversation& cv = it->second;
@@ -1108,7 +1110,7 @@ void App::DrawMessages(const std::string& peer) {
         }
         if (m.kind == MsgKind::System) {
             ImGui::PushTextWrapPos(avail);
-            ImGui::TextDisabled("%s", Emoji().Display(m.text).c_str());
+            ImGui::TextDisabled("%s", Emoji().Display(TDynamic(m.text)).c_str());
             ImGui::PopTextWrapPos();
             ImGui::PopID();
             continue;
@@ -1158,7 +1160,7 @@ void App::DrawMessages(const std::string& peer) {
             int bigEmoji = Emoji().EmojiOnly(m.text);  // only 1-3 emoji: show them big
             float textSize = ImGui::GetFontSize() * (bigEmoji == 1 ? 2.6f : bigEmoji ? 2.0f : 1.0f);
             ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(textSize, FLT_MAX, wrap, shown.c_str());
-            std::string meta = FormatTime(m.ts, false) + (m.outgoing ? (m.delivered ? "  delivered" : "  queued") : "");
+            std::string meta = FormatTime(m.ts, false) + (m.outgoing ? std::string("  ") + (m.delivered ? T("delivered") : T("queued")) : std::string());
             ImVec2 ms = ImGui::CalcTextSize(meta.c_str());
             float smallScale = 0.8f;
             float bw = std::max(ts.x, ms.x * smallScale) + pad * 2;
@@ -1216,7 +1218,7 @@ void App::DrawMessages(const std::string& peer) {
             float h = mobile ? ui::M().rowH * 0.85f : 0;
             if (QuickReactionRow(peer, m.mid, m.myReaction)) ImGui::CloseCurrentPopup();
             ImGui::Separator();
-            if (ImGui::Selectable("Copy text", false, 0, ImVec2(0, h))) {
+            if (ImGui::Selectable(T("Copy text"), false, 0, ImVec2(0, h))) {
                 std::string text = m.text;
                 if (m.kind == MsgKind::Files) {
                     text.clear();
@@ -1227,22 +1229,22 @@ void App::DrawMessages(const std::string& peer) {
                 }
                 ImGui::SetClipboardText(text.c_str());
             }
-            if (m.kind == MsgKind::Text && ImGui::Selectable("Select text...", false, 0, ImVec2(0, h))) {
+            if (m.kind == MsgKind::Text && ImGui::Selectable(T("Select text..."), false, 0, ImVec2(0, h))) {
                 textViewBuf = Emoji().Display(m.text);
                 openTextView = true;
             }
             bool s2 = selMsgs.count(m.mid) > 0;
-            if (ImGui::Selectable(s2 ? "Unselect" : "Select", false, 0, ImVec2(0, h))) {
+            if (ImGui::Selectable(s2 ? T("Unselect") : T("Select"), false, 0, ImVec2(0, h))) {
                 if (s2) selMsgs.erase(m.mid); else selMsgs.insert(m.mid);
                 selectionMode = mobile && !selMsgs.empty();
             }
-            if (!selMsgs.empty() && ImGui::Selectable(("Copy " + std::to_string(selMsgs.size()) + " selected").c_str(), false, 0, ImVec2(0, h)))
+            if (!selMsgs.empty() && ImGui::Selectable(TF("Copy %d selected", (int)selMsgs.size()).c_str(), false, 0, ImVec2(0, h)))
                 CopySelectedMessages(peer);
-            if (ImGui::Selectable("Delete...", false, 0, ImVec2(0, h))) AskDelete(peer, {m.mid});
-            if (selMsgs.size() > 1 && ImGui::Selectable(("Delete " + std::to_string(selMsgs.size()) + " selected...").c_str(), false, 0, ImVec2(0, h)))
+            if (ImGui::Selectable(T("Delete..."), false, 0, ImVec2(0, h))) AskDelete(peer, {m.mid});
+            if (selMsgs.size() > 1 && ImGui::Selectable(TF("Delete %d selected...", (int)selMsgs.size()).c_str(), false, 0, ImVec2(0, h)))
                 AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
             if (m.kind == MsgKind::Files) {
-                if (ImGui::Selectable("Share these files with...", false, 0, ImVec2(0, h))) {
+                if (ImGui::Selectable(T("Share these files with..."), false, 0, ImVec2(0, h))) {
                     std::vector<std::string> paths;
                     for (auto tid : m.tids) {
                         auto t = eng.transfers.find(tid);
@@ -1304,7 +1306,7 @@ bool App::QuickReactionRow(const std::string& peer, const std::string& mid, cons
         }
         if (ImGui::IsItemHovered()) {
             dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), ImGui::GetColorU32(ImGuiCol_HeaderHovered), s * 0.5f);
-            if (!mobile) ImGui::SetTooltip("More emoji");
+            if (!mobile) ImGui::SetTooltip(T("More emoji"));
         }
         ui::DrawIcon(dl, Icon::Plus, ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.45f, ImGui::GetColorU32(ImGuiCol_Text));
     } else {
@@ -1331,7 +1333,7 @@ void App::ReactHoverButton(const ChatMessage& m, ImVec2 b0, ImVec2 b1) {
         openReactPick = true;
     }
     bool hov = ImGui::IsItemHovered();
-    if (hov) ImGui::SetTooltip("React");
+    if (hov) ImGui::SetTooltip(T("React"));
     ImGui::PopID();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddCircleFilled(ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.5f, ImGui::GetColorU32(hov ? ImGuiCol_ButtonHovered : ImGuiCol_Button));
@@ -1374,7 +1376,7 @@ void App::DrawReactions(const std::string& peer, ChatMessage& m, ImVec2 b0, ImVe
         bool hov = ImGui::IsItemHovered();
         ImGui::PopID();
         if (hov && !ui::M().mobile)
-            ImGui::SetTooltip("%s", p.count > 1 ? "You both reacted - click to remove yours" : p.mine ? "Your reaction - click to remove" : "Click to react the same");
+            ImGui::SetTooltip("%s", p.count > 1 ? T("You both reacted - click to remove yours") : p.mine ? T("Your reaction - click to remove") : T("Click to react the same"));
         if (click) eng.React(peer, m.mid, p.mine ? "" : p.emoji);
         ImU32 bg = ImGui::GetColorU32(hov ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
         dl->AddRectFilled(a, b, bg, ph * 0.5f);
@@ -1439,7 +1441,7 @@ void App::CopySelectedMessages(const std::string& peer) {
         else out += "[" + FormatTime(m.ts, true) + "] " + (m.outgoing ? std::string("Me") : them) + ": " + text + "\n";
     }
     ImGui::SetClipboardText(out.c_str());
-    toasts.push_back({EventType::Info, "Copied", std::to_string(count) + " message(s) copied to clipboard", "", 0, 2.5f});
+    toasts.push_back({EventType::Info, T("Copied"), TF("%d message(s) copied to clipboard", count), "", 0, 2.5f});
 }
 
 void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float width) {
@@ -1481,11 +1483,11 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
     ImGui::TextUnformatted(Emoji().Display(m.text).c_str());
     ImGui::PopTextWrapPos();
     if (items.empty()) {
-        ImGui::TextDisabled("(transfer details removed)");
+        ImGui::TextDisabled(T("(transfer details removed)"));
         return;
     }
-    ImGui::TextDisabled("%s%s  -  %s", m.outgoing ? "Sending " : "Receiving ", FormatBytes((double)total).c_str(),
-                        items.size() > 1 ? (std::to_string(items.size()) + " files").c_str() : TStateName(items[0]->state));
+    ImGui::TextDisabled("%s  -  %s", TF(m.outgoing ? "Sending %s" : "Receiving %s", FormatBytes((double)total).c_str()).c_str(),
+                        items.size() > 1 ? TF("%d files", (int)items.size()).c_str() : T(TStateName(items[0]->state)));
     DrawThumbnails(peer, items, width);
     DrawAudioItems(items, width);
     // progress
@@ -1503,9 +1505,9 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
         ImGui::Dummy(ImVec2(ih, ih));
         ui::DrawIcon(dl, Icon::Check, ImVec2(cp.x + ih * 0.5f, cp.y + ih * 0.5f), ih, allVerified ? ui::ColOk() : ui::ColWarn());
         ImGui::SameLine();
-        ImGui::TextUnformatted(allVerified ? "Delivered - SHA-256 verified on both sides" : "Delivered");
+        ImGui::TextUnformatted(allVerified ? T("Delivered - SHA-256 verified on both sides") : T("Delivered"));
         ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered() && items.size() == 1) ImGui::SetTooltip("SHA-256 before: %s\nSHA-256 after:  %s", items[0]->sha256.c_str(), items[0]->recvSha.c_str());
+        if (ImGui::IsItemHovered() && items.size() == 1) ImGui::SetTooltip(T("SHA-256 before: %s\nSHA-256 after:  %s"), items[0]->sha256.c_str(), items[0]->recvSha.c_str());
     } else {
         double frac = total ? (double)done / (double)total : (nDone ? 1.0 : 0.0);
         if (speed > 0) snprintf(buf, sizeof(buf), "%.0f%%  %s/s  %s left", frac * 100, FormatBytes(speed).c_str(), Eta((double)(total - done), speed).c_str());
@@ -1518,44 +1520,44 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
     auto sl = [&]() { if (any) ImGui::SameLine(); any = true; };
     if (!m.outgoing && nPending) {
         sl();
-        if (ui::IconTextButton("Accept", Icon::Check, ImVec2(0, h))) eng.AcceptBatch(m.batch);
+        if (ui::IconTextButton(T("Accept"), Icon::Check, ImVec2(0, h))) eng.AcceptBatch(m.batch);
         sl();
-        if (ui::IconTextButton("Decline", Icon::Cancel, ImVec2(0, h)))
+        if (ui::IconTextButton(T("Decline"), Icon::Cancel, ImVec2(0, h)))
             for (auto& t : items) if (t->state == TState::Pending) eng.Reject(t->tid);
     }
     if (nActive || nHash) {
         sl();
-        if (ui::IconTextButton("Pause", Icon::Pause, ImVec2(0, h)))
+        if (ui::IconTextButton(T("Pause"), Icon::Pause, ImVec2(0, h)))
             for (auto& t : items) eng.Pause(t->tid);
     }
     if (nPaused) {
         sl();
-        if (ui::IconTextButton("Resume", Icon::Play, ImVec2(0, h)))
+        if (ui::IconTextButton(T("Resume"), Icon::Play, ImVec2(0, h)))
             for (auto& t : items) eng.Resume(t->tid);
     }
     if (nActive || nPaused || nHash || (m.outgoing && nPending)) {
         sl();
-        if (ui::IconTextButton("Cancel", Icon::Cancel, ImVec2(0, h)))
+        if (ui::IconTextButton(T("Cancel"), Icon::Cancel, ImVec2(0, h)))
             for (auto& t : items) eng.Cancel(t->tid);
     }
     if (m.outgoing && nFail) {
         sl();
-        if (ui::IconTextButton("Retry", Icon::Retry, ImVec2(0, h)))
+        if (ui::IconTextButton(T("Retry"), Icon::Retry, ImVec2(0, h)))
             for (auto& t : items) if (t->state == TState::Failed || t->state == TState::Cancelled) eng.Retry(t->tid);
     }
     if (nDone && items.size() == 1) {
         sl();
-        if (ui::IconTextButton("Open", Icon::Open, ImVec2(0, h))) OpenPath(items[0]->localPath);
+        if (ui::IconTextButton(T("Open"), Icon::Open, ImVec2(0, h))) OpenPath(items[0]->localPath);
         sl();
-        if (ui::IconTextButton("Folder", Icon::Folder, ImVec2(0, h))) RevealPath(items[0]->localPath);
+        if (ui::IconTextButton(T("Folder"), Icon::Folder, ImVec2(0, h))) RevealPath(items[0]->localPath);
     } else if (nDone && !m.outgoing) {
         sl();
         std::string dir = JoinPath(eng.settings.downloadDir, items[0]->rel.substr(0, items[0]->rel.find('/')));
-        if (ui::IconTextButton("Folder", Icon::Folder, ImVec2(0, h))) RevealPath(items[0]->localPath.empty() ? eng.settings.downloadDir : DirName(items[0]->localPath));
+        if (ui::IconTextButton(T("Folder"), Icon::Folder, ImVec2(0, h))) RevealPath(items[0]->localPath.empty() ? eng.settings.downloadDir : DirName(items[0]->localPath));
     }
     if (nDone) {
         sl();
-        if (ui::IconTextButton("Share", Icon::Share, ImVec2(0, h))) {
+        if (ui::IconTextButton(T("Share"), Icon::Share, ImVec2(0, h))) {
             std::vector<std::string> paths;
             for (auto& t : items) if (t->state == TState::Completed && FileExists(t->localPath)) paths.push_back(t->localPath);
             OpenSendTo(paths);
@@ -1570,7 +1572,7 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
         }
     if (items.size() > 1) {
         bool open = expandedBatches.count(m.batch) > 0;
-        if (ImGui::SmallButton(open ? "Hide files" : "Show files")) {
+        if (ImGui::SmallButton(open ? T("Hide files") : T("Show files"))) {
             if (open) expandedBatches.erase(m.batch); else expandedBatches.insert(m.batch);
         }
         if (open) {
@@ -1582,7 +1584,7 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
                 ImGui::TextUnformatted(t->rel.c_str());
                 ImGui::PopTextWrapPos();
                 float frac = t->size ? (float)((double)(t->state == TState::Completed ? t->size : t->done.load()) / (double)t->size) : (t->state == TState::Completed ? 1.f : 0.f);
-                snprintf(buf, sizeof(buf), "%s  %s", TStateName(t->state), FormatBytes((double)t->size).c_str());
+                snprintf(buf, sizeof(buf), "%s  %s", T(TStateName(t->state)), FormatBytes((double)t->size).c_str());
                 ui::ProgressBarText(frac, buf, ImVec2(width - (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) * 2, 0), StateColor(t->state));
                 ImGui::SameLine();
                 DrawTransferActions(t);
@@ -1601,28 +1603,28 @@ void App::DrawTransferActions(const std::shared_ptr<Transfer>& t) {
     float sz = ImGui::GetFrameHeight();
     switch (t->state) {
         case TState::Pending:
-            sl(); if (ui::IconButton("acc", Icon::Check, "Accept", sz)) eng.Accept(t->tid);
-            sl(); if (ui::IconButton("rej", Icon::Cancel, "Decline", sz, true)) eng.Reject(t->tid);
+            sl(); if (ui::IconButton("acc", Icon::Check, T("Accept"), sz)) eng.Accept(t->tid);
+            sl(); if (ui::IconButton("rej", Icon::Cancel, T("Decline"), sz, true)) eng.Reject(t->tid);
             break;
         case TState::Active: case TState::Queued: case TState::Offered:
-            sl(); if (ui::IconButton("pause", Icon::Pause, "Pause", sz)) eng.Pause(t->tid);
-            sl(); if (ui::IconButton("cancel", Icon::Cancel, "Cancel", sz, true)) eng.Cancel(t->tid);
+            sl(); if (ui::IconButton("pause", Icon::Pause, T("Pause"), sz)) eng.Pause(t->tid);
+            sl(); if (ui::IconButton("cancel", Icon::Cancel, T("Cancel"), sz, true)) eng.Cancel(t->tid);
             break;
         case TState::Paused: case TState::Interrupted:
-            sl(); if (ui::IconButton("resume", Icon::Play, "Resume", sz)) eng.Resume(t->tid);
-            sl(); if (ui::IconButton("cancel", Icon::Cancel, "Cancel", sz, true)) eng.Cancel(t->tid);
+            sl(); if (ui::IconButton("resume", Icon::Play, T("Resume"), sz)) eng.Resume(t->tid);
+            sl(); if (ui::IconButton("cancel", Icon::Cancel, T("Cancel"), sz, true)) eng.Cancel(t->tid);
             break;
         case TState::Hashing: case TState::Verifying:
-            sl(); if (ui::IconButton("cancel", Icon::Cancel, "Cancel", sz, true)) eng.Cancel(t->tid);
+            sl(); if (ui::IconButton("cancel", Icon::Cancel, T("Cancel"), sz, true)) eng.Cancel(t->tid);
             sl(); ImGui::Dummy(ImVec2(sz, sz));
             break;
         case TState::Completed:
-            sl(); if (ui::IconButton("open", Icon::Open, "Open", sz)) OpenPath(t->localPath);
-            sl(); if (ui::IconButton("folder", Icon::Folder, "Show in folder", sz)) RevealPath(t->localPath);
+            sl(); if (ui::IconButton("open", Icon::Open, T("Open"), sz)) OpenPath(t->localPath);
+            sl(); if (ui::IconButton("folder", Icon::Folder, T("Show in folder"), sz)) RevealPath(t->localPath);
             break;
         default:
-            if (t->outgoing) { sl(); if (ui::IconButton("retry", Icon::Retry, "Retry", sz)) eng.Retry(t->tid); }
-            sl(); if (ui::IconButton("remove", Icon::Trash, "Remove from list", sz)) eng.RemoveTransfer(t->tid);
+            if (t->outgoing) { sl(); if (ui::IconButton("retry", Icon::Retry, T("Retry"), sz)) eng.Retry(t->tid); }
+            sl(); if (ui::IconButton("remove", Icon::Trash, T("Remove from list"), sz)) eng.RemoveTransfer(t->tid);
             break;
     }
 }
@@ -1639,7 +1641,7 @@ void App::DrawTransferRow(const std::shared_ptr<Transfer>& t, bool compact) {
     else if (t->state == TState::Hashing || (t->state == TState::Verifying && !t->outgoing))
         snprintf(buf, sizeof(buf), "%s SHA-256 %.0f%%", t->state == TState::Hashing ? "Hashing" : "Verifying", frac * 100);
     else
-        snprintf(buf, sizeof(buf), "%s  %.1f%%  %s", TStateName(t->state), frac * 100, FormatBytes((double)t->size).c_str());
+        snprintf(buf, sizeof(buf), "%s  %.1f%%  %s", T(TStateName(t->state)), frac * 100, FormatBytes((double)t->size).c_str());
     float actionsW = (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) * 2;
     if (compact) {
         ImGui::TextUnformatted(t->rel.c_str());
@@ -1662,11 +1664,11 @@ void App::DrawTransfers() {
     float h = mobile ? ui::M().rowH : 0;
     // phones: three equal buttons sharing the width, with short labels, so the row always fits
     float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3 : 0;
-    if (ui::IconTextButton(mobile ? "Pause" : "Pause all", Icon::Pause, ImVec2(bw, h))) eng.PauseAll(true);
+    if (ui::IconTextButton(mobile ? T("Pause") : T("Pause all"), Icon::Pause, ImVec2(bw, h))) eng.PauseAll(true);
     ImGui::SameLine();
-    if (ui::IconTextButton(mobile ? "Resume" : "Resume all", Icon::Play, ImVec2(bw, h))) eng.PauseAll(false);
+    if (ui::IconTextButton(mobile ? T("Resume") : T("Resume all"), Icon::Play, ImVec2(bw, h))) eng.PauseAll(false);
     ImGui::SameLine();
-    if (ui::IconTextButton(mobile ? "Clear" : "Clear finished", Icon::Trash, ImVec2(bw, h))) eng.ClearFinishedTransfers();
+    if (ui::IconTextButton(mobile ? T("Clear") : T("Clear finished"), Icon::Trash, ImVec2(bw, h))) eng.ClearFinishedTransfers();
     ImGui::Separator();
     std::vector<std::shared_ptr<Transfer>> list;
     for (auto& [id, t] : eng.transfers) list.push_back(t);
@@ -1676,7 +1678,9 @@ void App::DrawTransfers() {
         return a->created > b->created;
     });
     if (list.empty()) {
-        ImGui::TextDisabled("No transfers. Drop files on the window or use the + button in a chat.");
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled(T("No transfers. Drop files on the window or use the + button in a chat."));
+        ImGui::PopTextWrapPos();
         return;
     }
     ImGui::BeginChild("tlist");
@@ -1691,9 +1695,9 @@ void App::DrawTransfers() {
     } else if (ImGui::BeginTable("transfers", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize());
-        ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 2.0f);
-        ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("Progress", ImGuiTableColumnFlags_WidthStretch, 2.6f);
+        ImGui::TableSetupColumn(T("File"), ImGuiTableColumnFlags_WidthStretch, 2.0f);
+        ImGui::TableSetupColumn(T("Device"), ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn(T("Progress"), ImGuiTableColumnFlags_WidthStretch, 2.6f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) * 2);
         ImGui::TableHeadersRow();
         ImGuiListClipper clip;
@@ -1713,7 +1717,7 @@ void App::DrawTransfers() {
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted(t->rel.c_str());
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s\nSHA-256 (sender): %s\nSHA-256 (receiver): %s%s%s", t->localPath.empty() ? t->rel.c_str() : t->localPath.c_str(),
+                    ImGui::SetTooltip(T("%s\nSHA-256 (sender): %s\nSHA-256 (receiver): %s%s%s"), t->localPath.empty() ? t->rel.c_str() : t->localPath.c_str(),
                                       t->sha256.empty() ? "-" : t->sha256.c_str(), t->recvSha.empty() ? "-" : t->recvSha.c_str(),
                                       t->error.empty() ? "" : "\n", t->error.c_str());
                 ImGui::TableNextColumn();
@@ -1737,25 +1741,25 @@ void App::DrawHistory() {
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH : 0;
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 18);
-    ImGui::InputTextWithHint("##hfilter", "Search name, device or hash", &historyFilter);
+    ImGui::InputTextWithHint("##hfilter", T("Search name, device or hash"), &historyFilter);
     if (!mobile) ImGui::SameLine();
     ImGui::BeginDisabled(historySel.empty());
-    std::string shareLabel = "Share selected (" + std::to_string(historySel.size()) + ")";
+    std::string shareLabel = TF("Share selected (%d)", (int)historySel.size());
     if (ui::IconTextButton(shareLabel.c_str(), Icon::Share, ImVec2(0, h))) {
         std::vector<std::string> paths;
         for (auto& e : eng.history)
             if (historySel.count(e.tid) && FileExists(e.path)) paths.push_back(e.path);
-        if (paths.empty()) toasts.push_back({EventType::Error, "Nothing to share", "Selected files no longer exist on this device", "", 0, 5});
+        if (paths.empty()) toasts.push_back({EventType::Error, T("Nothing to share"), T("Selected files no longer exist on this device"), "", 0, 5});
         else OpenSendTo(paths);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ui::IconTextButton("Clear", Icon::Trash, ImVec2(0, h))) ImGui::OpenPopup("clearhist");
+    if (ui::IconTextButton(T("Clear"), Icon::Trash, ImVec2(0, h))) ImGui::OpenPopup("clearhist");
     if (ImGui::BeginPopup("clearhist")) {
-        ImGui::TextUnformatted("Remove all entries from the shared files history?\n(The files themselves are not deleted.)");
-        if (ImGui::Button("Clear history")) { eng.ClearHistory(); historySel.clear(); ImGui::CloseCurrentPopup(); }
+        ImGui::TextUnformatted(T("Remove all entries from the shared files history?\n(The files themselves are not deleted.)"));
+        if (ImGui::Button(T("Clear history"))) { eng.ClearHistory(); historySel.clear(); ImGui::CloseCurrentPopup(); }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     ImGui::Separator();
@@ -1772,7 +1776,7 @@ void App::DrawHistory() {
         rows.push_back(i);
     }
     if (rows.empty()) {
-        ImGui::TextDisabled(eng.history.empty() ? "Files you send or receive will be listed here so you can share them again." : "No matches.");
+        ImGui::TextDisabled(eng.history.empty() ? T("Files you send or receive will be listed here so you can share them again.") : T("No matches."));
         return;
     }
     ImGui::BeginChild("hlist");
@@ -1783,7 +1787,7 @@ void App::DrawHistory() {
         float sz = mobile ? ui::M().rowH * 0.85f : ImGui::GetFrameHeight();
         ImGui::BeginDisabled(!exists);
         if (ImageCache::IsImagePath(e.path)) {
-            if (ui::IconButton("view", Icon::Star, "View picture", sz)) OpenViewer(e.peer, e.path, true);
+            if (ui::IconButton("view", Icon::Star, T("View picture"), sz)) OpenViewer(e.peer, e.path, true);
             if (exists && ImGui::IsItemHovered() && !ui::M().mobile) {
                 const ImageTex& t = Images().Get(e.path, false);
                 if (t.state == ImageTex::Ready && ImGui::BeginTooltip()) {
@@ -1794,16 +1798,16 @@ void App::DrawHistory() {
             }
             ImGui::SameLine();
         }
-        if (ui::IconButton("share", Icon::Share, "Share again with...", sz)) OpenSendTo({e.path});
+        if (ui::IconButton("share", Icon::Share, T("Share again with..."), sz)) OpenSendTo({e.path});
         ImGui::SameLine();
-        if (ui::IconButton("open", Icon::Open, "Open", sz)) OpenPath(e.path);
+        if (ui::IconButton("open", Icon::Open, T("Open"), sz)) OpenPath(e.path);
         ImGui::SameLine();
-        if (ui::IconButton("folder", Icon::Folder, "Show in folder", sz)) RevealPath(e.path);
+        if (ui::IconButton("folder", Icon::Folder, T("Show in folder"), sz)) RevealPath(e.path);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (ui::IconButton("hash", Icon::Copy, "Copy SHA-256", sz)) ImGui::SetClipboardText(e.sha256.c_str());
+        if (ui::IconButton("hash", Icon::Copy, T("Copy SHA-256"), sz)) ImGui::SetClipboardText(e.sha256.c_str());
         ImGui::SameLine();
-        if (ui::IconButton("rm", Icon::Trash, "Remove from history", sz, true)) removeIdx = idx;
+        if (ui::IconButton("rm", Icon::Trash, T("Remove from history"), sz, true)) removeIdx = idx;
     };
     if (mobile) {
         for (int idx : rows) {
@@ -1813,9 +1817,9 @@ void App::DrawHistory() {
             if (ImGui::Checkbox("##sel", &sel)) { if (sel) historySel.insert(e.tid); else historySel.erase(e.tid); }
             ImGui::SameLine();
             ImGui::TextUnformatted(e.name.c_str());
-            ImGui::TextDisabled("%s %s  -  %s  -  %s %s", e.outgoing ? "Sent to" : "From", eng.PeerName(e.peer).c_str(), FormatBytes((double)e.size).c_str(),
-                                FormatTime(e.ts).c_str(), e.verified ? "- verified" : "");
-            if (!FileExists(e.path)) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColWarn()), "File moved or deleted");
+            ImGui::TextDisabled("%s %s  -  %s  -  %s %s", e.outgoing ? T("Sent to") : T("From"), eng.PeerName(e.peer).c_str(), FormatBytes((double)e.size).c_str(),
+                                FormatTime(e.ts).c_str(), e.verified ? T("- verified") : "");
+            if (!FileExists(e.path)) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColWarn()), T("File moved or deleted"));
             else if (ImageCache::IsImagePath(e.path)) {
                 const ImageTex& t = Images().Get(e.path, false);
                 if (t.state == ImageTex::Ready) {
@@ -1831,10 +1835,10 @@ void App::DrawHistory() {
     } else if (ImGui::BeginTable("history", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
-        ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 2.5f);
-        ImGui::TableSetupColumn("Device", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthStretch, 0.7f);
-        ImGui::TableSetupColumn("Date", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn(T("File"), ImGuiTableColumnFlags_WidthStretch, 2.5f);
+        ImGui::TableSetupColumn(T("Device"), ImGuiTableColumnFlags_WidthStretch, 1.2f);
+        ImGui::TableSetupColumn(T("Size"), ImGuiTableColumnFlags_WidthStretch, 0.7f);
+        ImGui::TableSetupColumn(T("Date"), ImGuiTableColumnFlags_WidthStretch, 1.0f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) * 6);
         ImGui::TableHeadersRow();
         ImGuiListClipper clip;
@@ -1855,7 +1859,7 @@ void App::DrawHistory() {
                 ImGui::TextUnformatted(e.name.c_str());
                 if (!exists) ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s%s\nSHA-256: %s\n%s", e.path.c_str(), exists ? "" : "  (missing)", e.sha256.c_str(), e.verified ? "Verified on both sides" : "");
+                    ImGui::SetTooltip(T("%s%s\nSHA-256: %s\n%s"), e.path.c_str(), exists ? "" : T("  (missing)"), e.sha256.c_str(), e.verified ? T("Verified on both sides") : "");
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
                 ImGui::Text("%s %s", e.outgoing ? "to" : "from", eng.PeerName(e.peer).c_str());
@@ -1885,7 +1889,7 @@ void App::DrawDevices() {
     bool mobile = ui::M().mobile;
     auto peers = SortedPeers();
     if (peers.empty()) {
-        ImGui::TextDisabled("No devices yet.");
+        ImGui::TextDisabled(T("No devices yet."));
         return;
     }
     if (mobile) {
@@ -1913,17 +1917,17 @@ void App::DrawDeviceDetails(const std::string& peer) {
     if (it == eng.devices.end()) {
         auto o = eng.online.find(peer);
         ImGui::Text("%s", o != eng.online.end() ? o->second.name.c_str() : peer.c_str());
-        ImGui::TextDisabled("Seen on the network but never connected.");
-        if (ui::IconTextButton("Connect", Icon::Link, ImVec2(0, h))) eng.ConnectPeer(peer);
+        ImGui::TextDisabled(T("Seen on the network but never connected."));
+        if (ui::IconTextButton(T("Connect"), Icon::Link, ImVec2(0, h))) eng.ConnectPeer(peer);
         return;
     }
     KnownDevice& d = it->second;
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.25f);
     ImGui::TextUnformatted(d.DisplayName().c_str());
     ImGui::PopFont();
-    ImGui::TextDisabled("Announces itself as \"%s\"", d.name.c_str());
+    ImGui::TextDisabled(T("Announces itself as \"%s\""), d.name.c_str());
     ImGui::Spacing();
-    ImGui::TextUnformatted("Nickname (only on this device)");
+    ImGui::TextUnformatted(T("Nickname (only on this device)"));
     static std::string nickBuf, nickPeer;
     if (nickPeer != peer || !ImGui::IsItemActive()) {
         if (nickPeer != peer) { nickPeer = peer; nickBuf = d.customName; }
@@ -1935,37 +1939,37 @@ void App::DrawDeviceDetails(const std::string& peer) {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(110, 30, 30, 200));
         ImGui::BeginChild("keywarn", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders);
         ImGui::PushTextWrapPos(0);
-        ImGui::TextUnformatted("Identity key changed - connection refused");
-        ImGui::Text("Known key:  %s\nNew key:      %s", KeyFingerprint(d.pubKey).c_str(), KeyFingerprint(d.pendingKey).c_str());
-        ImGui::TextUnformatted("This happens when LunaShare was reinstalled or its settings were reset on that device. "
+        ImGui::TextUnformatted(T("Identity key changed - connection refused"));
+        ImGui::Text(T("Known key:  %s\nNew key:      %s"), KeyFingerprint(d.pubKey).c_str(), KeyFingerprint(d.pendingKey).c_str());
+        ImGui::TextUnformatted(T("This happens when LunaShare was reinstalled or its settings were reset on that device. "
                                "It can also mean another device is pretending to be it. Only accept if you know why it changed, "
-                               "then compare the new safety number on both screens.");
+                               "then compare the new safety number on both screens."));
         ImGui::PopTextWrapPos();
-        if (ImGui::Button("Accept new key", ImVec2(0, h))) eng.AcceptNewKey(peer);
+        if (ImGui::Button(T("Accept new key"), ImVec2(0, h))) eng.AcceptNewKey(peer);
         ImGui::SameLine();
-        if (ImGui::Button("Block device", ImVec2(0, h))) eng.SetBlocked(peer, true);
+        if (ImGui::Button(T("Block device"), ImVec2(0, h))) eng.SetBlocked(peer, true);
         ImGui::EndChild();
         ImGui::PopStyleColor();
         ImGui::Spacing();
     }
-    ImGui::SeparatorText("Security");
+    ImGui::SeparatorText(T("Security"));
     if (d.pubKey.empty()) {
-        ImGui::TextDisabled("No identity key yet - it is exchanged on the first connection.");
+        ImGui::TextDisabled(T("No identity key yet - it is exchanged on the first connection."));
     } else {
         std::string safety = SafetyNumber(eng.MyPublicKey(), d.pubKey);
-        ImGui::TextDisabled("Safety number (identical on both devices when nobody is in between):");
+        ImGui::TextDisabled(T("Safety number (identical on both devices when nobody is in between):"));
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.35f);
         ImGui::TextUnformatted(safety.substr(0, 17).c_str());
         ImGui::TextUnformatted(safety.size() > 18 ? safety.substr(18).c_str() : "");
         ImGui::PopFont();
         bool ver = d.verified;
-        if (ImGui::Checkbox("I compared it - mark as verified", &ver)) eng.SetVerified(peer, ver);
-        ImGui::TextDisabled("Their key: %s    Yours: %s", KeyFingerprint(d.pubKey).c_str(), KeyFingerprint(eng.MyPublicKey()).c_str());
+        if (ImGui::Checkbox(T("I compared it - mark as verified"), &ver)) eng.SetVerified(peer, ver);
+        ImGui::TextDisabled(T("Their key: %s    Yours: %s"), KeyFingerprint(d.pubKey).c_str(), KeyFingerprint(eng.MyPublicKey()).c_str());
     }
     ImGui::Spacing();
     bool trusted = d.trusted, blocked = d.blocked;
-    if (ImGui::Checkbox("Trusted - accept files automatically", &trusted)) eng.SetTrusted(peer, trusted);
-    if (ImGui::Checkbox("Blocked", &blocked)) eng.SetBlocked(peer, blocked);
+    if (ImGui::Checkbox(T("Trusted - accept files automatically"), &trusted)) eng.SetTrusted(peer, trusted);
+    if (ImGui::Checkbox(T("Blocked"), &blocked)) eng.SetBlocked(peer, blocked);
     ImGui::Spacing();
     if (ImGui::BeginTable("devinfo", 2, ImGuiTableFlags_None)) {
         ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 8.5f);
@@ -1980,25 +1984,25 @@ void App::DrawDeviceDetails(const std::string& peer) {
         };
         std::string macs;
         for (auto& m : d.macs) macs += (macs.empty() ? "" : ", ") + m;
-        row("User @ host", d.user + " @ " + d.host);
-        row("Platform", d.platform);
-        row("Fingerprint", d.Fingerprint());
-        row("Device ID", d.id);
-        row("MAC address", macs);
-        row("Last address", d.lastIp.empty() ? "" : d.lastIp + ":" + std::to_string(d.lastPort));
-        row("Bluetooth", d.btAddr);
-        row("First seen", d.firstSeen ? FormatTime(d.firstSeen) : "");
-        row("Last seen", eng.IsConnected(peer) ? "now" : (d.lastSeen ? FormatTime(d.lastSeen) : ""));
+        row(T("User @ host"), d.user + " @ " + d.host);
+        row(T("Platform"), d.platform);
+        row(T("Fingerprint"), d.Fingerprint());
+        row(T("Device ID"), d.id);
+        row(T("MAC address"), macs);
+        row(T("Last address"), d.lastIp.empty() ? "" : d.lastIp + ":" + std::to_string(d.lastPort));
+        row(T("Bluetooth"), d.btAddr);
+        row(T("First seen"), d.firstSeen ? FormatTime(d.firstSeen) : "");
+        row(T("Last seen"), eng.IsConnected(peer) ? T("now") : (d.lastSeen ? FormatTime(d.lastSeen) : ""));
         int sent = 0, recv = 0;
         int64_t bytes = 0;
         for (auto& e : eng.history)
             if (e.peer == peer) { (e.outgoing ? sent : recv)++; bytes += e.size; }
-        row("Shared", std::to_string(sent) + " sent, " + std::to_string(recv) + " received (" + FormatBytes((double)bytes) + ")");
+        row(T("Shared"), TF("%d sent, %d received (%s)", (int)sent, (int)recv, FormatBytes((double)bytes).c_str()));
         ImGui::EndTable();
     }
-    ImGui::TextDisabled("Click a value to copy it.");
+    ImGui::TextDisabled(T("Click a value to copy it."));
     ImGui::Spacing();
-    ImGui::TextUnformatted("Notes");
+    ImGui::TextUnformatted(T("Notes"));
     std::string notes = d.notes;
     if (ImGui::InputTextMultiline("##notes", &notes, ImVec2(mobile ? -1 : ImGui::GetFontSize() * 24, ImGui::GetTextLineHeight() * 3))) {
         d.notes = notes;
@@ -2006,38 +2010,38 @@ void App::DrawDeviceDetails(const std::string& peer) {
     }
     ImGui::Spacing();
     bool connected = eng.IsConnected(peer);
-    if (ui::IconTextButton("Chat", Icon::Send, ImVec2(0, h))) {
+    if (ui::IconTextButton(T("Chat"), Icon::Send, ImVec2(0, h))) {
         SelectPeer(peer);
         if (mobile) { backStack.push_back(screen); screen = MScreen::Chat; }
         else { tab = Tab::Chat; tabForce = true; }
     }
     ImGui::SameLine();
-    if (ui::IconTextButton(connected ? "Disconnect" : "Connect", Icon::Link, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
+    if (ui::IconTextButton(connected ? T("Disconnect") : T("Connect"), Icon::Link, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
     if (!d.btAddr.empty()) {
         ImGui::SameLine();
-        if (ui::IconTextButton("Via Bluetooth", Icon::Bluetooth, ImVec2(0, h))) eng.ConnectBluetooth(d.btAddr);
+        if (ui::IconTextButton(T("Via Bluetooth"), Icon::Bluetooth, ImVec2(0, h))) eng.ConnectBluetooth(d.btAddr);
     }
     if (mobile) ImGui::Spacing(); else ImGui::SameLine();
-    if (ui::IconTextButton("Clear chat", Icon::Trash, ImVec2(0, h))) ImGui::OpenPopup("clearchat");
+    if (ui::IconTextButton(T("Clear chat"), Icon::Trash, ImVec2(0, h))) ImGui::OpenPopup("clearchat");
     ImGui::SameLine();
-    if (ui::IconTextButton("Forget device", Icon::Trash, ImVec2(0, h))) ImGui::OpenPopup("forget");
+    if (ui::IconTextButton(T("Forget device"), Icon::Trash, ImVec2(0, h))) ImGui::OpenPopup("forget");
     if (ImGui::BeginPopup("clearchat")) {
-        ImGui::TextUnformatted("Delete the chat history with this device (on this device only)?");
-        if (ImGui::Button("Delete")) { eng.ClearChat(peer); ImGui::CloseCurrentPopup(); }
+        ImGui::TextUnformatted(T("Delete the chat history with this device (on this device only)?"));
+        if (ImGui::Button(T("Delete"))) { eng.ClearChat(peer); ImGui::CloseCurrentPopup(); }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     if (ImGui::BeginPopup("forget")) {
-        ImGui::TextUnformatted("Forget this device, its nickname and chat history?");
-        if (ImGui::Button("Forget")) {
+        ImGui::TextUnformatted(T("Forget this device, its nickname and chat history?"));
+        if (ImGui::Button(T("Forget"))) {
             eng.ForgetDevice(peer);
             if (selectedPeer == peer) selectedPeer.clear();
             devicesSel.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 }
@@ -2052,9 +2056,9 @@ void App::DrawNearby() {
     if (mobile) ui::TouchScroll();
 
     // ---- this device
-    ImGui::SeparatorText("This device");
+    ImGui::SeparatorText(T("This device"));
     ImGui::Text("%s", eng.settings.displayName.c_str());
-    ImGui::TextDisabled("Key fingerprint %s  -  port %u", KeyFingerprint(eng.MyPublicKey()).c_str(), eng.boundPort);
+    ImGui::TextDisabled(T("Key fingerprint %s  -  port %u"), KeyFingerprint(eng.MyPublicKey()).c_str(), eng.boundPort);
     if (!eng.listenError.empty()) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColErr()), "%s", eng.listenError.c_str());
     auto addrs = LocalIPv4Addresses();
     for (auto& a : addrs) {
@@ -2062,24 +2066,24 @@ void App::DrawNearby() {
         ImGui::SameLine();
         ImGui::TextDisabled("(%s)", a.iface.c_str());
     }
-    if (addrs.empty()) ImGui::TextDisabled("No network connection.");
-    ImGui::TextDisabled("Devices on the same network find each other automatically:");
-    ImGui::BulletText("Bonjour / mDNS (_lunashare._tcp): %s", eng.settings.discovery && eng.settings.mdns ? eng.MdnsStatus().c_str() : "off");
-    ImGui::BulletText("UDP broadcast beacons (port %u): %s", kDiscoveryPort, eng.settings.discovery && eng.settings.broadcast ? "on" : "off");
-    ImGui::BulletText("Internet rendezvous: %s", eng.settings.wanEnabled ? eng.WanStatus().c_str() : "off (Settings > Internet)");
-    if (ui::IconTextButton("Search again", Icon::Retry, ImVec2(0, h))) eng.RefreshDiscovery();
+    if (addrs.empty()) ImGui::TextDisabled(T("No network connection."));
+    ImGui::TextDisabled(T("Devices on the same network find each other automatically:"));
+    ImGui::BulletText(T("Bonjour / mDNS (_lunashare._tcp): %s"), eng.settings.discovery && eng.settings.mdns ? eng.MdnsStatus().c_str() : "off");
+    ImGui::BulletText(T("UDP broadcast beacons (port %u): %s"), kDiscoveryPort, eng.settings.discovery && eng.settings.broadcast ? "on" : "off");
+    ImGui::BulletText(T("Internet rendezvous: %s"), eng.settings.wanEnabled ? TDynamic(eng.WanStatus()).c_str() : T("off (Settings > Advanced > Internet)"));
+    if (ui::IconTextButton(T("Search again"), Icon::Retry, ImVec2(0, h))) eng.RefreshDiscovery();
     if (!eng.online.empty()) {
-        ImGui::TextDisabled("Found on the network:");
+        ImGui::TextDisabled(T("Found on the network:"));
         for (auto& [id, p] : eng.online) {
             if (p.OnLan()) ImGui::BulletText("%s  %s:%u", eng.PeerName(id).c_str(), p.ip.c_str(), p.port);
             else ImGui::BulletText("%s", eng.PeerName(id).c_str());
             ImGui::SameLine();
-            ImGui::TextDisabled("(%s%s)", p.Via().c_str(), eng.IsConnected(id) ? ", connected" : "");
+            ImGui::TextDisabled("(%s%s)", TS(p.Via()).c_str(), eng.IsConnected(id) ? T(", connected") : "");
         }
     }
 
     // ---- manual
-    ImGui::SeparatorText("Connect by address");
+    ImGui::SeparatorText(T("Connect by address"));
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 14);
     ImGui::InputTextWithHint("##host", "192.168.1.20", &manualHost, mobile ? 0 : ImGuiInputTextFlags_None);
     if (!mobile) ImGui::SameLine();
@@ -2093,90 +2097,90 @@ void App::DrawNearby() {
         host = host.substr(0, colon);
     }
     ImGui::BeginDisabled(host.empty());
-    if (ui::IconTextButton("Connect", Icon::Link, ImVec2(0, h))) eng.ConnectAddress(host, (uint16_t)manualPort);
+    if (ui::IconTextButton(T("Connect"), Icon::Link, ImVec2(0, h))) eng.ConnectAddress(host, (uint16_t)manualPort);
     ImGui::EndDisabled();
 
     // ---- bluetooth
-    ImGui::SeparatorText("Bluetooth");
+    ImGui::SeparatorText(T("Bluetooth"));
     if (!eng.btSupported) {
-        ImGui::TextDisabled("Bluetooth is not available here (no adapter or not supported on %s yet).", PlatformName());
+        ImGui::TextDisabled(T("Bluetooth is not available here (no adapter or not supported on %s yet)."), PlatformName());
     } else {
         bool bt = eng.settings.bluetooth;
-        if (ImGui::Checkbox("Accept Bluetooth connections", &bt)) {
+        if (ImGui::Checkbox(T("Accept Bluetooth connections"), &bt)) {
             Settings s = eng.settings;
             s.bluetooth = bt;
             eng.ApplySettings(s);
             if (bt && Bridge().requestPermissions) Bridge().requestPermissions();
         }
         ImGui::TextDisabled("%s", eng.btStatus.c_str());
-        ImGui::TextDisabled("Pair the devices in the system Bluetooth settings first. Bluetooth is slow (~100-300 KB/s) - good for chat, small files, or handing over hotspot credentials.");
-        if (ui::IconTextButton(eng.btScanning ? "Searching..." : "Paired devices", Icon::Bluetooth, ImVec2(0, h)) && !eng.btScanning) eng.BtRefresh(false);
+        ImGui::TextDisabled(T("Pair the devices in the system Bluetooth settings first. Bluetooth is slow (~100-300 KB/s) - good for chat, small files, or handing over hotspot credentials."));
+        if (ui::IconTextButton(eng.btScanning ? T("Searching...") : T("Paired devices"), Icon::Bluetooth, ImVec2(0, h)) && !eng.btScanning) eng.BtRefresh(false);
         ImGui::SameLine();
-        if (ui::IconTextButton("Scan nearby", Icon::Retry, ImVec2(0, h)) && !eng.btScanning) eng.BtRefresh(true);
+        if (ui::IconTextButton(T("Scan nearby"), Icon::Retry, ImVec2(0, h)) && !eng.btScanning) eng.BtRefresh(true);
         for (auto& d : eng.btDevices) {
             ImGui::PushID(d.addr.c_str());
             ImGui::AlignTextToFramePadding();
             ImGui::Text("%s", d.name.empty() ? d.addr.c_str() : d.name.c_str());
             ImGui::SameLine();
-            ImGui::TextDisabled("%s%s", d.addr.c_str(), d.paired ? " (paired)" : "");
+            ImGui::TextDisabled("%s%s", d.addr.c_str(), d.paired ? T(" (paired)") : "");
             ImGui::SameLine();
-            if (ImGui::Button("Connect", ImVec2(0, mobile ? h * 0.8f : 0))) eng.ConnectBluetooth(d.addr);
+            if (ImGui::Button(T("Connect"), ImVec2(0, mobile ? h * 0.8f : 0))) eng.ConnectBluetooth(d.addr);
             ImGui::PopID();
         }
     }
 
     // ---- hotspot
-    ImGui::SeparatorText("Phone-to-phone (Wi-Fi hotspot)");
+    ImGui::SeparatorText(T("Phone-to-phone (Wi-Fi hotspot)"));
     ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("No shared Wi-Fi? One phone starts a hotspot, the other joins it - then they find each other automatically "
+    ImGui::TextDisabled(T("No shared Wi-Fi? One phone starts a hotspot, the other joins it - then they find each other automatically "
                         "at full Wi-Fi speed. The other phone can join by scanning the QR code with its camera, or automatically "
-                        "when both are connected over Bluetooth.");
+                        "when both are connected over Bluetooth."));
     ImGui::PopTextWrapPos();
     if (Bridge().hotspotStart) {
         if (!eng.hotspot.active) {
-            if (ui::BigButton("Start hotspot on this phone", Icon::Wifi, mobile ? -1 : ImGui::GetFontSize() * 18)) Bridge().hotspotStart();
+            if (ui::BigButton(T("Start hotspot on this phone"), Icon::Wifi, mobile ? -1 : ImGui::GetFontSize() * 18)) Bridge().hotspotStart();
         } else {
-            ImGui::Text("Hotspot running: %s", eng.hotspot.ssid.c_str());
-            ImGui::Text("Password: %s", eng.hotspot.pass.c_str());
+            ImGui::Text(T("Hotspot running: %s"), eng.hotspot.ssid.c_str());
+            ImGui::Text(T("Password: %s"), eng.hotspot.pass.c_str());
             std::string wifiQr = "WIFI:T:WPA;S:" + eng.hotspot.ssid + ";P:" + eng.hotspot.pass + ";;";
             ui::QrCode(wifiQr.c_str(), std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 16));
             for (auto& c : eng.conns) {
                 if (!c->ready || c->closed) continue;
                 ImGui::PushID((int)c->cid);
-                std::string l = "Send Wi-Fi login to " + eng.PeerName(c->peerId);
+                std::string l = TF("Send Wi-Fi login to %s", eng.PeerName(c->peerId).c_str());
                 if (ui::IconTextButton(l.c_str(), Icon::Share, ImVec2(0, h))) eng.SendWifiCreds(c->peerId, eng.hotspot.ssid, eng.hotspot.pass);
                 ImGui::PopID();
             }
-            if (ui::IconTextButton("Stop hotspot", Icon::Cancel, ImVec2(0, h)) && Bridge().hotspotStop) Bridge().hotspotStop();
+            if (ui::IconTextButton(T("Stop hotspot"), Icon::Cancel, ImVec2(0, h)) && Bridge().hotspotStop) Bridge().hotspotStop();
         }
     }
     if (Bridge().wifiJoin) {
-        ImGui::TextUnformatted("Join a hotspot");
+        ImGui::TextUnformatted(T("Join a hotspot"));
         ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 14);
-        ImGui::InputTextWithHint("##jssid", "Network name (SSID)", &joinSsid);
+        ImGui::InputTextWithHint("##jssid", T("Network name (SSID)"), &joinSsid);
         ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 14);
-        ImGui::InputTextWithHint("##jpass", "Password", &joinPass, ImGuiInputTextFlags_Password);
+        ImGui::InputTextWithHint("##jpass", T("Password"), &joinPass, ImGuiInputTextFlags_Password);
         ImGui::BeginDisabled(joinSsid.empty());
-        if (ui::IconTextButton("Join", Icon::Wifi, ImVec2(0, h))) Bridge().wifiJoin(joinSsid, joinPass);
+        if (ui::IconTextButton(T("Join"), Icon::Wifi, ImVec2(0, h))) Bridge().wifiJoin(joinSsid, joinPass);
         ImGui::EndDisabled();
     }
     if (!IsMobilePlatform()) {
 #ifdef _WIN32
-        if (ImGui::Button("Open Windows Mobile hotspot settings")) OpenWithDefaultApp("ms-settings:network-mobilehotspot");
+        if (ImGui::Button(T("Open Windows Mobile hotspot settings"))) OpenWithDefaultApp("ms-settings:network-mobilehotspot");
 #endif
-        ImGui::TextDisabled("Sharing this computer's hotspot? Enter its name and password to show a QR code phones can scan:");
+        ImGui::TextDisabled(T("Sharing this computer's hotspot? Enter its name and password to show a QR code phones can scan:"));
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12);
-        ImGui::InputTextWithHint("##qssid", "SSID", &qrSsid);
+        ImGui::InputTextWithHint("##qssid", T("SSID"), &qrSsid);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12);
-        ImGui::InputTextWithHint("##qpass", "Password", &qrPass);
+        ImGui::InputTextWithHint("##qpass", T("Password"), &qrPass);
         if (!qrSsid.empty()) {
             std::string wifiQr = "WIFI:T:WPA;S:" + qrSsid + ";P:" + qrPass + ";;";
             ui::QrCode(wifiQr.c_str(), ImGui::GetFontSize() * 12);
             for (auto& c : eng.conns) {
                 if (!c->ready || c->closed || c->transport != Transport::Bluetooth) continue;
                 ImGui::PushID((int)c->cid);
-                if (ImGui::Button(("Send to " + eng.PeerName(c->peerId) + " over Bluetooth").c_str())) eng.SendWifiCreds(c->peerId, qrSsid, qrPass);
+                if (ImGui::Button(TF("Send to %s over Bluetooth", eng.PeerName(c->peerId).c_str()).c_str())) eng.SendWifiCreds(c->peerId, qrSsid, qrPass);
                 ImGui::PopID();
             }
         }
@@ -2196,15 +2200,15 @@ void App::DrawSettings() {
     bool changed = false;
     float fieldW = mobile ? -1 : ImGui::GetFontSize() * 22;
 
-    ImGui::SeparatorText("Profile");
-    ImGui::TextUnformatted("Name shown to other devices");
+    ImGui::SeparatorText(T("Profile"));
+    ImGui::TextUnformatted(T("Name shown to other devices"));
     ImGui::SetNextItemWidth(fieldW);
     ImGui::InputText("##dname", &edit.displayName);
     if (ImGui::IsItemActive()) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 
-    ImGui::SeparatorText("Internet");
-    ImGui::TextUnformatted("Rendezvous server (optional)");
+    ImGui::SeparatorText(T("Internet"));
+    ImGui::TextUnformatted(T("Rendezvous server (optional)"));
     ImGui::SetNextItemWidth(fieldW);
     ImGui::InputTextWithHint("##wanserver", "home.example.com", &edit.wanServer);
     if (ImGui::IsItemActive()) editDirty = true;
@@ -2212,91 +2216,110 @@ void App::DrawSettings() {
         edit.wanEnabled = !edit.wanServer.empty();  // a server set = use it
         changed = true;
     }
-    ui::HelpMarker("Lets your devices find each other outside the local network. The server only introduces them; chat and "
+    ui::HelpMarker(T("Lets your devices find each other outside the local network. The server only introduces them; chat and "
                    "files are end-to-end encrypted and go directly between the devices (through the server only when no direct "
-                   "path is possible). Leave empty for local network, hotspot and Bluetooth only.");
+                   "path is possible). Leave empty for local network, hotspot and Bluetooth only."));
     if (eng.settings.wanEnabled && !eng.settings.wanServer.empty()) {
-        ImGui::TextDisabled("Status: %s", eng.WanStatus().c_str());
+        ImGui::TextDisabled(T("Status: %s"), TDynamic(eng.WanStatus()).c_str());
         std::string mp = eng.WanMappedEndpoint();
-        if (!mp.empty()) ImGui::TextDisabled("Reachable through the router at %s", mp.c_str());
+        if (!mp.empty()) ImGui::TextDisabled(T("Reachable through the router at %s"), mp.c_str());
     }
 
-    ImGui::SeparatorText("Received files");
-    ImGui::TextUnformatted("Save received files to");
+    ImGui::SeparatorText(T("Received files"));
+    ImGui::TextUnformatted(T("Save received files to"));
     ImGui::SetNextItemWidth(mobile ? -1 : fieldW);
     ImGui::InputText("##dldir", &edit.downloadDir);
     if (ImGui::IsItemActive()) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     if (!mobile) ImGui::SameLine();
-    if (ImGui::Button("Browse...", ImVec2(0, h))) {
+    if (ImGui::Button(T("Browse..."), ImVec2(0, h))) {
         browseFor = BrowseFor::DownloadDir;
-        browser.Open(FileBrowser::Mode::SelectDir, "Folder for received files", edit.downloadDir);
+        browser.Open(FileBrowser::Mode::SelectDir, T("Folder for received files"), edit.downloadDir);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Open folder", ImVec2(0, h))) RevealPath(edit.downloadDir);
-    ImGui::SeparatorText("Appearance");
+    if (ImGui::Button(T("Open folder"), ImVec2(0, h))) RevealPath(edit.downloadDir);
+    ImGui::SeparatorText(T("Appearance"));
     int layout = (int)edit.layout;
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::Combo("##layout", &layout, "Layout: automatic\0Layout: desktop\0Layout: phone (vertical, big buttons)\0")) {
+    if (ImGui::Combo("##layout", &layout, TItems("Layout: automatic\0Layout: desktop\0Layout: phone (vertical, big buttons)\0"))) {
         edit.layout = (UiLayout)layout;
         changed = true;
         styleGeneration++;
     }
     ImGui::SetNextItemWidth(fieldW);
     float sc = edit.uiScale <= 0 ? 0.0f : edit.uiScale;
-    if (ImGui::SliderFloat("##scale", &sc, 0.0f, 3.0f, sc < 0.5f ? "UI scale: automatic" : "UI scale: %.2fx")) {
+    if (ImGui::SliderFloat("##scale", &sc, 0.0f, 3.0f, sc < 0.5f ? T("UI scale: automatic") : T("UI scale: %.2fx"))) {
         edit.uiScale = sc < 0.5f ? 0.0f : sc;
         editDirty = true;
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; styleGeneration++; }
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::Combo("##theme", &edit.theme, "Theme: dark\0Theme: light\0Theme: classic\0")) { changed = true; styleGeneration++; }
-    ImGui::TextDisabled("%s", Emoji().Available() ? "Colour emoji: on" : "Colour emoji: off (module not installed)");
+    if (ImGui::Combo("##theme", &edit.theme, TItems("Theme: dark\0Theme: light\0Theme: classic\0"))) { changed = true; styleGeneration++; }
+    {
+        // language: automatic (the system's) or one of the translations
+        const auto& langs = Languages();
+        std::string cur = T("Language: automatic");
+        for (auto& l : langs)
+            if (edit.language == l.code) cur = std::string(T("Language: ")) + l.name;
+        ImGui::SetNextItemWidth(fieldW);
+        if (ImGui::BeginCombo("##lang", cur.c_str())) {
+            auto pick = [&](const std::string& code) {
+                edit.language = code;
+                SetLanguage(code);
+                changed = true;
+            };
+            if (ImGui::Selectable(T("Automatic (system language)"), edit.language.empty(), 0, ImVec2(0, h))) pick("");
+            for (auto& l : langs)
+                if (ImGui::Selectable(l.name, edit.language == l.code, 0, ImVec2(0, h))) pick(l.code);
+            ImGui::EndCombo();
+        }
+    }
+    ImGui::TextDisabled("%s", Emoji().Available() ? T("Colour emoji: on") : T("Colour emoji: off (module not installed)"));
 
     ImGui::Spacing();
     // everything below works automatically: hidden until asked for
-    if (ImGui::CollapsingHeader("Advanced", ImGuiTreeNodeFlags_None)) {
-        ImGui::SeparatorText("Receiving");
-        changed |= ImGui::Checkbox("Automatically accept files from trusted devices", &edit.autoAcceptTrusted);
-        changed |= ImGui::Checkbox("Automatically accept files from everyone", &edit.autoAcceptAll);
-        ui::HelpMarker("Anyone on your network could send you files without asking. Only enable on networks you trust.");
-        changed |= ImGui::Checkbox("Resume interrupted transfers automatically", &edit.autoResume);
+    if (ImGui::CollapsingHeader(T("Advanced"), ImGuiTreeNodeFlags_None)) {
+        ImGui::SeparatorText(T("Receiving"));
+        changed |= ImGui::Checkbox(T("Automatically accept files from trusted devices"), &edit.autoAcceptTrusted);
+        changed |= ImGui::Checkbox(T("Automatically accept files from everyone"), &edit.autoAcceptAll);
+        ui::HelpMarker(T("Anyone on your network could send you files without asking. Only enable on networks you trust."));
+        changed |= ImGui::Checkbox(T("Resume interrupted transfers automatically"), &edit.autoResume);
 
-        ImGui::SeparatorText("Network");
-        changed |= ImGui::Checkbox("Find devices on the local network", &edit.discovery);
+        ImGui::SeparatorText(T("Network"));
+        changed |= ImGui::Checkbox(T("Find devices on the local network"), &edit.discovery);
         ImGui::BeginDisabled(!edit.discovery);
         ImGui::Indent();
-        changed |= ImGui::Checkbox("Bonjour / mDNS", &edit.mdns);
-        ui::HelpMarker("Standard service discovery (_lunashare._tcp). Works on most routers and is the only method iPhones/iPads can use.");
-        changed |= ImGui::Checkbox("UDP broadcast beacons", &edit.broadcast);
-        ui::HelpMarker("Fast discovery that also works on networks without multicast. Not available on iOS.");
+        changed |= ImGui::Checkbox(T("Bonjour / mDNS"), &edit.mdns);
+        ui::HelpMarker(T("Standard service discovery (_lunashare._tcp). Works on most routers and is the only method iPhones/iPads can use."));
+        changed |= ImGui::Checkbox(T("UDP broadcast beacons"), &edit.broadcast);
+        ui::HelpMarker(T("Fast discovery that also works on networks without multicast. Not available on iOS."));
         ImGui::Unindent();
         ImGui::EndDisabled();
-        changed |= ImGui::Checkbox("Connect to found devices automatically", &edit.autoConnect);
+        changed |= ImGui::Checkbox(T("Connect to found devices automatically"), &edit.autoConnect);
         int port = edit.tcpPort;
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt("TCP port", &port, 0)) { edit.tcpPort = (uint16_t)std::clamp(port, 1, 65535); editDirty = true; }
+        if (ImGui::InputInt(T("TCP port"), &port, 0)) { edit.tcpPort = (uint16_t)std::clamp(port, 1, 65535); editDirty = true; }
         if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
         ImGui::SameLine();
-        ImGui::TextDisabled("(listening on %u)", eng.boundPort);
+        ImGui::TextDisabled(T("(listening on %u)"), eng.boundPort);
 
-        ImGui::SeparatorText("Transfers");
+        ImGui::SeparatorText(T("Transfers"));
         int limit = (int)(edit.speedLimitKBs / 1024);
         ImGui::SetNextItemWidth(fieldW);
-        if (ImGui::SliderInt("##limit", &limit, 0, 200, limit == 0 ? "Upload speed: unlimited" : "Upload limit: %d MB/s")) { edit.speedLimitKBs = (int64_t)limit * 1024; changed = true; }
+        if (ImGui::SliderInt("##limit", &limit, 0, 200, limit == 0 ? T("Upload speed: unlimited") : T("Upload limit: %d MB/s"))) { edit.speedLimitKBs = (int64_t)limit * 1024; changed = true; }
         ImGui::SetNextItemWidth(fieldW);
-        changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, "Files at once per device: %d");
+        changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, T("Files at once per device: %d"));
         ImGui::SetNextItemWidth(fieldW);
-        changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, "Chunk size: %d KB", ImGuiSliderFlags_Logarithmic);
+        changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, T("Chunk size: %d KB"), ImGuiSliderFlags_Logarithmic);
 
         DrawCallSettings(fieldW, h, changed);
 
-        ImGui::SeparatorText("Internet");
+        ImGui::SeparatorText(T("Internet"));
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("Devices that use the same server, room name and password see each other. Without a room name, every "
-                            "device on the server is in one shared room - set a name and password to keep your devices to yourself.");
+        ImGui::TextDisabled(T("Devices that use the same server, room name and password see each other. Without a room name, every "
+                            "device on the server is in one shared room - set a name and password to keep your devices to yourself."));
         ImGui::PopTextWrapPos();
-        changed |= ImGui::Checkbox("Use the rendezvous server", &edit.wanEnabled);
+        changed |= ImGui::Checkbox(T("Use the rendezvous server"), &edit.wanEnabled);
         ImGui::BeginDisabled(!edit.wanEnabled);
         auto wanField = [&](const char* label, const char* hint, std::string* v, ImGuiInputTextFlags f) {
             ImGui::TextUnformatted(label);
@@ -2305,67 +2328,67 @@ void App::DrawSettings() {
             if (ImGui::IsItemActive()) editDirty = true;
             if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
         };
-        wanField("Room name", "family", &edit.wanRoom, 0);
-        wanField("Room password", "shared by your devices", &edit.wanPassword, ImGuiInputTextFlags_Password);
-        changed |= ImGui::Checkbox("Relay through the server when a direct connection fails", &edit.wanRelay);
-        ui::HelpMarker("Some networks can't be reached directly at all (mobile data and other carrier-grade NAT on both sides, "
-                       "strict firewalls). The server then passes the data along. It stays end-to-end encrypted, the server can't read it.");
-        changed |= ImGui::Checkbox("Ask the router for a port mapping (UPnP / NAT-PMP)", &edit.wanNatPmp);
-        ui::HelpMarker("Most home routers allow this automatically. It makes direct connections work behind routers that change the "
-                       "port for every destination.");
+        wanField(T("Room name"), T("family"), &edit.wanRoom, 0);
+        wanField(T("Room password"), T("shared by your devices"), &edit.wanPassword, ImGuiInputTextFlags_Password);
+        changed |= ImGui::Checkbox(T("Relay through the server when a direct connection fails"), &edit.wanRelay);
+        ui::HelpMarker(T("Some networks can't be reached directly at all (mobile data and other carrier-grade NAT on both sides, "
+                       "strict firewalls). The server then passes the data along. It stays end-to-end encrypted, the server can't read it."));
+        changed |= ImGui::Checkbox(T("Ask the router for a port mapping (UPnP / NAT-PMP)"), &edit.wanNatPmp);
+        ui::HelpMarker(T("Most home routers allow this automatically. It makes direct connections work behind routers that change the "
+                       "port for every destination."));
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt("Fixed local UDP port", &edit.wanLocalPort, 0)) { edit.wanLocalPort = std::clamp(edit.wanLocalPort, 0, 65535); editDirty = true; }
+        if (ImGui::InputInt(T("Fixed local UDP port"), &edit.wanLocalPort, 0)) { edit.wanLocalPort = std::clamp(edit.wanLocalPort, 0, 65535); editDirty = true; }
         if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt("Port forwarded on the router", &edit.wanForwardedPort, 0)) { edit.wanForwardedPort = std::clamp(edit.wanForwardedPort, 0, 65535); editDirty = true; }
+        if (ImGui::InputInt(T("Port forwarded on the router"), &edit.wanForwardedPort, 0)) { edit.wanForwardedPort = std::clamp(edit.wanForwardedPort, 0, 65535); editDirty = true; }
         if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ui::HelpMarker("Only if you forward a UDP port on your router to this device by hand: the local port above, the external port here.");
+        ui::HelpMarker(T("Only if you forward a UDP port on your router to this device by hand: the local port above, the external port here."));
         ImGui::EndDisabled();
         if (eng.settings.wanEnabled) {
             std::string ep = eng.WanPublicEndpoint();
-            if (!ep.empty()) ImGui::TextDisabled("Seen by the server as %s", ep.c_str());
-            if (ImGui::Button("Copy room hash (for the server's allow-list)", ImVec2(0, h)))
+            if (!ep.empty()) ImGui::TextDisabled(T("Seen by the server as %s"), ep.c_str());
+            if (ImGui::Button(T("Copy room hash (for the server's allow-list)"), ImVec2(0, h)))
                 ImGui::SetClipboardText(RoomHash(eng.settings.wanRoom, eng.settings.wanPassword).c_str());
         }
 
-        ImGui::SeparatorText("Bluetooth");
-        changed |= ImGui::Checkbox("Accept Bluetooth connections##s", &edit.bluetooth);
+        ImGui::SeparatorText(T("Bluetooth"));
+        changed |= ImGui::Checkbox(T("Accept Bluetooth connections##s"), &edit.bluetooth);
     #if defined(__linux__) && !defined(__ANDROID__)
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        changed |= ImGui::SliderInt("RFCOMM channel", &edit.btChannel, 1, 30);
-        ui::HelpMarker("Linux uses a fixed RFCOMM channel. Use the same channel on both Linux machines.");
+        changed |= ImGui::SliderInt(T("RFCOMM channel"), &edit.btChannel, 1, 30);
+        ui::HelpMarker(T("Linux uses a fixed RFCOMM channel. Use the same channel on both Linux machines."));
     #endif
 
-        ImGui::SeparatorText("History & privacy");
-        changed |= ImGui::Checkbox("Keep chat and shared-file history", &edit.keepHistory);
-        if (ImGui::Button("Clear shared files history", ImVec2(0, h))) eng.ClearHistory();
+        ImGui::SeparatorText(T("History & privacy"));
+        changed |= ImGui::Checkbox(T("Keep chat and shared-file history"), &edit.keepHistory);
+        if (ImGui::Button(T("Clear shared files history"), ImVec2(0, h))) eng.ClearHistory();
 
-        ImGui::SeparatorText("Backup / move to another device");
+        ImGui::SeparatorText(T("Backup / move to another device"));
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("Exports all settings plus your list of known devices with their nicknames, trust and block state.");
+        ImGui::TextDisabled(T("Exports all settings plus your list of known devices with their nicknames, trust and block state."));
         ImGui::PopTextWrapPos();
-        ImGui::Checkbox("Include chat & shared files history", &exportHistory);
-        ImGui::Checkbox("Include this device's identity (only for restoring THIS device)", &exportIdentity);
-        if (ui::IconTextButton("Export settings...", Icon::Up, ImVec2(0, h))) {
+        ImGui::Checkbox(T("Include chat & shared files history"), &exportHistory);
+        ImGui::Checkbox(T("Include this device's identity (only for restoring THIS device)"), &exportIdentity);
+        if (ui::IconTextButton(T("Export settings..."), Icon::Up, ImVec2(0, h))) {
             browseFor = BrowseFor::Export;
             std::string name = "lunashare-settings-" + FormatTime(NowMs(), true).substr(0, 10) + ".json";
-            browser.Open(FileBrowser::Mode::SaveFile, "Export settings", eng.settings.downloadDir, name, ".json");
+            browser.Open(FileBrowser::Mode::SaveFile, T("Export settings"), eng.settings.downloadDir, name, ".json");
         }
         ImGui::SameLine();
-        if (ui::IconTextButton("Import settings...", Icon::Down, ImVec2(0, h))) {
+        if (ui::IconTextButton(T("Import settings..."), Icon::Down, ImVec2(0, h))) {
             browseFor = BrowseFor::Import;
-            browser.Open(FileBrowser::Mode::OpenFile, "Import settings", eng.settings.downloadDir, "", ".json");
+            browser.Open(FileBrowser::Mode::OpenFile, T("Import settings"), eng.settings.downloadDir, "", ".json");
         }
-        ImGui::Checkbox("When importing, also take over the device identity", &importIdentity);
+        ImGui::Checkbox(T("When importing, also take over the device identity"), &importIdentity);
 
     }
 
-    ImGui::SeparatorText("About");
-    ImGui::TextDisabled("LunaShare 0.1  -  %s  -  protocol v%d", PlatformName(), kProtocolVersion);
-    ImGui::TextDisabled("Settings folder: %s", (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());
-    ImGui::TextDisabled("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts.");
-    ImGui::TextDisabled("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact).");
-    ImGui::TextDisabled("This device's key fingerprint: %s", KeyFingerprint(eng.MyPublicKey()).c_str());
+    ImGui::SeparatorText(T("About"));
+    ImGui::TextDisabled(T("LunaShare 0.1  -  %s  -  protocol v%d"), PlatformName(), kProtocolVersion);
+    ImGui::TextDisabled(T("Settings folder: %s"), (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());
+    ImGui::TextDisabled(T("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts."));
+    ImGui::TextDisabled(T("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact)."));
+    ImGui::TextDisabled(T("This device's key fingerprint: %s"), KeyFingerprint(eng.MyPublicKey()).c_str());
     ImGui::Dummy(ImVec2(0, h));
     ImGui::EndChild();
 
@@ -2422,13 +2445,13 @@ void App::DrawPopups() {
                 s.downloadDir = res[0];
                 break;
             case BrowseFor::Export:
-                if (eng.ExportSettings(res[0], exportHistory, exportIdentity, &err)) infoMessage = "Settings exported to\n" + res[0];
-                else infoMessage = "Export failed: " + err;
+                if (eng.ExportSettings(res[0], exportHistory, exportIdentity, &err)) infoMessage = T("Settings exported to\n") + res[0];
+                else infoMessage = T("Export failed: ") + err;
                 openInfo = true;
                 break;
             case BrowseFor::Import:
-                if (eng.ImportSettings(res[0], importIdentity, &err)) { infoMessage = "Settings imported from\n" + res[0]; styleGeneration++; s = eng.settings; s.lastBrowseDir = browser.lastDir; }
-                else infoMessage = "Import failed: " + err;
+                if (eng.ImportSettings(res[0], importIdentity, &err)) { infoMessage = T("Settings imported from\n") + res[0]; styleGeneration++; s = eng.settings; s.lastBrowseDir = browser.lastDir; }
+                else infoMessage = T("Import failed: ") + err;
                 openInfo = true;
                 break;
             default: break;
@@ -2441,16 +2464,16 @@ void App::DrawPopups() {
     DrawIncomingCall();
 
     // ---- send to device picker
-    if (openSendTo) { ImGui::OpenPopup("Send to device"); openSendTo = false; }
+    if (openSendTo) { ImGui::OpenPopup(T("Send to device")); openSendTo = false; }
     centerNext(0.4f);
-    if (ImGui::BeginPopupModal("Send to device", nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
+    if (ImGui::BeginPopupModal(T("Send to device"), nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
         int64_t total = 0;
         for (auto& p : pendingSend) total += IsDirectory(p) ? 0 : std::max<int64_t>(0, FileSize(p));
-        ImGui::Text("%d item(s)%s", (int)pendingSend.size(), total ? ("  -  " + FormatBytes((double)total)).c_str() : "");
+        ImGui::Text(T("%d item(s)%s"), (int)pendingSend.size(), total ? ("  -  " + FormatBytes((double)total)).c_str() : "");
         for (size_t i = 0; i < pendingSend.size() && i < 5; i++) ImGui::BulletText("%s", BaseName(pendingSend[i]).c_str());
-        if (pendingSend.size() > 5) ImGui::TextDisabled("... and %d more", (int)pendingSend.size() - 5);
+        if (pendingSend.size() > 5) ImGui::TextDisabled(T("... and %d more"), (int)pendingSend.size() - 5);
         ImGui::Separator();
-        ImGui::TextUnformatted("Choose a device:");
+        ImGui::TextUnformatted(T("Choose a device:"));
         auto peers = SortedPeers();
         ImGui::BeginChild("pick", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 24, std::min(ImGui::GetFontSize() * 16, vp->WorkSize.y * 0.5f)), ImGuiChildFlags_Borders);
         if (mobile) ui::TouchScroll();
@@ -2466,9 +2489,9 @@ void App::DrawPopups() {
                 ImGui::CloseCurrentPopup();
             }
         }
-        if (peers.empty()) ImGui::TextDisabled("No devices known yet.");
+        if (peers.empty()) ImGui::TextDisabled(T("No devices known yet."));
         ImGui::EndChild();
-        if (ImGui::Button("Cancel", ImVec2(mobile ? -1 : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        if (ImGui::Button(T("Cancel"), ImVec2(mobile ? -1 : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             pendingSend.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -2476,71 +2499,71 @@ void App::DrawPopups() {
     }
 
     // ---- select text view
-    if (openTextView) { ImGui::OpenPopup("Message text"); openTextView = false; }
+    if (openTextView) { ImGui::OpenPopup(T("Message text")); openTextView = false; }
     centerNext(0.5f);
-    if (ImGui::BeginPopupModal("Message text", nullptr, 0)) {
-        ImGui::TextDisabled("Select any part of the text and press Ctrl+C, or copy everything:");
+    if (ImGui::BeginPopupModal(T("Message text"), nullptr, 0)) {
+        ImGui::TextDisabled(T("Select any part of the text and press Ctrl+C, or copy everything:"));
         ImGui::InputTextMultiline("##tv", &textViewBuf, ImVec2(-1, ImGui::GetTextLineHeight() * (mobile ? 12 : 10)), ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
-        if (ImGui::Button("Copy all", ImVec2(0, h))) ImGui::SetClipboardText(textViewBuf.c_str());
+        if (ImGui::Button(T("Copy all"), ImVec2(0, h))) ImGui::SetClipboardText(textViewBuf.c_str());
         ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Close"), ImVec2(0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     // ---- rename
-    if (openRename) { ImGui::OpenPopup("Rename device"); openRename = false; }
+    if (openRename) { ImGui::OpenPopup(T("Rename device")); openRename = false; }
     centerNext(0.3f);
-    if (ImGui::BeginPopupModal("Rename device", nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
+    if (ImGui::BeginPopupModal(T("Rename device"), nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
         auto d = eng.devices.find(renamePeer);
-        ImGui::Text("Nickname for %s", d != eng.devices.end() ? d->second.name.c_str() : renamePeer.c_str());
+        ImGui::Text(T("Nickname for %s"), d != eng.devices.end() ? d->second.name.c_str() : renamePeer.c_str());
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 18);
-        bool enter = ImGui::InputTextWithHint("##rn", "leave empty to use the announced name", &renameBuf, ImGuiInputTextFlags_EnterReturnsTrue);
-        if (ImGui::Button("Save", ImVec2(0, h)) || enter) { eng.SetCustomName(renamePeer, renameBuf); ImGui::CloseCurrentPopup(); }
+        bool enter = ImGui::InputTextWithHint("##rn", T("leave empty to use the announced name"), &renameBuf, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::Button(T("Save"), ImVec2(0, h)) || enter) { eng.SetCustomName(renamePeer, renameBuf); ImGui::CloseCurrentPopup(); }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Cancel"), ImVec2(0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     // ---- wifi offer
-    if (openWifiOffer && !wifiOffers.empty()) { ImGui::OpenPopup("Wi-Fi hotspot offered"); openWifiOffer = false; }
+    if (openWifiOffer && !wifiOffers.empty()) { ImGui::OpenPopup(T("Wi-Fi hotspot offered")); openWifiOffer = false; }
     centerNext(0.35f);
-    if (ImGui::BeginPopupModal("Wi-Fi hotspot offered", nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
+    if (ImGui::BeginPopupModal(T("Wi-Fi hotspot offered"), nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
         auto& o = wifiOffers.front();
-        ImGui::Text("%s shares its hotspot for a faster connection:", eng.PeerName(o.peer).c_str());
-        ImGui::Text("Network: %s", o.ssid.c_str());
-        ImGui::Text("Password: %s", o.pass.c_str());
+        ImGui::Text(T("%s shares its hotspot for a faster connection:"), eng.PeerName(o.peer).c_str());
+        ImGui::Text(T("Network: %s"), o.ssid.c_str());
+        ImGui::Text(T("Password: %s"), o.pass.c_str());
         std::string qr = "WIFI:T:WPA;S:" + o.ssid + ";P:" + o.pass + ";;";
         ui::QrCode(qr.c_str(), ImGui::GetFontSize() * 10);
         if (Bridge().wifiJoin) {
-            if (ImGui::Button("Join now", ImVec2(0, h))) { Bridge().wifiJoin(o.ssid, o.pass); wifiOffers.erase(wifiOffers.begin()); ImGui::CloseCurrentPopup(); }
+            if (ImGui::Button(T("Join now"), ImVec2(0, h))) { Bridge().wifiJoin(o.ssid, o.pass); wifiOffers.erase(wifiOffers.begin()); ImGui::CloseCurrentPopup(); }
             ImGui::SameLine();
         } else {
-            ImGui::TextDisabled("Join this network in your system Wi-Fi settings.");
+            ImGui::TextDisabled(T("Join this network in your system Wi-Fi settings."));
         }
-        if (ImGui::Button("Copy password", ImVec2(0, h))) ImGui::SetClipboardText(o.pass.c_str());
+        if (ImGui::Button(T("Copy password"), ImVec2(0, h))) ImGui::SetClipboardText(o.pass.c_str());
         ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(0, h))) { wifiOffers.erase(wifiOffers.begin()); ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button(T("Close"), ImVec2(0, h))) { wifiOffers.erase(wifiOffers.begin()); ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }
 
     // ---- info
-    if (openInfo) { ImGui::OpenPopup("LunaShare##info"); openInfo = false; }
+    if (openInfo) { ImGui::OpenPopup(T("LunaShare##info")); openInfo = false; }
     centerNext(0);
-    if (ImGui::BeginPopupModal("LunaShare##info", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(T("LunaShare##info"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted(infoMessage.c_str());
-        if (ImGui::Button("OK", ImVec2(mobile ? -1 : ImGui::GetFontSize() * 6, h)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("OK"), ImVec2(mobile ? -1 : ImGui::GetFontSize() * 6, h)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 
     // ---- quit
-    if (openQuit) { ImGui::OpenPopup("Quit LunaShare?"); openQuit = false; }
+    if (openQuit) { ImGui::OpenPopup(T("Quit LunaShare?")); openQuit = false; }
     centerNext(0);
-    if (ImGui::BeginPopupModal("Quit LunaShare?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Transfers are still running.\nThey will be paused and continue automatically the next time both devices are online.");
-        if (ImGui::Button("Quit", ImVec2(0, h))) { quitConfirmed = true; ImGui::CloseCurrentPopup(); }
+    if (ImGui::BeginPopupModal(T("Quit LunaShare?"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(T("Transfers are still running.\nThey will be paused and continue automatically the next time both devices are online."));
+        if (ImGui::Button(T("Quit"), ImVec2(0, h))) { quitConfirmed = true; ImGui::CloseCurrentPopup(); }
         ImGui::SameLine();
-        if (ImGui::Button("Keep running", ImVec2(0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        if (ImGui::Button(T("Keep running"), ImVec2(0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 }
@@ -2567,17 +2590,17 @@ void App::DrawToasts() {
                   : t.type == EventType::TransferDone ? ui::ColOk() : ui::ColAccent();
         ImVec2 p = ImGui::GetWindowPos();
         ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + 4, p.y + ImGui::GetWindowHeight()), col);
-        ImGui::TextUnformatted(Emoji().Display(t.title).c_str());
+        ImGui::TextUnformatted(Emoji().Display(TDynamic(t.title)).c_str());
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", Emoji().Display(t.text).c_str());
+        ImGui::TextDisabled("%s", Emoji().Display(TDynamic(t.text)).c_str());
         ImGui::PopTextWrapPos();
         float bh = mobile ? ui::M().rowH * 0.8f : 0;
         if (t.type == EventType::IncomingOffer) {
             auto it = eng.transfers.find(t.tid);
             if (it != eng.transfers.end() && it->second->state == TState::Pending) {
-                if (ImGui::Button("Accept", ImVec2(0, bh))) { eng.AcceptBatch(it->second->batch); t.ttl = 0; }
+                if (ImGui::Button(T("Accept"), ImVec2(0, bh))) { eng.AcceptBatch(it->second->batch); t.ttl = 0; }
                 ImGui::SameLine();
-                if (ImGui::Button("Decline", ImVec2(0, bh))) {
+                if (ImGui::Button(T("Decline"), ImVec2(0, bh))) {
                     for (auto& x : eng.BatchTransfers(it->second->batch)) if (x->state == TState::Pending) eng.Reject(x->tid);
                     t.ttl = 0;
                 }
@@ -2597,7 +2620,7 @@ void App::DrawToasts() {
                 t.ttl = 0;
             }
         } else if (!t.peer.empty() && t.type != EventType::Error) {
-            if (ImGui::Button("Open chat", ImVec2(0, bh))) {
+            if (ImGui::Button(T("Open chat"), ImVec2(0, bh))) {
                 SelectPeer(t.peer);
                 if (mobile) { backStack.clear(); backStack.push_back(MScreen::Home); screen = MScreen::Chat; }
                 else { tab = Tab::Chat; tabForce = true; }
@@ -2605,7 +2628,7 @@ void App::DrawToasts() {
             }
             ImGui::SameLine();
         }
-        if ((!mobile || t.type == EventType::IncomingOffer) && ImGui::Button("Dismiss", ImVec2(0, bh))) t.ttl = 0;
+        if ((!mobile || t.type == EventType::IncomingOffer) && ImGui::Button(T("Dismiss"), ImVec2(0, bh))) t.ttl = 0;
         if (ImGui::IsWindowHovered()) t.ttl = std::max(t.ttl, 1.5f);
         y -= ImGui::GetWindowHeight() + ImGui::GetStyle().ItemSpacing.y;
         ImGui::End();
@@ -2618,10 +2641,10 @@ bool App::CallButton(const std::string& peer, float size, bool video) {
     bool connected = eng.IsConnected(peer);
     bool capable = connected && eng.PeerHasCap(peer, video ? "video" : "voice");
     bool busy = eng.call.state != CallState::None;
-    const char* tip = !connected ? (video ? "Video call (device is offline)" : "Voice call (device is offline)")
-                    : !capable ? (video ? "Video call - the other device does not have the video module"
-                                        : "Voice call - the other device does not have the voice module")
-                    : busy ? "Already in a call" : video ? "Video call" : "Voice call";
+    const char* tip = !connected ? (video ? T("Video call (device is offline)") : T("Voice call (device is offline)"))
+                    : !capable ? (video ? T("Video call - the other device does not have the video module")
+                                        : T("Voice call - the other device does not have the voice module"))
+                    : busy ? T("Already in a call") : video ? T("Video call") : T("Voice call");
     ImGui::BeginDisabled(!capable || busy);
     bool clicked = ui::IconButton(video ? "vcall" : "call", video ? Icon::Video : Icon::Phone, tip, size);
     ImGui::EndDisabled();
@@ -2645,10 +2668,10 @@ bool App::WebcamButton(const std::string& peer, float size) {
     bool capable = connected && eng.PeerHasCap(peer, "video");
     bool busy = eng.call.state != CallState::None;
     bool pc = Media().VcamOn();
-    const char* tip = !connected ? "Webcam (device is offline)"
-                    : !capable ? "Webcam - the other device does not have the video module"
-                    : busy ? "Already in a call"
-                    : pc ? "Use this device's camera as a webcam (LunaShare Camera)" : "Send my camera to this PC as a webcam";
+    const char* tip = !connected ? T("Webcam (device is offline)")
+                    : !capable ? T("Webcam - the other device does not have the video module")
+                    : busy ? T("Already in a call")
+                    : pc ? T("Use this device's camera as a webcam (LunaShare Camera)") : T("Send my camera to this PC as a webcam");
     ImGui::BeginDisabled(!capable || busy);
     bool clicked = ui::IconButton("webcam", Icon::Webcam, tip, size);
     ImGui::EndDisabled();
@@ -2681,24 +2704,24 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
     if (c.state == CallState::Active) {
         bool muted = Media().Muted();
         if (muted) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
-        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? "Unmute" : "Mute", bw)) Media().SetMute(!muted);
+        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? T("Unmute") : T("Mute"), bw)) Media().SetMute(!muted);
         if (muted) ImGui::PopStyleColor();
         ImGui::SameLine();
         if (withVideo && Media().VideoRunning()) {
             bool on = Media().CameraOn();
             if (!on) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
-            if (ui::IconButton("cam", on ? Icon::Video : Icon::VideoOff, on ? "Turn camera off" : "Turn camera on", bw)) {
+            if (ui::IconButton("cam", on ? Icon::Video : Icon::VideoOff, on ? T("Turn camera off") : T("Turn camera on"), bw)) {
                 Media().SetCameraOn(!on);
                 if (!on && ui::M().mobile) videoFull = true;
             }
             if (!on) ImGui::PopStyleColor();
             ImGui::SameLine();
             if (on) {
-                if (ui::IconButton("flip", Icon::FlipCamera, "Switch camera", bw)) Media().NextCamera();
+                if (ui::IconButton("flip", Icon::FlipCamera, T("Switch camera"), bw)) Media().NextCamera();
                 ImGui::SameLine();
                 if (camPanel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
                 bool wasOpen = camPanel;
-                if (ui::IconButton("camset", Icon::Sliders, "Camera settings (zoom, exposure, focus, quality...)", bw)) camPanel = !camPanel;
+                if (ui::IconButton("camset", Icon::Sliders, T("Camera settings (zoom, exposure, focus, quality...)"), bw)) camPanel = !camPanel;
                 if (wasOpen) ImGui::PopStyleColor();
                 ImGui::SameLine();
             }
@@ -2709,7 +2732,7 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             bool spk = cur && cur->kind == "speaker";
             bool hl = cur && cur->kind != "earpiece";
             if (hl) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : "Audio output", bw)) {
+            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : T("Audio output"), bw)) {
                 Media().RefreshRoutes();
                 auto& rs = Media().Routes();
                 if (rs.size() > 2) {
@@ -2732,7 +2755,7 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
     }
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(200, 50, 50, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(230, 70, 70, 255));
-    if (ui::IconButton("hangup", Icon::HangUp, "Hang up", bw)) eng.EndCall();
+    if (ui::IconButton("hangup", Icon::HangUp, T("Hang up"), bw)) eng.EndCall();
     ImGui::PopStyleColor(2);
 }
 
@@ -2753,7 +2776,7 @@ void App::DrawCallBar() {
     if (c.state == CallState::Active) {
         int secs = (int)((SteadyMs() - c.answered) / 1000);
         auto conn = eng.ReadyConn(c.peer);
-        snprintf(status, sizeof(status), "%s  %d:%02d%s%s", who.c_str(), secs / 60, secs % 60, conn ? "  via " : "", conn ? TransportName(conn->transport) : "");
+        snprintf(status, sizeof(status), "%s  %d:%02d%s", who.c_str(), secs / 60, secs % 60, conn ? ("  " + TF("via %s", T(TransportName(conn->transport)))).c_str() : "");
     } else {
         snprintf(status, sizeof(status), "Calling %s...", who.c_str());
     }
@@ -2788,7 +2811,7 @@ void App::DrawCallBar() {
                          vs.encoder[0] ? vs.encoder : "-", vs.decoder[0] ? vs.decoder : "-");
                 vid = b;
             }
-            ImGui::SetTooltip("Packet loss %.1f%%  jitter %d ms  delay %d ms  %d kbps\nsent %d / received %d packets%s%s%s", st.loss_percent,
+            ImGui::SetTooltip(T("Packet loss %.1f%%  jitter %d ms  delay %d ms  %d kbps\nsent %d / received %d packets%s%s%s"), st.loss_percent,
                               st.jitter_ms, st.buffered_ms, st.bitrate_kbps, st.packets_out, st.packets_in, vid.c_str(),
                               Media().audioError.empty() ? "" : "\n", Media().audioError.c_str());
         }
@@ -2805,7 +2828,7 @@ void App::DrawCallBar() {
         ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y + (h - bw) * 0.5f);
     }
     if (phoneVideo && !videoFull) {
-        if (ui::IconButton("vfull", Icon::Expand, "Show video", bw)) videoFull = true;
+        if (ui::IconButton("vfull", Icon::Expand, T("Show video"), bw)) videoFull = true;
         ImGui::SameLine();
     }
     DrawCallButtons(bw, h, true);
@@ -2849,12 +2872,12 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         float fs = r * 1.1f;
         ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0, ini.c_str());
         dl->AddText(f, fs, ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32_WHITE, ini.c_str());
-        std::string msg = Media().RemoteCameraOn() ? "Waiting for " + who + "'s video..." : who + "'s camera is off";
+        std::string msg = Media().RemoteCameraOn() ? TF("Waiting for %s's video...", who.c_str()) : TF("%s's camera is off", who.c_str());
         ImVec2 ms = ImGui::CalcTextSize(msg.c_str());
         dl->AddText(ImVec2(c.x - ms.x * 0.5f, c.y + r + ImGui::GetStyle().ItemSpacing.y), IM_COL32(220, 220, 220, 255), msg.c_str());
     }
     if (remote && !local && Media().CameraOn()) {
-        const char* t = eng.settings.callVideoFps > 60 ? "No self-view at 120 fps" : "Starting camera...";
+        const char* t = eng.settings.callVideoFps > 60 ? T("No self-view at 120 fps") : T("Starting camera...");
         ImVec2 ts = ImGui::CalcTextSize(t);
         float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
         ImVec2 a(p1.x - ts.x - m * 3, p1.y - ts.y - m * 3 - (phone ? ui::M().rowH * 1.6f : 0));
@@ -2879,12 +2902,12 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         ImGui::SetCursorScreenPos(ImVec2(p1.x - (bw + sp) * (float)n, p0.y + ImGui::GetStyle().ItemSpacing.y + (phone ? bw + sp : 0)));
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 110));
         if (remote) {
-            if (ui::IconButton("rotl", Icon::RotateLeft, "Turn their picture left", bw)) Media().RotateRemote(-1);
+            if (ui::IconButton("rotl", Icon::RotateLeft, T("Turn their picture left"), bw)) Media().RotateRemote(-1);
             ImGui::SameLine();
-            if (ui::IconButton("rotr", Icon::RotateRight, "Turn their picture right", bw)) Media().RotateRemote(1);
+            if (ui::IconButton("rotr", Icon::RotateRight, T("Turn their picture right"), bw)) Media().RotateRemote(1);
             if (!phone) ImGui::SameLine();
         }
-        if (!phone && ui::IconButton("vbig", Icon::Expand, videoBig ? "Smaller video" : "Bigger video", bw)) videoBig = !videoBig;
+        if (!phone && ui::IconButton("vbig", Icon::Expand, videoBig ? T("Smaller video") : T("Bigger video"), bw)) videoBig = !videoBig;
         ImGui::PopStyleColor();
     }
     if (!phone) {
@@ -2913,7 +2936,7 @@ void App::DrawVideoOverlay() {
     float pad = ImGui::GetStyle().ItemSpacing.x;
     ImGui::SetCursorPos(ImVec2(top.x + pad, top.y + pad));
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(0, 0, 0, 110));
-    if (ui::IconButton("vback", Icon::Back, "Back to chat", bw)) videoFull = false;
+    if (ui::IconButton("vback", Icon::Back, T("Back to chat"), bw)) videoFull = false;
     ImGui::SameLine();
     int secs = (int)((SteadyMs() - eng.call.answered) / 1000);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (bw - ImGui::GetTextLineHeight()) * 0.5f);
@@ -2931,7 +2954,7 @@ void App::DrawVideoOverlay() {
 bool App::VideoQualityControls(Settings& s, float w, float h) {
     bool changed = false;
     ImGui::SetNextItemWidth(w);
-    if (ImGui::BeginCombo("##vres", (std::string("Video: ") + MediaHost::ResName(s.callVideoRes)).c_str())) {
+    if (ImGui::BeginCombo("##vres", (std::string(T("Video: ")) + MediaHost::ResName(s.callVideoRes)).c_str())) {
         for (int r = 0; r < MediaHost::kResCount; r++)
             if (ImGui::Selectable(MediaHost::ResName(r), r == s.callVideoRes, 0, ImVec2(0, h))) {
                 s.callVideoRes = r;
@@ -2956,12 +2979,12 @@ bool App::VideoQualityControls(Settings& s, float w, float h) {
         ImGui::EndCombo();
     }
     LsvSettings p = MediaHost::Preset(s.callVideoRes, s.callVideoFps, true);
-    ImGui::TextDisabled("Up to about %s.%s", MediaHost::RateText(p.bitrate).c_str(),
-                        p.bitrate > 20000000 ? " Needs fast Wi-Fi or a cable." : p.height >= 1080 || p.fps >= 60 ? " Best on Wi-Fi." : "");
+    ImGui::TextDisabled(T("Up to about %s.%s"), MediaHost::RateText(p.bitrate).c_str(),
+                        p.bitrate > 20000000 ? T(" Needs fast Wi-Fi or a cable.") : p.height >= 1080 || p.fps >= 60 ? T(" Best on Wi-Fi.") : "");
     if (s.callVideoFps > 60 || s.callVideoRes >= 4)
-        ImGui::TextDisabled("If a camera can't do this, the closest it can do is sent.");
+        ImGui::TextDisabled(T("If a camera can't do this, the closest it can do is sent."));
     if (s.callVideoRes >= 6)
-        ImGui::TextDisabled("8K in H.264: if the receiving device can't decode it, it asks for 4K instead.");
+        ImGui::TextDisabled(T("8K in H.264: if the receiving device can't decode it, it asks for 4K instead."));
     return changed;
 }
 
@@ -2980,7 +3003,7 @@ void App::DrawCameraPanel() {
                                 ImGuiCond_Appearing);
     }
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoCollapse | (mobile ? ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize : ImGuiWindowFlags_AlwaysAutoResize);
-    if (!ImGui::Begin("Camera", &camPanel, fl)) {
+    if (!ImGui::Begin(T("Camera"), &camPanel, fl)) {
         ImGui::End();
         return;
     }
@@ -3024,17 +3047,17 @@ void App::DrawCameraPanel() {
         Media().ApplyVideoQuality();
         camCtlTime = -1;
     }
-    if (ImGui::Checkbox("Lower quality when slow", &s.callVideoAdaptive)) {
+    if (ImGui::Checkbox(T("Lower quality when slow"), &s.callVideoAdaptive)) {
         eng.ApplySettings(s);
         edit.callVideoAdaptive = s.callVideoAdaptive;
         Media().ApplyVideoQuality();
     }
     ImGui::Separator();
-    if (camCtl.empty()) ImGui::TextDisabled("This camera has no adjustable settings.");
+    if (camCtl.empty()) ImGui::TextDisabled(T("This camera has no adjustable settings."));
     if (LsvControl* z = find(LSV_CTL_ZOOM)) {
         float v = z->value;
         ImGui::SetNextItemWidth(w);
-        if (ImGui::SliderFloat("##zoom", &v, z->min, z->max, "Zoom %.1fx", ImGuiSliderFlags_Logarithmic)) set(z, v);
+        if (ImGui::SliderFloat("##zoom", &v, z->min, z->max, T("Zoom %.1fx"), ImGuiSliderFlags_Logarithmic)) set(z, v);
         // quick zoom steps that the camera supports (0.6x = ultra-wide on many phones)
         const float steps[] = {0.6f, 1.0f, 2.0f, 3.0f, 5.0f, 10.0f};
         bool first = true;
@@ -3051,19 +3074,19 @@ void App::DrawCameraPanel() {
     bool aeAuto = !ae || ae->value > 0.5f;
     if (ae) {
         bool v = aeAuto;
-        if (ImGui::Checkbox("Automatic exposure", &v)) set(ae, v ? 1.f : 0.f);
+        if (ImGui::Checkbox(T("Automatic exposure"), &v)) set(ae, v ? 1.f : 0.f);
         aeAuto = v;
     }
     if (LsvControl* ev = find(LSV_CTL_EXPOSURE_COMP); ev && aeAuto) {
         float v = ev->value;
         ImGui::SetNextItemWidth(w);
-        if (ImGui::SliderFloat("##ev", &v, ev->min, ev->max, "Exposure %+.1f EV")) set(ev, v);
+        if (ImGui::SliderFloat("##ev", &v, ev->min, ev->max, T("Exposure %+.1f EV"))) set(ev, v);
     }
     if (!aeAuto) {
         if (LsvControl* iso = find(LSV_CTL_ISO)) {
             float v = iso->value;
             ImGui::SetNextItemWidth(w);
-            if (ImGui::SliderFloat("##iso", &v, iso->min, iso->max, "ISO %.0f", ImGuiSliderFlags_Logarithmic)) set(iso, v);
+            if (ImGui::SliderFloat("##iso", &v, iso->min, iso->max, T("ISO %.0f"), ImGuiSliderFlags_Logarithmic)) set(iso, v);
         }
         if (LsvControl* sh = find(LSV_CTL_SHUTTER)) {
             float v = sh->value;
@@ -3077,50 +3100,50 @@ void App::DrawCameraPanel() {
     bool afAuto = !af || af->value > 0.5f;
     if (af) {
         bool v = afAuto;
-        if (ImGui::Checkbox("Automatic focus", &v)) set(af, v ? 1.f : 0.f);
+        if (ImGui::Checkbox(T("Automatic focus"), &v)) set(af, v ? 1.f : 0.f);
         afAuto = v;
     }
     if (LsvControl* fo = find(LSV_CTL_FOCUS); fo && !afAuto) {
         float v = fo->value;
         ImGui::SetNextItemWidth(w);
-        if (ImGui::SliderFloat("##focus", &v, fo->min, fo->max, "Focus %.1f")) set(fo, v);
-        if (mobile) ImGui::TextDisabled("Left = far away, right = close up");
+        if (ImGui::SliderFloat("##focus", &v, fo->min, fo->max, T("Focus %.1f"))) set(fo, v);
+        if (mobile) ImGui::TextDisabled(T("Left = far away, right = close up"));
     }
     if (LsvControl* wb = find(LSV_CTL_WHITE_BALANCE)) {
         static const char* names[] = {"Auto", "Daylight", "Cloudy", "Shade", "Tungsten (indoor lamps)", "Fluorescent"};
         int v = std::clamp((int)std::lround(wb->value), 0, 5);
         ImGui::SetNextItemWidth(w);
-        if (ImGui::BeginCombo("##wb", (std::string("White balance: ") + names[v]).c_str())) {
+        if (ImGui::BeginCombo("##wb", (std::string(T("White balance: ")) + T(names[v])).c_str())) {
             for (int i = 0; i <= std::min(5, (int)wb->max); i++)
-                if (ImGui::Selectable(names[i], i == v, 0, ImVec2(0, h))) set(wb, (float)i);
+                if (ImGui::Selectable(T(names[i]), i == v, 0, ImVec2(0, h))) set(wb, (float)i);
             ImGui::EndCombo();
         }
     }
     if (LsvControl* br = find(LSV_CTL_BRIGHTNESS)) {
         float v = br->value;
         ImGui::SetNextItemWidth(w);
-        if (ImGui::SliderFloat("##bright", &v, br->min, br->max, "Brightness %.0f")) set(br, v);
+        if (ImGui::SliderFloat("##bright", &v, br->min, br->max, T("Brightness %.0f"))) set(br, v);
     }
     if (LsvControl* t = find(LSV_CTL_TORCH)) {
         bool v = t->value > 0.5f;
-        if (ImGui::Checkbox("Flashlight", &v)) set(t, v ? 1.f : 0.f);
+        if (ImGui::Checkbox(T("Flashlight"), &v)) set(t, v ? 1.f : 0.f);
     }
     if (LsvControl* st = find(LSV_CTL_STABILIZATION)) {
         bool v = st->value > 0.5f;
-        if (ImGui::Checkbox("Stabilization", &v)) set(st, v ? 1.f : 0.f);
+        if (ImGui::Checkbox(T("Stabilization"), &v)) set(st, v ? 1.f : 0.f);
     }
     ImGui::Separator();
     LsvStats vs = Media().VideoStats();
-    ImGui::TextDisabled("Sending %dx%d, %d fps, %d kbps", vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps);
-    if (vs.encoder[0]) ImGui::TextDisabled("Encoder: %s", vs.encoder);
-    if (vs.recv_width) ImGui::TextDisabled("Receiving %dx%d, %d fps, %d kbps", vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps);
-    if (mobile && ImGui::Button("Close", ImVec2(w, h))) camPanel = false;
+    ImGui::TextDisabled(T("Sending %dx%d, %d fps, %d kbps"), vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps);
+    if (vs.encoder[0]) ImGui::TextDisabled(T("Encoder: %s"), vs.encoder);
+    if (vs.recv_width) ImGui::TextDisabled(T("Receiving %dx%d, %d fps, %d kbps"), vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps);
+    if (mobile && ImGui::Button(T("Close"), ImVec2(w, h))) camPanel = false;
     ImGui::End();
 }
 
 void App::DrawIncomingCall() {
     bool ringing = eng.call.state == CallState::IncomingRinging;
-    if (openIncomingCall && ringing) ImGui::OpenPopup("Incoming call");
+    if (openIncomingCall && ringing) ImGui::OpenPopup(T("Incoming call"));
     openIncomingCall = false;
     bool mobile = ui::M().mobile;
     ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -3131,7 +3154,7 @@ void App::DrawIncomingCall() {
         ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 22, 0));
     }
-    if (!ImGui::BeginPopupModal("Incoming call", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+    if (!ImGui::BeginPopupModal(T("Incoming call"), nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                                               (mobile ? 0 : ImGuiWindowFlags_AlwaysAutoResize)))
         return;
     if (!ringing) {
@@ -3157,8 +3180,8 @@ void App::DrawIncomingCall() {
     ImGui::PopFont();
     bool videoCall = eng.call.media == "video" && Media().VideoAvailable();
     bool webcamAsk = eng.call.media == "webcam", webcamOffer = eng.call.media == "webcam-offer";
-    const char* sub = webcamAsk ? "wants to use your camera as a webcam" : webcamOffer ? "offers its camera as a webcam"
-                    : videoCall ? "is video calling you" : "is calling you";
+    const char* sub = webcamAsk ? T("wants to use your camera as a webcam") : webcamOffer ? T("offers its camera as a webcam")
+                    : videoCall ? T("is video calling you") : T("is calling you");
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ImGui::CalcTextSize(sub).x) * 0.5f));
     ImGui::TextDisabled("%s", sub);
     ImGui::Spacing();
@@ -3168,28 +3191,28 @@ void App::DrawIncomingCall() {
     float bw = (avail - ImGui::GetStyle().ItemSpacing.x * (float)(nbtn - 1)) / (float)nbtn;
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 50, 50, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(220, 70, 70, 255));
-    if (ui::IconTextButton("Decline", Icon::HangUp, ImVec2(bw, bh)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) eng.EndCall();
+    if (ui::IconTextButton(T("Decline"), Icon::HangUp, ImVec2(bw, bh)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) eng.EndCall();
     ImGui::PopStyleColor(2);
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 150, 90, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 180, 110, 255));
     bool accept = false;
     if (webcamAsk || webcamOffer) {
-        if (ui::IconTextButton(webcamAsk ? "Allow" : "Accept", Icon::Webcam, ImVec2(bw, bh))) {
+        if (ui::IconTextButton(webcamAsk ? T("Allow") : T("Accept"), Icon::Webcam, ImVec2(bw, bh))) {
             Media().WantCameraAtStart(webcamAsk);  // asked: we send our camera; offered: we only receive
             accept = true;
         }
     } else if (videoCall) {
-        if (ui::IconTextButton(mobile ? "Voice" : "Voice only", Icon::Phone, ImVec2(bw, bh))) {
+        if (ui::IconTextButton(mobile ? T("Voice") : T("Voice only"), Icon::Phone, ImVec2(bw, bh))) {
             Media().WantCameraAtStart(false);
             accept = true;
         }
         ImGui::SameLine();
-        if (ui::IconTextButton("Video", Icon::Video, ImVec2(bw, bh))) {
+        if (ui::IconTextButton(T("Video"), Icon::Video, ImVec2(bw, bh))) {
             Media().WantCameraAtStart(true);
             accept = true;
         }
-    } else if (ui::IconTextButton("Accept", Icon::Phone, ImVec2(bw, bh))) {
+    } else if (ui::IconTextButton(T("Accept"), Icon::Phone, ImVec2(bw, bh))) {
         Media().WantCameraAtStart(false);
         accept = true;
     }
@@ -3204,12 +3227,12 @@ void App::DrawIncomingCall() {
 }
 
 void App::DrawCallSettings(float fieldW, float h, bool& changed) {
-    ImGui::SeparatorText("Calls");
+    ImGui::SeparatorText(T("Calls"));
     if (!Media().Available()) {
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("Voice calls are an optional module and are not installed (%s). To enable them, put the "
+        ImGui::TextDisabled(T("Voice calls are an optional module and are not installed (%s). To enable them, put the "
                             "lunashare_media library next to the LunaShare program (or install the \"LunaShare + Calls\" app on Android) "
-                            "and restart.", Media().loadInfo.c_str());
+                            "and restart."), Media().loadInfo.c_str());
         ImGui::PopTextWrapPos();
         return;
     }
@@ -3222,9 +3245,9 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
             lastScan[capture] = ImGui::GetTime();
         }
         ImGui::SetNextItemWidth(fieldW);
-        std::string preview = value.empty() ? std::string(label) + ": system default" : std::string(label) + ": " + value;
+        std::string preview = std::string(T(label)) + ": " + (value.empty() ? std::string(T("system default")) : value);
         if (ImGui::BeginCombo((std::string("##") + label).c_str(), preview.c_str())) {
-            if (ImGui::Selectable("System default", value.empty())) { value.clear(); changed = true; }
+            if (ImGui::Selectable(T("System default"), value.empty())) { value.clear(); changed = true; }
             for (auto& d : devs[capture])
                 if (ImGui::Selectable(d.c_str(), value == d)) { value = d; changed = true; }
             ImGui::EndCombo();
@@ -3232,47 +3255,47 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     };
     deviceCombo("Microphone", true, edit.callInputDevice);
     deviceCombo("Speaker", false, edit.callOutputDevice);
-    changed |= ImGui::Checkbox("Echo cancellation", &edit.callEchoCancel);
-    ui::HelpMarker("Removes your speaker's sound from the microphone so the other side does not hear themselves. Keep it on unless you use headphones.");
-    changed |= ImGui::Checkbox("Noise suppression", &edit.callNoiseSuppress);
-    changed |= ImGui::Checkbox("Automatic microphone level", &edit.callAutoGain);
+    changed |= ImGui::Checkbox(T("Echo cancellation"), &edit.callEchoCancel);
+    ui::HelpMarker(T("Removes your speaker's sound from the microphone so the other side does not hear themselves. Keep it on unless you use headphones."));
+    changed |= ImGui::Checkbox(T("Noise suppression"), &edit.callNoiseSuppress);
+    changed |= ImGui::Checkbox(T("Automatic microphone level"), &edit.callAutoGain);
     int kbps = edit.callBitrate / 1000;
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::SliderInt("##callbr", &kbps, 12, 48, "Voice quality: %d kbps")) { edit.callBitrate = kbps * 1000; editDirty = true; }
+    if (ImGui::SliderInt("##callbr", &kbps, 12, 48, T("Voice quality: %d kbps"))) { edit.callBitrate = kbps * 1000; editDirty = true; }
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, "Microphone boost: +%d dB")) editDirty = true;
+    if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, T("Microphone boost: +%d dB"))) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-    ui::HelpMarker("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar.");
+    ui::HelpMarker(T("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar."));
     if (Media().VideoAvailable()) {
         changed |= VideoQualityControls(edit, fieldW, h);
-        ui::HelpMarker("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call.");
-        changed |= ImGui::Checkbox("Lower video quality automatically when the connection is slow", &edit.callVideoAdaptive);
-        ui::HelpMarker("Keeps the picture smooth: less bitrate first, then a lower frame rate and a smaller picture while the "
-                       "connection is slow, back up when it recovers.");
-        changed |= ImGui::Checkbox("Use only H.264 (if HEVC/AV1 video shows problems)", &edit.callVideoH264Only);
+        ui::HelpMarker(T("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call."));
+        changed |= ImGui::Checkbox(T("Lower video quality automatically when the connection is slow"), &edit.callVideoAdaptive);
+        ui::HelpMarker(T("Keeps the picture smooth: less bitrate first, then a lower frame rate and a smaller picture while the "
+                       "connection is slow, back up when it recovers."));
+        changed |= ImGui::Checkbox(T("Use only H.264 (if HEVC/AV1 video shows problems)"), &edit.callVideoH264Only);
         if (Media().VcamAvailable()) {
             bool v = edit.virtualCamera;
             ImGui::BeginDisabled(Media().VcamBusy());
-            if (ImGui::Checkbox("Virtual camera: use received video as a webcam (\"LunaShare Camera\")", &v)) {
+            if (ImGui::Checkbox(T("Virtual camera: use received video as a webcam (\"LunaShare Camera\")"), &v)) {
                 edit.virtualCamera = v;
                 changed = true;
                 Media().SetVirtualCamera(v);
             }
             ImGui::EndDisabled();
-            ui::HelpMarker("Other apps (Teams, Zoom, OBS, Discord...) can pick \"LunaShare Camera\". It shows the video from the other "
+            ui::HelpMarker(T("Other apps (Teams, Zoom, OBS, Discord...) can pick \"LunaShare Camera\". It shows the video from the other "
                            "device during a video call - for example your phone's camera - and a dark picture otherwise. The first "
-                           "time Windows asks for administrator permission to install it.");
+                           "time Windows asks for administrator permission to install it."));
             std::string st = Media().VcamStatus();
             if (!st.empty()) ImGui::TextDisabled("%s", st.c_str());
         }
         auto cams = Media().Cameras();
         if (cams.size() > 1) {
-            std::string cur = "Front camera (default)";
+            std::string cur = T("Front camera (default)");
             for (auto& c : cams) if (edit.callCamera == c.id) cur = c.name;
             ImGui::SetNextItemWidth(fieldW);
-            if (ImGui::BeginCombo("##defcam", ("Camera: " + cur).c_str())) {
-                if (ImGui::Selectable("Front camera (default)", edit.callCamera.empty(), 0, ImVec2(0, h))) { edit.callCamera.clear(); changed = true; }
+            if (ImGui::BeginCombo("##defcam", (T("Camera: ") + cur).c_str())) {
+                if (ImGui::Selectable(T("Front camera (default)"), edit.callCamera.empty(), 0, ImVec2(0, h))) { edit.callCamera.clear(); changed = true; }
                 for (auto& c : cams)
                     if (ImGui::Selectable(c.name, edit.callCamera == c.id, 0, ImVec2(0, h))) { edit.callCamera = c.id; changed = true; }
                 ImGui::EndCombo();
@@ -3281,7 +3304,7 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     }
     bool testing = Media().MicTesting();
     if (eng.call.state == CallState::None) {
-        if (ImGui::Button(testing ? "Stop microphone test" : "Test microphone", ImVec2(0, h))) testing ? Media().StopMicTest() : Media().StartMicTest();
+        if (ImGui::Button(testing ? T("Stop microphone test") : T("Test microphone"), ImVec2(0, h))) testing ? Media().StopMicTest() : Media().StartMicTest();
         if (testing) {
             ImGui::SameLine();
             ui::ProgressBarText(Media().MicTestLevel(), "", ImVec2(ImGui::GetFontSize() * 8, ImGui::GetFrameHeight() * 0.5f), ui::ColOk());

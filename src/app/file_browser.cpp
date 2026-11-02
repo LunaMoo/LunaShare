@@ -1,4 +1,5 @@
 #include "file_browser.h"
+#include "i18n.h"
 
 #include <algorithm>
 #include <cmath>
@@ -22,20 +23,20 @@ static std::vector<std::pair<std::string, std::string>> BuildPlaces() {
     std::vector<std::pair<std::string, std::string>> p;
     std::string home = HomeDir();
 #if defined(__ANDROID__)
-    p.push_back({"Phone storage", "/storage/emulated/0"});
-    p.push_back({"Camera", "/storage/emulated/0/DCIM/Camera"});
-    p.push_back({"Pictures", "/storage/emulated/0/Pictures"});
-    p.push_back({"Screenshots", "/storage/emulated/0/Pictures/Screenshots"});
-    p.push_back({"Download", "/storage/emulated/0/Download"});
-    p.push_back({"Documents", "/storage/emulated/0/Documents"});
+    p.push_back({T("Phone storage"), "/storage/emulated/0"});
+    p.push_back({T("Camera"), "/storage/emulated/0/DCIM/Camera"});
+    p.push_back({T("Pictures"), "/storage/emulated/0/Pictures"});
+    p.push_back({T("Screenshots"), "/storage/emulated/0/Pictures/Screenshots"});
+    p.push_back({T("Download"), "/storage/emulated/0/Download"});
+    p.push_back({T("Documents"), "/storage/emulated/0/Documents"});
     for (auto& e : ListDir("/storage"))
-        if (e.isDir && e.name != "emulated" && e.name != "self") p.push_back({"SD card " + e.name, "/storage/" + e.name});
+        if (e.isDir && e.name != "emulated" && e.name != "self") p.push_back({TF("SD card %s", e.name.c_str()), "/storage/" + e.name});
     p.erase(std::remove_if(p.begin(), p.end(), [](auto& x) { return !IsDirectory(x.second); }), p.end());
 #else
-    p.push_back({"Home", home});
+    p.push_back({T("Home"), home});
     for (const char* sub : {"Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music"}) {
         std::string d = JoinPath(home, sub);
-        if (IsDirectory(d)) p.push_back({sub, d});
+        if (IsDirectory(d)) p.push_back({T(sub), d});
     }
 #ifdef _WIN32
     DWORD mask = GetLogicalDrives();
@@ -47,9 +48,9 @@ static std::vector<std::pair<std::string, std::string>> BuildPlaces() {
 #else
     p.push_back({"/", "/"});
 #if defined(__APPLE__)
-    p.push_back({"Volumes", "/Volumes"});
+    p.push_back({T("Volumes"), "/Volumes"});
 #else
-    if (IsDirectory("/media")) p.push_back({"Media", "/media"});
+    if (IsDirectory("/media")) p.push_back({T("Media"), "/media"});
     if (IsDirectory("/mnt")) p.push_back({"mnt", "/mnt"});
 #endif
 #endif
@@ -76,7 +77,7 @@ void FileBrowser::Open(Mode mode, const std::string& title, const std::string& s
 
 void FileBrowser::Navigate(const std::string& dir) {
     if (!IsDirectory(dir)) {
-        error_ = "Cannot open " + dir;
+        error_ = TF("Cannot open %s", dir.c_str());
         return;
     }
     dir_ = dir;
@@ -155,11 +156,11 @@ void FileBrowser::DrawList(std::string& navigateTo, bool& confirmed) {
     float rowH = mobile ? ui::M().rowH * 0.9f : 0;
     if (!ImGui::BeginTable("files", mobile ? 2 : 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp)) return;
     ImGui::TableSetupScrollFreeze(0, 1);
-    ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 4.0f);
-    ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    ImGui::TableSetupColumn(T("Name"), ImGuiTableColumnFlags_WidthStretch, 4.0f);
+    ImGui::TableSetupColumn(T("Size"), ImGuiTableColumnFlags_WidthStretch, 1.0f);
     if (!mobile) {
-        ImGui::TableSetupColumn("Modified", ImGuiTableColumnFlags_WidthStretch, 1.4f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.7f);
+        ImGui::TableSetupColumn(T("Modified"), ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn(T("Type"), ImGuiTableColumnFlags_WidthStretch, 0.7f);
     }
     ImGui::TableHeadersRow();
     if (mobile) ui::TouchScroll();
@@ -365,12 +366,12 @@ bool FileBrowser::Draw() {
 
     // ---- toolbar: navigation
     float bs = mobile ? ui::M().rowH * 0.85f : 0;
-    if (ui::IconButton("up", ui::Icon::Up, "Parent folder", bs)) {
+    if (ui::IconButton("up", ui::Icon::Up, T("Parent folder"), bs)) {
         std::string parent = DirName(dir_);
         if (!parent.empty() && parent != dir_) Navigate(parent);
     }
     ImGui::SameLine();
-    if (ui::IconButton("refresh", ui::Icon::Retry, "Refresh", bs)) Refresh();
+    if (ui::IconButton("refresh", ui::Icon::Retry, T("Refresh"), bs)) Refresh();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
     if (ImGui::InputText("##path", &pathBuf_, ImGuiInputTextFlags_EnterReturnsTrue)) Navigate(pathBuf_);
@@ -383,30 +384,30 @@ bool FileBrowser::Draw() {
             if (on) ImGui::PopStyleColor();
             return r;
         };
-        if (toggle("vlist", ui::Icon::List, "List", !prefs.grid)) prefs.grid = false;
+        if (toggle("vlist", ui::Icon::List, T("List"), !prefs.grid)) prefs.grid = false;
         ImGui::SameLine();
-        if (toggle("vgrid", ui::Icon::Grid, "Gallery (thumbnails)", prefs.grid)) prefs.grid = true;
+        if (toggle("vgrid", ui::Icon::Grid, T("Gallery (thumbnails)"), prefs.grid)) prefs.grid = true;
         ImGui::SameLine();
         if (mode_ == Mode::OpenMulti) {
-            if (ImGui::Checkbox("Pictures only", &prefs.picturesOnly)) Refresh();
+            if (ImGui::Checkbox(T("Pictures only"), &prefs.picturesOnly)) Refresh();
             ImGui::SameLine();
         }
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * (mobile ? 7.5f : 8.5f));
-        if (ImGui::Combo("##sort", &prefs.sort, "Name\0Newest first\0Largest first\0")) Refresh();
+        if (ImGui::Combo("##sort", &prefs.sort, TItems("Name\0Newest first\0Largest first\0"))) Refresh();
         if (prefs.grid && !mobile) {
             ImGui::SameLine();
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7);
-            ImGui::SliderInt("##tile", &prefs.tile, 80, 260, "Size %d");
+            ImGui::SliderInt("##tile", &prefs.tile, 80, 260, T("Size %d"));
         }
         if (mode_ == Mode::OpenMulti && !mobile) {
             ImGui::SameLine();
-            if (ImGui::Button("Select all files")) {
+            if (ImGui::Button(T("Select all files"))) {
                 for (auto& e : entries_)
                     if (!e.isDir) selected_.insert(JoinPath(dir_, e.name));
             }
             ImGui::SameLine();
             ImGui::BeginDisabled(selected_.empty());
-            if (ImGui::Button("Clear")) selected_.clear();
+            if (ImGui::Button(T("Clear"))) selected_.clear();
             ImGui::EndDisabled();
         }
     }
@@ -417,7 +418,7 @@ bool FileBrowser::Draw() {
 
     if (mobile) {
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::BeginCombo("##places", "Go to...")) {
+        if (ImGui::BeginCombo("##places", T("Go to..."))) {
             for (auto& [label, path] : places_)
                 if (ImGui::Selectable(label.c_str(), false, 0, ImVec2(0, ui::M().rowH * 0.8f))) Navigate(path);
             ImGui::EndCombo();
@@ -434,7 +435,7 @@ bool FileBrowser::Draw() {
     if (resetScroll_) { ImGui::SetScrollY(0); resetScroll_ = false; }
     if (!error_.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", error_.c_str());
     std::string navigateTo;
-    if (entries_.empty()) ImGui::TextDisabled(prefs.picturesOnly ? "No pictures or folders here." : "This folder is empty.");
+    if (entries_.empty()) ImGui::TextDisabled(prefs.picturesOnly ? T("No pictures or folders here.") : T("This folder is empty."));
     else if (prefs.grid && mode_ != Mode::SelectDir) DrawGrid(navigateTo, confirmed);
     else DrawList(navigateTo, confirmed);
     ImGui::EndChild();
@@ -443,41 +444,41 @@ bool FileBrowser::Draw() {
     // ---- footer
     if (mobile && mode_ == Mode::OpenMulti) {
         float w3 = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
-        if (ImGui::Button("Select all", ImVec2(w3, ui::M().rowH * 0.8f)))
+        if (ImGui::Button(T("Select all"), ImVec2(w3, ui::M().rowH * 0.8f)))
             for (auto& e : entries_)
                 if (!e.isDir) selected_.insert(JoinPath(dir_, e.name));
         ImGui::SameLine();
         ImGui::BeginDisabled(selected_.empty());
-        if (ImGui::Button("Clear", ImVec2(w3, ui::M().rowH * 0.8f))) selected_.clear();
+        if (ImGui::Button(T("Clear"), ImVec2(w3, ui::M().rowH * 0.8f))) selected_.clear();
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
         if (!selected_.empty()) ImGui::TextDisabled("%d - %s", (int)selected_.size(), FormatBytes((double)SelectedBytes()).c_str());
-        else ImGui::TextDisabled("Tap to select");
+        else ImGui::TextDisabled(T("Tap to select"));
     }
     if (mode_ == Mode::SaveFile) {
         ImGui::SetNextItemWidth(-1);
-        ImGui::InputTextWithHint("##name", "File name", &nameBuf_);
+        ImGui::InputTextWithHint("##name", T("File name"), &nameBuf_);
     }
     if (mode_ == Mode::SelectDir) {
         ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetContentRegionAvail().x * 0.5f);
-        ImGui::InputTextWithHint("##newfolder", "New folder name", &newFolderBuf_);
+        ImGui::InputTextWithHint("##newfolder", T("New folder name"), &newFolderBuf_);
         if (!mobile) ImGui::SameLine();
-        if (ImGui::Button("Create folder") && !newFolderBuf_.empty()) {
+        if (ImGui::Button(T("Create folder")) && !newFolderBuf_.empty()) {
             std::string nd = JoinPath(dir_, SanitizeRelativePath(newFolderBuf_));
             if (MakeDirs(nd)) { newFolderBuf_.clear(); Navigate(nd); }
         }
     }
-    const char* okLabel = mode_ == Mode::SaveFile ? "Save" : mode_ == Mode::SelectDir ? "Use this folder" : "Open";
+    const char* okLabel = mode_ == Mode::SaveFile ? T("Save") : mode_ == Mode::SelectDir ? T("Use this folder") : T("Open");
     std::string okText = okLabel;
-    if (mode_ == Mode::OpenMulti) okText = selected_.size() > 1 ? "Send " + std::to_string(selected_.size()) + " items" : "Send";
+    if (mode_ == Mode::OpenMulti) okText = selected_.size() > 1 ? TF("Send %d items", (int)selected_.size()) : std::string(T("Send"));
     float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f : ImGui::GetFontSize() * 9;
     float bh = mobile ? ui::M().rowH : 0;
     bool canOk = mode_ == Mode::SelectDir || (mode_ == Mode::SaveFile && !nameBuf_.empty()) || !selected_.empty();
     if (!mobile) {
         if (mode_ == Mode::OpenMulti && !selected_.empty()) {
             ImGui::AlignTextToFramePadding();
-            ImGui::TextDisabled("%d selected - %s", (int)selected_.size(), FormatBytes((double)SelectedBytes()).c_str());
+            ImGui::TextDisabled(T("%d selected - %s"), (int)selected_.size(), FormatBytes((double)SelectedBytes()).c_str());
             ImGui::SameLine();
         }
         ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - bw * 2 - ImGui::GetStyle().ItemSpacing.x);
@@ -486,7 +487,7 @@ bool FileBrowser::Draw() {
     if (ImGui::Button(okText.c_str(), ImVec2(bw, bh))) confirmed = true;
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(bw, bh)) || (!mobile && ImGui::IsKeyPressed(ImGuiKey_Escape) && !openPreview_)) keepOpen = false;
+    if (ImGui::Button(T("Cancel"), ImVec2(bw, bh)) || (!mobile && ImGui::IsKeyPressed(ImGuiKey_Escape) && !openPreview_)) keepOpen = false;
     if (ImGui::IsKeyPressed(ImGuiKey_AppBack) && !openPreview_) keepOpen = false;
 
     // ---- big preview (long press / right click on a picture)
@@ -506,12 +507,12 @@ bool FileBrowser::Draw() {
         }
         ImGui::TextUnformatted(BaseName(previewPath_).c_str());
         bool sel = selected_.count(previewPath_) > 0;
-        if (mode_ == Mode::OpenMulti && ImGui::Button(sel ? "Unselect" : "Select", ImVec2(0, bh))) {
+        if (mode_ == Mode::OpenMulti && ImGui::Button(sel ? T("Unselect") : T("Select"), ImVec2(0, bh))) {
             if (sel) selected_.erase(previewPath_); else selected_.insert(previewPath_);
             ImGui::CloseCurrentPopup();
         }
         if (mode_ == Mode::OpenMulti) ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(0, bh)) || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_AppBack))
+        if (ImGui::Button(T("Close"), ImVec2(0, bh)) || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_AppBack))
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }

@@ -1,4 +1,5 @@
 #include "media_host.h"
+#include "i18n.h"
 
 #include <SDL.h>
 
@@ -486,7 +487,7 @@ void MediaHost::SetVirtualCamera(bool on) {
     vcamBusy_ = true;
     {
         std::lock_guard<std::mutex> l(vcamM_);
-        vcamStatus_ = on ? "Setting up LunaShare Camera..." : "";
+        vcamStatus_ = on ? T("Setting up LunaShare Camera...") : "";
     }
     vcamThread_ = std::thread([this, on] {
         char msg[256] = {0};
@@ -495,7 +496,7 @@ void MediaHost::SetVirtualCamera(bool on) {
         else vcamOn_ = false;
         {
             std::lock_guard<std::mutex> l(vcamM_);
-            vcamStatus_ = ok ? (on ? "LunaShare Camera is available to other apps" : "") : std::string("Virtual camera: ") + msg;
+            vcamStatus_ = ok ? (on ? T("LunaShare Camera is available to other apps") : "") : std::string(T("Virtual camera: ")) + msg;
         }
         vcamBusy_ = false;
     });
@@ -546,12 +547,12 @@ bool MediaHost::SetCameraOn(bool on) {
     if (on) {
 #if defined(__ANDROID__)
         if (!SDL_AndroidRequestPermission("android.permission.CAMERA")) {
-            audioError = "camera permission denied";
+            audioError = T("camera permission denied");
             return false;
         }
 #endif
         if (!vmod_->set_camera_on(1)) {
-            audioError = "camera could not be started";
+            audioError = T("camera could not be started");
             return false;
         }
         camOn_ = true;
@@ -879,11 +880,11 @@ void MediaHost::SetRoute(int id) {
 }
 
 std::string MediaHost::RouteLabel(const Route& r) {
-    if (r.kind == "earpiece") return "Phone earpiece";
-    if (r.kind == "speaker") return "Loudspeaker";
-    if (r.kind == "bluetooth") return r.name.empty() ? "Bluetooth" : "Bluetooth: " + r.name;
-    if (r.kind == "wired") return r.name.empty() ? "Headphones" : "Headphones: " + r.name;
-    if (r.kind == "usb") return r.name.empty() ? "USB headset" : "USB: " + r.name;
+    if (r.kind == "earpiece") return T("Phone earpiece");
+    if (r.kind == "speaker") return T("Loudspeaker");
+    if (r.kind == "bluetooth") return r.name.empty() ? std::string(T("Bluetooth")) : std::string(T("Bluetooth")) + ": " + r.name;
+    if (r.kind == "wired") return r.name.empty() ? std::string(T("Headphones")) : std::string(T("Headphones")) + ": " + r.name;
+    if (r.kind == "usb") return r.name.empty() ? std::string(T("USB headset")) : "USB: " + r.name;
     return r.name.empty() ? r.kind : r.name;
 }
 
@@ -932,7 +933,7 @@ bool MediaHost::OpenVideoMessage(const std::string& path) {
     if (!CanRecordVideoMessages() || vmsgOpen_ || recording_) return false;
 #if defined(__ANDROID__)
     if (!SDL_AndroidRequestPermission("android.permission.CAMERA")) {
-        audioError = "camera permission denied";
+        audioError = T("camera permission denied");
         return false;
     }
 #endif
@@ -955,7 +956,7 @@ bool MediaHost::OpenVideoMessage(const std::string& path) {
     if (!vmod_->set_camera_on(1)) {
         vmod_->stop();
         vmsgOpen_ = false;
-        audioError = "camera could not be started";
+        audioError = T("camera could not be started");
         return false;
     }
     camOn_ = true;

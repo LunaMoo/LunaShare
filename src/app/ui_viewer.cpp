@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "image_cache.h"
+#include "i18n.h"
 #include "media_host.h"
 #include "player_host.h"
 #include "imgui.h"
@@ -96,7 +97,7 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         bool cur = Player().IsCurrent(path);
         bool playing = cur && Player().Playing();
         float h = ui::M().mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 1.4f;
-        if (ui::IconButton("play", playing ? Icon::Pause : Icon::Play, playing ? "Pause" : "Play", h)) Player().Toggle(path);
+        if (ui::IconButton("play", playing ? Icon::Pause : Icon::Play, playing ? T("Pause") : T("Play"), h)) Player().Toggle(path);
         ImGui::SameLine();
         double dur = cur && Player().Duration() > 0 ? Player().Duration() : meta.info.duration;
         double pos = cur ? Player().Position() : 0;
@@ -118,11 +119,11 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         dl->AddRectFilled(ImVec2(p.x, cy - 3), ImVec2(p.x + barW, cy + 3), ImGui::GetColorU32(ImGuiCol_Text, 0.25f), 3);
         dl->AddRectFilled(ImVec2(p.x, cy - 3), ImVec2(p.x + barW * frac, cy + 3), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 3);
         dl->AddCircleFilled(ImVec2(p.x + barW * frac, cy), 6, ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
-        std::string label = (cur ? Clock(pos) + " / " : "") + (dur > 0 ? Clock(dur) : std::string("--:--")) + "   " + (BaseName(path).rfind("Voice message", 0) == 0 ? std::string("Voice message") : BaseName(path));
+        std::string label = (cur ? Clock(pos) + " / " : "") + (dur > 0 ? Clock(dur) : std::string("--:--")) + "   " + (BaseName(path).rfind("Voice message", 0) == 0 ? std::string(T("Voice message")) : BaseName(path));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + barW);
         ImGui::TextDisabled("%s", label.c_str());
         ImGui::PopTextWrapPos();
-        if (meta.done && !meta.ok) ImGui::TextDisabled("can't play this file here");
+        if (meta.done && !meta.ok) ImGui::TextDisabled(T("can't play this file here"));
         ImGui::EndGroup();
         ImGui::PopID();
     }
@@ -160,7 +161,7 @@ void App::DrawThumbnails(const std::string& peer, const std::vector<std::shared_
         if (t.ready) dl->AddImageRounded(t.id, p, p1, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, rounding);
         else dl->AddRectFilled(p, p1, ImGui::GetColorU32(ImGuiCol_FrameBg), rounding);
         if (!t.ready && !t.failed && !t.video) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), "loading...");
-        if (t.failed) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), t.video ? "can't play this video here" : "preview not available");
+        if (t.failed) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), t.video ? T("can't play this video here") : T("preview not available"));
         if (t.video && !t.failed) VideoBadge(dl, p, p1, t.duration);
         if (hovered) {
             dl->AddRect(p, p1, ImGui::GetColorU32(ImGuiCol_ButtonHovered), rounding, 0, 2.0f);
@@ -225,14 +226,14 @@ void App::RebuildViewerList() {
                 for (auto tid : m.tids) {
                     auto t = eng.transfers.find(tid);
                     if (t == eng.transfers.end() || !ViewablePath(*t->second)) continue;
-                    add(t->second->localPath, (m.outgoing ? "Sent to " : "From ") + them + "  -  " + FormatTime(m.ts));
+                    add(t->second->localPath, TF(m.outgoing ? "Sent to %s" : "From %s", them.c_str()) + "  -  " + FormatTime(m.ts));
                 }
             }
         }
     } else {
         for (auto& h : eng.history) {
             if (!Viewable(h.path) || !FileExists(h.path)) continue;
-            add(h.path, (h.outgoing ? "Sent to " : "From ") + eng.PeerName(h.peer) + "  -  " + FormatTime(h.ts));
+            add(h.path, TF(h.outgoing ? "Sent to %s" : "From %s", eng.PeerName(h.peer).c_str()) + "  -  " + FormatTime(h.ts));
         }
     }
     viewer.index = 0;
@@ -394,7 +395,7 @@ void App::DrawViewer() {
             }
         }
         if (Player().State() == LSP_ERROR || (Player().GetMeta(path).done && !Player().GetMeta(path).ok)) {
-            const char* msg = "This video can't be played here";
+            const char* msg = T("This video can't be played here");
             ImVec2 ts = ImGui::CalcTextSize(msg);
             dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32(220, 220, 220, 255), msg);
         }
@@ -443,7 +444,7 @@ void App::DrawViewer() {
         }
     }
     if (!isVideo && full.state != ImageTex::Ready) {
-        const char* msg = full.state == ImageTex::Failed ? "Cannot display this picture" : "Loading...";
+        const char* msg = full.state == ImageTex::Failed ? T("Cannot display this picture") : T("Loading...");
         ImVec2 ts = ImGui::CalcTextSize(msg);
         dl->AddText(ImVec2(c.x - ts.x * 0.5f, viewer.areaMax.y - ts.y * 3), IM_COL32(220, 220, 220, 255), msg);
     }
@@ -457,7 +458,7 @@ void App::DrawViewer() {
         ImGui::SetCursorScreenPos(ImVec2(viewer.areaMin.x + ImGui::GetStyle().ItemSpacing.x, viewer.areaMin.y + ImGui::GetStyle().ItemSpacing.y));
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 40, 46, 200));
         ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(240, 240, 240, 255));
-        if (ui::IconButton("vclose", Icon::Back, "Close (Esc)", bh)) close = true;
+        if (ui::IconButton("vclose", Icon::Back, T("Close (Esc)"), bh)) close = true;
         ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::TextUnformatted(BaseName(path).c_str());
@@ -478,25 +479,25 @@ void App::DrawViewer() {
         } else {
             float right = viewer.areaMax.x - (bh + ImGui::GetStyle().ItemSpacing.x) * (float)nb - ImGui::GetStyle().ItemSpacing.x;
             ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - ImGui::GetWindowPos().x));
-            if (ui::IconButton("zout", Icon::ZoomOut, "Zoom out (-)", bh)) ViewerZoomAt(c, 0.8f);
+            if (ui::IconButton("zout", Icon::ZoomOut, T("Zoom out (-)"), bh)) ViewerZoomAt(c, 0.8f);
             ImGui::SameLine();
-            if (ui::IconButton("zfit", Icon::Fit, "Fit to screen (0)", bh)) { viewer.zoom = 1; viewer.pan = ImVec2(0, 0); }
+            if (ui::IconButton("zfit", Icon::Fit, T("Fit to screen (0)"), bh)) { viewer.zoom = 1; viewer.pan = ImVec2(0, 0); }
             ImGui::SameLine();
-            if (ui::IconButton("zin", Icon::ZoomIn, "Zoom in (+)", bh)) ViewerZoomAt(c, 1.25f);
+            if (ui::IconButton("zin", Icon::ZoomIn, T("Zoom in (+)"), bh)) ViewerZoomAt(c, 1.25f);
             ImGui::SameLine();
         }
         float sameGap = mobile ? (areaSize.x - bh * (float)nb) / (float)(nb + 1) : -1.0f;
-        if (ui::IconButton("vopen", Icon::Open, "Open with default app", bh)) {
+        if (ui::IconButton("vopen", Icon::Open, T("Open with default app"), bh)) {
             if (Bridge().openFile) Bridge().openFile(path); else OpenWithDefaultApp(path);
         }
         ImGui::SameLine(0, sameGap);
-        if (ui::IconButton("vshare", Icon::Share, "Share with another device", bh)) {
+        if (ui::IconButton("vshare", Icon::Share, T("Share with another device"), bh)) {
             pendingSend = {path};
             openSendTo = true;
             close = true;
         }
         ImGui::SameLine(0, sameGap);
-        if (ui::IconButton("vall", viewer.all ? Icon::Users : Icon::Image, viewer.all ? "Showing all shared pictures - tap for this chat only" : "Showing this chat - tap for all shared pictures", bh)) {
+        if (ui::IconButton("vall", viewer.all ? Icon::Users : Icon::Image, viewer.all ? T("Showing all shared pictures - tap for this chat only") : T("Showing this chat - tap for all shared pictures"), bh)) {
             viewer.all = !viewer.all;
             RebuildViewerList();
             if (viewer.paths.empty()) close = true;
@@ -510,7 +511,7 @@ void App::DrawViewer() {
         float aw = mobile ? bh : bh * 1.2f;
         if (viewer.index > 0) {
             ImGui::SetCursorScreenPos(ImVec2(viewer.areaMin.x + 8, c.y - aw * 0.5f));
-            if (ui::IconButton("vprev", Icon::Back, "Previous (Left)", aw)) ViewerGo(-1);
+            if (ui::IconButton("vprev", Icon::Back, T("Previous (Left)"), aw)) ViewerGo(-1);
         }
         if (viewer.index + 1 < n) {
             ImGui::SetCursorScreenPos(ImVec2(viewer.areaMax.x - aw - 8, c.y - aw * 0.5f));
@@ -521,7 +522,7 @@ void App::DrawViewer() {
             float h = aw * 0.275f, t = std::max(1.5f, aw * 0.55f * 0.11f) * 1.3f;
             ImVec2 pts[3] = {ImVec2(cc.x - h * 0.35f, cc.y - h * 0.7f), ImVec2(cc.x + h * 0.35f, cc.y), ImVec2(cc.x - h * 0.35f, cc.y + h * 0.7f)};
             dl->AddPolyline(pts, 3, IM_COL32(240, 240, 240, 255), 0, t);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Next (Right)");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Next (Right)"));
             ImGui::PopID();
             if (nx) ViewerGo(1);
         }
@@ -533,7 +534,7 @@ void App::DrawViewer() {
                               IM_COL32(0, 0, 0, (int)(130 * a)));
             ImGui::SetCursorScreenPos(ImVec2(viewer.areaMin.x + ImGui::GetStyle().ItemSpacing.x, y));
             bool playing = Player().Playing();
-            if (ui::IconButton("vplay", playing ? Icon::Pause : Icon::Play, playing ? "Pause (Space)" : "Play (Space)", vbh)) Player().Toggle(path);
+            if (ui::IconButton("vplay", playing ? Icon::Pause : Icon::Play, playing ? T("Pause (Space)") : T("Play (Space)"), vbh)) Player().Toggle(path);
             ImGui::SameLine();
             double dur = Player().Duration(), pos = Player().Position();
             std::string tl = Clock(pos) + " / " + Clock(dur);

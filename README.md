@@ -66,6 +66,12 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   encrypted packets. Only your name and the server need to be set; everything else is under *Settings → Advanced*.
   See [docs/INTERNET.md](docs/INTERNET.md).
 
+**Languages**
+- English and Polish. *Settings → Appearance → Language* switches right away; *automatic* follows the system language.
+- Adding a language: copy `src/app/lang/pl.inc` to `<code>.inc`, translate the second string of every line (keep
+  `%s`/`%d` in the same order), and add it to the two lists in `src/app/i18n.cpp`. `tools/i18n_keys.py src/app/lang/<code>.inc`
+  shows strings that are missing or no longer used.
+
 **Security**
 - Every connection is end-to-end encrypted: an X25519 key exchange per connection (forward secrecy),
   XChaCha20-Poly1305 for every frame, and a per-device EdDSA identity key ([Monocypher](https://monocypher.org)).

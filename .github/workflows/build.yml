@@ -76,6 +76,7 @@ jobs:
       - name: Test
         shell: bash
         run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then python3 tools/i18n_keys.py src/app/lang/pl.inc; fi
           if [ -f build/Release/lunashare_tests.exe ]; then build/Release/lunashare_voice_tests.exe && build/Release/lunashare_video_tests.exe && build/Release/lunashare_tests.exe; else build/lunashare_voice_tests && build/lunashare_video_tests && build/lunashare_tests; fi
       - name: Package
         shell: bash

@@ -66,6 +66,7 @@ struct Settings {
     std::string callInputDevice, callOutputDevice;  // empty = system default
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list
+    std::string language;          // UI language code ("pl"), empty = the system's
     std::string emojiRecent;       // emoji picker: recently used, '\n' separated
     int emojiTone = 0;             // emoji picker: skin tone 0 (none) .. 5
     bool browserPicturesOnly = false;
