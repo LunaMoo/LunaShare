@@ -1046,10 +1046,12 @@ void App::DrawDeleteConfirm(const std::string& peer) {
     float w = mobile ? ImGui::GetMainViewport()->Size.x * 0.8f : ImGui::GetFontSize() * 16;
     size_t n = deleteMids.size();
     ImGui::TextUnformatted(n == 1 ? "Delete this message?" : ("Delete " + std::to_string(n) + " messages?").c_str());
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w);
     if (deleteEveryoneOk)
-        ImGui::TextDisabled("\"For everyone\" also removes it from %s\n(as soon as that device is reachable).", eng.PeerName(peer).c_str());
+        ImGui::TextDisabled("\"For everyone\" also removes it from %s (as soon as that device is reachable).", eng.PeerName(peer).c_str());
     else
         ImGui::TextDisabled("Messages you received can only be deleted on this device.");
+    ImGui::PopTextWrapPos();
     ImGui::Spacing();
     auto done = [&] {
         for (auto& mid : deleteMids) selMsgs.erase(mid);
@@ -1132,10 +1134,21 @@ void App::DrawMessages(const std::string& peer) {
             dl->ChannelsMerge();
             ReactHoverButton(m, p0, p1);
             DrawReactions(peer, m, p0, p1);
-            // selection by clicking the card background
-            if (ImGui::IsMouseHoveringRect(p0, p1) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered()) {
+            // menu: right-click anywhere on the card (also over thumbnails / buttons); selection: click the background
+            bool overCard = ImGui::IsMouseHoveringRect(p0, p1) && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+            if (overCard) {
                 if (ImGui::IsMouseClicked(1)) { contextMid = m.mid; ImGui::OpenPopup("msgctx"); }
-                if (ImGui::IsMouseClicked(0) && (io.KeyCtrl || selectionMode)) { sel ? (void)selMsgs.erase(m.mid) : (void)selMsgs.insert(m.mid); }
+                if (ImGui::IsMouseClicked(0) && (io.KeyCtrl || selectionMode) && !ImGui::IsAnyItemHovered()) { sel ? (void)selMsgs.erase(m.mid) : (void)selMsgs.insert(m.mid); }
+            }
+            // phones: long-press anywhere on the card (the finger must not have moved: that's scrolling)
+            ImVec2 cp = io.MouseClickedPos[0];
+            if (mobile && overCard && ImGui::IsMouseDown(0) && io.MouseDownDuration[0] >= 0.55f && io.MouseDownDuration[0] - io.DeltaTime < 0.55f &&
+                cp.x >= p0.x && cp.x <= p1.x && cp.y >= p0.y && cp.y <= p1.y && io.MouseDragMaxDistanceSqr[0] < ImGui::GetFontSize() * ImGui::GetFontSize() * 0.25f) {
+                contextMid = m.mid;
+                selectionMode = true;
+                selMsgs.insert(m.mid);
+                ImGui::ClearActiveID();  // the thumbnail / button under the finger must not fire on release
+                ImGui::OpenPopup("msgctx");
             }
             ImGui::Dummy(ImVec2(0, pad * 0.3f));
         } else {
@@ -1263,6 +1276,8 @@ static void EmojiAt(ImDrawList* dl, const std::string& emoji, ImVec2 p0, ImVec2 
 bool App::QuickReactionRow(const std::string& peer, const std::string& mid, const std::string& current) {
     bool mobile = ui::M().mobile;
     float s = mobile ? ui::M().rowH * 0.9f : ImGui::GetFrameHeight() * 1.5f;
+    if (mobile)  // 6 + "more" must fit across the phone screen
+        s = std::min(s, (ImGui::GetMainViewport()->WorkSize.x * 0.94f - ImGui::GetStyle().WindowPadding.x * 2) / 7.6f);
     bool done = false;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     for (int i = 0; i < 6; i++) {
@@ -2783,10 +2798,16 @@ void App::DrawCallBar() {
 
 // ---------------------------------------------------------------- video
 void App::DrawVideoStage(ImVec2 size, bool phone) {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(12, 12, 14, 255));
-    ImGui::BeginChild("videostage", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    // Desktop: a child window inside the chat. Phone: drawn straight into the full-screen call window, because the
+    // call buttons are placed on top of it in that window, and a child window would take their touches.
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    if (!phone) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(12, 12, 14, 255));
+        ImGui::BeginChild("videostage", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        p0 = ImGui::GetWindowPos();
+    }
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 p0 = ImGui::GetWindowPos(), p1(p0.x + size.x, p0.y + size.y);
+    ImVec2 p1(p0.x + size.x, p0.y + size.y);
     const auto& rv = Media().RemoteVideo();
     const auto& lv = Media().LocalVideo();
     int64_t nowMs = (int64_t)SDL_GetTicks64();
@@ -2846,8 +2867,10 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         if (!phone && ui::IconButton("vbig", Icon::Expand, videoBig ? "Smaller video" : "Bigger video", bw)) videoBig = !videoBig;
         ImGui::PopStyleColor();
     }
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
+    if (!phone) {
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+    }
 }
 
 void App::DrawVideoOverlay() {

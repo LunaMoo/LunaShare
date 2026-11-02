@@ -337,6 +337,33 @@ int main(int argc, char** argv) {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
+        {
+            // dev: LUNASHARE_TAPS="x,y,ms[,hold_ms];..." simulates touches (pixels, ms since start) for UI tests
+            static const char* taps = SDL_getenv("LUNASHARE_TAPS");
+            static int64_t t0 = ls::SteadyMs();
+            static int stage = 0;  // 0 idle, 1 down sent
+            static int64_t upAt = 0;
+            if (taps && *taps) {
+                int x, y, ms, hold = 80, n = 0;
+                int got = sscanf(taps, "%d,%d,%d,%d%n", &x, &y, &ms, &hold, &n);
+                if (got < 4) { hold = 80; got = sscanf(taps, "%d,%d,%d%n", &x, &y, &ms, &n); }
+                int64_t now = ls::SteadyMs() - t0;
+                if (got >= 3 && stage == 0 && now >= ms) {
+                    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+                    io.AddMousePosEvent((float)x, (float)y);
+                    io.AddMouseButtonEvent(0, true);
+                    stage = 1;
+                    upAt = now + hold;
+                } else if (stage == 1 && now >= upAt) {
+                    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+                    io.AddMouseButtonEvent(0, false);
+                    SDL_Log("tap %d,%d done", x, y);
+                    stage = 0;
+                    taps += n;
+                    while (*taps == ';' || *taps == ' ') taps++;
+                }
+            }
+        }
         ImGui::NewFrame();
         app.Frame();
         Player().Update();  // before Media(): hands it the current video picture to upload
