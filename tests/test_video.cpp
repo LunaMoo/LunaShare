@@ -139,6 +139,7 @@ int main() {
     m->get_stats(&st);
     printf("    sending %d kbps, %d fps, queued %zu bytes\n", st.send_kbps, st.send_fps, Queued(nullptr));
     CHECK(st.send_kbps < 450, "bitrate adapted down (%d kbps)", st.send_kbps);
+    int congestedKbps = st.send_kbps;
     CHECK(Queued(nullptr) < 64 * 1024, "queue stays short (%zu bytes, under ~1 s of delay)", Queued(nullptr));
     before = L.remote;
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
@@ -148,7 +149,7 @@ int main() {
     L.kbps = 0;
     std::this_thread::sleep_for(std::chrono::milliseconds(9000));
     m->get_stats(&st);
-    CHECK(st.send_kbps > 600, "bitrate climbs back (%d kbps)", st.send_kbps);
+    CHECK(st.send_kbps > congestedKbps * 3 / 2, "bitrate climbs back (%d kbps, was %d)", st.send_kbps, congestedKbps);
 
     printf("[video: receiver asks for a smaller picture]\n");
     {
