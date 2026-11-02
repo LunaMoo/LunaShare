@@ -544,29 +544,50 @@ void App::DrawMobile() {
         case MScreen::Settings: title = "Settings"; break;
         case MScreen::Devices: title = "Device"; break;
     }
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (rowH - ImGui::GetFontSize() * 1.3f) * 0.5f);
+    // chat: buttons on the right; the title gets what's left (shortened with "..."), buttons shrink on tiny screens
+    bool chatScreen = screen == MScreen::Chat;
+    bool callable = chatScreen && Media().Available();
+    bool videoable = callable && Media().VideoAvailable();
+    bool webcam = chatScreen && WebcamButtonShown(selectedPeer);
+    int nb = chatScreen ? 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) : 0;
+    float sp = ImGui::GetStyle().ItemSpacing.x;
+    float rowEnd = ImGui::GetContentRegionMax().x;
+    float titleX = ImGui::GetCursorPosX();
+    float hb = nb ? std::min(rowH, ((rowEnd - titleX) * 0.7f - sp * (float)(nb - 1)) / (float)nb) : 0;
+    float buttonsW = nb ? hb * (float)nb + sp * (float)nb : 0;
+    float rowY = ImGui::GetCursorPosY();
+    ImGui::SetCursorPosY(rowY + (rowH - ImGui::GetFontSize() * 1.3f) * 0.5f);
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
-    ImGui::TextUnformatted(title);
+    {
+        std::string t = title;
+        float maxW = rowEnd - titleX - buttonsW;
+        if (ImGui::CalcTextSize(t.c_str()).x > maxW) {
+            while (!t.empty() && ImGui::CalcTextSize((t + "...").c_str()).x > maxW) {
+                t.pop_back();
+                while (!t.empty() && ((unsigned char)t.back() & 0xC0) == 0x80) t.pop_back();  // whole UTF-8 characters
+                if (!t.empty() && (unsigned char)t.back() >= 0xC0) t.pop_back();
+            }
+            t += "...";
+        }
+        ImGui::TextUnformatted(t.c_str());
+    }
     ImGui::PopFont();
-    if (screen == MScreen::Chat) {
-        bool callable = Media().Available();
-        bool videoable = callable && Media().VideoAvailable();
-        bool webcam = WebcamButtonShown(selectedPeer);
-        int nb = 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - rowH * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
+    if (chatScreen) {
+        ImGui::SameLine(rowEnd - hb * (float)nb - sp * (float)(nb - 1));
+        ImGui::SetCursorPosY(rowY + (rowH - hb) * 0.5f);
         if (webcam) {
-            WebcamButton(selectedPeer, rowH);
+            WebcamButton(selectedPeer, hb);
             ImGui::SameLine();
         }
         if (callable) {
-            CallButton(selectedPeer, rowH);
+            CallButton(selectedPeer, hb);
             ImGui::SameLine();
         }
         if (videoable) {
-            CallButton(selectedPeer, rowH, true);
+            CallButton(selectedPeer, hb, true);
             ImGui::SameLine();
         }
-        if (ui::IconButton("attach", Icon::Attach, nullptr, rowH)) {
+        if (ui::IconButton("attach", Icon::Attach, nullptr, hb)) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, "Send to " + peerTitle, browser.lastDir);
         }
@@ -2279,8 +2300,13 @@ void App::DrawCallBar() {
     if (c.state == CallState::None || c.state == CallState::IncomingRinging) return;
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 1.2f;
+    bool phoneVideo = mobile && VideoVisible();
+    int nb = CallButtonCount(true) + (phoneVideo && !videoFull ? 1 : 0);
+    // phones: the buttons get their own row under the status once there are more than two, so they always fit
+    bool twoRows = mobile && nb >= 2;
+    float barH = twoRows ? h * 2 + ImGui::GetStyle().ItemSpacing.y : h;
     ImGui::PushStyleColor(ImGuiCol_ChildBg, c.state == CallState::Active ? IM_COL32(30, 110, 70, 255) : IM_COL32(60, 70, 120, 255));
-    ImGui::BeginChild("callbar", ImVec2(0, h + ImGui::GetStyle().WindowPadding.y * 2), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::BeginChild("callbar", ImVec2(0, barH + ImGui::GetStyle().WindowPadding.y * 2), ImGuiChildFlags_AlwaysUseWindowPadding);
     std::string who = eng.PeerName(c.peer);
     char status[160];
     if (c.state == CallState::Active) {
@@ -2326,12 +2352,17 @@ void App::DrawCallBar() {
                               Media().audioError.empty() ? "" : "\n", Media().audioError.c_str());
         }
     }
-    // buttons on the right (phones with video showing: those live on the full-screen video view)
-    bool phoneVideo = mobile && VideoVisible();
-    int nb = CallButtonCount(true) + (phoneVideo && !videoFull ? 1 : 0);
-    float bw = h;
-    ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
-    ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y);
+    // buttons on the right, shrunk if needed so all of them fit the width
+    float sp = ImGui::GetStyle().ItemSpacing.x;
+    float rowW = ImGui::GetContentRegionMax().x - ImGui::GetStyle().WindowPadding.x;
+    float bw = std::min(h, (rowW - sp * (float)(nb - 1)) / (float)nb);
+    if (twoRows) {
+        ImGui::SetCursorPos(ImVec2(ImGui::GetContentRegionMax().x - bw * (float)nb - sp * (float)(nb - 1),
+                                   ImGui::GetStyle().WindowPadding.y + h + ImGui::GetStyle().ItemSpacing.y + (h - bw) * 0.5f));
+    } else {
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - sp * (float)(nb - 1));
+        ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y + (h - bw) * 0.5f);
+    }
     if (phoneVideo && !videoFull) {
         if (ui::IconButton("vfull", Icon::Expand, "Show video", bw)) videoFull = true;
         ImGui::SameLine();
@@ -2440,7 +2471,7 @@ void App::DrawVideoOverlay() {
     ImGui::Text("%s  %d:%02d", eng.PeerName(eng.call.peer).c_str(), secs / 60, secs % 60);
     // bottom: call buttons, centered
     int nb = CallButtonCount(true);
-    float bb = bw * 1.05f;
+    float bb = std::min(bw * 1.05f, (full.x - pad * (float)(nb + 1)) / (float)nb);  // always fits the screen width
     float rowW = bb * (float)nb + pad * (float)(nb - 1);
     ImGui::SetCursorPos(ImVec2(top.x + (full.x - rowW) * 0.5f, top.y + full.y - bb - pad * 2));
     DrawCallButtons(bb, bb, true);
@@ -2489,8 +2520,10 @@ void App::DrawCameraPanel() {
     bool mobile = ui::M().mobile;
     ImGuiViewport* vp = ImGui::GetMainViewport();
     if (mobile) {
-        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y * 0.35f));
-        ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, vp->WorkSize.y * 0.65f));
+        // leave the call buttons at the bottom of the video view visible (hang up!)
+        float buttons = ui::M().rowH * 1.05f + ImGui::GetStyle().ItemSpacing.x * 3;
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y * 0.3f));
+        ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, vp->WorkSize.y * 0.7f - buttons));
         ImGui::SetNextWindowBgAlpha(0.92f);
     } else {
         ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 24, 0), ImGuiCond_Appearing);
@@ -2542,7 +2575,7 @@ void App::DrawCameraPanel() {
         Media().ApplyVideoQuality();
         camCtlTime = -1;
     }
-    if (ImGui::Checkbox("Lower quality when the connection is slow", &s.callVideoAdaptive)) {
+    if (ImGui::Checkbox("Lower quality when slow", &s.callVideoAdaptive)) {
         eng.ApplySettings(s);
         edit.callVideoAdaptive = s.callVideoAdaptive;
         Media().ApplyVideoQuality();
