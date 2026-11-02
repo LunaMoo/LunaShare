@@ -118,7 +118,7 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         dl->AddRectFilled(ImVec2(p.x, cy - 3), ImVec2(p.x + barW, cy + 3), ImGui::GetColorU32(ImGuiCol_Text, 0.25f), 3);
         dl->AddRectFilled(ImVec2(p.x, cy - 3), ImVec2(p.x + barW * frac, cy + 3), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 3);
         dl->AddCircleFilled(ImVec2(p.x + barW * frac, cy), 6, ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
-        std::string label = (cur ? Clock(pos) + " / " : "") + (dur > 0 ? Clock(dur) : std::string("--:--")) + "   " + BaseName(path);
+        std::string label = (cur ? Clock(pos) + " / " : "") + (dur > 0 ? Clock(dur) : std::string("--:--")) + "   " + (BaseName(path).rfind("Voice message", 0) == 0 ? std::string("Voice message") : BaseName(path));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + barW);
         ImGui::TextDisabled("%s", label.c_str());
         ImGui::PopTextWrapPos();

@@ -136,11 +136,21 @@ void App::Frame() {
             }
     }
 
+    static const char* autoRec = getenv("LUNASHARE_AUTOREC");  // dev: start a voice message
+    static bool autoRecDone = false;
+    if (autoRec && !autoRecDone && !selectedPeer.empty() && Media().CanRecordMessages()) {
+        recPath = JoinPath(ConfigDir(), "autorec.ogg");
+        recPeer = selectedPeer;
+        Media().StartRecording(recPath);
+        autoRecDone = true;
+    }
+
     busy = false;
     int unread = 0;
     for (auto& [id, t] : eng.transfers)
         if (t->state == TState::Active || t->state == TState::Hashing || t->state == TState::Verifying) busy = true;
     for (auto& [peer, cv] : eng.chats) unread += cv.unread;
+    if (Media().Recording() || Player().Playing()) busy = true;  // keep the timer / seek bar moving
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 
     ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -774,6 +784,43 @@ void App::DrawChat(const std::string& peer) {
 
     // input row
     float sendW = mobile ? ui::M().rowH * 1.4f : ImGui::GetFontSize() * 6;
+    // ---- voice message being recorded: timer, level, cancel / send instead of the text box
+    if (Media().Recording() && recPeer == peer) {
+        double secs = Media().RecordingSeconds();
+        float bw = inputH;
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(150, 50, 50, 255));
+        bool cancel = ui::IconButton("reccancel", Icon::Trash, "Discard", bw);
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float w = ImGui::GetContentRegionAvail().x - sendW - ImGui::GetStyle().ItemSpacing.x;
+        ImGui::Dummy(ImVec2(w, inputH));
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float blink = 0.5f + 0.5f * sinf((float)ImGui::GetTime() * 5.0f);
+        float r = ImGui::GetFontSize() * 0.35f;
+        dl->AddCircleFilled(ImVec2(p.x + r * 2, p.y + inputH * 0.5f), r, IM_COL32(230, 60, 60, (int)(120 + 135 * blink)));
+        char t[64];
+        snprintf(t, sizeof(t), "%d:%02d", (int)secs / 60, (int)secs % 60);
+        dl->AddText(ImVec2(p.x + r * 4, p.y + (inputH - ImGui::GetTextLineHeight()) * 0.5f), ImGui::GetColorU32(ImGuiCol_Text), t);
+        float lx = p.x + r * 4 + ImGui::CalcTextSize("00:00").x + r * 2, lw = std::max(10.0f, p.x + w - lx - r);
+        float lvl = Media().RecordLevel();
+        dl->AddRectFilled(ImVec2(lx, p.y + inputH * 0.42f), ImVec2(lx + lw, p.y + inputH * 0.58f), ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
+        dl->AddRectFilled(ImVec2(lx, p.y + inputH * 0.42f), ImVec2(lx + lw * lvl, p.y + inputH * 0.58f), ui::ColOk(), 4);
+        ImGui::SameLine();
+        bool send = ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH)) || secs > 600;  // 10 minutes max
+        if (cancel) Media().StopRecording(false);
+        if (send) {
+            double len = Media().StopRecording(true);
+            if (len >= 0.5) {
+                eng.SendPaths(peer, {recPath});
+                scrollToBottom = true;
+            } else {
+                RemoveFile(recPath);  // too short to be meant
+            }
+        }
+        DrawDeleteConfirm(peer);
+        return;
+    }
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - sendW - ImGui::GetStyle().ItemSpacing.x);
     if (focusInput) {
         ImGui::SetKeyboardFocusHere();
@@ -783,7 +830,21 @@ void App::DrawChat(const std::string& peer) {
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap);
     if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Enter = send, Ctrl+Enter = new line, drop files to send");
     ImGui::SameLine();
-    if (ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH))) send = true;
+    if (chatInput.empty() && Media().CanRecordMessages() && !Media().Recording()) {
+        // nothing typed: the button records a voice message
+        if (ui::IconTextButton(mobile ? "Voice" : "Voice", Icon::Mic, ImVec2(sendW, inputH))) {
+            std::string dir = JoinPath(ConfigDir(), "voice");
+            MakeDirs(dir);
+            time_t now = time(nullptr);
+            char name[96];
+            strftime(name, sizeof(name), "Voice message %Y-%m-%d %H-%M-%S.ogg", localtime(&now));
+            recPath = JoinPath(dir, name);
+            recPeer = peer;
+            if (!Media().StartRecording(recPath))
+                toasts.push_back({EventType::Error, "Microphone", "Could not start recording (microphone permission?)", "", 0, 4.0f});
+        }
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("Record a voice message");
+    } else if (ui::IconTextButton("Send", Icon::Send, ImVec2(sendW, inputH))) send = true;
     if (send) {
         std::string t = chatInput;
         while (!t.empty() && (t.back() == '\n' || t.back() == ' ')) t.pop_back();

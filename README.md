@@ -83,6 +83,11 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 
 ![Video in chat](docs/player.png)
 
+**Voice messages (needs the voice module)**
+- With nothing typed, the Send button becomes **Voice**. Tap it to record: the bar shows a timer and a level meter, with
+  **Discard** and **Send**. Recordings are Opus in Ogg (about 3 KB per second, noise-suppressed and levelled), up to 10 minutes,
+  and play in the chat like any other audio file. Anything under half a second is thrown away. A call ends a recording that is in progress.
+
 **Voice calls (optional module)**
 - Calls live in a separate plug-in, `lunashare_media` (`lunashare_media.dll` / `liblunashare_media.so` / `.dylib`), which is loaded at
   startup only if it's present. Without it LunaShare is the plain chat + file app, and the call button doesn't appear. Delete the file to remove calls.

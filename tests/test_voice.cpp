@@ -5,6 +5,7 @@
 #include <cstring>
 #include <deque>
 #include <random>
+#include <string>
 #include <vector>
 
 #include <opus.h>
@@ -152,6 +153,45 @@ static void TestEcho() {
     CHECK(nearOff - nearOn < 10, "own voice preserved");
 }
 
+static void TestVoiceMessage() {
+    printf("[voice message: Ogg Opus file]\n");
+    const LsmModule* m = lunashare_media_module();
+    std::string path = "voice_message_test.ogg";
+    CHECK(m->rec_start(path.c_str(), 24000) == 0, "recording starts");
+    std::vector<int16_t> pcm(320);
+    double t = 0;
+    for (int f = 0; f < 150; f++) {  // 3 s, speech-like warble
+        for (auto& v : pcm) {
+            v = (int16_t)(8000 * std::sin(t * 2 * 3.14159265 * (200 + 60 * std::sin(t * 3))) * (0.6 + 0.4 * std::sin(t * 7)));
+            t += 1.0 / 16000;
+        }
+        m->rec_push(pcm.data(), (int)pcm.size());
+    }
+    double secs = m->rec_stop(1);
+    CHECK(std::fabs(secs - 3.0) < 0.05, "3 s recorded (%.2f)", secs);
+    FILE* f = fopen(path.c_str(), "rb");
+    std::vector<uint8_t> data;
+    if (f) {
+        uint8_t b[4096];
+        size_t n;
+        while ((n = fread(b, 1, sizeof(b), f)) > 0) data.insert(data.end(), b, b + n);
+        fclose(f);
+    }
+    CHECK(data.size() > 4000 && data.size() < 20000, "file size fits 24 kbit/s (%zu bytes)", data.size());
+    CHECK(data.size() > 36 && memcmp(data.data(), "OggS", 4) == 0 && memcmp(data.data() + 28, "OpusHead", 8) == 0, "Ogg Opus headers");
+    int pages = 0;
+    for (size_t i = 0; i + 4 < data.size(); i++)
+        if (memcmp(&data[i], "OggS", 4) == 0) pages++;
+    CHECK(pages >= 4, "%d Ogg pages", pages);
+    printf("  %.2f s, %zu bytes, %d pages\n", secs, data.size(), pages);
+    m->rec_start("voice_message_cancel.ogg", 24000);  // cancelled recordings leave nothing behind
+    m->rec_push(pcm.data(), (int)pcm.size());
+    m->rec_stop(0);
+    FILE* g = fopen("voice_message_cancel.ogg", "rb");
+    CHECK(g == nullptr, "cancelled recording deleted");
+    if (g) fclose(g);
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     const LsmModule* m = lunashare_media_module();
@@ -159,6 +199,7 @@ int main() {
     TestLoopback(0.0);
     TestLoopback(0.10);
     TestEcho();
+    TestVoiceMessage();
     printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL VOICE TESTS PASSED\n", g_fail);
     return g_fail ? 1 : 0;
 }

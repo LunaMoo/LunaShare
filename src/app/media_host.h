@@ -93,6 +93,14 @@ public:
     bool VcamBusy() const { return vcamBusy_; }
     std::string VcamStatus();
 
+    // voice messages (not during a call)
+    bool CanRecordMessages() const { return mod_ != nullptr && mode_ != Mode::Call; }
+    bool StartRecording(const std::string& path);
+    double StopRecording(bool keep);  // returns the length in seconds
+    bool Recording() const { return recording_; }
+    double RecordingSeconds() const;
+    float RecordLevel() const { return mod_ && recording_ ? mod_->rec_level() : 0.f; }
+
     // microphone test from the settings page
     void StartMicTest();
     void StopMicTest();
@@ -100,7 +108,7 @@ public:
     float MicTestLevel() const { return micTestLevel_; }
 
 private:
-    enum class Mode { Off, Ring, Ringback, Call, MicTest };
+    enum class Mode { Off, Ring, Ringback, Call, MicTest, Record };
     void SetMode(Mode m);
     bool OpenDevices(bool capture, bool playback);
     void CloseDevices();
@@ -162,6 +170,8 @@ private:
     uint32_t settingsTick_ = 0;
     void ApplyMicGain(int16_t* pcm, int n);
     std::atomic<bool> micTest_{false};
+    std::atomic<bool> recording_{false};
+    uint32_t recStart_ = 0;
     std::atomic<float> micTestLevel_{0};
     uint64_t toneSample_ = 0;
     bool audioInit_ = false;

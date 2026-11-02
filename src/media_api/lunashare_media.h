@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define LSM_API_VERSION 1
+#define LSM_API_VERSION 2
 #define LSM_SAMPLE_RATE 16000 /* audio exchanged with the host: 16 kHz, mono, signed 16-bit */
 
 #if defined(_WIN32)
@@ -69,6 +69,11 @@ typedef struct LsmModule {
     void (*set_mute)(int mute);
     void (*set_settings)(const LsmSettings* settings);
     void (*get_stats)(LsmStats* out);
+    /* --- since version 2: voice messages, written as Ogg Opus files (independent of calls) --- */
+    int (*rec_start)(const char* path_utf8, int bitrate);  /* 0 on success */
+    void (*rec_push)(const int16_t* pcm, int samples);      /* 16 kHz mono microphone samples */
+    float (*rec_level)(void);                               /* 0..1, for a level meter */
+    double (*rec_stop)(int keep);                           /* finishes (or deletes) the file; returns seconds */
 } LsmModule;
 
 /* The only exported symbol. */

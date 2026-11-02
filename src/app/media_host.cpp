@@ -670,6 +670,8 @@ void MediaHost::CaptureCb(void* u, uint8_t* stream, int len) {
     self->ApplyMicGain(pcm, n);
     if (self->mode_ == Mode::Call) {
         self->mod_->capture(pcm, n);
+    } else if (self->mode_ == Mode::Record) {
+        self->mod_->rec_push(pcm, n);
     } else if (self->mode_ == Mode::MicTest) {
         double s = 0;
         for (int i = 0; i < n; i++) s += (double)pcm[i] * pcm[i];
@@ -768,7 +770,7 @@ void MediaHost::SetMode(Mode m) {
     } else if (m == Mode::Ring || m == Mode::Ringback) {
         mode_ = m;
         OpenDevices(false, true);
-    } else if (m == Mode::MicTest) {
+    } else if (m == Mode::MicTest || m == Mode::Record) {
         mode_ = m;
         OpenDevices(true, false);
     }
@@ -794,7 +796,9 @@ void MediaHost::Update() {
     if (st == CallState::Active && mod_) want = Mode::Call;
     else if (st == CallState::IncomingRinging) want = Mode::Ring;
     else if (st == CallState::OutgoingRinging) want = Mode::Ringback;
+    else if (recording_) want = Mode::Record;
     else if (micTest_) want = Mode::MicTest;
+    if (recording_ && st != CallState::None) StopRecording(false);  // a call takes the microphone
     if (st == CallState::None) wantCamera_ = false;
     if (want != Mode::Call && mode_ == Mode::Call) mute_ = false;
     SetMode(want);
@@ -867,6 +871,32 @@ LsmStats MediaHost::Stats() {
     if (mod_ && mode_ == Mode::Call) mod_->get_stats(&s);
     return s;
 }
+
+bool MediaHost::StartRecording(const std::string& path) {
+    if (!mod_ || recording_ || mode_ == Mode::Call) return false;
+    Settings s = eng_ ? eng_->GetSettings() : Settings();
+    if (mod_->rec_start(path.c_str(), std::max(24000, s.callBitrate)) != 0) return false;
+    micTest_ = false;
+    recording_ = true;
+    recStart_ = SDL_GetTicks();
+    SetMode(Mode::Record);  // opens the microphone now (Update() keeps it that way)
+    if (!capDev_) {
+        mod_->rec_stop(0);
+        recording_ = false;
+        SetMode(Mode::Off);
+        return false;
+    }
+    return true;
+}
+
+double MediaHost::StopRecording(bool keep) {
+    if (!recording_) return 0;
+    recording_ = false;
+    SetMode(Mode::Off);  // closes the microphone first, so nothing is pushed while finishing
+    return mod_->rec_stop(keep ? 1 : 0);
+}
+
+double MediaHost::RecordingSeconds() const { return recording_ ? (SDL_GetTicks() - recStart_) / 1000.0 : 0; }
 
 void MediaHost::StartMicTest() { micTest_ = true; }
 void MediaHost::StopMicTest() {
