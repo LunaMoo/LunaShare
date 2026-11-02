@@ -509,10 +509,28 @@ void ApiStats(LsvStats* o) {
     }
 }
 
+int ApiVcamAvailable() {
+    Core& c = G();
+    std::lock_guard<std::mutex> l(c.m);
+    return c.backend && c.backend->VcamAvailable() ? 1 : 0;
+}
+int ApiVcamEnable(int on, char* msg, int len) {
+    Core& c = G();  // no core lock: this can wait for the user's admin prompt
+    std::string err;
+    bool ok = c.backend && c.backend->VcamEnable(on != 0, &err);
+    if (msg && len > 0) snprintf(msg, (size_t)len, "%s", err.c_str());
+    return ok ? 1 : 0;
+}
+void ApiVcamPush(const LsvImage* img) {
+    Core& c = G();
+    if (c.backend && img) c.backend->VcamPush(*img);
+}
+
 const LsvModule kModule = {
-    LSV_API_VERSION, "LunaShare video", "1.0",
+    LSV_API_VERSION, "LunaShare video", "1.1",
     ApiInit, ApiStart, ApiStop, ApiReceive, ApiCameraOn, ApiListCameras, ApiSelectCamera,
     ApiSetSettings, ApiGetControls, ApiSetControl, ApiStats,
+    ApiVcamAvailable, ApiVcamEnable, ApiVcamPush,
 };
 
 }  // namespace

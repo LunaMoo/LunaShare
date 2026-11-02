@@ -12,6 +12,8 @@
 
 #include <codecapi.h>
 #include <d3d11.h>
+#include <devpropdef.h>
+#include <shellapi.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -32,7 +34,36 @@
 #include <thread>
 #include <vector>
 
+#include "vcam_shared.h"
 #include "video_backend.h"
+
+// Windows 11 virtual camera API (mfvirtualcamera.h, SDK 10.0.22000+). Loaded at run time from mfsensorgroup.dll so the
+// module still loads on older Windows; declared here when the SDK headers don't have it.
+#if defined(_MSC_VER) && __has_include(<mfvirtualcamera.h>)
+#include <mfvirtualcamera.h>
+#else
+typedef enum __MFVirtualCameraType { MFVirtualCameraType_SoftwareCameraSource = 0 } MFVirtualCameraType;
+typedef enum __MFVirtualCameraLifetime { MFVirtualCameraLifetime_Session = 0, MFVirtualCameraLifetime_System = 1 } MFVirtualCameraLifetime;
+typedef enum __MFVirtualCameraAccess { MFVirtualCameraAccess_CurrentUser = 0, MFVirtualCameraAccess_AllUsers = 1 } MFVirtualCameraAccess;
+struct IMFCameraSyncObject;
+MIDL_INTERFACE("1C08A864-EF6C-4C75-AF59-5F2D68DA9563")
+IMFVirtualCamera : public IMFAttributes {
+public:
+    virtual HRESULT STDMETHODCALLTYPE AddDeviceSourceInfo(LPCWSTR info) = 0;
+    virtual HRESULT STDMETHODCALLTYPE AddProperty(const DEVPROPKEY* key, DEVPROPTYPE type, const BYTE* data, ULONG size) = 0;
+    virtual HRESULT STDMETHODCALLTYPE AddRegistryEntry(LPCWSTR name, LPCWSTR subkey, DWORD type, const BYTE* data, ULONG size) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Start(IMFAsyncCallback * callback) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Stop() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Remove() = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetMediaSource(IMFMediaSource * *source) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SendCameraProperty(REFGUID set, ULONG id, ULONG flags, void* payload, ULONG payloadLen, void* data,
+                                                         ULONG dataLen, ULONG* written) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateSyncEvent(REFGUID set, ULONG id, ULONG flags, HANDLE ev, IMFCameraSyncObject** obj) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreateSyncSemaphore(REFGUID set, ULONG id, ULONG flags, HANDLE sem, LONG adjust,
+                                                          IMFCameraSyncObject** obj) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Shutdown() = 0;
+};
+#endif
 
 #if defined(__MINGW32__) && !defined(_MSC_VER)
 __CRT_UUID_DECL(ICodecAPI, 0x901db4c7, 0x31ce, 0x41a2, 0x85, 0xdc, 0x8f, 0xa0, 0xbf, 0x41, 0xb8, 0xda)
@@ -357,6 +388,225 @@ private:
     std::vector<uint8_t> header_, buf_;
 };
 
+// ======================================================================== virtual camera control (app side)
+typedef HRESULT(WINAPI* CreateVcamFn)(MFVirtualCameraType, MFVirtualCameraLifetime, MFVirtualCameraAccess, LPCWSTR, LPCWSTR,
+                                      const GUID*, ULONG, IMFVirtualCamera**);
+typedef HRESULT(WINAPI* VcamSupportedFn)(MFVirtualCameraType, BOOL*);
+
+std::wstring ModuleDir() {
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)&ModuleDir, &self);
+    wchar_t p[MAX_PATH] = {0};
+    GetModuleFileNameW(self, p, MAX_PATH);
+    std::wstring s = p;
+    size_t k = s.find_last_of(L"\\/");
+    return k == std::wstring::npos ? L"." : s.substr(0, k);
+}
+
+class VirtualCamera {
+public:
+    bool Available() {
+        HMODULE m = LoadLibraryW(L"mfsensorgroup.dll");
+        if (!m) return false;
+        auto fn = (VcamSupportedFn)GetProcAddress(m, "MFIsVirtualCameraTypeSupported");
+        create_ = (CreateVcamFn)GetProcAddress(m, "MFCreateVirtualCamera");
+        BOOL ok = FALSE;
+        if (!fn || !create_ || FAILED(fn(MFVirtualCameraType_SoftwareCameraSource, &ok))) return false;
+        return ok != FALSE;
+    }
+
+    bool Enable(bool on, std::string* err) {
+        if (!on) {
+            Disable();
+            return true;
+        }
+        if (thread_.joinable()) return true;
+        if (!Available()) {
+            *err = "virtual cameras need Windows 11";
+            return false;
+        }
+        if (!EnsureRegistered(err)) return false;
+        // the camera object lives on its own (MTA) thread for as long as it's enabled
+        std::mutex m;
+        std::condition_variable cv;
+        int state = 0;
+        std::string e;
+        stop_ = false;
+        thread_ = std::thread([&, this] {
+            ComInit com;
+            MFStartup(MF_VERSION, MFSTARTUP_FULL);
+            IMFVirtualCamera* cam = nullptr;
+            HRESULT hr = create_(MFVirtualCameraType_SoftwareCameraSource, MFVirtualCameraLifetime_Session, MFVirtualCameraAccess_CurrentUser,
+                                 LSVC_NAME, LSVC_CLSID_STR, nullptr, 0, &cam);
+            if (SUCCEEDED(hr)) hr = cam->Start(nullptr);
+            {
+                std::lock_guard<std::mutex> l(m);
+                state = SUCCEEDED(hr) ? 1 : -1;
+                if (FAILED(hr)) e = "Windows refused the virtual camera (" + Hr(hr) + ")";
+            }
+            cv.notify_all();
+            if (SUCCEEDED(hr)) {
+                std::unique_lock<std::mutex> l(stopM_);
+                stopCv_.wait(l, [this] { return stop_; });
+                cam->Remove();
+            }
+            if (cam) {
+                cam->Shutdown();
+                cam->Release();
+            }
+            MFShutdown();
+        });
+        std::unique_lock<std::mutex> l(m);
+        cv.wait(l, [&] { return state != 0; });
+        if (state < 0) {
+            l.unlock();
+            thread_.join();
+            *err = e;
+            return false;
+        }
+        return true;
+    }
+
+    void Disable() {
+        if (!thread_.joinable()) return;
+        {
+            std::lock_guard<std::mutex> l(stopM_);
+            stop_ = true;
+        }
+        stopCv_.notify_all();
+        thread_.join();
+        std::lock_guard<std::mutex> l(fm_);
+        CloseMapping();
+    }
+
+    bool On() const { return const_cast<std::thread&>(thread_).joinable(); }
+
+    // newest picture -> shared memory, upright and scaled down to what the camera user asked for
+    void Push(const LsvImage& im) {
+        if (!On()) return;
+        uint64_t now = GetTickCount64();
+        std::lock_guard<std::mutex> l(fm_);
+        if (!view_) {
+            if (now - lastOpenTry_ < 1000) return;  // nobody is using the camera yet
+            lastOpenTry_ = now;
+            map_ = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, LSVC_MAPPING);
+            if (!map_) return;
+            view_ = (uint8_t*)MapViewOfFile(map_, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+            if (!view_) { CloseMapping(); return; }
+        }
+        auto* h = (LsvcHeader*)view_;
+        if (h->magic != LSVC_MAGIC) return;
+        if (now - lastWrite_ < 15) return;  // at most ~60 fps
+        lastWrite_ = now;
+        int rot = ((im.rotation % 360) + 360) % 360;
+        bool swap = rot == 90 || rot == 270;
+        int uw = swap ? im.height : im.width, uh = swap ? im.width : im.height;  // upright size
+        int bw = h->wantW ? (int)h->wantW : 1920, bh = h->wantH ? (int)h->wantH : 1080;
+        bw = std::min(bw, LSVC_MAX_W);
+        bh = std::min(bh, LSVC_MAX_H);
+        double f = std::min(1.0, std::min((double)bw / uw, (double)bh / uh));
+        int ow = std::max(2, (int)(uw * f) & ~1), oh = std::max(2, (int)(uh * f) & ~1);
+        uint8_t* dy = view_ + LSVC_DATA_OFFSET;
+        uint8_t* duv = dy + (size_t)ow * oh;
+        InterlockedIncrement(&h->seq);  // odd: writing
+        const int W = im.width, H = im.height, ps = im.uv_pixel_stride;
+        auto src = [&](int ux, int uy, int& sx, int& sy) {  // upright -> raw camera coordinates
+            switch (rot) {
+                case 90: sx = uy; sy = H - 1 - ux; break;
+                case 180: sx = W - 1 - ux; sy = H - 1 - uy; break;
+                case 270: sx = W - 1 - uy; sy = ux; break;
+                default: sx = ux; sy = uy; break;
+            }
+        };
+        for (int y = 0; y < oh; y++) {
+            int uy = (int)((int64_t)y * uh / oh);
+            uint8_t* row = dy + (size_t)y * ow;
+            for (int x = 0; x < ow; x++) {
+                int sx, sy;
+                src((int)((int64_t)x * uw / ow), uy, sx, sy);
+                row[x] = im.y[(size_t)sy * im.y_stride + sx];
+            }
+        }
+        for (int y = 0; y < oh / 2; y++) {
+            int uy = (int)((int64_t)(y * 2) * uh / oh);
+            uint8_t* row = duv + (size_t)y * ow;
+            for (int x = 0; x < ow / 2; x++) {
+                int sx, sy;
+                src((int)((int64_t)(x * 2) * uw / ow), uy, sx, sy);
+                size_t ci = (size_t)(sy >> 1) * im.uv_stride + (size_t)(sx >> 1) * ps;
+                row[x * 2] = im.u[ci];
+                row[x * 2 + 1] = im.v[ci];
+            }
+        }
+        h->width = (uint32_t)ow;
+        h->height = (uint32_t)oh;
+        h->writtenMs = (int64_t)now;
+        InterlockedIncrement(&h->seq);  // even: done
+    }
+
+private:
+    void CloseMapping() {
+        if (view_) UnmapViewOfFile(view_);
+        if (map_) CloseHandle(map_);
+        view_ = nullptr;
+        map_ = nullptr;
+    }
+
+    // The camera service can't load DLLs from user folders: copy lunashare_vcam.dll to ProgramData and register it
+    // there (COM, machine-wide). Needs administrator rights once per version.
+    bool EnsureRegistered(std::string* err) {
+        std::wstring srcPath = ModuleDir() + L"\\lunashare_vcam.dll";
+        WIN32_FILE_ATTRIBUTE_DATA fa{};
+        if (!GetFileAttributesExW(srcPath.c_str(), GetFileExInfoStandard, &fa)) {
+            *err = "lunashare_vcam.dll is missing next to the video module";
+            return false;
+        }
+        wchar_t pd[MAX_PATH] = L"C:\\ProgramData";
+        GetEnvironmentVariableW(L"ProgramData", pd, MAX_PATH);
+        wchar_t stamp[64];
+        swprintf(stamp, 64, L"%08lx%08lx", (unsigned long)fa.ftLastWriteTime.dwHighDateTime, (unsigned long)fa.nFileSizeLow);
+        std::wstring dir = std::wstring(pd) + L"\\LunaShare";
+        std::wstring dst = dir + L"\\lunashare_vcam_" + stamp + L".dll";
+        if (RegisteredPath() == dst && GetFileAttributesW(dst.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+        std::wstring args = L"/c mkdir \"" + dir + L"\" 2>nul & copy /y \"" + srcPath + L"\" \"" + dst + L"\" >nul && regsvr32 /s \"" + dst + L"\"";
+        SHELLEXECUTEINFOW sei{sizeof(sei)};
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE;
+        sei.lpVerb = L"runas";
+        sei.lpFile = L"cmd.exe";
+        sei.lpParameters = args.c_str();
+        sei.nShow = SW_HIDE;
+        if (!ShellExecuteExW(&sei) || !sei.hProcess) {
+            *err = GetLastError() == ERROR_CANCELLED ? "the one-time setup needs administrator permission (it was declined)"
+                                                     : "could not run the one-time setup";
+            return false;
+        }
+        WaitForSingleObject(sei.hProcess, 60000);
+        CloseHandle(sei.hProcess);
+        if (RegisteredPath() != dst) {
+            *err = "the one-time setup did not finish (registration failed)";
+            return false;
+        }
+        return true;
+    }
+
+    static std::wstring RegisteredPath() {
+        std::wstring key = std::wstring(L"Software\\Classes\\CLSID\\") + LSVC_CLSID_STR + L"\\InprocServer32";
+        wchar_t buf[MAX_PATH * 2] = {0};
+        DWORD size = sizeof(buf);
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, key.c_str(), nullptr, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS) return {};
+        return buf;
+    }
+
+    CreateVcamFn create_ = nullptr;
+    std::thread thread_;
+    std::mutex stopM_, fm_;
+    std::condition_variable stopCv_;
+    bool stop_ = false;
+    HANDLE map_ = nullptr;
+    uint8_t* view_ = nullptr;
+    uint64_t lastOpenTry_ = 0, lastWrite_ = 0;
+};
+
 // ======================================================================== backend
 class WinBackend : public Backend {
 public:
@@ -365,6 +615,7 @@ public:
         mfOk_ = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_FULL));
     }
     ~WinBackend() override {
+        vcam_.Disable();
         StopCamera();
         StopDecoder();
     }
@@ -589,6 +840,10 @@ public:
         std::lock_guard<std::mutex> l(nameM_);
         return encName_;
     }
+    bool VcamAvailable() override { return vcam_.Available(); }
+    bool VcamEnable(bool on, std::string* err) override { return vcam_.Enable(on, err); }
+    void VcamPush(const LsvImage& img) override { vcam_.Push(img); }
+
     std::string DecoderName() override { return dec_ ? (decGpu_ ? "Microsoft H.264 decoder (GPU)" : "Microsoft H.264 decoder (software)") : ""; }
 
 private:
@@ -869,6 +1124,7 @@ private:
     std::string encName_;
     // decoder
     std::unique_ptr<ComInit> decCom_;
+    VirtualCamera vcam_;
     Com<IMFTransform> dec_;
     Com<ID3D11Device> d3d_;
     Com<IMFDXGIDeviceManager> dxgiMgr_;

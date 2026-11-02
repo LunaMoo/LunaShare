@@ -122,6 +122,7 @@ void MediaHost::LoadVideo() {
         vlib_ = lib;
         vmod_ = m;
         videoLoadInfo = c;
+        vcamAvail_ = m->vcam_available && m->vcam_available();
         break;
     }
     if (!vmod_ && videoLoadInfo.empty()) videoLoadInfo = "not installed";
@@ -174,6 +175,7 @@ void MediaHost::VLog(void*, const char* m) { SDL_Log("%s", m); }
 void MediaHost::VImage(void* u, int src, const LsvImage* img) {
     auto* self = (MediaHost*)u;
     if (src != LSV_LOCAL && src != LSV_REMOTE) return;
+    if (src == LSV_REMOTE && self->vcamOn_) self->vmod_->vcam_push(img);  // to "LunaShare Camera" as well
     Slot& s = self->slots_[src];
     {
         std::lock_guard<std::mutex> l(s.m);
@@ -440,6 +442,32 @@ void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p
     }
     dl->AddImageQuad(id, a, ImVec2(b.x, a.y), b, ImVec2(a.x, b.y), tc(u0, v0), tc(u1, v0), tc(u1, v1), tc(u0, v1));
     if (t.gpu) dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+}
+
+void MediaHost::SetVirtualCamera(bool on) {
+    if (!vcamAvail_ || vcamBusy_ || on == vcamOn_) return;
+    if (vcamThread_.joinable()) vcamThread_.join();
+    vcamBusy_ = true;
+    {
+        std::lock_guard<std::mutex> l(vcamM_);
+        vcamStatus_ = on ? "Setting up LunaShare Camera..." : "";
+    }
+    vcamThread_ = std::thread([this, on] {
+        char msg[256] = {0};
+        bool ok = vmod_->vcam_enable(on ? 1 : 0, msg, sizeof(msg)) != 0;
+        if (on) vcamOn_ = ok;
+        else vcamOn_ = false;
+        {
+            std::lock_guard<std::mutex> l(vcamM_);
+            vcamStatus_ = ok ? (on ? "LunaShare Camera is available to other apps" : "") : std::string("Virtual camera: ") + msg;
+        }
+        vcamBusy_ = false;
+    });
+}
+
+std::string MediaHost::VcamStatus() {
+    std::lock_guard<std::mutex> l(vcamM_);
+    return vcamStatus_;
 }
 
 void MediaHost::StartVideo() {
@@ -723,6 +751,10 @@ void MediaHost::SetMode(Mode m) {
 
 void MediaHost::Update() {
     if (!eng_) return;
+    if (!vcamChecked_) {  // settings are loaded by now
+        vcamChecked_ = true;
+        if (vcamAvail_ && eng_->GetSettings().virtualCamera) SetVirtualCamera(true);
+    }
     uint32_t now = SDL_GetTicks();
     if (now - settingsTick_ > 500) {
         settingsTick_ = now;
@@ -750,6 +782,9 @@ void MediaHost::Update() {
 
 void MediaHost::Shutdown() {
     SetMode(Mode::Off);
+    if (vcamThread_.joinable()) vcamThread_.join();
+    if (vcamOn_ && vmod_) vmod_->vcam_enable(0, nullptr, 0);
+    vcamOn_ = false;
     if (eng_) eng_->onMedia = nullptr;
 }
 

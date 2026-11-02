@@ -59,7 +59,8 @@ struct Settings {
     int callVideoRes = 1;          // 0 360p 1 540p 2 720p 3 1080p 4 1440p 5 4K 6 8K
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
-    std::string callCamera;        // preferred camera id (empty: front camera)      // dB added to the microphone before processing (quiet PC mics)
+    std::string callCamera;        // preferred camera id (empty: front camera)
+    bool virtualCamera = false;    // Windows 11: offer received video as "LunaShare Camera" to other apps      // dB added to the microphone before processing (quiet PC mics)
     std::string callInputDevice, callOutputDevice;  // empty = system default
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list

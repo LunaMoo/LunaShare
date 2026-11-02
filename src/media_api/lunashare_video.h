@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define LSV_API_VERSION 1
+#define LSV_API_VERSION 2
 
 #if defined(_WIN32)
 #define LSV_EXPORT __declspec(dllexport)
@@ -123,6 +123,12 @@ typedef struct LsvModule {
     int (*get_controls)(LsvControl* out, int max);
     void (*set_control)(int id, float value);
     void (*get_stats)(LsvStats* out);
+    /* --- since version 2: virtual camera (Windows 11: "LunaShare Camera" for other apps) --- */
+    int (*vcam_available)(void);
+    /* turn it on/off; on failure returns 0 and puts a reason into msg */
+    int (*vcam_enable)(int on, char* msg, int msg_len);
+    /* the picture to show in it (normally the video received from the other device); any thread */
+    void (*vcam_push)(const LsvImage* img);
 } LsvModule;
 
 typedef const LsvModule* (*LsvGetModuleFn)(void);

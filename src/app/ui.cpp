@@ -2712,6 +2712,21 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call.");
         changed |= ImGui::Checkbox("Lower video quality automatically when the connection is slow", &edit.callVideoAdaptive);
+        if (Media().VcamAvailable()) {
+            bool v = edit.virtualCamera;
+            ImGui::BeginDisabled(Media().VcamBusy());
+            if (ImGui::Checkbox("Virtual camera: use received video as a webcam (\"LunaShare Camera\")", &v)) {
+                edit.virtualCamera = v;
+                changed = true;
+                Media().SetVirtualCamera(v);
+            }
+            ImGui::EndDisabled();
+            ui::HelpMarker("Other apps (Teams, Zoom, OBS, Discord...) can pick \"LunaShare Camera\". It shows the video from the other "
+                           "device during a video call - for example your phone's camera - and a dark picture otherwise. The first "
+                           "time Windows asks for administrator permission to install it.");
+            std::string st = Media().VcamStatus();
+            if (!st.empty()) ImGui::TextDisabled("%s", st.c_str());
+        }
         auto cams = Media().Cameras();
         if (cams.size() > 1) {
             std::string cur = "Front camera (default)";

@@ -98,7 +98,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   or during a call. The bitrate follows from both: about 5 Mbit/s for 1080p at 30 fps, and about 60 Mbit/s for 4K at 120 fps, which needs fast Wi-Fi.
   If a camera or encoder can't do a combination, the closest one it can do is sent, and the call stats show the actual numbers.
   On Android, 120 fps uses the camera's high-speed mode, which has no self-view stream; the other side still gets the full rate.
-  Colour conversion, rotation and mirroring run on the GPU. On Windows, received video is decoded by the graphics card. With *Lower quality when the connection is slow* on, the bitrate follows what the link can actually carry
+  Colour conversion, rotation and mirroring run on the GPU. On Windows, received video is decoded by the graphics card.
+  8K (7680x4320) is offered as well. H.264 at 8K is beyond most decoders, so if the receiving device can't decode
+  a size, it automatically asks the sender for 4K (or 1080p) instead. With *Lower quality when the connection is slow* on, the bitrate follows what the link can actually carry
   (measured four times a second), so the picture gets softer instead of lagging. Voice always goes ahead of video.
 - **Camera panel (during a call):**
   - Phones: zoom (including the ultra-wide lens, e.g. 0.6x, where the phone has one), switching between cameras, exposure
@@ -106,6 +108,11 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
     depends on the camera.
   - Webcams: zoom, focus, exposure and brightness, when the camera supports them.
 - **Lost or late video** isn't buffered for long. The receiver asks for a fresh keyframe, so the picture recovers within a moment.
+- **Virtual camera (Windows 11):** turn on *Settings → Calls → Virtual camera* and the PC gets a webcam called **LunaShare Camera**.
+  Teams, Zoom, OBS, Discord and other apps can pick it. It shows the video received in a call, for example your phone's
+  camera, and a dark picture otherwise. Windows asks for administrator permission once, to install the small camera
+  component (`lunashare_vcam.dll`) into `%ProgramData%\LunaShare`, where the Windows camera service can load it.
+  It offers 360p up to 4K, at 30 or 60 fps.
 - On phones a video call opens full screen with the call buttons at the bottom. On desktop the video sits above the chat and can be enlarged.
 
 ![Video call](docs/video-call.png)
@@ -165,6 +172,7 @@ opnsense/      OPNsense plugin (Services > LunaShare rendezvous) + install.sh
   platform.*     paths, MACs, interfaces, UTF-8 file I/O
 src/media_api/ lunashare_media.h - the C ABI between the app and media modules
 modules/voice/ voice module: Opus + SpeexDSP + jitter buffer (built as lunashare_media)
+modules/vcam/  Windows 11 virtual camera media source (lunashare_vcam.dll, loaded by the camera Frame Server)
 modules/video/ video module (lunashare_video): video_core.cpp (packets, keyframes, bitrate), video_win.cpp (Media Foundation),
                video_android.cpp + android/app/src/calls/java/.../VideoEngine.java (Camera2 + MediaCodec), video_fake.cpp (tests)
 src/app/       SDL2 + Dear ImGui front end

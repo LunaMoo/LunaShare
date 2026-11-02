@@ -2,6 +2,7 @@
 #pragma once
 #include <atomic>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,13 @@ public:
     const VideoTex& RemoteVideo() const { return tex_[LSV_REMOTE]; }
     const VideoTex& LocalVideo() const { return tex_[LSV_LOCAL]; }
 
+    // virtual camera (Windows 11): received video shows up as "LunaShare Camera" in other apps
+    bool VcamAvailable() const { return vcamAvail_; }
+    void SetVirtualCamera(bool on);  // runs in the background (may show a one-time admin prompt)
+    bool VcamOn() const { return vcamOn_; }
+    bool VcamBusy() const { return vcamBusy_; }
+    std::string VcamStatus();
+
     // microphone test from the settings page
     void StartMicTest();
     void StopMicTest();
@@ -132,6 +140,11 @@ private:
     std::string camId_;
     Slot slots_[2];
     VideoTex tex_[2];
+    bool vcamAvail_ = false, vcamChecked_ = false;
+    std::atomic<bool> vcamOn_{false}, vcamBusy_{false};
+    std::mutex vcamM_;
+    std::string vcamStatus_;
+    std::thread vcamThread_;
 
     std::vector<Route> routes_;
     int currentRoute_ = -1;

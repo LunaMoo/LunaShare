@@ -46,7 +46,7 @@ jobs:
           mkdir -p dist
           # the optional calls module goes into modules/ (delete that folder for a chat + files only install)
           mkdir -p dist/modules
-          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll dist/modules/;
+          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/;
           elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/; cp build/liblunashare_media.dylib dist/LunaShare.app/Contents/MacOS/; rmdir dist/modules;
           else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; cp build/liblunashare_media.so dist/modules/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true

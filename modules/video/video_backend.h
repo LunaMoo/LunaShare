@@ -48,6 +48,13 @@ public:
     virtual void StopDecoder() = 0;
     virtual std::string EncoderName() = 0;
     virtual std::string DecoderName() = 0;
+    // virtual camera (Windows 11 only)
+    virtual bool VcamAvailable() { return false; }
+    virtual bool VcamEnable(bool, std::string* err) {
+        if (err) *err = "not supported on this system";
+        return false;
+    }
+    virtual void VcamPush(const LsvImage&) {}
 };
 
 std::unique_ptr<Backend> CreateBackend(Sink* sink, const LsvHost* host);
