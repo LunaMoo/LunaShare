@@ -338,6 +338,17 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         {
+            // dev: LUNASHARE_FPSLOG prints how many frames the UI draws per second
+            static const bool fpsLog = SDL_getenv("LUNASHARE_FPSLOG") != nullptr;
+            static int frames = 0;
+            static int64_t fpsT = ls::SteadyMs();
+            if (fpsLog && (++frames, ls::SteadyMs() - fpsT >= 1000)) {
+                SDL_Log("ui fps %d", frames);
+                frames = 0;
+                fpsT = ls::SteadyMs();
+            }
+        }
+        {
             // dev: LUNASHARE_TAPS="x,y,ms[,hold_ms];..." simulates touches (pixels, ms since start) for UI tests
             static const char* taps = SDL_getenv("LUNASHARE_TAPS");
             static int64_t t0 = ls::SteadyMs();

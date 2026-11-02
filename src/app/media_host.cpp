@@ -24,7 +24,10 @@ MediaHost& Media() {
     return m;
 }
 
+static Uint32 WakeEvent();
+
 bool MediaHost::Load() {
+    WakeEvent();  // registered on the UI thread
 #if defined(LS_MEDIA_STATIC)
     mod_ = lunashare_media_module();
     loadInfo = "built in";
@@ -163,6 +166,20 @@ std::string MediaHost::RateText(int bps) {
     return b;
 }
 
+// The UI sleeps between events to save battery. A new video picture is such an event: it wakes the UI right away
+// (once per drawn picture), so video is shown at its own frame rate even when nobody touches the screen.
+static std::atomic<bool> g_wakePending{false};
+static Uint32 WakeEvent() {
+    static Uint32 t = SDL_RegisterEvents(1);
+    return t;
+}
+static void WakeUi() {
+    if (g_wakePending.exchange(true)) return;
+    SDL_Event e{};
+    e.type = WakeEvent();
+    if (e.type != (Uint32)-1) SDL_PushEvent(&e);
+}
+
 int MediaHost::VSend(void* u, const uint8_t* d, size_t n) {
     auto* self = (MediaHost*)u;
     if (self->vmsgOpen_) {
@@ -206,6 +223,7 @@ void MediaHost::VImage(void* u, int src, const LsvImage* img) {
     }
     if (self->gpuYuv_) CopyPlanes(*img, s);
     else Convert(*img, s);
+    WakeUi();
 }
 
 // GPU path: only copy the planes (tight Y, interleaved U/V); colour conversion, rotation and mirroring happen when drawing
@@ -306,6 +324,7 @@ void MediaHost::PushPlayerFrame(const LsvImage& img) {
 }
 
 void MediaHost::UploadVideo() {
+    g_wakePending = false;  // the next picture may wake the UI again
     for (int i = 0; i < 3; i++) {
         Slot& s = slots_[i];
         VideoTex& t = tex_[i];
