@@ -40,6 +40,7 @@ struct HostBridge {
     // Android: JavaVM* and a global ref to the VideoEngine class (calls build only), for the video module
     std::function<void*()> javaVm;
     std::function<void*()> videoClass;
+    std::function<void*()> playerClass;  // global ref to PlayerEngine (all builds)
 };
 HostBridge& Bridge();
 

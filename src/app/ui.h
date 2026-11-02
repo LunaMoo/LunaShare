@@ -95,6 +95,7 @@ private:
     void ViewerZoomAt(ImVec2 pt, float factor);
     void ViewerGo(int delta);
     void DrawThumbnails(const std::string& peer, const std::vector<std::shared_ptr<ls::Transfer>>& items, float width);
+    void DrawAudioItems(const std::vector<std::shared_ptr<ls::Transfer>>& items, float width);
     void DrawToasts();
     void OpenSendTo(const std::vector<std::string>& paths);
     void CopySelectedMessages(const std::string& peer);
@@ -169,6 +170,7 @@ private:
         float swipeX = 0;
         ImVec2 areaMin{0, 0}, areaMax{0, 0};
         float uiAlpha = 1.0f;
+        std::string videoPath;     // video being played in the viewer
     } viewer;
 
     bool openIncomingCall = false;

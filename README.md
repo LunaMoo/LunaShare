@@ -72,6 +72,17 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Each pair of devices has a **safety number** (30 digits, identical on both screens). Compare it once and mark the device as *verified*.
 - Bluetooth links and hotspot logins sent over them are encrypted the same way. Only the discovery beacons (name, ID, port) are plain.
 
+**Audio and video files in chat (optional player module)**
+- Videos you send or receive show a thumbnail with their length. Tapping one plays it in the full-screen viewer, where you can swipe
+  between pictures and videos and use play/pause and a seek bar. Audio files (mp3, m4a/aac, ogg/opus, flac, wav) play right in the chat bubble.
+- Supported formats: mp4/mov, mkv/webm, ogg, mp3, flac, wav and avi. Video codecs: H.264, HEVC, AV1, VP9, VP8 and MPEG-4. Audio: AAC, MP3, Opus, Vorbis, FLAC, ALAC and PCM.
+  Phone videos are shown upright using their rotation tag.
+- **Windows:** `lunashare_player.dll` plus the shared trimmed FFmpeg in `modules/` (about 8 MB together with the video module's files).
+  Video is decoded on the graphics card where possible.
+- **Android:** the phone's own hardware decoders, so it adds almost nothing to the app and is included in both the lite and the calls APK.
+
+![Video in chat](docs/player.png)
+
 **Voice calls (optional module)**
 - Calls live in a separate plug-in, `lunashare_media` (`lunashare_media.dll` / `liblunashare_media.so` / `.dylib`), which is loaded at
   startup only if it's present. Without it LunaShare is the plain chat + file app, and the call button doesn't appear. Delete the file to remove calls.

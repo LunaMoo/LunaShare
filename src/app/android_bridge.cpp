@@ -142,6 +142,17 @@ void AndroidBridgeInit(ls::Engine* engine) {
         Env()->GetJavaVM(&vm);
         return vm;
     };
+    b.playerClass = []() -> void* {
+        JNIEnv* env = Env();
+        jmethodID m = M("playerClass", "()Ljava/lang/Class;");
+        if (!m) { env->ExceptionClear(); return nullptr; }
+        jobject c = env->CallStaticObjectMethod(g_cls, m);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
+        if (!c) return nullptr;
+        jobject g = env->NewGlobalRef(c);
+        env->DeleteLocalRef(c);
+        return g;
+    };
     b.videoClass = []() -> void* {
         JNIEnv* env = Env();
         jmethodID m = M("videoClass", "()Ljava/lang/Class;");

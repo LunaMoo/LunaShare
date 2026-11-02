@@ -80,6 +80,11 @@ public:
     void SetGlsl(const char* glslVersion);  // after the GL context exists; enables the GPU path
     const VideoTex& RemoteVideo() const { return tex_[LSV_REMOTE]; }
     const VideoTex& LocalVideo() const { return tex_[LSV_LOCAL]; }
+    // the player module's picture goes through the same upload / GPU colour path (slot 2)
+    void PushPlayerFrame(const LsvImage& img);
+    const VideoTex& PlayerVideo() const { return tex_[2]; }
+    void ClearPlayerVideo() { tex_[2].valid = false; }
+    void UploadVideoNow() { UploadVideo(); }
 
     // virtual camera (Windows 11): received video shows up as "LunaShare Camera" in other apps
     bool VcamAvailable() const { return vcamAvail_; }
@@ -141,8 +146,8 @@ private:
     bool wantCamera_ = false;
     std::atomic<bool> camOn_{false}, remoteCam_{false};
     std::string camId_;
-    Slot slots_[2];
-    VideoTex tex_[2];
+    Slot slots_[3];
+    VideoTex tex_[3];
     bool vcamAvail_ = false, vcamChecked_ = false;
     std::atomic<int> remoteRotAdj_{0};
     std::atomic<bool> vcamOn_{false}, vcamBusy_{false};

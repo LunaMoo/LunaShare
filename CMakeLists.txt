@@ -11,6 +11,7 @@ option(LUNASHARE_BUILD_SERVER "Build the lunashare-rendezvous server" ON)
 option(LUNASHARE_BUILD_VOICE "Build the optional voice call module (separate library)" ON)
 option(LUNASHARE_VIDEO_TEST_MODULE "Development: build lunashare_video with a test-pattern camera where no real backend exists" OFF)
 set(LUNASHARE_FFMPEG_DIR "" CACHE PATH "FFmpeg 7.1 install for HEVC/AV1 decoding in the Windows video module (optional)")
+option(LUNASHARE_BUILD_PLAYER "Build the optional player module (audio/video files in chat)" ON)
 option(LUNASHARE_BUILD_VIDEO "Build the optional video call module (separate library, Windows/Android)" ON)
 option(LUNASHARE_SYSTEM_SDL  "Use an installed SDL2 instead of fetching it" OFF)
 set(LUNASHARE_GL_API "GL3" CACHE STRING "Renderer API: GL3 (desktop), GLES3 (Android/iOS), GLES2")
@@ -160,6 +161,36 @@ if(LUNASHARE_BUILD_VIDEO)
     target_link_libraries(lunashare_video_test PUBLIC Threads::Threads)
 endif()
 
+# ---------------------------------------------------------------- optional player module
+# lunashare_player: plays audio/video files from the chat. Android uses the platform decoders (Java side:
+# android/app/src/main/java/.../PlayerEngine.java), desktop uses FFmpeg (LUNASHARE_FFMPEG_DIR, DLLs next to it).
+if(LUNASHARE_BUILD_PLAYER)
+    set(LSP_PLATFORM "")
+    if(ANDROID)
+        set(LSP_PLATFORM modules/player/player_android.cpp)
+    elseif(LUNASHARE_FFMPEG_DIR AND EXISTS "${LUNASHARE_FFMPEG_DIR}/include/libavformat/avformat.h")
+        set(LSP_PLATFORM modules/player/player_ff.cpp)
+    endif()
+    if(LSP_PLATFORM)
+        add_library(lunashare_player SHARED modules/player/player_core.cpp ${LSP_PLATFORM})
+        set_target_properties(lunashare_player PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+        target_include_directories(lunashare_player PRIVATE src/media_api modules/player)
+        target_link_libraries(lunashare_player PRIVATE Threads::Threads)
+        if(NOT ANDROID)
+            target_include_directories(lunashare_player PRIVATE "${LUNASHARE_FFMPEG_DIR}/include")
+        endif()
+        if(WIN32 AND NOT MSVC)
+            target_link_options(lunashare_player PRIVATE -static)
+        elseif(APPLE)
+            target_link_options(lunashare_player PRIVATE -Wl,-exported_symbol,_lunashare_player_module)
+        elseif(NOT WIN32)
+            target_link_libraries(lunashare_player PRIVATE ${CMAKE_DL_LIBS})
+            target_link_options(lunashare_player PRIVATE -Wl,--exclude-libs,ALL)
+        endif()
+    endif()
+endif()
+
 # ---------------------------------------------------------------- rendezvous server
 if(LUNASHARE_BUILD_SERVER AND NOT ANDROID AND NOT IOS)
     add_executable(lunashare-rendezvous server/main.cpp)
@@ -230,7 +261,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_viewer.cpp
         src/app/image_cache.cpp
         src/app/gl_funcs.cpp
-        src/app/media_host.cpp
+        src/app/media_host.cpp src/app/player_host.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp
         ${imgui_SOURCE_DIR}/imgui_draw.cpp
         ${imgui_SOURCE_DIR}/imgui_tables.cpp

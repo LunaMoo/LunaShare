@@ -15,6 +15,7 @@
 #include "ui.h"
 #include "ui_widgets.h"
 #include "media_host.h"
+#include "player_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
 
@@ -234,6 +235,7 @@ int main(int argc, char** argv) {
 
     ls::Engine engine;
     AndroidBridgeInit(&engine);
+    Player().Load();         // optional player module (audio/video files in chat)
     Media().Load();          // optional calls module; must happen before Start() so the capability is announced
     Media().Attach(&engine);
     engine.Start();
@@ -333,6 +335,7 @@ int main(int argc, char** argv) {
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
         app.Frame();
+        Player().Update();  // before Media(): hands it the current video picture to upload
         Media().Update();
         ImGui::Render();
 
@@ -375,6 +378,7 @@ int main(int argc, char** argv) {
 
     }
 
+    Player().Shutdown();
     Media().Shutdown();
     engine.Stop();
     Images().Shutdown();

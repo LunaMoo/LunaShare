@@ -276,8 +276,18 @@ static void Upload(unsigned tex, bool resize, int internalFmt, unsigned fmt, int
     else glf::TexSubImage2D(glf::TEXTURE_2D, 0, 0, 0, w, h, fmt, glf::UNSIGNED_BYTE, data);
 }
 
+void MediaHost::PushPlayerFrame(const LsvImage& img) {
+    Slot& s = slots_[2];
+    {
+        std::lock_guard<std::mutex> l(s.m);
+        if (s.fresh) return;
+    }
+    if (gpuYuv_) CopyPlanes(img, s);
+    else Convert(img, s);
+}
+
 void MediaHost::UploadVideo() {
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         Slot& s = slots_[i];
         VideoTex& t = tex_[i];
         std::lock_guard<std::mutex> l(s.m);

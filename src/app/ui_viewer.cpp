@@ -3,6 +3,8 @@
 #include <cmath>
 
 #include "image_cache.h"
+#include "media_host.h"
+#include "player_host.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "platform.h"
@@ -12,10 +14,118 @@
 using namespace ls;
 using ui::Icon;
 
+static bool Viewable(const std::string& path) {
+    return ImageCache::IsImagePath(path) || (Player().Available() && PlayerHost::IsVideoPath(path));
+}
+
 static bool ViewablePath(const Transfer& t) {
-    if (!ImageCache::IsImagePath(t.rel.empty() ? t.name : t.rel)) return false;
+    if (!Viewable(t.rel.empty() ? t.name : t.rel)) return false;
     if (t.outgoing) return t.state != TState::Cancelled && FileExists(t.localPath);
     return t.state == TState::Completed && FileExists(t.localPath);
+}
+
+// picture for a chat thumbnail: the image itself, or a frame from a video (via the player module)
+struct ThumbRef {
+    ImTextureID id = 0;
+    int w = 0, h = 0;
+    bool ready = false, failed = false, video = false;
+    double duration = 0;
+};
+static ThumbRef ThumbFor(const std::string& path) {
+    ThumbRef r;
+    if (PlayerHost::IsVideoPath(path)) {
+        const auto& m = Player().GetMeta(path);
+        r.video = true;
+        r.duration = m.info.duration;
+        r.failed = m.done && !m.ok;
+        if (m.tex) {
+            r.id = (ImTextureID)(intptr_t)m.tex;
+            r.w = m.tw;
+            r.h = m.th;
+            r.ready = true;
+        } else if (m.done && m.ok) {
+            r.w = std::max(1, m.info.width);
+            r.h = std::max(1, m.info.height);
+        }
+        return r;
+    }
+    const ImageTex& t = Images().Get(path, false);
+    r.ready = t.state == ImageTex::Ready;
+    r.failed = t.state == ImageTex::Failed;
+    if (r.ready) {
+        r.id = t.Id();
+        r.w = t.w;
+        r.h = t.h;
+    }
+    return r;
+}
+
+static std::string Clock(double s) {
+    int t = (int)(s + 0.5);
+    char b[32];
+    if (t >= 3600) snprintf(b, sizeof(b), "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
+    else snprintf(b, sizeof(b), "%d:%02d", t / 60, t % 60);
+    return b;
+}
+
+// play triangle + length on top of a video thumbnail
+static void VideoBadge(ImDrawList* dl, ImVec2 p, ImVec2 p1, double duration) {
+    ImVec2 c((p.x + p1.x) * 0.5f, (p.y + p1.y) * 0.5f);
+    float r = std::min(p1.x - p.x, p1.y - p.y) * 0.16f;
+    r = std::clamp(r, 12.0f, ImGui::GetFontSize() * 2.2f);
+    dl->AddCircleFilled(c, r, IM_COL32(0, 0, 0, 150));
+    dl->AddTriangleFilled(ImVec2(c.x - r * 0.35f, c.y - r * 0.5f), ImVec2(c.x + r * 0.55f, c.y), ImVec2(c.x - r * 0.35f, c.y + r * 0.5f), IM_COL32_WHITE);
+    if (duration > 0) {
+        std::string d = Clock(duration);
+        ImVec2 ts = ImGui::CalcTextSize(d.c_str());
+        ImVec2 a(p1.x - ts.x - 10, p1.y - ts.y - 6);
+        dl->AddRectFilled(ImVec2(a.x - 4, a.y - 2), ImVec2(p1.x - 6, p1.y - 4), IM_COL32(0, 0, 0, 160), 4);
+        dl->AddText(a, IM_COL32_WHITE, d.c_str());
+    }
+}
+
+// ---------------------------------------------------------------- audio files: inline player rows
+void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, float width) {
+    if (!Player().Available()) return;
+    for (auto& t : items) {
+        const std::string& path = t->localPath;
+        bool ready = t->outgoing ? t->state != TState::Cancelled : t->state == TState::Completed;
+        if (!PlayerHost::IsAudioPath(path) || !ready || !FileExists(path)) continue;
+        ImGui::PushID(path.c_str());
+        const auto& meta = Player().GetMeta(path);
+        bool cur = Player().IsCurrent(path);
+        bool playing = cur && Player().Playing();
+        float h = ui::M().mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 1.4f;
+        if (ui::IconButton("play", playing ? Icon::Pause : Icon::Play, playing ? "Pause" : "Play", h)) Player().Toggle(path);
+        ImGui::SameLine();
+        double dur = cur && Player().Duration() > 0 ? Player().Duration() : meta.info.duration;
+        double pos = cur ? Player().Position() : 0;
+        float barW = std::max(40.0f, width - h - ImGui::GetStyle().ItemSpacing.x);
+        ImGui::BeginGroup();
+        // progress bar you can tap / drag to seek
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float bh = h * 0.45f;
+        ImGui::InvisibleButton("seek", ImVec2(barW, bh));
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float frac = dur > 0 ? (float)std::clamp(pos / dur, 0.0, 1.0) : 0;
+        if ((ImGui::IsItemActive() || ImGui::IsItemClicked()) && dur > 0) {
+            float f = std::clamp((ImGui::GetIO().MousePos.x - p.x) / barW, 0.0f, 1.0f);
+            if (!cur) Player().Play(path);
+            Player().Seek(f * dur);
+            frac = f;
+        }
+        float cy = p.y + bh * 0.5f;
+        dl->AddRectFilled(ImVec2(p.x, cy - 3), ImVec2(p.x + barW, cy + 3), ImGui::GetColorU32(ImGuiCol_Text, 0.25f), 3);
+        dl->AddRectFilled(ImVec2(p.x, cy - 3), ImVec2(p.x + barW * frac, cy + 3), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 3);
+        dl->AddCircleFilled(ImVec2(p.x + barW * frac, cy), 6, ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
+        std::string label = (cur ? Clock(pos) + " / " : "") + (dur > 0 ? Clock(dur) : std::string("--:--")) + "   " + BaseName(path);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + barW);
+        ImGui::TextDisabled("%s", label.c_str());
+        ImGui::PopTextWrapPos();
+        if (meta.done && !meta.ok) ImGui::TextDisabled("can't play this file here");
+        ImGui::EndGroup();
+        ImGui::PopID();
+    }
 }
 
 // ---------------------------------------------------------------- thumbnails inside a chat card
@@ -35,10 +145,10 @@ void App::DrawThumbnails(const std::string& peer, const std::vector<std::shared_
         return hovered;
     };
     if (imgs.size() == 1) {
-        const ImageTex& t = Images().Get(imgs[0]->localPath, false);
+        ThumbRef t = ThumbFor(imgs[0]->localPath);
         float maxH = ImGui::GetFontSize() * (ui::M().mobile ? 16.0f : 13.0f);
         ImVec2 size(width, maxH * 0.6f);
-        if (t.state == ImageTex::Ready) {
+        if (t.w > 0 && t.h > 0) {
             float aspect = (float)t.w / (float)t.h;
             size.y = std::min(maxH, width / aspect);
             size.x = size.y * aspect;
@@ -47,10 +157,11 @@ void App::DrawThumbnails(const std::string& peer, const std::vector<std::shared_
         ImVec2 p = ImGui::GetCursorScreenPos();
         bool hovered = clickable(imgs[0]->localPath, size);
         ImVec2 p1(p.x + size.x, p.y + size.y);
-        if (t.state == ImageTex::Ready) dl->AddImageRounded(t.Id(), p, p1, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, rounding);
+        if (t.ready) dl->AddImageRounded(t.id, p, p1, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, rounding);
         else dl->AddRectFilled(p, p1, ImGui::GetColorU32(ImGuiCol_FrameBg), rounding);
-        if (t.state == ImageTex::Loading) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), "loading...");
-        if (t.state == ImageTex::Failed) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), "preview not available");
+        if (!t.ready && !t.failed && !t.video) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), "loading...");
+        if (t.failed) dl->AddText(ImVec2(p.x + 8, p.y + 8), ui::ColMuted(), t.video ? "can't play this video here" : "preview not available");
+        if (t.video && !t.failed) VideoBadge(dl, p, p1, t.duration);
         if (hovered) {
             dl->AddRect(p, p1, ImGui::GetColorU32(ImGuiCol_ButtonHovered), rounding, 0, 2.0f);
             ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -65,18 +176,19 @@ void App::DrawThumbnails(const std::string& peer, const std::vector<std::shared_
     int shown = std::min((int)imgs.size(), maxShow);
     for (int i = 0; i < shown; i++) {
         if (i % cols) ImGui::SameLine(0, gap);
-        const ImageTex& t = Images().Get(imgs[(size_t)i]->localPath, false);
+        ThumbRef t = ThumbFor(imgs[(size_t)i]->localPath);
         ImVec2 p = ImGui::GetCursorScreenPos();
         bool hovered = clickable(imgs[(size_t)i]->localPath, ImVec2(cell, cell));
         ImVec2 p1(p.x + cell, p.y + cell);
-        if (t.state == ImageTex::Ready) {
+        if (t.ready) {
             ImVec2 uv0(0, 0), uv1(1, 1);
             if (t.w > t.h) { float f = (float)t.h / (float)t.w; uv0.x = (1 - f) * 0.5f; uv1.x = 1 - uv0.x; }
             else { float f = (float)t.w / (float)t.h; uv0.y = (1 - f) * 0.5f; uv1.y = 1 - uv0.y; }
-            dl->AddImageRounded(t.Id(), p, p1, uv0, uv1, IM_COL32_WHITE, rounding);
+            dl->AddImageRounded(t.id, p, p1, uv0, uv1, IM_COL32_WHITE, rounding);
         } else {
             dl->AddRectFilled(p, p1, ImGui::GetColorU32(ImGuiCol_FrameBg), rounding);
         }
+        if (t.video) VideoBadge(dl, p, p1, t.duration);
         if (i == shown - 1 && (int)imgs.size() > shown) {
             dl->AddRectFilled(p, p1, IM_COL32(0, 0, 0, 140), rounding);
             std::string more = "+" + std::to_string((int)imgs.size() - shown);
@@ -119,7 +231,7 @@ void App::RebuildViewerList() {
         }
     } else {
         for (auto& h : eng.history) {
-            if (!ImageCache::IsImagePath(h.path) || !FileExists(h.path)) continue;
+            if (!Viewable(h.path) || !FileExists(h.path)) continue;
             add(h.path, (h.outgoing ? "Sent to " : "From ") + eng.PeerName(h.peer) + "  -  " + FormatTime(h.ts));
         }
     }
@@ -194,6 +306,10 @@ void App::DrawViewer() {
     ImGui::PopStyleColor(2);
     if (!vis) {
         viewer.open = false;
+        if (!viewer.videoPath.empty()) {
+            Player().Stop();
+            viewer.videoPath.clear();
+        }
         return;
     }
     ImGuiIO& io = ImGui::GetIO();
@@ -243,20 +359,52 @@ void App::DrawViewer() {
     if (!active) viewer.swipeX *= powf(0.0005f, io.DeltaTime);  // spring back / slide in
     if (fabsf(viewer.swipeX) < 0.5f) viewer.swipeX = 0;
 
-    // keyboard
-    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_Space)) ViewerGo(1);
+    bool isVideo = PlayerHost::IsVideoPath(path);
+    // the video on screen plays; anything else that was playing from here stops
+    if (isVideo && viewer.videoPath != path) {
+        Player().Play(path);
+        viewer.videoPath = path;
+    } else if (!isVideo && !viewer.videoPath.empty()) {
+        Player().Stop();
+        viewer.videoPath.clear();
+    }
+
+    // keyboard (space plays/pauses a video, otherwise next picture)
+    if (isVideo && ImGui::IsKeyPressed(ImGuiKey_Space)) Player().Toggle(path);
+    else if (ImGui::IsKeyPressed(ImGuiKey_Space)) ViewerGo(1);
+    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_PageDown)) ViewerGo(1);
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) ViewerGo(-1);
     if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) ViewerZoomAt(c, 1.25f);
     if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) ViewerZoomAt(c, 0.8f);
     if (ImGui::IsKeyPressed(ImGuiKey_0) || ImGui::IsKeyPressed(ImGuiKey_Keypad0)) { viewer.zoom = 1; viewer.pan = ImVec2(0, 0); }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_AppBack)) close = true;
 
+    // ---- video
+    if (isVideo) {
+        ImVec2 off(viewer.swipeX, 0);
+        const auto& vt = Media().PlayerVideo();
+        if (vt.valid) {
+            Media().DrawVideo(dl, vt, ImVec2(viewer.areaMin.x + off.x, viewer.areaMin.y), ImVec2(viewer.areaMax.x + off.x, viewer.areaMax.y), false);
+        } else {
+            ThumbRef t = ThumbFor(path);
+            if (t.ready) {
+                float f = std::min(areaSize.x / (float)t.w, areaSize.y / (float)t.h);
+                float dw = t.w * f, dh = t.h * f;
+                dl->AddImage(t.id, ImVec2(c.x + off.x - dw * 0.5f, c.y - dh * 0.5f), ImVec2(c.x + off.x + dw * 0.5f, c.y + dh * 0.5f));
+            }
+        }
+        if (Player().State() == LSP_ERROR || (Player().GetMeta(path).done && !Player().GetMeta(path).ok)) {
+            const char* msg = "This video can't be played here";
+            ImVec2 ts = ImGui::CalcTextSize(msg);
+            dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32(220, 220, 220, 255), msg);
+        }
+    }
     // ---- image
-    const ImageTex& full = Images().Get(path, true);
-    const ImageTex& thumb = Images().Get(path, false);
-    if (viewer.index + 1 < n) Images().Prefetch(viewer.paths[(size_t)viewer.index + 1], true);
-    if (viewer.index > 0) Images().Prefetch(viewer.paths[(size_t)viewer.index - 1], true);
-    const ImageTex* show = full.state == ImageTex::Ready ? &full : (thumb.state == ImageTex::Ready ? &thumb : nullptr);
+    const ImageTex& full = Images().Get(isVideo ? std::string() : path, true);
+    const ImageTex& thumb = Images().Get(isVideo ? std::string() : path, false);
+    if (viewer.index + 1 < n && !PlayerHost::IsVideoPath(viewer.paths[(size_t)viewer.index + 1])) Images().Prefetch(viewer.paths[(size_t)viewer.index + 1], true);
+    if (viewer.index > 0 && !PlayerHost::IsVideoPath(viewer.paths[(size_t)viewer.index - 1])) Images().Prefetch(viewer.paths[(size_t)viewer.index - 1], true);
+    const ImageTex* show = isVideo ? nullptr : full.state == ImageTex::Ready ? &full : (thumb.state == ImageTex::Ready ? &thumb : nullptr);
     float fit = 1;
     if (show) {
         fit = std::min(areaSize.x / (float)show->w, areaSize.y / (float)show->h);
@@ -281,7 +429,20 @@ void App::DrawViewer() {
             }
         }
     }
-    if (full.state != ImageTex::Ready) {
+    // neighbours peek in while swiping away from a video too
+    if (isVideo && viewer.swipeX != 0) {
+        int ni = viewer.swipeX > 0 ? viewer.index - 1 : viewer.index + 1;
+        if (ni >= 0 && ni < n) {
+            ThumbRef nt = ThumbFor(viewer.paths[(size_t)ni]);
+            if (nt.ready) {
+                float nf = std::min(areaSize.x / (float)nt.w, areaSize.y / (float)nt.h);
+                float nw = (float)nt.w * nf, nh = (float)nt.h * nf;
+                float ncx = c.x + viewer.swipeX + (viewer.swipeX > 0 ? -areaSize.x : areaSize.x);
+                dl->AddImage(nt.id, ImVec2(ncx - nw * 0.5f, c.y - nh * 0.5f), ImVec2(ncx + nw * 0.5f, c.y + nh * 0.5f));
+            }
+        }
+    }
+    if (!isVideo && full.state != ImageTex::Ready) {
         const char* msg = full.state == ImageTex::Failed ? "Cannot display this picture" : "Loading...";
         ImVec2 ts = ImGui::CalcTextSize(msg);
         dl->AddText(ImVec2(c.x - ts.x * 0.5f, viewer.areaMax.y - ts.y * 3), IM_COL32(220, 220, 220, 255), msg);
@@ -364,10 +525,44 @@ void App::DrawViewer() {
             ImGui::PopID();
             if (nx) ViewerGo(1);
         }
+        // video: play/pause + seek bar + time, above the bottom bar on phones
+        if (isVideo && Player().IsCurrent(path)) {
+            float vbh = bh;
+            float y = mobile ? viewer.areaMax.y - barH - vbh - ImGui::GetStyle().ItemSpacing.y * 2 : viewer.areaMax.y - vbh - ImGui::GetStyle().ItemSpacing.y * 2;
+            dl->AddRectFilled(ImVec2(viewer.areaMin.x, y - ImGui::GetStyle().ItemSpacing.y), ImVec2(viewer.areaMax.x, y + vbh + ImGui::GetStyle().ItemSpacing.y),
+                              IM_COL32(0, 0, 0, (int)(130 * a)));
+            ImGui::SetCursorScreenPos(ImVec2(viewer.areaMin.x + ImGui::GetStyle().ItemSpacing.x, y));
+            bool playing = Player().Playing();
+            if (ui::IconButton("vplay", playing ? Icon::Pause : Icon::Play, playing ? "Pause (Space)" : "Play (Space)", vbh)) Player().Toggle(path);
+            ImGui::SameLine();
+            double dur = Player().Duration(), pos = Player().Position();
+            std::string tl = Clock(pos) + " / " + Clock(dur);
+            float tw = ImGui::CalcTextSize("00:00:00 / 00:00:00").x * (dur >= 3600 ? 1.0f : 0.7f);
+            float barW = viewer.areaMax.x - ImGui::GetCursorScreenPos().x - tw - ImGui::GetStyle().ItemSpacing.x * 3;
+            ImVec2 bp = ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("vseek", ImVec2(std::max(20.0f, barW), vbh));
+            float frac = dur > 0 ? (float)std::clamp(pos / dur, 0.0, 1.0) : 0;
+            if ((ImGui::IsItemActive() || ImGui::IsItemClicked()) && dur > 0) {
+                frac = std::clamp((io.MousePos.x - bp.x) / barW, 0.0f, 1.0f);
+                Player().Seek(frac * dur);
+                viewer.swipeX = 0;
+            }
+            float cy = bp.y + vbh * 0.5f;
+            dl->AddRectFilled(ImVec2(bp.x, cy - 3), ImVec2(bp.x + barW, cy + 3), IM_COL32(255, 255, 255, 70), 3);
+            dl->AddRectFilled(ImVec2(bp.x, cy - 3), ImVec2(bp.x + barW * frac, cy + 3), IM_COL32(120, 170, 255, 255), 3);
+            dl->AddCircleFilled(ImVec2(bp.x + barW * frac, cy), vbh * 0.18f, IM_COL32(240, 240, 240, 255));
+            ImGui::SameLine();
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (vbh - ImGui::GetTextLineHeight()) * 0.5f);
+            ImGui::TextUnformatted(tl.c_str());
+        }
         ImGui::PopStyleColor(2);
     }
     if (close) {
         viewer.open = false;
+        if (!viewer.videoPath.empty()) {
+            Player().Stop();
+            viewer.videoPath.clear();
+        }
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();

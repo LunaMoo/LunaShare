@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Trimmed FFmpeg for the Windows video module: H.264/HEVC/AV1 decoders + D3D11VA (GPU) only, LGPL, as DLLs
-  # (avcodec-61.dll + avutil-59.dll) that the module loads at run time. Cached; rebuilt only when this changes.
+  # Trimmed FFmpeg (LGPL) shared by the Windows video and player modules, loaded at run time from modules/:
+  # video decoders (+ D3D11VA GPU decoding), the common containers and audio decoders. Cached; rebuilt on changes.
   ffmpeg-windows:
     runs-on: ubuntu-24.04
     steps:
@@ -15,7 +15,7 @@ jobs:
         id: cache
         with:
           path: ffwin
-          key: ffmpeg-n7.1-win64-h264-hevc-av1-d3d11va-v1
+          key: ffmpeg-n7.1-win64-player-v2
       - name: Build FFmpeg (mingw-w64 cross)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -23,10 +23,12 @@ jobs:
           git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
           mkdir ffbuild && cd ffbuild
           ../ffsrc/configure --prefix=$GITHUB_WORKSPACE/ffwin --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
-            --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-avformat --disable-swscale \
-            --disable-swresample --disable-avfilter --disable-network --disable-autodetect --enable-w32threads --enable-d3d11va \
-            --enable-decoder=h264,hevc,av1 --enable-parser=h264,hevc,av1 \
-            --enable-hwaccel=h264_d3d11va,h264_d3d11va2,hevc_d3d11va,hevc_d3d11va2,av1_d3d11va,av1_d3d11va2 \
+            --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale \
+            --disable-avfilter --disable-network --disable-autodetect --enable-w32threads --enable-d3d11va \
+            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi \
+            --enable-decoder=h264,hevc,av1,vp8,vp9,mpeg4,aac,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
+            --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac \
+            --enable-hwaccel=h264_d3d11va,h264_d3d11va2,hevc_d3d11va,hevc_d3d11va2,av1_d3d11va,av1_d3d11va2,vp9_d3d11va,vp9_d3d11va2 \
             --enable-shared --disable-static --disable-debug --extra-ldflags=-static-libgcc
           make -j4 && make install
           cp ../ffsrc/COPYING.LGPLv2.1 $GITHUB_WORKSPACE/ffwin/FFmpeg-LICENSE.txt
@@ -81,7 +83,7 @@ jobs:
           mkdir -p dist
           # the optional calls module goes into modules/ (delete that folder for a chat + files only install)
           mkdir -p dist/modules
-          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/; cp ffwin/bin/avcodec-61.dll ffwin/bin/avutil-59.dll ffwin/FFmpeg-LICENSE.txt dist/modules/;
+          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/; cp build/Release/lunashare_player.dll dist/modules/; cp ffwin/bin/avcodec-61.dll ffwin/bin/avutil-59.dll ffwin/bin/avformat-61.dll ffwin/bin/swresample-5.dll ffwin/FFmpeg-LICENSE.txt dist/modules/;
           elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/; cp build/liblunashare_media.dylib dist/LunaShare.app/Contents/MacOS/; rmdir dist/modules;
           else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; cp build/liblunashare_media.so dist/modules/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true
@@ -114,6 +116,7 @@ jobs:
           unzip -l "$calls" | grep -E "lib(lunashare_media|lunashare_video)\.so" | head
           unzip -l "$calls" | grep -q "arm64-v8a/liblunashare_video.so" || { echo "video module missing from calls APK"; exit 1; }
           unzip -l "$calls" | grep -q "arm64-v8a/liblunashare_media.so" || { echo "voice module missing from calls APK"; exit 1; }
+          for a in "$calls" "$lite"; do unzip -l "$a" | grep -q "arm64-v8a/liblunashare_player.so" || { echo "player module missing from $a"; exit 1; }; done
           if unzip -l "$lite" | grep -qE "lunashare_(media|video)"; then echo "lite APK must not contain call modules"; exit 1; fi
           unzip -p "$calls" 'classes*.dex' | grep -aq "Lorg/lunamoo/lunashare/VideoEngine;" || { echo "VideoEngine missing from calls APK"; exit 1; }
       - uses: actions/upload-artifact@v4

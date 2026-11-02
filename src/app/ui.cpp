@@ -10,6 +10,7 @@
 #include "hash.h"
 #include "image_cache.h"
 #include "media_host.h"
+#include "player_host.h"
 #include "wan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -128,7 +129,7 @@ void App::Frame() {
     static bool autoViewDone = false;
     if (autoView && !autoViewDone && !selectedPeer.empty()) {
         for (auto& [id, t] : eng.transfers)
-            if (t->state == TState::Completed && ImageCache::IsImagePath(t->localPath) && t->localPath.find(autoView) != std::string::npos) {
+            if (t->state == TState::Completed && (ImageCache::IsImagePath(t->localPath) || PlayerHost::IsVideoPath(t->localPath)) && t->localPath.find(autoView) != std::string::npos) {
                 OpenViewer(selectedPeer, t->localPath, false);
                 autoViewDone = true;
                 break;
@@ -1076,6 +1077,7 @@ void App::DrawBatchCard(const std::string& peer, const ChatMessage& m, float wid
     ImGui::TextDisabled("%s%s  -  %s", m.outgoing ? "Sending " : "Receiving ", FormatBytes((double)total).c_str(),
                         items.size() > 1 ? (std::to_string(items.size()) + " files").c_str() : TStateName(items[0]->state));
     DrawThumbnails(peer, items, width);
+    DrawAudioItems(items, width);
     // progress
     std::string overlay;
     char buf[160];
