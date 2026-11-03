@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.3
+
+- **Call settings during calls:** the settings button (sliders) is now in every call, voice or video. It opens one panel
+  with all sound settings (microphone, speaker, echo cancellation, noise suppression, automatic level, voice quality,
+  microphone boost) and, with the camera on, the camera and video quality settings.
+- **Sound settings apply immediately** during a call (before, changes only took effect in the next call).
+- **Switching speaker / headphones / loudspeaker** during a call no longer disturbs the other side: the echo canceller
+  starts over for the new sound path instead of using what it learned for the old one (which could leave echo or cut
+  into your voice), it covers longer phone audio delays (400 ms), and the automatic level no longer amplifies leftover
+  echo while the other side is talking.
+
 ## 1.0.2
 
 - **Louder calls:** the automatic gain levelled every voice at about -30 dBFS, which is quiet; speech is now sent at

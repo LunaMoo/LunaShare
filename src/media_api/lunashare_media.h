@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define LSM_API_VERSION 4
+#define LSM_API_VERSION 5
 #define LSM_SAMPLE_RATE 48000 /* audio exchanged with the host: 48 kHz, mono, signed 16-bit (v4; was 16 kHz) */
 
 #if defined(_WIN32)
@@ -78,6 +78,9 @@ typedef struct LsmModule {
      * callback instead of a file (video messages: the host puts them into an MP4). pre_skip receives the decoder
      * delay in 48 kHz samples. Ended with rec_stop(). The callback runs on the thread that calls rec_push. */
     int (*rec_start_stream)(int bitrate, void (*packet)(void* user, const uint8_t* data, int len), void* user, int* pre_skip);
+    /* --- since version 5: the sound path changed during a call (other speaker / headphones / loudspeaker): the echo
+     * canceller forgets what it learned about the old path and adapts again */
+    void (*reset_echo)(void);
 } LsmModule;
 
 /* The only exported symbol. */

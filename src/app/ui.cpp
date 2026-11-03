@@ -225,9 +225,9 @@ void App::Frame() {
         videoFull = videoAutoOpened = true;  // a video call opens full screen on phones
     }
     static bool devPanel = getenv("LUNASHARE_CAMPANEL") != nullptr;  // dev hook for screenshots
-    if (devPanel && Media().CameraOn()) { camPanel = true; devPanel = false; }
+    if (devPanel && eng.call.state == CallState::Active && (Media().CameraOn() || !strcmp(getenv("LUNASHARE_CAMPANEL"), "audio"))) { camPanel = true; devPanel = false; }
     if (m.mobile && videoFull && VideoVisible()) DrawVideoOverlay();
-    if (camPanel && Media().CameraOn()) DrawCameraPanel();
+    if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawToasts();
     if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
     // Touch scrolling everywhere (phone layout or a touch screen on desktop); the picture viewer handles its own drags.
@@ -2715,8 +2715,9 @@ int App::CallButtonCount(bool withVideo) const {
     if (IsMobilePlatform()) n++;  // audio output
     if (withVideo && Media().VideoRunning()) {
         n++;                                   // camera on/off
-        if (Media().CameraOn()) n += 2;        // flip, camera settings
+        if (Media().CameraOn()) n++;           // flip
     }
+    if (Media().Available()) n++;              // call settings (sound, camera)
     return n;
 }
 
@@ -2740,12 +2741,14 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             if (on) {
                 if (ui::IconButton("flip", Icon::FlipCamera, T("Switch camera"), bw)) Media().NextCamera();
                 ImGui::SameLine();
-                if (camPanel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-                bool wasOpen = camPanel;
-                if (ui::IconButton("camset", Icon::Sliders, T("Camera settings (zoom, exposure, focus, quality...)"), bw)) camPanel = !camPanel;
-                if (wasOpen) ImGui::PopStyleColor();
-                ImGui::SameLine();
             }
+        }
+        if (Media().Available()) {
+            if (camPanel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            bool wasOpen = camPanel;
+            if (ui::IconButton("camset", Icon::Sliders, T("Call settings (sound, camera, quality...)"), bw)) camPanel = !camPanel;
+            if (wasOpen) ImGui::PopStyleColor();
+            ImGui::SameLine();
         }
         if (IsMobilePlatform()) {
             // Audio output: with only earpiece + loudspeaker it's a toggle; with a headset connected it opens a list.
@@ -3026,7 +3029,7 @@ void App::DrawCameraPanel() {
                                 ImGuiCond_Appearing);
     }
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoCollapse | (mobile ? ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize : ImGuiWindowFlags_AlwaysAutoResize);
-    if (!ImGui::Begin(T("Camera"), &camPanel, fl)) {
+    if (!ImGui::Begin((std::string(T("Call settings")) + "###callpanel").c_str(), &camPanel, fl)) {
         ImGui::End();
         return;
     }
@@ -3035,6 +3038,24 @@ void App::DrawCameraPanel() {
     if (mobile) ui::TouchScroll();
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     float w = ImGui::GetContentRegionAvail().x;
+    // sound: the same settings as in Settings > Calls, applied right away
+    ImGui::SeparatorText(T("Sound"));
+    bool audioChanged = false;
+    AudioCallControls(w - ImGui::GetFontSize() * 2, h, audioChanged);
+    if (audioChanged) {
+        eng.ApplySettings(edit);
+        editDirty = false;
+    }
+    LsmStats ast = Media().Stats();
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled(T("Voice: %d kbps, %.1f%% lost, %d ms delay"), ast.bitrate_kbps, ast.loss_percent, ast.buffered_ms);
+    ImGui::PopTextWrapPos();
+    if (!Media().CameraOn()) {
+        if (mobile && ImGui::Button(T("Close"), ImVec2(w, h))) camPanel = false;
+        ImGui::End();
+        return;
+    }
+    ImGui::SeparatorText(T("Video"));
     double now = ImGui::GetTime();
     if (now - camCtlTime > 0.5) {  // re-read now and then (the camera may change values itself)
         camCtl = Media().Controls();
@@ -3250,17 +3271,8 @@ void App::DrawIncomingCall() {
     ImGui::EndPopup();
 }
 
-void App::DrawCallSettings(float fieldW, float h, bool& changed) {
-    ImGui::SeparatorText(T("Calls"));
-    if (!Media().Available()) {
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled(T("Voice calls are an optional module and are not installed (%s). To enable them, put the "
-                            "lunashare_media library next to the LunaShare program (or install the \"LunaShare + Calls\" app on Android) "
-                            "and restart."), Media().loadInfo.c_str());
-        ImGui::PopTextWrapPos();
-        return;
-    }
-    ImGui::TextDisabled("%s - %s", Media().ModuleName().c_str(), Media().loadInfo.c_str());
+// Microphone / speaker and voice processing: in Settings and in the call settings panel (applied live during calls)
+void App::AudioCallControls(float fieldW, float h, bool& changed) {
     auto deviceCombo = [&](const char* label, bool capture, std::string& value) {
         static std::vector<std::string> devs[2];
         static double lastScan[2] = {-100, -100};
@@ -3271,9 +3283,9 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         ImGui::SetNextItemWidth(fieldW);
         std::string preview = std::string(T(label)) + ": " + (value.empty() ? std::string(T("system default")) : value);
         if (ImGui::BeginCombo((std::string("##") + label).c_str(), preview.c_str())) {
-            if (ImGui::Selectable(T("System default"), value.empty())) { value.clear(); changed = true; }
+            if (ImGui::Selectable(T("System default"), value.empty(), 0, ImVec2(0, h))) { value.clear(); changed = true; }
             for (auto& d : devs[capture])
-                if (ImGui::Selectable(d.c_str(), value == d)) { value = d; changed = true; }
+                if (ImGui::Selectable(d.c_str(), value == d, 0, ImVec2(0, h))) { value = d; changed = true; }
             ImGui::EndCombo();
         }
     };
@@ -3291,6 +3303,20 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, T("Microphone boost: +%d dB"))) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     ui::HelpMarker(T("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar."));
+}
+
+void App::DrawCallSettings(float fieldW, float h, bool& changed) {
+    ImGui::SeparatorText(T("Calls"));
+    if (!Media().Available()) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled(T("Voice calls are an optional module and are not installed (%s). To enable them, put the "
+                            "lunashare_media library next to the LunaShare program (or install the \"LunaShare + Calls\" app on Android) "
+                            "and restart."), Media().loadInfo.c_str());
+        ImGui::PopTextWrapPos();
+        return;
+    }
+    ImGui::TextDisabled("%s - %s", Media().ModuleName().c_str(), Media().loadInfo.c_str());
+    AudioCallControls(fieldW, h, changed);
     if (Media().VideoAvailable()) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker(T("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call."));

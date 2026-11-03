@@ -46,7 +46,7 @@ namespace {
 constexpr int kRate = LSM_SAMPLE_RATE;
 constexpr int kFrame = kRate / 50;          // 20 ms = 960 samples
 constexpr int kOpusRate = 48000;             // Opus timestamps / pre-skip are always in 48 kHz units
-constexpr int kEchoTail = kRate / 5;        // 200 ms echo tail
+constexpr int kEchoTail = kRate * 2 / 5;    // 400 ms echo tail (phone audio paths add a lot of latency)
 constexpr int kMaxPacket = 1500;
 
 // Make-up gain after speexdsp's AGC, which levels speech at only about -25 dBFS (quiet next to other apps):
@@ -55,13 +55,16 @@ constexpr int kMaxPacket = 1500;
 struct Leveler {
     float gain = 1, speech = 0, noise = 0.001f;
     void Reset() { *this = Leveler(); }
-    void Run(int16_t* p, int n) {
+    // farActive: the other side is talking through our speaker; anything we hear now may be leftover echo, so the
+    // gain is held (never raised) instead of amplifying it
+    void Run(int16_t* p, int n, bool farActive = false) {
         double s = 0;
         for (int i = 0; i < n; i++) s += (double)p[i] * p[i];
         float rms = (float)(std::sqrt(s / std::max(1, n)) / 32768.0);
         noise = rms < noise ? noise * 0.8f + rms * 0.2f : noise * 1.002f + 1e-6f;  // falls fast, rises slowly
-        if (rms > 0.003f && rms > noise * 4) speech = speech > 0 ? speech * 0.95f + rms * 0.05f : rms;
+        if (!farActive && rms > 0.003f && rms > noise * 4) speech = speech > 0 ? speech * 0.95f + rms * 0.05f : rms;
         float want = speech > 0 ? std::clamp(0.112f / speech, 1.0f, 5.0f) : 1.0f;
+        if (farActive) want = std::min(want, gain);
         float g0 = gain;
         gain = want > gain ? std::min(want, gain * 1.01f) : std::max(want, gain * 0.95f);  // ~+4 dB/s up, faster down
         for (int i = 0; i < n; i++) {
@@ -100,6 +103,7 @@ struct Voice {
     int targetFrames = 3;       // playout delay target (adaptive, 60 ms start)
     std::deque<int16_t> out;    // decoded samples waiting for the speaker
     float spkLevel = 0;
+    int farHold = 0;  // capture frames left during which the far end counts as talking
     int packetsIn = 0;
     // loss/jitter statistics (rolling)
     int recvWindow = 0, lostWindow = 0;
@@ -191,6 +195,7 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     g.lossPct = 0;
     g.jitterMs = 0;
     g.lastArrivalUs = 0;
+    g.farHold = 0;
     g.underruns = 0;
     g.running = true;
     Log("voice started (Opus 16 kHz, speexdsp AEC/NS)");
@@ -214,7 +219,9 @@ void EncodeFrameLocked(int16_t* frame) {
         memcpy(clean, frame, sizeof(clean));
     }
     if (g.pre) speex_preprocess_run(g.pre, clean);
-    if (g.settings.auto_gain) g.leveler.Run(clean, kFrame);
+    if (g.farHold > 0) g.farHold--;
+    if (g.spkLevel > 0.3f) g.farHold = 15;  // the speaker played something above -42 dBFS in the last 300 ms
+    if (g.settings.auto_gain) g.leveler.Run(clean, kFrame, g.farHold > 0);
     if (g.mute) memset(clean, 0, sizeof(clean));
     g.micLevel = g.micLevel * 0.7f + Level(clean, kFrame) * 0.3f;
     uint8_t pkt[kMaxPacket];
@@ -350,6 +357,13 @@ void Playback(int16_t* outBuf, int samples) {
 }
 
 void SetMute(int m) { g.mute = m != 0; }
+
+void ResetEcho() {
+    std::lock_guard<std::mutex> l(g.m);
+    if (g.echo) speex_echo_state_reset(g.echo);
+    g.leveler.Reset();  // the microphone may have changed too (headset)
+    if (g.running) Log("echo canceller reset (sound path changed)");
+}
 
 void SetSettings(const LsmSettings* s) {
     std::lock_guard<std::mutex> l(g.m);
@@ -565,9 +579,9 @@ double RecStop(int keep) {
 }
 
 const LsmModule kModule = {
-    LSM_API_VERSION, "LunaShare Voice", "1.2", "voice",
+    LSM_API_VERSION, "LunaShare Voice", "1.3", "voice",
     Start, Stop, Capture, Playback, Receive, SetMute, SetSettings, GetStats,
-    RecStart, RecPush, RecLevel, RecStop, RecStartStream,
+    RecStart, RecPush, RecLevel, RecStop, RecStartStream, ResetEcho,
 };
 
 }  // namespace

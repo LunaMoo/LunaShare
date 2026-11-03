@@ -804,6 +804,11 @@ void MediaHost::SetMode(Mode m) {
         mod_->set_mute(mute_ ? 1 : 0);
         mode_ = Mode::Call;
         OpenDevices(true, true);
+        liveLs_ = ls;
+        liveIn_ = s.callInputDevice;
+        liveOut_ = s.callOutputDevice;
+        liveDefaultOut_ = DefaultOutputName();
+        liveRoute_ = -2;  // first route reading is not a change
         StartVideo();
     } else if (m == Mode::Ring || m == Mode::Ringback) {
         mode_ = m;
@@ -846,6 +851,59 @@ void MediaHost::Update() {
         routesTick_ = now;
         RefreshRoutes();  // follows headsets being plugged in / connected during the call
     }
+    if (mode_ == Mode::Call) ApplyLiveAudio();
+}
+
+std::string MediaHost::DefaultOutputName() {
+#if SDL_VERSION_ATLEAST(2, 24, 0) && !defined(__ANDROID__)
+    char* name = nullptr;
+    SDL_AudioSpec spec;
+    if (SDL_GetDefaultAudioInfo(&name, &spec, 0) == 0 && name) {
+        std::string r = name;
+        SDL_free(name);
+        return r;
+    }
+#endif
+    return {};
+}
+
+void MediaHost::ResetEcho() {
+    if (mod_ && mod_->api_version >= 5 && mod_->reset_echo) mod_->reset_echo();
+}
+
+// Audio settings changed during a call take effect right away; a different speaker / headphones / loudspeaker makes
+// the echo canceller start over (what it learned about the old sound path only gets in the way).
+void MediaHost::ApplyLiveAudio() {
+    Settings s = eng_->GetSettings();
+    LsmSettings ls{s.callEchoCancel ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
+    if (memcmp(&ls, &liveLs_, sizeof(ls)) != 0) {
+        bool aecOn = ls.echo_cancel && !liveLs_.echo_cancel;
+        liveLs_ = ls;
+        mod_->set_settings(&ls);
+        if (aecOn) ResetEcho();
+    }
+    bool pathChanged = false;
+    if (s.callInputDevice != liveIn_ || s.callOutputDevice != liveOut_) {
+        liveIn_ = s.callInputDevice;
+        liveOut_ = s.callOutputDevice;
+        OpenDevices(true, true);
+        pathChanged = true;
+    }
+    if (currentRoute_ != liveRoute_) {
+        pathChanged |= liveRoute_ != -2;
+        liveRoute_ = currentRoute_;
+    }
+    static uint32_t lastDefault = 0;
+    uint32_t now = SDL_GetTicks();
+    if (s.callOutputDevice.empty() && now - lastDefault > 1500) {  // "system default" switched (headphones plugged in)
+        lastDefault = now;
+        std::string d = DefaultOutputName();
+        if (d != liveDefaultOut_) {
+            liveDefaultOut_ = d;
+            pathChanged = true;
+        }
+    }
+    if (pathChanged) ResetEcho();
 }
 
 void MediaHost::Shutdown() {

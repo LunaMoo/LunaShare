@@ -177,6 +177,13 @@ private:
     std::vector<Route> routes_;
     int currentRoute_ = -1;
     uint32_t routesTick_ = 0;
+    // what the running call uses, to apply settings changed during the call
+    LsmSettings liveLs_{};
+    std::string liveIn_, liveOut_, liveDefaultOut_;
+    int liveRoute_ = -1;
+    void ApplyLiveAudio();
+    static std::string DefaultOutputName();  // desktop: current system default speaker ("" if unknown)
+    void ResetEcho();
     std::atomic<float> micGain_{1.0f};
     uint32_t settingsTick_ = 0;
     void ApplyMicGain(int16_t* pcm, int n);
