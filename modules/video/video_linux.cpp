@@ -414,13 +414,24 @@ public:
                 return;
             }
             std::string err;
-            if (!dec_.Open(codec, false, &err)) {
+            if (!dec_.Open(codec, decHw_, &err)) {
                 sink_->Log("decoder: " + err);
                 sink_->OnDecoderError();
                 return;
             }
+            sink_->Log("decoder: " + dec_.Name());
         }
-        if (!dec_.Decode(d, n, [&](const LsvImage& im) { sink_->OnDecoded(im); })) sink_->OnDecoderError();
+        if (dec_.Decode(d, n, [&](const LsvImage& im) { sink_->OnDecoded(im); })) {
+            decFails_ = 0;
+            return;
+        }
+        sink_->OnDecoderError();
+        if (dec_.Hardware() && ++decFails_ >= 3) {  // the GPU decoder can't do this stream: CPU from the next keyframe
+            sink_->Log(dec_.Name() + " failed, decoding on the CPU");
+            decHw_ = false;
+            decFails_ = 0;
+            dec_.Close();
+        }
     }
     void StopDecoder() override { dec_.Close(); }
     std::string EncoderName() override {
@@ -742,7 +753,7 @@ private:
             if (work.size() < (size_t)W * H * 3 / 2) continue;
             enc_.SetBitrate(bitrate_);
             LsvImage img{W, H, work.data(), work.data() + (size_t)W * H, work.data() + (size_t)W * H * 5 / 4, W, W / 2, 1, 0, 0};
-            enc_.Encode(img, keyReq_.exchange(false), [&](const uint8_t* d, size_t n, bool key) {
+            bool ok = enc_.Encode(img, keyReq_.exchange(false), [&](const uint8_t* d, size_t n, bool key) {
                 EncodedFrame f;
                 f.data = d;
                 f.len = n;
@@ -752,6 +763,21 @@ private:
                 f.codec = kH264;
                 sink_->OnEncoded(f);
             });
+            if (!ok && enc_.Hardware() && ++encFails_ >= 3) {
+                // a GPU encoder that stopped working: carry on with x264
+                sink_->Log(enc_.Name() + " failed, switching to x264");
+                std::string e;
+                if (!enc_.FallBackToCpu(&e)) {
+                    sink_->OnCameraError("no working H.264 encoder: " + e);
+                    return;
+                }
+                encFails_ = 0;
+                keyReq_ = true;
+                std::lock_guard<std::mutex> l(nameM_);
+                encName_ = enc_.Name();
+            } else if (ok) {
+                encFails_ = 0;
+            }
         }
     }
 
@@ -784,6 +810,8 @@ private:
     int fd_ = -1, w_ = 0, h_ = 0, stride_ = 0, fps_ = 30;
     uint32_t fourcc_ = 0;
     bool streaming_ = false, test_ = false;
+    int encFails_ = 0, decFails_ = 0;
+    bool decHw_ = true;
     std::vector<std::pair<void*, size_t>> bufs_;
     FfDecoder mjpeg_, dec_;
     FfEncoder enc_;

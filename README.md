@@ -137,8 +137,11 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   video call button when both devices have it, and any call between two video-capable devices can turn the camera on or off.
 - Windows and Android use the system's own H.264: Media Foundation on Windows (a GPU encoder when one works, otherwise
   Microsoft's software encoder) and MediaCodec on Android (hardware).
-- **Linux:** cameras through V4L2 (raw YUYV/NV12 or MJPEG, whichever gives the asked size and frame rate), H.264 encoding with
-  x264 (low-latency settings) and H.264 / HEVC / AV1 decoding through the FFmpeg bundled in `modules/` (dav1d for AV1).
+- **Linux:** cameras through V4L2 (raw YUYV/NV12 or MJPEG, whichever gives the asked size and frame rate). H.264 is encoded on
+  the graphics card when it can - NVIDIA NVENC, or VA-API on Intel / AMD (the system's VA-API driver, e.g. `intel-media-driver`
+  or Mesa's `va` driver) - and with x264 on the CPU otherwise; decoding (H.264 / HEVC / AV1) likewise tries VA-API / NVDEC
+  first, then the CPU (dav1d for AV1). The camera panel shows which encoder and decoder are in use. Everything comes from the
+  FFmpeg bundled in `modules/` (with libva); `LUNASHARE_NO_GPU_ENCODE=1` forces x264.
   Zoom, exposure, focus, white balance and brightness are offered when the webcam has them.
   **LunaShare Camera** for other apps (browsers, Zoom, OBS...) uses the v4l2loopback kernel module (package `v4l2loopback-dkms`);
   LunaShare loads it with `pkexec` the first time it's switched on after a reboot, so phones can be used as webcams on Linux too.
@@ -282,7 +285,7 @@ tests/         engine tests (pause/resume, receiver restart, corruption detectio
 ## License
 
 On Linux the bundled FFmpeg is built with x264 and is therefore GPL-2.0-or-later (compatible with LunaShare's GPL-3.0);
-dav1d is BSD-2-Clause. Their license files are in `modules/`. FFmpeg on Windows is the LGPL build.
+dav1d is BSD-2-Clause, libva is MIT. Their license files are in `modules/`. FFmpeg on Windows is the LGPL build.
 
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).

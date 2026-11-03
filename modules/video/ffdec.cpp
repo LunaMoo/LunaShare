@@ -3,6 +3,7 @@
 #include "ffdec.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -54,6 +55,9 @@ struct Api {
     int (*frame_get_buffer)(AVFrame*, int);
     int (*frame_make_writable)(AVFrame*);
     int (*opt_set)(void*, const char*, const char*, int);
+    AVBufferRef* (*hwframe_ctx_alloc)(AVBufferRef*);
+    int (*hwframe_ctx_init)(AVBufferRef*);
+    int (*hwframe_get_buffer)(AVBufferRef*, AVFrame*, int);
 };
 Api g_api;
 bool g_loaded = false;
@@ -88,7 +92,7 @@ bool Get(void* lib, T& fn, const char* name) {
 enum AVPixelFormat PickFormat(AVCodecContext* ctx, const enum AVPixelFormat* fmts) {
     bool wantHw = ctx->hw_device_ctx != nullptr;
     for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++)
-        if (wantHw && *p == AV_PIX_FMT_D3D11) return *p;
+        if (wantHw && (*p == AV_PIX_FMT_D3D11 || *p == AV_PIX_FMT_VAAPI || *p == AV_PIX_FMT_CUDA)) return *p;
     for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++)
         if (*p == AV_PIX_FMT_YUV420P || *p == AV_PIX_FMT_YUVJ420P || *p == AV_PIX_FMT_NV12) return *p;
     return fmts[0];
@@ -134,6 +138,9 @@ bool FfDecoder::Load(const std::vector<std::string>& dirs, std::string* err) {
         Get(util, a.frame_get_buffer, "av_frame_get_buffer");
         Get(util, a.frame_make_writable, "av_frame_make_writable");
         Get(util, a.opt_set, "av_opt_set");
+        Get(util, a.hwframe_ctx_alloc, "av_hwframe_ctx_alloc");
+        Get(util, a.hwframe_ctx_init, "av_hwframe_ctx_init");
+        Get(util, a.hwframe_get_buffer, "av_hwframe_get_buffer");
         g_api = a;
         g_api.log_set_level(AV_LOG_ERROR);
         g_loaded = true;
@@ -155,13 +162,16 @@ bool FfDecoder::Open(int codec, bool hw, std::string* err) {
     }
     AVCodecID id = codec == kHEVC ? AV_CODEC_ID_HEVC : codec == kAV1 ? AV_CODEC_ID_AV1 : codec == kMJPEG ? AV_CODEC_ID_MJPEG : AV_CODEC_ID_H264;
     const AVCodec* c = g_api.find_decoder(id);
-    const AVCodec* dav1d = codec == kAV1 && !hw && g_api.find_decoder_by_name ? g_api.find_decoder_by_name("libdav1d") : nullptr;
-    if (dav1d) c = dav1d;  // software AV1 (Linux builds)
+    // software AV1 (Linux builds): dav1d, used when there's no GPU decoder
+    const AVCodec* dav1d = codec == kAV1 && g_api.find_decoder_by_name ? g_api.find_decoder_by_name("libdav1d") : nullptr;
+    const AVCodec* native = c;
     if (!c) {
         if (err) *err = std::string("no ") + CodecName(codec) + " decoder";
         return false;
     }
     for (int attempt = hw ? 0 : 1; attempt < 2; attempt++) {
+        c = attempt == 1 && dav1d ? dav1d : native;
+        if (!c) continue;
         AVCodecContext* ctx = g_api.alloc_context3(c);
         if (!ctx) return false;
         ctx->get_format = PickFormat;
@@ -175,6 +185,28 @@ bool FfDecoder::Open(int codec, bool hw, std::string* err) {
                 if (hc->device_type == AV_HWDEVICE_TYPE_D3D11VA && (hc->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) canHw = true;
             }
             if (!canHw || g_api.hwdevice_ctx_create(&dev, AV_HWDEVICE_TYPE_D3D11VA, nullptr, nullptr, 0) < 0) {
+                g_api.free_context(&ctx);
+                continue;
+            }
+            ctx->hw_device_ctx = g_api.buffer_ref(dev);
+            ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+#elif defined(__linux__) && !defined(__ANDROID__)
+            // VA-API (Intel / AMD) first, then NVIDIA (NVDEC through CUDA, loaded on demand by FFmpeg)
+            bool made = false;
+            for (AVHWDeviceType t : {AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_CUDA}) {
+                bool can = false;
+                for (int i = 0;; i++) {
+                    const AVCodecHWConfig* hc = g_api.get_hw_config(c, i);
+                    if (!hc) break;
+                    if (hc->device_type == t && (hc->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) can = true;
+                }
+                if (can && g_api.hwdevice_ctx_create(&dev, t, nullptr, nullptr, 0) >= 0) {
+                    made = true;
+                    break;
+                }
+                dev = nullptr;
+            }
+            if (!made) {
                 g_api.free_context(&ctx);
                 continue;
             }
@@ -261,7 +293,7 @@ bool FfDecoder::Decode(const uint8_t* d, size_t n, const std::function<void(cons
         if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) break;
         if (r < 0) return false;
         AVFrame* pic = f;
-        if (f->format == AV_PIX_FMT_D3D11) {
+        if (f->hw_frames_ctx) {
             g_api.frame_unref(sw);
             if (g_api.hwframe_transfer_data(sw, f, 0) < 0) {  // GPU -> memory (NV12)
                 g_api.frame_unref(f);
@@ -316,61 +348,128 @@ bool FfDecoder::Decode(const uint8_t* d, size_t n, const std::function<void(cons
 }
 
 // ======================================================================== encoder
+// Tried in this order: NVIDIA NVENC (FFmpeg loads the driver's libnvidia-encode on demand), VA-API (Intel / AMD,
+// through the bundled libva and the system's driver), then x264 on the CPU. The first one that opens is used.
 bool FfEncoder::Open(int width, int height, int fps, int bitrate, std::string* err) {
     Close();
     if (!g_loaded || !g_api.send_frame || !g_api.receive_packet || !g_api.opt_set || !g_api.frame_get_buffer) {
         if (err) *err = "FFmpeg encoder functions missing";
         return false;
     }
-    const AVCodec* c = g_api.find_encoder_by_name ? g_api.find_encoder_by_name("libx264") : nullptr;
-    if (!c && g_api.find_encoder) c = g_api.find_encoder(AV_CODEC_ID_H264);
-    if (!c) {
-        if (err) *err = "no H.264 encoder in FFmpeg";
-        return false;
+    w_ = width & ~1;
+    h_ = height & ~1;
+    fps_ = std::max(1, fps);
+    bitrate_ = bitrate;
+    std::string errs;
+    const char* order[] = {"h264_nvenc", "h264_vaapi", "libx264"};
+    for (const char* name : order) {
+        if (!allowHw_ && strcmp(name, "libx264") != 0) continue;
+        if (getenv("LUNASHARE_NO_GPU_ENCODE") && strcmp(name, "libx264") != 0) continue;
+        std::string e;
+        bool gpu = strcmp(name, "libx264") != 0;
+        if (gpu) g_api.log_set_level(AV_LOG_FATAL);  // a missing GPU / driver is normal: no console noise
+        bool ok = OpenWith(name, &e);
+        if (gpu) g_api.log_set_level(AV_LOG_ERROR);
+        if (ok) return true;
+        if (!e.empty()) errs += std::string(errs.empty() ? "" : "; ") + name + ": " + e;
+    }
+    if (g_api.find_encoder && OpenWith(nullptr, nullptr)) return true;  // whatever H.264 encoder the build has
+    if (err) *err = errs.empty() ? "no H.264 encoder in FFmpeg" : errs;
+    return false;
+}
+
+bool FfEncoder::OpenWith(const char* name, std::string* err) {
+    const AVCodec* c = name ? (g_api.find_encoder_by_name ? g_api.find_encoder_by_name(name) : nullptr)
+                            : g_api.find_encoder(AV_CODEC_ID_H264);
+    if (!c) return false;  // not in this build
+    bool vaapi = name && strcmp(name, "h264_vaapi") == 0, nvenc = name && strcmp(name, "h264_nvenc") == 0;
+    AVBufferRef* dev = nullptr;
+    AVBufferRef* frames = nullptr;
+    if (vaapi) {
+        if (!g_api.hwframe_ctx_alloc || !g_api.hwframe_ctx_init || !g_api.hwframe_get_buffer ||
+            g_api.hwdevice_ctx_create(&dev, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0) < 0) {
+            if (err) *err = "no VA-API device";
+            return false;
+        }
+        frames = g_api.hwframe_ctx_alloc(dev);
+        AVHWFramesContext* fc = frames ? (AVHWFramesContext*)frames->data : nullptr;
+        if (fc) {
+            fc->format = AV_PIX_FMT_VAAPI;
+            fc->sw_format = AV_PIX_FMT_NV12;
+            fc->width = w_;
+            fc->height = h_;
+            fc->initial_pool_size = 8;
+        }
+        if (!fc || g_api.hwframe_ctx_init(frames) < 0) {
+            if (frames) g_api.buffer_unref(&frames);
+            g_api.buffer_unref(&dev);
+            if (err) *err = "VA-API can't make frames this size";
+            return false;
+        }
     }
     AVCodecContext* ctx = g_api.alloc_context3(c);
     if (!ctx) return false;
-    fps_ = std::max(1, fps);
-    ctx->width = width & ~1;
-    ctx->height = height & ~1;
-    ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    ctx->width = w_;
+    ctx->height = h_;
+    ctx->pix_fmt = vaapi ? AV_PIX_FMT_VAAPI : AV_PIX_FMT_YUV420P;
     ctx->time_base = AVRational{1, fps_};
     ctx->framerate = AVRational{fps_, 1};
-    ctx->bit_rate = bitrate;
-    ctx->rc_max_rate = bitrate;
-    ctx->rc_buffer_size = std::max(bitrate / 2, 64000);  // ~0.5 s: steady enough, still low delay
-    ctx->gop_size = fps_ * 4;                             // keyframes mostly on request
+    ctx->bit_rate = bitrate_;
+    ctx->rc_max_rate = bitrate_;
+    ctx->rc_buffer_size = std::max(bitrate_ / 2, 64000);  // ~0.5 s: steady enough, still low delay
+    ctx->gop_size = fps_ * 4;                              // keyframes mostly on request
     ctx->max_b_frames = 0;
-    ctx->thread_count = 0;                                // x264 picks (sliced threads with zerolatency)
     ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+    if (vaapi) ctx->hw_frames_ctx = g_api.buffer_ref(frames);
+    else ctx->thread_count = 0;
     if (ctx->priv_data) {
-        int pixels = ctx->width * ctx->height * fps_;
-        // fast enough for real time on ordinary desktop CPUs, faster presets for big pictures
-        g_api.opt_set(ctx->priv_data, "preset", pixels > 1920 * 1080 * 60 ? "ultrafast" : pixels > 1920 * 1080 * 30 ? "superfast" : "veryfast", 0);
-        g_api.opt_set(ctx->priv_data, "tune", "zerolatency", 0);
-        g_api.opt_set(ctx->priv_data, "profile", "high", 0);
+        if (nvenc) {
+            g_api.opt_set(ctx->priv_data, "preset", "p2", 0);
+            g_api.opt_set(ctx->priv_data, "tune", "ull", 0);
+            g_api.opt_set(ctx->priv_data, "rc", "cbr", 0);
+            g_api.opt_set(ctx->priv_data, "zerolatency", "1", 0);
+            g_api.opt_set(ctx->priv_data, "delay", "0", 0);
+            g_api.opt_set(ctx->priv_data, "forced-idr", "1", 0);
+        } else if (vaapi) {
+            g_api.opt_set(ctx->priv_data, "rc_mode", "CBR", 0);
+            g_api.opt_set(ctx->priv_data, "async_depth", "1", 0);
+        } else {
+            int pixels = w_ * h_ * fps_;
+            // fast enough for real time on ordinary desktop CPUs, faster presets for big pictures
+            g_api.opt_set(ctx->priv_data, "preset", pixels > 1920 * 1080 * 60 ? "ultrafast" : pixels > 1920 * 1080 * 30 ? "superfast" : "veryfast", 0);
+            g_api.opt_set(ctx->priv_data, "tune", "zerolatency", 0);
+            g_api.opt_set(ctx->priv_data, "profile", "high", 0);
+        }
     }
     if (g_api.open2(ctx, c, nullptr) < 0) {
         g_api.free_context(&ctx);
-        if (err) *err = std::string("cannot open ") + c->name;
+        if (frames) g_api.buffer_unref(&frames);
+        if (dev) g_api.buffer_unref(&dev);
+        if (err) *err = nvenc ? "no NVIDIA encoder" : vaapi ? "the VA-API driver has no H.264 encoder" : "cannot open";
         return false;
     }
+    // the picture we fill: I420 for x264 / NVENC, NV12 to upload for VA-API
     AVFrame* f = g_api.frame_alloc();
-    f->format = AV_PIX_FMT_YUV420P;
-    f->width = ctx->width;
-    f->height = ctx->height;
+    f->format = vaapi ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P;
+    f->width = w_;
+    f->height = h_;
     if (g_api.frame_get_buffer(f, 0) < 0) {
         g_api.frame_free(&f);
         g_api.free_context(&ctx);
-        if (err) *err = "no memory for frames";
+        if (frames) g_api.buffer_unref(&frames);
+        if (dev) g_api.buffer_unref(&dev);
         return false;
     }
     ctx_ = ctx;
     frame_ = f;
     pkt_ = g_api.packet_alloc();
+    hwdev_ = dev;
+    hwframes_ = frames;
+    vaapi_ = vaapi;
     pts_ = 0;
-    bitrate_ = bitrate;
-    name_ = std::string(c->name) == "libx264" ? "x264 (software)" : std::string(c->name);
+    openedBitrate_ = bitrate_;
+    std::string n = c->name;
+    name_ = n == "libx264" ? "x264 (CPU)" : n == "h264_nvenc" ? "NVIDIA NVENC (GPU)" : n == "h264_vaapi" ? "VA-API (GPU)" : n;
     return true;
 }
 
@@ -388,20 +487,45 @@ void FfEncoder::Close() {
         AVPacket* p = (AVPacket*)pkt_;
         g_api.packet_free(&p);
     }
-    ctx_ = frame_ = pkt_ = nullptr;
+    if (hwframes_) {
+        AVBufferRef* b = (AVBufferRef*)hwframes_;
+        g_api.buffer_unref(&b);
+    }
+    if (hwdev_) {
+        AVBufferRef* b = (AVBufferRef*)hwdev_;
+        g_api.buffer_unref(&b);
+    }
+    ctx_ = frame_ = pkt_ = hwframes_ = hwdev_ = nullptr;
+    vaapi_ = false;
 }
 
 void FfEncoder::SetBitrate(int bps) {
     if (!ctx_ || bps == bitrate_) return;
     AVCodecContext* ctx = (AVCodecContext*)ctx_;
     bitrate_ = bps;
-    ctx->bit_rate = bps;  // libx264 reconfigures itself on the next frame
+    // x264 and NVENC pick this up on the next frame; VA-API is reopened in Encode() when the change is big
+    ctx->bit_rate = bps;
     ctx->rc_max_rate = bps;
     ctx->rc_buffer_size = std::max(bps / 2, 64000);
 }
 
 bool FfEncoder::Encode(const LsvImage& img, bool forceKey, const std::function<void(const uint8_t*, size_t, bool)>& out) {
     if (!ctx_) return false;
+    if (vaapi_ && std::abs(bitrate_ - openedBitrate_) > openedBitrate_ / 4) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - lastReopen_ > std::chrono::seconds(2)) {  // VA-API can't change the bitrate on the fly
+            lastReopen_ = now;
+            std::string e;
+            int64_t pts = pts_;
+            Close();
+            if (!OpenWith("h264_vaapi", &e)) {
+                allowHw_ = false;
+                if (!Open(w_, h_, fps_, bitrate_, &e)) return false;
+            }
+            pts_ = pts;
+            forceKey = true;  // a new encoder starts with one anyway
+        }
+    }
     AVCodecContext* ctx = (AVCodecContext*)ctx_;
     AVFrame* f = (AVFrame*)frame_;
     AVPacket* pkt = (AVPacket*)pkt_;
@@ -409,33 +533,59 @@ bool FfEncoder::Encode(const LsvImage& img, bool forceKey, const std::function<v
     int w = std::min(img.width, f->width), h = std::min(img.height, f->height);
     for (int y = 0; y < h; y++) memcpy(f->data[0] + (size_t)y * f->linesize[0], img.y + (size_t)y * img.y_stride, (size_t)w);
     for (int y = 0; y < h / 2; y++) {
-        uint8_t* du = f->data[1] + (size_t)y * f->linesize[1];
-        uint8_t* dv = f->data[2] + (size_t)y * f->linesize[2];
         const uint8_t* su = img.u + (size_t)y * img.uv_stride;
         const uint8_t* sv = img.v + (size_t)y * img.uv_stride;
-        if (img.uv_pixel_stride == 1) {
+        int ps = img.uv_pixel_stride;
+        if (vaapi_) {  // NV12: U,V pairs
+            uint8_t* d = f->data[1] + (size_t)y * f->linesize[1];
+            for (int x = 0; x < w / 2; x++) {
+                d[x * 2] = su[x * ps];
+                d[x * 2 + 1] = sv[x * ps];
+            }
+            continue;
+        }
+        uint8_t* du = f->data[1] + (size_t)y * f->linesize[1];
+        uint8_t* dv = f->data[2] + (size_t)y * f->linesize[2];
+        if (ps == 1) {
             memcpy(du, su, (size_t)w / 2);
             memcpy(dv, sv, (size_t)w / 2);
         } else {
             for (int x = 0; x < w / 2; x++) {
-                du[x] = su[x * img.uv_pixel_stride];
-                dv[x] = sv[x * img.uv_pixel_stride];
+                du[x] = su[x * ps];
+                dv[x] = sv[x * ps];
             }
         }
     }
-    f->pts = pts_++;
-    f->pict_type = forceKey ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
-    if (forceKey) f->flags |= AV_FRAME_FLAG_KEY;
-    else f->flags &= ~AV_FRAME_FLAG_KEY;
-    if (g_api.send_frame(ctx, f) < 0) return false;
+    AVFrame* send = f;
+    AVFrame* hwf = nullptr;
+    if (vaapi_) {  // into GPU memory
+        hwf = g_api.frame_alloc();
+        if (g_api.hwframe_get_buffer((AVBufferRef*)hwframes_, hwf, 0) < 0 || g_api.hwframe_transfer_data(hwf, f, 0) < 0) {
+            g_api.frame_free(&hwf);
+            return false;
+        }
+        send = hwf;
+    }
+    send->pts = pts_++;
+    send->pict_type = forceKey ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+    if (forceKey) send->flags |= AV_FRAME_FLAG_KEY;
+    else send->flags &= ~AV_FRAME_FLAG_KEY;
+    int r = g_api.send_frame(ctx, send);
+    if (hwf) g_api.frame_free(&hwf);
+    if (r < 0) return false;
     for (;;) {
-        int r = g_api.receive_packet(ctx, pkt);
+        r = g_api.receive_packet(ctx, pkt);
         if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) break;
         if (r < 0) return false;
         out(pkt->data, (size_t)pkt->size, (pkt->flags & AV_PKT_FLAG_KEY) != 0);
         g_api.packet_unref(pkt);
     }
     return true;
+}
+
+bool FfEncoder::FallBackToCpu(std::string* err) {
+    allowHw_ = false;
+    return Open(w_, h_, fps_, bitrate_, err);
 }
 
 }  // namespace lsv

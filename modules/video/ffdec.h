@@ -3,6 +3,7 @@
 // (HEVC/H.264; FFmpeg's AV1 decoder needs the GPU). Frames come out as NV12 or I420 LsvImages.
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <chrono>
 #include <functional>
 #include <string>
 #include <vector>
@@ -48,20 +49,28 @@ private:
 class FfEncoder {
 public:
     ~FfEncoder() { Close(); }
+    // GPU first (NVENC, VA-API), then x264
     bool Open(int width, int height, int fps, int bitrate, std::string* err);
     void Close();
     bool IsOpen() const { return ctx_ != nullptr; }
+    bool Hardware() const { return name_.find("GPU") != std::string::npos; }
     std::string Name() const { return name_; }
     void SetBitrate(int bps);
     // I420 picture; out() gets the encoded frames (zero or more)
     bool Encode(const LsvImage& img, bool forceKey, const std::function<void(const uint8_t*, size_t, bool key)>& out);
+    bool FallBackToCpu(std::string* err);  // a GPU encoder failed while running
 
 private:
+    bool OpenWith(const char* name, std::string* err);
     void* ctx_ = nullptr;
     void* frame_ = nullptr;
     void* pkt_ = nullptr;
+    void* hwdev_ = nullptr;
+    void* hwframes_ = nullptr;
+    bool vaapi_ = false, allowHw_ = true;
     int64_t pts_ = 0;
-    int bitrate_ = 0, fps_ = 30;
+    int bitrate_ = 0, openedBitrate_ = 0, fps_ = 30, w_ = 0, h_ = 0;
+    std::chrono::steady_clock::time_point lastReopen_{};
     std::string name_;
 };
 

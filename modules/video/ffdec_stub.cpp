@@ -23,4 +23,8 @@ bool FfEncoder::Open(int, int, int, int, std::string* err) {
 void FfEncoder::Close() {}
 void FfEncoder::SetBitrate(int) {}
 bool FfEncoder::Encode(const LsvImage&, bool, const std::function<void(const uint8_t*, size_t, bool)>&) { return false; }
+bool FfEncoder::FallBackToCpu(std::string* err) {
+    if (err) *err = "built without FFmpeg";
+    return false;
+}
 }  // namespace lsv
