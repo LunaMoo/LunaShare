@@ -54,6 +54,9 @@ int main(int argc, char** argv) {
                 while (!line.empty() && isspace((unsigned char)line.front())) line.erase(line.begin());
                 if (line.size() == 64) o.allowedRooms.insert(line);
             }
+        } else if (a == "--version") {
+            printf("lunashare-rendezvous %s\n", LUNASHARE_VERSION);
+            return 0;
         } else if (a == "-h" || a == "--help") {
             Usage();
             return 0;

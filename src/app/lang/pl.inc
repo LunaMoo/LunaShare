@@ -391,7 +391,7 @@
 {"Import settings", "Importuj ustawienia"},
 {"When importing, also take over the device identity", "Przy imporcie przejmij też tożsamość urządzenia"},
 {"About", "O programie"},
-{"LunaShare 0.1  -  %s  -  protocol v%d", "LunaShare 0.1  -  %s  -  protokół v%d"},
+{"LunaShare %s  -  %s  -  protocol v%d", "LunaShare %s  -  %s  -  protokół v%d"},
 {"Settings folder: %s", "Folder ustawień: %s"},
 {"Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts.", "Każdy plik jest sprawdzany sumą SHA-256 przed wysłaniem i ponownie po odebraniu; przesyłanie można wstrzymywać i wznawiać, a przetrwa ono ponowne uruchomienie."},
 {"All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact).", "Wszystkie połączenia są szyfrowane end-to-end (wymiana kluczy X25519, XChaCha20-Poly1305, klucze urządzeń EdDSA zapamiętywane przy pierwszym kontakcie)."},

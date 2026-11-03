@@ -2402,7 +2402,7 @@ void App::DrawSettings() {
     }
 
     ImGui::SeparatorText(T("About"));
-    ImGui::TextDisabled(T("LunaShare 0.1  -  %s  -  protocol v%d"), PlatformName(), kProtocolVersion);
+    ImGui::TextDisabled(T("LunaShare %s  -  %s  -  protocol v%d"), LUNASHARE_VERSION, PlatformName(), kProtocolVersion);
     ImGui::TextDisabled(T("Settings folder: %s"), (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());
     ImGui::TextDisabled("%s", T("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts."));
     ImGui::TextDisabled("%s", T("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact)."));

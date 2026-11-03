@@ -212,13 +212,17 @@ jobs:
 
   # Every push to main refreshes the "latest" pre-release, so files have stable public download links
   # (Actions artifacts need a GitHub login, which e.g. an OPNsense box doesn't have).
+  # main: the rolling "latest" pre-release. A tag vX.Y.Z: a real release named after it, notes from CHANGELOG.md.
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [desktop, android, opnsense]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
+        with:
+          path: src
       - uses: actions/download-artifact@v4
         with:
           path: art
@@ -227,10 +231,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir out
+          tag=""
+          case "$GITHUB_REF" in refs/tags/v*) tag=${GITHUB_REF#refs/tags/};; esac
+          ver=${tag#v}
+          suffix=${ver:+-$ver}
           cp art/LunaShare-opnsense-freebsd-amd64/lunashare-opnsense.tar.gz out/
-          find art/LunaShare-android -name '*.apk' -exec cp {} out/ \;
-          for d in windows-x64 linux-x64 macos-arm64; do (cd art/LunaShare-$d && zip -qry ../../out/LunaShare-$d.zip .); done
+          for a in $(find art/LunaShare-android -name '*.apk'); do
+            b=$(basename "$a" .apk)
+            if [ -n "$tag" ]; then cp "$a" "out/LunaShare$suffix-${b#app-}.apk"; else cp "$a" out/; fi
+          done
+          for d in windows-x64 linux-x64 macos-arm64; do (cd art/LunaShare-$d && zip -qry ../../out/LunaShare$suffix-$d.zip .); done
           ls -l out
+          if [ -n "$tag" ]; then
+            # notes: this version's section of CHANGELOG.md
+            awk -v v="## $ver" 'index($0, v) == 1 {on=1; next} /^## / && on {exit} on' src/CHANGELOG.md > notes.md
+            cat notes.md
+            gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+              gh release create "$tag" -R "$GITHUB_REPOSITORY" --title "LunaShare $ver" --notes-file notes.md --verify-tag
+            gh release upload "$tag" out/* -R "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
           git_sha=${GITHUB_SHA::7}
           gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create latest -R "$GITHUB_REPOSITORY" --prerelease --title "Latest build" --notes "Automatic build of main."
