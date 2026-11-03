@@ -131,7 +131,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     if (s.callMicBoost < 0 || s.callMicBoost > 30) s.callMicBoost = 0;
     Get(j, "callInputDevice", s.callInputDevice);
     Get(j, "callOutputDevice", s.callOutputDevice);
-    if (s.callBitrate < 8000 || s.callBitrate > 64000) s.callBitrate = 24000;
+    if (s.callBitrate == 24000) s.callBitrate = 48000;  // old default (16 kHz era) -> new fullband default
+    if (s.callBitrate < 8000 || s.callBitrate > 128000) s.callBitrate = 48000;
     if (s.browserSort < 0 || s.browserSort > 2) s.browserSort = 0;
     if (s.browserTile < 64 || s.browserTile > 400) s.browserTile = 130;
     if (s.chunkKB < 16) s.chunkKB = 16;

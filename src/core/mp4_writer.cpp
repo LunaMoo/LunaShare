@@ -299,7 +299,7 @@ double Mp4Writer::Finish() {
     dOps.u8(0);
     dOps.u8(1);  // mono
     dOps.u16((uint32_t)preSkip_);
-    dOps.u32(16000);
+    dOps.u32(48000);
     dOps.u16(0);
     dOps.u8(0);
     Box opus;

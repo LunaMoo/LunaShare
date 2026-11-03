@@ -753,7 +753,7 @@ bool MediaHost::OpenDevices(bool capture, bool playback) {
     want.freq = LSM_SAMPLE_RATE;
     want.format = AUDIO_S16SYS;
     want.channels = 1;
-    want.samples = 256;  // ~16 ms
+    want.samples = 512;  // ~10.7 ms at 48 kHz
     want.userdata = this;
     audioError.clear();
     if (playback) {

@@ -3282,7 +3282,7 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     changed |= ImGui::Checkbox(T("Automatic microphone level"), &edit.callAutoGain);
     int kbps = edit.callBitrate / 1000;
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::SliderInt("##callbr", &kbps, 12, 48, T("Voice quality: %d kbps"))) { edit.callBitrate = kbps * 1000; editDirty = true; }
+    if (ImGui::SliderInt("##callbr", &kbps, 16, 128, T("Voice quality: %d kbps"))) { edit.callBitrate = kbps * 1000; editDirty = true; }
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     ImGui::SetNextItemWidth(fieldW);
     if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, T("Microphone boost: +%d dB"))) editDirty = true;

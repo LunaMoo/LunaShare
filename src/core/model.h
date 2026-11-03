@@ -54,7 +54,7 @@ struct Settings {
     bool callEchoCancel = true;
     bool callNoiseSuppress = true;
     bool callAutoGain = true;
-    int callBitrate = 24000;
+    int callBitrate = 48000;
     int callMicBoost = 0;
     bool wanRelay = true;          // internet: let the server relay (still end-to-end encrypted) when direct fails
     int callVideoRes = 1;          // 0 360p 1 540p 2 720p 3 1080p 4 1440p 5 4K 6 8K

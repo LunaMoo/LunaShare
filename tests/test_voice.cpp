@@ -159,12 +159,12 @@ static void TestVoiceMessage() {
     const LsmModule* m = lunashare_media_module();
     std::string path = "voice_message_test.ogg";
     CHECK(m->rec_start(path.c_str(), 24000) == 0, "recording starts");
-    std::vector<int16_t> pcm(320);
+    std::vector<int16_t> pcm(F);
     double t = 0;
     for (int f = 0; f < 150; f++) {  // 3 s, speech-like warble
         for (auto& v : pcm) {
             v = (int16_t)(8000 * std::sin(t * 2 * 3.14159265 * (200 + 60 * std::sin(t * 3))) * (0.6 + 0.4 * std::sin(t * 7)));
-            t += 1.0 / 16000;
+            t += 1.0 / R;
         }
         m->rec_push(pcm.data(), (int)pcm.size());
     }
@@ -213,7 +213,7 @@ static void TestVideoMessageFile() {
     g_mp4 = &w;
     const uint8_t sps[] = {0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x01, 0x40};
     const uint8_t pps[] = {0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80};
-    std::vector<int16_t> pcm(533);
+    std::vector<int16_t> pcm(R / 30);  // one video frame of audio
     for (int i = 0; i < 60; i++) {  // 2 s at 30 fps, keyframe every second
         bool key = i % 30 == 0;
         std::vector<uint8_t> au;
@@ -225,7 +225,7 @@ static void TestVideoMessageFile() {
         au.insert(au.end(), slice, slice + sizeof(slice));
         if (i == 0) w.AddVideo(slice, sizeof(slice), false, 0, 1280, 720);  // a non-keyframe first is ignored
         w.AddVideo(au.data(), au.size(), key, (int64_t)i * 33333, 1280, 720);
-        for (size_t k = 0; k < pcm.size(); k++) pcm[k] = (int16_t)(6000 * std::sin((i * 533 + (int)k) * 0.17));
+        for (size_t k = 0; k < pcm.size(); k++) pcm[k] = (int16_t)(6000 * std::sin((i * (int)pcm.size() + (int)k) * 0.17 * 16000 / R));
         m->rec_push(pcm.data(), (int)pcm.size());
     }
     m->rec_stop(0);

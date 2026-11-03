@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- **Much better call audio:** voice is now 48 kHz fullband Opus (was 16 kHz wideband, which sounded like a radio) at
+  48 kbit/s by default (adjustable 16–128 under *Advanced*), with gentler noise suppression. Voice and video messages
+  are recorded in fullband too. Update both devices to hear the difference; older versions can still talk to 1.0.1.
+
 ## 1.0.0 - first release
 
 LunaShare is a chat app built around sharing files, for Windows, Linux, macOS and Android, with optional voice/video

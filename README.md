@@ -122,7 +122,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   startup only if it's present. Without it LunaShare is the plain chat + file app, and the call button doesn't appear. Delete the file to remove calls.
 - The call button sits in the chat header. It's only shown when **both** devices have the module, since each device announces its capabilities.
 - Calls go peer-to-peer over the same encrypted connection as chat (LAN, hotspot, internet/KCP, and in principle Bluetooth, though there it can be choppy).
-- Audio: Opus (16 kHz, 12–48 kbit/s, in-band FEC), an adaptive jitter buffer with loss concealment, and SpeexDSP for echo cancellation, noise suppression and auto gain.
+- Audio: Opus (48 kHz fullband, 16–128 kbit/s, default 48, in-band FEC), an adaptive jitter buffer with loss concealment, and SpeexDSP for echo cancellation, noise suppression and auto gain.
 - During a call, file transfers to that device are throttled so they don't cause audio stutter.
 - Call bar: timer, mic/speaker levels, link stats (loss, jitter, delay), and buttons for mute, speaker (phones) and hang up. Incoming calls get a ringtone and a full-screen answer screen on phones.
 - Calls are logged in the chat (*Outgoing call – 2:31*, *Missed call*, …).

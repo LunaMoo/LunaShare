@@ -44,7 +44,8 @@ static void RemoveUtf8(const char* p) { remove(p); }
 namespace {
 
 constexpr int kRate = LSM_SAMPLE_RATE;
-constexpr int kFrame = kRate / 50;          // 20 ms = 320 samples
+constexpr int kFrame = kRate / 50;          // 20 ms = 960 samples
+constexpr int kOpusRate = 48000;             // Opus timestamps / pre-skip are always in 48 kHz units
 constexpr int kEchoTail = kRate / 5;        // 200 ms echo tail
 constexpr int kMaxPacket = 1500;
 
@@ -82,6 +83,7 @@ struct Voice {
     double jitterMs = 0;
     int64_t lastArrivalUs = 0;
     uint32_t lastArrivalTs = 0;
+    uint16_t lastArrivalSeq = 0;
     int underruns = 0;
 };
 
@@ -106,11 +108,11 @@ float Level(const int16_t* p, int n) {
 }
 
 void ApplySettingsLocked() {
-    if (g.enc) opus_encoder_ctl(g.enc, OPUS_SET_BITRATE(std::clamp(g.settings.bitrate, 6000, 64000)));
+    if (g.enc) opus_encoder_ctl(g.enc, OPUS_SET_BITRATE(std::clamp(g.settings.bitrate, 6000, 128000)));
     if (g.pre) {
         int on = g.settings.noise_suppress ? 1 : 0;
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_DENOISE, &on);
-        int suppress = -25;
+        int suppress = -18;  // gentler than speexdsp's default: strong suppression sounds metallic / "radio-like"
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &suppress);
         int agc = g.settings.auto_gain ? 1 : 0;
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_AGC, &agc);
@@ -140,9 +142,10 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     g.enc = opus_encoder_create(kRate, 1, OPUS_APPLICATION_VOIP, &err);
     if (err != OPUS_OK) { Log("opus encoder failed"); FreeLocked(); return -1; }
     opus_encoder_ctl(g.enc, OPUS_SET_INBAND_FEC(1));
-    opus_encoder_ctl(g.enc, OPUS_SET_PACKET_LOSS_PERC(10));
+    opus_encoder_ctl(g.enc, OPUS_SET_PACKET_LOSS_PERC(5));
     opus_encoder_ctl(g.enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
-    opus_encoder_ctl(g.enc, OPUS_SET_COMPLEXITY(8));
+    opus_encoder_ctl(g.enc, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));  // up to 20 kHz: natural voices
+    opus_encoder_ctl(g.enc, OPUS_SET_COMPLEXITY(9));
     g.dec = opus_decoder_create(kRate, 1, &err);
     if (err != OPUS_OK) { Log("opus decoder failed"); FreeLocked(); return -1; }
     g.echo = speex_echo_state_init(kFrame, kEchoTail);
@@ -229,11 +232,13 @@ void Receive(const uint8_t* data, size_t len) {
     // RFC 3550 style inter-arrival jitter
     int64_t now = NowUs();
     if (g.lastArrivalUs) {
-        double d = (double)(now - g.lastArrivalUs) / 1000.0 - (double)(int32_t)(ts - g.lastArrivalTs) * 1000.0 / kRate;
+        // from sequence numbers (20 ms each), so peers with other sample rates (older versions: 16 kHz) count right
+        double d = (double)(now - g.lastArrivalUs) / 1000.0 - (double)(int16_t)(seq - g.lastArrivalSeq) * 20.0;
         g.jitterMs += (std::fabs(d) - g.jitterMs) / 16.0;
     }
     g.lastArrivalUs = now;
     g.lastArrivalTs = ts;
+    g.lastArrivalSeq = seq;
     if (g.playing && (int16_t)(seq - g.nextSeq) < 0) return;  // too late, already concealed
     if (g.jitter.size() > 100) g.jitter.erase(g.jitter.begin());
     g.jitter[seq].assign(data + 7, data + len);
@@ -415,11 +420,12 @@ bool RecOpen(int bitrate) {
     int err = 0;
     rec.enc = opus_encoder_create(kRate, 1, OPUS_APPLICATION_VOIP, &err);
     if (!rec.enc) return false;
-    opus_encoder_ctl(rec.enc, OPUS_SET_BITRATE(bitrate > 0 ? bitrate : 24000));
-    opus_encoder_ctl(rec.enc, OPUS_SET_COMPLEXITY(9));
+    opus_encoder_ctl(rec.enc, OPUS_SET_BITRATE(bitrate > 0 ? bitrate : 48000));
+    opus_encoder_ctl(rec.enc, OPUS_SET_COMPLEXITY(10));
+    opus_encoder_ctl(rec.enc, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
     opus_int32 look = 0;
     opus_encoder_ctl(rec.enc, OPUS_GET_LOOKAHEAD(&look));
-    rec.preSkip = look * 3;  // in 48 kHz samples
+    rec.preSkip = look * (kOpusRate / kRate);  // in 48 kHz samples
     rec.pre = speex_preprocess_state_init(kFrame, kRate);
     int on = 1, sup = -25;
     float lvl = 12000;
@@ -500,7 +506,7 @@ void RecPush(const int16_t* pcm, int n) {
         }
         rec.page.insert(rec.page.end(), pkt, pkt + len);
         OggAddLacing(rec.lacing, (size_t)len);
-        rec.granule += kFrame * 3;
+        rec.granule += kFrame * (kOpusRate / kRate);
         rec.packetsInPage++;
         if (rec.packetsInPage >= 50 || rec.lacing.size() > 200) OggFlush(rec, false);
     }
