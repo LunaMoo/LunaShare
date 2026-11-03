@@ -182,7 +182,9 @@ public class LunaShareActivity extends SDLActivity {
                         am.setBluetoothScoOn(false);
                     }
                 }
-                self.setVolumeControlStream(inCall ? android.media.AudioManager.STREAM_VOICE_CALL : android.media.AudioManager.USE_DEFAULT_STREAM_TYPE);
+                // SDL plays call audio on the media stream (OpenSL ES default), so the volume buttons must control
+                // that one: with STREAM_VOICE_CALL they changed a stream we don't use and calls stayed quiet
+                self.setVolumeControlStream(inCall ? android.media.AudioManager.STREAM_MUSIC : android.media.AudioManager.USE_DEFAULT_STREAM_TYPE);
             } catch (Exception e) {
                 nativeOnError("audio mode: " + e.getMessage());
             }

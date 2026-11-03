@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- **Louder calls:** the automatic gain levelled every voice at about -30 dBFS, which is quiet; speech is now sent at
+  about -20 dBFS (around 9 dB louder) whatever the microphone level, with a soft limiter so it doesn't clip. Voice and
+  video messages too.
+- **Android:** the volume buttons during a call now change the call's actual volume (they changed an unused stream).
+- **Video messages** are recorded in the resolution and frame rate set for video calls (was always 720p30).
+
 ## 1.0.1
 
 - **Much better call audio:** voice is now 48 kHz fullband Opus (was 16 kHz wideband, which sounded like a radio) at

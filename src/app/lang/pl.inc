@@ -178,7 +178,7 @@
 {"Starting camera...", "Uruchamianie aparatu..."},
 {"Switch camera", "Przełącz aparat"},
 {"Up to 3 minutes", "Do 3 minut"},
-{"Video message - up to 3 minutes, 720p", "Wiadomość wideo - do 3 minut, 720p"},
+{"Video message - up to 3 minutes, %dp%d", "Wiadomość wideo - do 3 minut, %dp%d"},
 {"Record", "Nagrywaj"},
 {"Video message", "Wiadomość wideo"},
 {"Nothing was recorded", "Nic nie zostało nagrane"},

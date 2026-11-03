@@ -113,8 +113,8 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 
 **Video messages (needs the voice and video modules)**
 - The camera button next to **Voice** opens a camera preview filling the chat (front camera on phones; switch cameras before
-  you start). **Record** starts, **Send** stops and sends. Messages are MP4 files (720p30 H.264 with Opus sound, about 16 MB
-  a minute, up to 3 minutes) that play in the chat with the player. The picture keeps the phone's orientation from the moment
+  you start). **Record** starts, **Send** stops and sends. Messages are MP4 files (H.264 with Opus sound, up to 3 minutes) in
+  the resolution and frame rate set for video calls (720p30 is about 16 MB a minute) that play in the chat with the player. The picture keeps the phone's orientation from the moment
   recording starts, like a camera app.
 
 **Voice calls (optional module)**

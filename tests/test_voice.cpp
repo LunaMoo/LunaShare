@@ -86,6 +86,52 @@ static void TestLoopback(double loss) {
     CHECK(st.buffered_ms < 250, "bounded latency (%d ms)", st.buffered_ms);
 }
 
+// quiet microphone (laptop / phone at arm's length): default call settings must bring speech to a normal level
+static double SentLevelDb(int micAmp, double* inDb) {
+    const LsmModule* m = lunashare_media_module();
+    Net net;
+    LsmHost h{LSM_API_VERSION, &net, HostSend, HostLog};
+    LsmSettings s{1, 1, 1, 48000};
+    m->start(&h, &s);
+    int err;
+    OpusDecoder* tap = opus_decoder_create(R, 1, &err);  // decodes what we send
+    std::mt19937 rng(3);
+    int16_t frame[F], silence[F] = {}, dec[F * 6];
+    double t = 0, inSq = 0, outSq = 0;
+    long inN = 0, outN = 0;
+    for (int step = 0; step < 500; step++) {  // 10 s of syllables: 200 ms voiced, 100 ms pause
+        for (int i = 0; i < F; i++, t += 1.0 / R) {
+            double ph = std::fmod(t, 0.3), env = ph < 0.2 ? std::sin(PI * ph / 0.2) : 0;
+            double f0 = 140 + 30 * std::sin(t * 2.1), v = 0;
+            for (int k = 1; k <= 12; k++) v += std::sin(2 * PI * f0 * k * t) / k;  // harmonic voice
+            double x = micAmp * env * v + std::normal_distribution<>(0, 10)(rng);
+            frame[i] = (int16_t)std::clamp(x, -32768.0, 32767.0);
+            if (step >= 300) { inSq += x * x; inN++; }
+        }
+        m->playback(silence, F);
+        m->capture(frame, F);
+        for (auto& p : net.sent) {
+            int n = opus_decode(tap, p.data() + 7, (opus_int32)p.size() - 7, dec, F * 6, 0);
+            if (step >= 300)
+                for (int i = 0; i < n; i++) { outSq += (double)dec[i] * dec[i]; outN++; }
+        }
+        net.sent.clear();
+    }
+    m->stop();
+    opus_decoder_destroy(tap);
+    *inDb = 20 * std::log10(std::sqrt(inSq / std::max(1L, inN)) / 32768.0 + 1e-9);
+    return 20 * std::log10(std::sqrt(outSq / std::max(1L, outN)) / 32768.0 + 1e-9);
+}
+
+static void TestLoudness() {
+    printf("[loudness: speech level sent, default settings]\n");
+    for (int amp : {150, 500, 2000, 8000}) {
+        double in, out = SentLevelDb(amp, &in);
+        printf("  mic %.1f dBFS -> sent %.1f dBFS\n", in, out);
+        CHECK(out > -23 && out < -16, "speech sent at a normal level (%.1f dBFS)", out);
+    }
+}
+
 static double EchoRun(bool aec, double* nearOut, bool ns = true) {
     const LsmModule* m = lunashare_media_module();
     Net net;
@@ -266,6 +312,7 @@ int main() {
     CHECK(m && m->api_version == LSM_API_VERSION && strcmp(m->caps, "voice") == 0, "module descriptor");
     TestLoopback(0.0);
     TestLoopback(0.10);
+    TestLoudness();
     TestEcho();
     TestVoiceMessage();
     TestVideoMessageFile();

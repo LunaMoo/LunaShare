@@ -956,8 +956,10 @@ bool MediaHost::OpenVideoMessage(const std::string& path) {
         return false;
     }
 #endif
-    // 720p30 H.264: plays everywhere and stays around 16 MB a minute
-    LsvSettings vs = Preset(2, 30, false);
+    // same resolution / frame rate as video calls (Advanced settings); always H.264, which the MP4 needs and every
+    // device plays; no adaptation: this is recorded locally, not sent live
+    Settings cs = eng_ ? eng_->GetSettings() : Settings();
+    LsvSettings vs = Preset(cs.callVideoRes, cs.callVideoFps, false);
     vs.codec_pref = 1;
     if (!vmod_->start(&vs)) return false;
     vmsgPath_ = path;

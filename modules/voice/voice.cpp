@@ -49,11 +49,34 @@ constexpr int kOpusRate = 48000;             // Opus timestamps / pre-skip are a
 constexpr int kEchoTail = kRate / 5;        // 200 ms echo tail
 constexpr int kMaxPacket = 1500;
 
+// Make-up gain after speexdsp's AGC, which levels speech at only about -25 dBFS (quiet next to other apps):
+// follows the level of speech (not pauses or noise) towards about -19 dBFS, up to +14 dB, with a soft limiter
+// so peaks don't clip. Only ever raises the level.
+struct Leveler {
+    float gain = 1, speech = 0, noise = 0.001f;
+    void Reset() { *this = Leveler(); }
+    void Run(int16_t* p, int n) {
+        double s = 0;
+        for (int i = 0; i < n; i++) s += (double)p[i] * p[i];
+        float rms = (float)(std::sqrt(s / std::max(1, n)) / 32768.0);
+        noise = rms < noise ? noise * 0.8f + rms * 0.2f : noise * 1.002f + 1e-6f;  // falls fast, rises slowly
+        if (rms > 0.003f && rms > noise * 4) speech = speech > 0 ? speech * 0.95f + rms * 0.05f : rms;
+        float want = speech > 0 ? std::clamp(0.112f / speech, 1.0f, 5.0f) : 1.0f;
+        float g0 = gain;
+        gain = want > gain ? std::min(want, gain * 1.01f) : std::max(want, gain * 0.95f);  // ~+4 dB/s up, faster down
+        for (int i = 0; i < n; i++) {
+            float x = p[i] / 32768.0f * (g0 + (gain - g0) * (float)i / (float)n), a = std::fabs(x);
+            if (a > 0.7f) x = std::copysign(0.7f + 0.3f * std::tanh((a - 0.7f) / 0.3f), x);
+            p[i] = (int16_t)std::lround(std::clamp(x, -1.0f, 1.0f) * 32767.0f);
+        }
+    }
+};
+
 struct Voice {
     // ---- shared
     std::mutex m;  // everything below except where noted
     LsmHost host{};
-    LsmSettings settings{1, 1, 1, 24000};
+    LsmSettings settings{1, 1, 1, 48000};
     bool running = false;
     std::atomic<bool> mute{false};
 
@@ -61,6 +84,7 @@ struct Voice {
     OpusEncoder* enc = nullptr;
     SpeexEchoState* echo = nullptr;
     SpeexPreprocessState* pre = nullptr;
+    Leveler leveler;
     std::vector<int16_t> capBuf;
     uint16_t seqOut = 0;
     uint32_t tsOut = 0;
@@ -116,7 +140,7 @@ void ApplySettingsLocked() {
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &suppress);
         int agc = g.settings.auto_gain ? 1 : 0;
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_AGC, &agc);
-        float level = 12000;
+        float level = 20000;
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_AGC_LEVEL, &level);
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_ECHO_STATE, g.settings.echo_cancel ? g.echo : nullptr);
     }
@@ -155,6 +179,7 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     ApplySettingsLocked();
     g.capBuf.clear();
     g.seqOut = 0;
+    g.leveler.Reset();
     g.tsOut = 0;
     g.jitter.clear();
     g.out.clear();
@@ -189,6 +214,7 @@ void EncodeFrameLocked(int16_t* frame) {
         memcpy(clean, frame, sizeof(clean));
     }
     if (g.pre) speex_preprocess_run(g.pre, clean);
+    if (g.settings.auto_gain) g.leveler.Run(clean, kFrame);
     if (g.mute) memset(clean, 0, sizeof(clean));
     g.micLevel = g.micLevel * 0.7f + Level(clean, kFrame) * 0.3f;
     uint8_t pkt[kMaxPacket];
@@ -352,6 +378,7 @@ struct Recorder {
     std::string path;
     OpusEncoder* enc = nullptr;
     SpeexPreprocessState* pre = nullptr;
+    Leveler leveler;
     std::vector<int16_t> buf;
     std::vector<uint8_t> page;       // packets of the page being filled
     std::vector<uint8_t> lacing;
@@ -427,8 +454,9 @@ bool RecOpen(int bitrate) {
     opus_encoder_ctl(rec.enc, OPUS_GET_LOOKAHEAD(&look));
     rec.preSkip = look * (kOpusRate / kRate);  // in 48 kHz samples
     rec.pre = speex_preprocess_state_init(kFrame, kRate);
-    int on = 1, sup = -25;
-    float lvl = 12000;
+    int on = 1, sup = -18;
+    float lvl = 20000;
+    rec.leveler.Reset();
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_DENOISE, &on);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &sup);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_AGC, &on);
@@ -495,6 +523,7 @@ void RecPush(const int16_t* pcm, int n) {
         memcpy(frame, &rec.buf[off], sizeof(frame));
         off += kFrame;
         speex_preprocess_run(rec.pre, frame);
+        rec.leveler.Run(frame, kFrame);
         rec.level = rec.level * 0.7f + Level(frame, kFrame) * 0.3f;
         uint8_t pkt[kMaxPacket];
         int len = opus_encode(rec.enc, frame, kFrame, pkt, kMaxPacket);

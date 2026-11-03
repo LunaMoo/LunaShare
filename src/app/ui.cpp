@@ -1018,7 +1018,10 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
         dl->AddRectFilled(ImVec2(m0.x + pad, m0.y + inputH * 0.42f), ImVec2(m0.x + mw - pad, m0.y + inputH * 0.58f), ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
         dl->AddRectFilled(ImVec2(m0.x + pad, m0.y + inputH * 0.42f), ImVec2(m0.x + pad + (mw - 2 * pad) * lvl, m0.y + inputH * 0.58f), ui::ColOk(), 4);
     } else {
-        const char* hint = mobile ? T("Up to 3 minutes") : T("Video message - up to 3 minutes, 720p");
+        Settings vs = eng.GetSettings();
+        LsvSettings vp = MediaHost::Preset(vs.callVideoRes, vs.callVideoFps, false);
+        std::string hintS = mobile ? std::string(T("Up to 3 minutes")) : TF("Video message - up to 3 minutes, %dp%d", vp.height, vp.fps);
+        const char* hint = hintS.c_str();
         ImVec2 ts = ImGui::CalcTextSize(hint);
         if (ts.x < mw) dl->AddText(ImVec2(m0.x + (mw - ts.x) * 0.5f, m0.y + (inputH - ts.y) * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), hint);
     }
