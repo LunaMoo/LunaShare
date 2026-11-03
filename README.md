@@ -221,8 +221,8 @@ cmake --build build --config Release
 - Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`.
 
 The GitHub Actions workflow builds Windows, Linux, macOS and the Android APK on every push and uploads them as artifacts.
-Every push to `main` updates the *latest* pre-release; pushing a tag `vX.Y.Z` publishes a release with that version's notes from
-[CHANGELOG.md](CHANGELOG.md).
+Every push to `main` updates the *latest* pre-release. When a new version (the `VERSION` in `CMakeLists.txt`) first reaches
+`main`, a release `vX.Y.Z` is published with that version's notes from [CHANGELOG.md](CHANGELOG.md).
 
 Command line: `--portable` (keeps settings in `LunaShareData` next to the executable), `--config <dir>`.
 
