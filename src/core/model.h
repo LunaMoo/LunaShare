@@ -15,6 +15,21 @@ using json = nlohmann::json;
 
 enum class UiLayout : int { Auto = 0, Desktop = 1, Mobile = 2 };
 
+// One device of an account, as listed in the account's signed device list.
+struct AccountDevice {
+    std::string id, pub;  // device id + its identity key (hex)
+    bool operator==(const AccountDevice& o) const { return id == o.id && pub == o.pub; }
+};
+
+// What we know about someone else's account (from their signed device list).
+struct AccountInfo {
+    std::string pub;
+    int64_t ver = 0;
+    std::vector<AccountDevice> devices;
+    std::vector<std::string> removed;  // device ids taken off the account (they must not rejoin by themselves)
+    std::string sig;
+};
+
 struct Settings {
     // identity (generated once; NOT part of a normal export so two devices never share an id)
     std::string deviceId;
@@ -23,6 +38,14 @@ struct Settings {
     // profile picture (avatar.jpg in the config folder); changed only through Engine::SetAvatar
     std::string avatarHash;        // SHA-256 hex of avatar.jpg, empty = no picture
     int64_t profileVer = 0;        // bumped whenever the picture changes; peers fetch when theirs is older
+    // account: a key of the person, shared by all their linked devices (see docs/ACCOUNTS.md). Its secret is
+    // never part of a normal settings export; it moves only through linking and the recovery phrase / backup.
+    std::string accountSecret;     // EdDSA seed (hex)
+    std::vector<AccountDevice> accountDevices;  // this account's devices, signed as a whole (accountSig)
+    std::vector<std::string> accountRemoved;  // device ids removed from the account (part of the signed list)
+    int64_t accountVer = 0;
+    std::string accountSig;
+    bool accountBackedUp = false;  // the user saved the recovery phrase or a backup file
 
     std::string downloadDir;
     uint16_t tcpPort = 47820;
@@ -95,6 +118,7 @@ struct KnownDevice {
     std::string pendingKey;  // a DIFFERENT key was presented: connection refused until the user accepts it
     std::string avatarHash;  // their profile picture (verified, cached in avatars/), empty = none
     int64_t profileVer = 0;  // version of the profile we have
+    std::string accountPub;  // the account this device belongs to (verified certificate), empty = none / old version
     std::string DisplayName() const { return customName.empty() ? (name.empty() ? id.substr(0, 8) : name) : customName; }
     std::string Fingerprint() const;  // short, readable form of the identity key (or id if unknown)
 };
@@ -112,6 +136,7 @@ struct ChatMessage {
     bool delivered = false;
     std::string myReaction, theirReaction;  // emoji (UTF-8), empty = none
     bool reactionSent = true;               // false until the other device confirmed myReaction
+    std::vector<std::string> pendingTo;     // devices that still have to get this message (contact's + my other ones)
 };
 
 struct Conversation {

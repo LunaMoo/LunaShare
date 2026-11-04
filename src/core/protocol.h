@@ -20,7 +20,8 @@ constexpr uint32_t kMaxFrame = 16u << 20;
 constexpr const char* kBtServiceUuid = "6c756e61-7368-6172-6500-000000000001";
 
 enum class Msg : uint8_t {
-    Hello = 1,        // {proto, id, name, user, host, platform, macs[], app, tcpPort, pub, sig, caps[], pv, avh}
+    Hello = 1,        // {proto, id, name, user, host, platform, macs[], app, tcpPort, pub, sig, caps[], pv, avh,
+                      //  acc (account key), acs (account's signature over "id\npub"), av (account device list version)}
     Ping = 2,
     Pong = 3,
     Chat = 10,        // {mid, ts, text}
@@ -31,6 +32,13 @@ enum class Msg : uint8_t {
     ChatReactAck = 15,  // {mid, emoji}
     ProfileGet = 16,  // {}  send me your current profile (my copy is older than the version in your Hello)
     ProfileData = 17, // {ver, name, avh, img (base64 JPEG, "" = no picture), sig}  also pushed when it changes
+    AccountGet = 18,  // {}  send me your account's device list (Hello said a newer version exists)
+    AccountData = 19, // {pub, ver, devices[{id, pub}], sig}  signed by the account key; pushed to own devices too
+    ChatSync = 30,    // {chat, mid, ts, text, out}  between devices of the SAME account: a message of conversation `chat`
+    ChatSyncAck = 31, // {mid}
+    LinkOffer = 32,   // {}  "join my account" (the user picked this device); both show the connection's Code()
+    LinkAnswer = 33,  // {accept}
+    LinkGrant = 34,   // {secret, account{...AccountData}, name, avh, img, pv, devices[], accounts[], chats{}}
     FileOffer = 20,   // {tid, name, rel, size, sha256, mtime, batch, batchCount, mid}
     FileAccept = 21,  // {tid, offset}  (also used to resume: receiver tells sender where to continue)
     FileReject = 22,  // {tid, reason}

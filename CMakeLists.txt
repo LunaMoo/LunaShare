@@ -309,6 +309,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/file_browser.cpp
         src/app/android_bridge.cpp
         src/app/ui_viewer.cpp
+        src/app/ui_account.cpp
         src/app/image_cache.cpp
         src/app/avatar.cpp
         src/app/gl_funcs.cpp

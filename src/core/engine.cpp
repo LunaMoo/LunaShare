@@ -65,6 +65,28 @@ bool Engine::Start() {
             settings.identitySecret = identity_.seedHex;
             MarkDirty();
         }
+        // every device has an account; older installs get one now, with this device as its only member
+        if (settings.accountSecret.empty() || !account_.LoadSeed(settings.accountSecret)) {
+            account_.Generate();
+            settings.accountSecret = account_.seedHex;
+            settings.accountDevices.clear();
+            settings.accountVer = 0;
+            MarkDirty();
+        }
+        {
+            bool self = false;
+            for (auto& d : settings.accountDevices) self |= d.id == settings.deviceId && d.pub == identity_.PubHex();
+            if (!self) {
+                settings.accountDevices.push_back({settings.deviceId, identity_.PubHex()});
+                settings.accountVer = std::max(NowMs(), settings.accountVer + 1);
+                SignAccountDevices();
+                MarkDirty();
+            }
+        }
+        accountCert_ = SignData(account_, "device", settings.deviceId + "\n" + identity_.PubHex());
+        std::vector<std::string> ids;
+        for (auto& [id, d] : devices) ids.push_back(id);
+        for (auto& id : ids) MergeChats(id);
         if (settings.displayName.empty()) {
             settings.displayName = UserName() + "@" + HostName();
             MarkDirty();
@@ -235,8 +257,21 @@ KnownDevice& Engine::Device(const std::string& id) {
     return d;
 }
 
-std::string Engine::PeerName(const std::string& peer) {
+std::string Engine::PeerName(const std::string& peerOrKey) {
     auto lk = Lock();
+    std::string peer = peerOrKey;
+    if (IsContactKey(peerOrKey)) {
+        // a person: a nickname given to any of their devices, else the name of the device seen last
+        const KnownDevice* best = nullptr;
+        for (auto& id : DevicesOf(peerOrKey)) {
+            auto it = devices.find(id);
+            if (it == devices.end()) continue;
+            if (!it->second.customName.empty()) return it->second.customName;
+            if (!best || it->second.lastSeen > best->lastSeen) best = &it->second;
+        }
+        if (!best) return peerOrKey.substr(1, 8);
+        peer = best->id;
+    }
     auto it = devices.find(peer);
     if (it != devices.end()) return it->second.DisplayName();
     auto o = online.find(peer);
@@ -247,8 +282,10 @@ std::string Engine::PeerName(const std::string& peer) {
 std::shared_ptr<Connection> Engine::ReadyConn(const std::string& peer) {
     auto lk = Lock();
     std::shared_ptr<Connection> best;
+    bool person = IsContactKey(peer);
     for (auto& c : conns) {
-        if (!c->ready || c->closed || c->peerId != peer) continue;
+        if (!c->ready || c->closed) continue;
+        if (person ? ChatKey(c->peerId) != peer : c->peerId != peer) continue;
         if (!best || TransportRank(c->transport) < TransportRank(best->transport)) best = c;
     }
     return best;
@@ -276,6 +313,500 @@ std::vector<Event> Engine::PopEvents() {
     return e;
 }
 
+// ============================================================================ accounts
+
+static bool WriteWholeFile(const std::string& path, const std::string& data);
+static bool ReadWholeFile(const std::string& path, std::string& out, size_t maxBytes);
+static bool LooksLikeJpeg(const std::string& d);
+
+std::string Engine::ChatKey(const std::string& device) {
+    auto it = devices.find(device);
+    if (it == devices.end() || it->second.accountPub.empty() || it->second.accountPub == MyAccount()) return device;
+    return "@" + it->second.accountPub;
+}
+
+std::vector<std::string> Engine::DevicesOf(const std::string& key) {
+    if (!IsContactKey(key)) return {key};
+    std::vector<std::string> out;
+    std::string acc = key.substr(1);
+    for (auto& [id, d] : devices)
+        if (d.accountPub == acc && !d.blocked) out.push_back(id);
+    return out;
+}
+
+std::string Engine::Resolve(const std::string& key) {
+    if (!IsContactKey(key)) return key;
+    if (auto c = ReadyConn(key)) return c->peerId;
+    std::string best;
+    int64_t bestSeen = -1;
+    for (auto& id : DevicesOf(key)) {
+        auto o = online.find(id);
+        int64_t seen = o != online.end() ? INT64_MAX : devices[id].lastSeen;
+        if (seen > bestSeen) {
+            best = id;
+            bestSeen = seen;
+        }
+    }
+    return best.empty() ? key : best;
+}
+
+bool Engine::IsOnline(const std::string& key) {
+    for (auto& id : DevicesOf(key))
+        if (online.count(id)) return true;
+    return false;
+}
+
+const KnownDevice* Engine::DeviceFor(const std::string& key) {
+    auto it = devices.find(Resolve(key));
+    return it == devices.end() ? nullptr : &it->second;
+}
+
+std::vector<std::string> Engine::MyOtherDevices() {
+    std::vector<std::string> out;
+    for (auto& [id, d] : devices)
+        if (d.accountPub == MyAccount() && id != settings.deviceId && !d.blocked) out.push_back(id);
+    return out;
+}
+
+std::vector<std::string> Engine::Conversations() {
+    std::set<std::string> keys;
+    for (auto& [id, d] : devices)
+        if (id != settings.deviceId) keys.insert(ChatKey(id));
+    for (auto& [id, o] : online)
+        if (id != settings.deviceId) keys.insert(ChatKey(id));
+    for (auto& [k, cv] : chats)
+        if (!cv.messages.empty()) keys.insert(k);
+    return std::vector<std::string>(keys.begin(), keys.end());
+}
+
+// What an account signs about its devices. The text is canonical (sorted), so any device of the account produces
+// the same bytes for the same list.
+static std::string DeviceListText(int64_t ver, std::vector<AccountDevice> list, std::vector<std::string> removed) {
+    std::sort(list.begin(), list.end(), [](auto& a, auto& b) { return a.id < b.id; });
+    std::sort(removed.begin(), removed.end());
+    std::string t = std::to_string(ver) + "\n";
+    for (auto& d : list) t += d.id + " " + d.pub + "\n";
+    for (auto& r : removed) t += "removed " + r + "\n";
+    return t;
+}
+
+static std::vector<std::string> JsonStrings(const json& a) {
+    std::vector<std::string> out;
+    if (a.is_array())
+        for (auto& x : a)
+            if (x.is_string()) out.push_back(x.get<std::string>());
+    return out;
+}
+
+static std::vector<AccountDevice> JsonDevices(const json& a) {
+    std::vector<AccountDevice> out;
+    if (a.is_array())
+        for (auto& d : a) {
+            if (!d.is_object()) continue;
+            AccountDevice ad{d.value("id", ""), d.value("pub", "")};
+            if (!ad.id.empty() && ad.pub.size() == 64) out.push_back(ad);
+        }
+    return out;
+}
+
+void Engine::SignAccountDevices() {
+    settings.accountSig = SignData(account_, "devices", DeviceListText(settings.accountVer, settings.accountDevices, settings.accountRemoved));
+}
+
+json Engine::AccountJson() {
+    json ds = json::array();
+    for (auto& d : settings.accountDevices) ds.push_back({{"id", d.id}, {"pub", d.pub}});
+    return {{"pub", MyAccount()}, {"ver", settings.accountVer}, {"devices", ds}, {"removed", settings.accountRemoved}, {"sig", settings.accountSig}};
+}
+
+void Engine::PushAccount() {
+    json aj = AccountJson();
+    for (auto& o : conns)
+        if (o->ready && !o->closed) Queue(o, Msg::AccountData, aj);
+}
+
+void Engine::HandleAccount(const std::shared_ptr<Connection>& c, const json& j) {
+    auto dv = devices.find(c->peerId);
+    if (dv == devices.end()) return;
+    std::string pub = j.value("pub", ""), sig = j.value("sig", "");
+    int64_t ver = j.value("ver", (int64_t)0);
+    if (pub.empty() || pub != dv->second.accountPub) return;  // only the account the sending device belongs to
+    std::vector<AccountDevice> list = JsonDevices(j.value("devices", json::array()));
+    std::vector<std::string> removed = JsonStrings(j.value("removed", json::array()));
+    if (list.empty() || list.size() > 64 || removed.size() > 256 || !VerifyData(pub, "devices", DeviceListText(ver, list, removed), sig)) return;
+    bool mine = pub == MyAccount();
+    std::vector<AccountDevice> old = mine ? settings.accountDevices : accounts[pub].devices;
+    if (ver <= (mine ? settings.accountVer : accounts[pub].ver)) return;
+    if (mine) {
+        bool self = false;
+        for (auto& d : list) self |= d.id == settings.deviceId;
+        if (!self && std::find(removed.begin(), removed.end(), settings.deviceId) != removed.end()) {
+            LeaveAccount();  // another of my devices removed this one
+            return;
+        }
+        settings.accountDevices = list;
+        settings.accountRemoved = removed;
+        settings.accountVer = ver;
+        settings.accountSig = sig;
+        if (!self) {
+            // a newer list without me, but I was not removed (restored from the phrase elsewhere): rejoin
+            settings.accountDevices.push_back({settings.deviceId, identity_.PubHex()});
+            settings.accountVer = std::max(NowMs(), settings.accountVer + 1);
+            SignAccountDevices();
+            PushAccount();
+        }
+    } else {
+        AccountInfo& a = accounts[pub];
+        a.pub = pub;
+        a.ver = ver;
+        a.devices = list;
+        a.removed = removed;
+        a.sig = sig;
+    }
+    // devices of the list we have never met: known now (their key is vouched for by the account), so messages can
+    // be queued for them and the internet server can find them
+    for (auto& ad : list) {
+        if (ad.id == settings.deviceId) continue;
+        auto it = devices.find(ad.id);
+        if (it == devices.end()) {
+            KnownDevice& nd = Device(ad.id);
+            nd.pubKey = ad.pub;
+            nd.accountPub = pub;
+            nd.name = mine ? settings.displayName : PeerName("@" + pub);
+        } else if (it->second.pubKey == ad.pub && it->second.accountPub != pub) {
+            it->second.accountPub = pub;
+            MergeChats(ad.id);
+        }
+    }
+    // devices removed from the account no longer speak for it
+    for (auto& od : old)
+        if (std::find(list.begin(), list.end(), od) == list.end()) {
+            auto it = devices.find(od.id);
+            if (it != devices.end() && it->second.accountPub == pub) it->second.accountPub.clear();
+        }
+    MarkDirty();
+}
+
+void Engine::MergeChats(const std::string& device) {
+    std::string key = ChatKey(device);
+    if (key != device) MergeChatInto(device, key);
+}
+
+void Engine::MergeChatInto(const std::string& fromKey, const std::string& key) {
+    if (fromKey == key) return;
+    auto it = chats.find(fromKey);
+    if (it == chats.end()) return;
+    Conversation& to = chats[key];
+    to.peer = key;
+    for (auto& m : it->second.messages) {
+        bool dup = false;
+        for (auto& e : to.messages) dup |= e.mid == m.mid;
+        if (!dup) to.messages.push_back(m);
+    }
+    std::stable_sort(to.messages.begin(), to.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
+    to.unread += it->second.unread;
+    to.pendingDeletes.insert(to.pendingDeletes.end(), it->second.pendingDeletes.begin(), it->second.pendingDeletes.end());
+    chats.erase(fromKey);  // (`it` is invalid from here on)
+    MarkDirty();
+}
+
+// ---- linking
+
+std::string Engine::LinkCode(const std::string& device) {
+    auto c = ReadyConn(device);
+    return c && c->sec ? c->sec->Code() : std::string();
+}
+
+bool Engine::LinkPending(const std::string& device) {
+    auto lk = Lock();
+    auto it = linkOffered_.find(device);
+    return it != linkOffered_.end() && SteadyMs() - it->second < 10 * 60000;
+}
+
+bool Engine::LinkDevice(const std::string& device) {
+    auto lk = Lock();
+    auto dv = devices.find(device);
+    auto c = ReadyConn(device);
+    if (dv == devices.end() || dv->second.accountPub == MyAccount() || !c) return false;
+    linkOffered_[device] = SteadyMs();
+    Queue(c, Msg::LinkOffer, {{"name", settings.displayName}});
+    return true;
+}
+
+void Engine::AnswerLink(const std::string& device, bool accept) {
+    auto lk = Lock();
+    auto it = linkAsked_.find(device);
+    if (it == linkAsked_.end()) return;
+    linkAsked_.erase(it);
+    if (accept) linkJoining_[device] = SteadyMs();
+    QueueToPeer(device, Msg::LinkAnswer, {{"accept", accept}});
+}
+
+// Everything another device needs to become "me": the account key and device list, my profile, contacts and
+// conversations (the newest 2000 messages of each). Sent to a device being linked, and saved in backups.
+json Engine::AccountPayload(const std::string& exceptDevice) {
+    json devs = json::array();
+    for (auto& [id, kd] : devices)
+        if (id != exceptDevice) devs.push_back(ToJson(kd));
+    KnownDevice self;
+    self.id = settings.deviceId;
+    self.name = settings.displayName;
+    self.platform = PlatformName();
+    self.host = HostName();
+    self.pubKey = identity_.PubHex();
+    self.accountPub = MyAccount();
+    self.trusted = true;
+    self.lastIp = "";
+    self.lastPort = boundPort;
+    devs.push_back(ToJson(self));
+    json accs = json::array();
+    for (auto& [pub, a] : accounts) {
+        if (a.sig.empty()) continue;
+        json ds = json::array();
+        for (auto& ad : a.devices) ds.push_back({{"id", ad.id}, {"pub", ad.pub}});
+        accs.push_back({{"pub", a.pub}, {"ver", a.ver}, {"devices", ds}, {"removed", a.removed}, {"sig", a.sig}});
+    }
+    json cj = json::object();
+    for (auto& [key, cv] : chats) {
+        if (key == exceptDevice || cv.messages.empty()) continue;
+        json arr = json::array();
+        size_t from = cv.messages.size() > 2000 ? cv.messages.size() - 2000 : 0;
+        for (size_t i = from; i < cv.messages.size(); i++) arr.push_back(ToJson(cv.messages[i]));
+        cj[key] = arr;
+    }
+    json pj = ProfileJson();
+    return {{"secret", settings.accountSecret}, {"account", AccountJson()}, {"name", settings.displayName},
+            {"avh", settings.avatarHash}, {"img", pj["img"]}, {"pv", settings.profileVer},
+            {"devices", devs}, {"accounts", accs}, {"chats", cj}};
+}
+
+// Become a device of the account in `p` (link grant or restored backup / phrase). requireSelf: the signed device
+// list must already contain this device (linking); otherwise this device adds itself (restoring).
+bool Engine::AdoptAccount(const json& p, const std::string& fromDevice, bool requireSelf, std::string* err) {
+    Identity acc;
+    json a = p.value("account", json::object());
+    std::string pub = a.value("pub", ""), sig = a.value("sig", "");
+    int64_t ver = a.value("ver", (int64_t)0);
+    if (!acc.LoadSeed(p.value("secret", "")) || (!pub.empty() && acc.PubHex() != pub)) {
+        if (err) *err = "the account key is not valid";
+        return false;
+    }
+    pub = acc.PubHex();
+    std::vector<AccountDevice> list = JsonDevices(a.value("devices", json::array()));
+    std::vector<std::string> removed = JsonStrings(a.value("removed", json::array()));
+    bool self = false;
+    for (auto& d : list) self |= d.id == settings.deviceId && d.pub == identity_.PubHex();
+    bool listOk = !list.empty() && VerifyData(pub, "devices", DeviceListText(ver, list, removed), sig);
+    if (requireSelf && (!self || !listOk)) {
+        if (err) *err = "the account's device list is not valid";
+        return false;
+    }
+    if (!listOk) {
+        list.clear();
+        removed.clear();
+        ver = 0;
+    }
+    // this device: never "removed" when the owner restores it on purpose
+    removed.erase(std::remove(removed.begin(), removed.end(), settings.deviceId), removed.end());
+    account_.LoadSeed(p.value("secret", ""));
+    settings.accountSecret = account_.seedHex;
+    settings.accountDevices = list;
+    settings.accountRemoved = removed;
+    settings.accountVer = ver;
+    settings.accountSig = sig;
+    if (!self) {
+        settings.accountDevices.push_back({settings.deviceId, identity_.PubHex()});
+        settings.accountVer = std::max(NowMs(), settings.accountVer + 1);
+    }
+    SignAccountDevices();
+    accountCert_ = SignData(account_, "device", settings.deviceId + "\n" + identity_.PubHex());
+    // the person's profile: name and picture
+    std::string name = p.value("name", ""), avh = p.value("avh", ""), img;
+    if (!name.empty()) settings.displayName = name;
+    if (!avh.empty() && Base64Decode(p.value("img", ""), img) && img.size() <= kMaxAvatarBytes && LooksLikeJpeg(img) &&
+        Sha256Hex(img.data(), img.size()) == avh && WriteWholeFile(AvatarFile("", avh), img)) {
+        if (!settings.avatarHash.empty() && settings.avatarHash != avh) RemoveFile(AvatarFile("", settings.avatarHash));
+        settings.avatarHash = avh;
+    }
+    settings.profileVer = std::max(NowMs(), std::max(settings.profileVer + 1, p.value("pv", (int64_t)0)));
+    // contacts
+    for (auto& dj : p.value("devices", json::array())) {
+        KnownDevice kd = DeviceFromJson(dj);
+        if (kd.id.empty() || kd.id == settings.deviceId) continue;
+        auto it = devices.find(kd.id);
+        if (it == devices.end()) {
+            kd.avatarHash.clear();  // their picture comes with their own profile
+            kd.profileVer = 0;
+            devices[kd.id] = kd;
+        } else {
+            KnownDevice& e = it->second;
+            if (e.pubKey.empty()) e.pubKey = kd.pubKey;
+            if (e.pubKey == kd.pubKey && !kd.accountPub.empty()) e.accountPub = kd.accountPub;
+            if (e.customName.empty()) e.customName = kd.customName;
+            e.trusted |= kd.trusted;
+            e.verified |= kd.verified && e.pubKey == kd.pubKey;
+        }
+    }
+    if (!fromDevice.empty()) devices[fromDevice].accountPub = pub;
+    for (auto& aj : p.value("accounts", json::array())) {
+        AccountInfo ai;
+        ai.pub = aj.value("pub", "");
+        ai.ver = aj.value("ver", (int64_t)0);
+        ai.sig = aj.value("sig", "");
+        ai.devices = JsonDevices(aj.value("devices", json::array()));
+        ai.removed = JsonStrings(aj.value("removed", json::array()));
+        if (ai.pub.empty() || ai.pub == pub || !VerifyData(ai.pub, "devices", DeviceListText(ai.ver, ai.devices, ai.removed), ai.sig)) continue;
+        if (ai.ver > accounts[ai.pub].ver) accounts[ai.pub] = ai;
+    }
+    // conversations: merged with what this device already had
+    json chatsJ = p.value("chats", json::object());  // (kept alive: items() of a temporary would dangle)
+    for (auto& [key, arr] : chatsJ.items()) {
+        if (key == settings.deviceId || !arr.is_array()) continue;
+        Conversation& cv = chats[key];
+        cv.peer = key;
+        for (auto& mj : arr) {
+            ChatMessage m = MessageFromJson(mj);
+            m.pendingTo.clear();
+            bool dup = false;
+            for (auto& e : cv.messages) dup |= e.mid == m.mid;
+            if (!dup) cv.messages.push_back(m);
+        }
+        std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& x, auto& y) { return x.ts < y.ts; });
+    }
+    if (!fromDevice.empty()) MergeChatInto("@" + pub, fromDevice);  // our old chat with that device (another account then)
+    std::vector<std::string> ids;
+    for (auto& [id, d] : devices) ids.push_back(id);
+    for (auto& id : ids) MergeChats(id);
+    MarkDirty();
+    // reconnect everywhere: the other devices learn the new account from the next Hello
+    std::vector<std::shared_ptr<Connection>> cs = conns;
+    Spawn([this, cs] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::vector<std::string> peers;
+        for (auto& o : cs) {
+            peers.push_back(o->peerId);
+            CloseConn(o, "account changed");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        for (auto& pr : peers) ConnectPeer(pr);
+    });
+    return true;
+}
+
+void Engine::HandleLinkGrant(const std::shared_ptr<Connection>& c, const json& j) {
+    auto lj = linkJoining_.find(c->peerId);
+    if (lj == linkJoining_.end() || SteadyMs() - lj->second > 10 * 60000) return;  // only what we agreed to
+    linkJoining_.erase(lj);
+    if (AdoptAccount(j, c->peerId, true, nullptr))
+        Emit({EventType::LinkDone, c->peerId, "This device is now linked to the account of " + settings.displayName + "."});
+}
+
+void Engine::LeaveAccount() {
+    account_.Generate();
+    settings.accountSecret = account_.seedHex;
+    settings.accountDevices = {{settings.deviceId, identity_.PubHex()}};
+    settings.accountRemoved.clear();
+    settings.accountVer = NowMs();
+    settings.accountBackedUp = false;
+    SignAccountDevices();
+    accountCert_ = SignData(account_, "device", settings.deviceId + "\n" + identity_.PubHex());
+    MarkDirty();
+    Emit({EventType::LinkDone, "", "This device was removed from your account and now has an account of its own."});
+    std::vector<std::shared_ptr<Connection>> cs = conns;
+    Spawn([this, cs] {
+        std::vector<std::string> peers;
+        for (auto& o : cs) {
+            peers.push_back(o->peerId);
+            CloseConn(o, "account changed");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        for (auto& pr : peers) ConnectPeer(pr);
+    });
+}
+
+void Engine::RemoveMyDevice(const std::string& device) {
+    auto lk = Lock();
+    if (device == settings.deviceId) return;
+    auto& list = settings.accountDevices;
+    list.erase(std::remove_if(list.begin(), list.end(), [&](const AccountDevice& a) { return a.id == device; }), list.end());
+    if (std::find(settings.accountRemoved.begin(), settings.accountRemoved.end(), device) == settings.accountRemoved.end())
+        settings.accountRemoved.push_back(device);
+    settings.accountVer = std::max(NowMs(), settings.accountVer + 1);
+    SignAccountDevices();
+    auto it = devices.find(device);
+    if (it != devices.end() && it->second.accountPub == MyAccount()) it->second.accountPub.clear();
+    PushAccount();
+    MarkDirty();
+}
+
+// ---- recovery
+
+std::string Engine::RecoveryPhrase() {
+    auto lk = Lock();
+    return SeedToPhrase(settings.accountSecret);
+}
+
+void Engine::MarkBackedUp() {
+    auto lk = Lock();
+    settings.accountBackedUp = true;
+    MarkDirty();
+}
+
+bool Engine::RestoreFromPhrase(const std::string& phrase, std::string* err) {
+    std::string seed;
+    if (!PhraseToSeed(phrase, seed, err)) return false;
+    auto lk = Lock();
+    if (seed == settings.accountSecret) return true;  // already this account
+    // only the key: the device list, contacts and chats come back from the account's other devices
+    json p = {{"secret", seed}, {"name", settings.displayName}};
+    if (!AdoptAccount(p, "", false, err)) return false;
+    settings.accountBackedUp = true;
+    return true;
+}
+
+bool Engine::SaveBackup(const std::string& path, const std::string& password, std::string* err) {
+    if (password.size() < 6) {
+        if (err) *err = "use a password of at least 6 characters";
+        return false;
+    }
+    std::string plain;
+    {
+        auto lk = Lock();
+        plain = AccountPayload("").dump();
+    }
+    std::string blob = PasswordEncrypt(plain, password);
+    json f = {{"app", kAppId}, {"type", "account-backup"}, {"version", 1}, {"data", Base64Encode(blob)}};
+    if (!WriteWholeFile(path, f.dump(1))) {
+        if (err) *err = "could not write the file";
+        return false;
+    }
+    MarkBackedUp();
+    return true;
+}
+
+bool Engine::RestoreBackup(const std::string& path, const std::string& password, std::string* err) {
+    std::string text, blob, plain;
+    json f;
+    if (!ReadWholeFile(path, text, 256u << 20) || (f = json::parse(text, nullptr, false)).is_discarded() ||
+        f.value("type", "") != "account-backup" || !Base64Decode(f.value("data", ""), blob)) {
+        if (err) *err = "not a LunaShare account backup";
+        return false;
+    }
+    if (!PasswordDecrypt(blob, password, plain)) {
+        if (err) *err = "wrong password (or the file is damaged)";
+        return false;
+    }
+    json p = json::parse(plain, nullptr, false);
+    if (p.is_discarded()) {
+        if (err) *err = "the backup is damaged";
+        return false;
+    }
+    auto lk = Lock();
+    if (!AdoptAccount(p, "", false, err)) return false;
+    settings.accountBackedUp = true;
+    return true;
+}
+
 // ============================================================================ profile pictures
 
 static std::string ProfileSigned(int64_t ver, const std::string& name, const std::string& avh) {
@@ -295,10 +826,16 @@ std::string Engine::AvatarFile(const std::string& peer, const std::string& hash)
 
 std::string Engine::AvatarPath(const std::string& peer) {
     auto lk = Lock();
-    std::string h;
+    std::string h, dev = peer;
     if (peer.empty()) h = settings.avatarHash;
-    else if (auto it = devices.find(peer); it != devices.end()) h = it->second.avatarHash;
-    return h.empty() ? std::string() : AvatarFile(peer, h);  // called every frame: no file system check
+    else if (IsContactKey(peer)) {
+        int64_t best = -1;
+        for (auto& id : DevicesOf(peer)) {
+            auto& d = devices[id];
+            if (d.profileVer > best) { best = d.profileVer; h = d.avatarHash; dev = id; }
+        }
+    } else if (auto it = devices.find(peer); it != devices.end()) h = it->second.avatarHash;
+    return h.empty() ? std::string() : AvatarFile(dev, h);  // called every frame: no file system check
 }
 
 static bool ReadWholeFile(const std::string& path, std::string& out, size_t maxBytes) {
@@ -405,14 +942,15 @@ void Engine::AddSystemMessage(const std::string& peer, const std::string& text) 
     m.ts = NowMs();
     m.text = text;
     m.delivered = true;
-    Conversation& cv = chats[peer];
-    cv.peer = peer;
+    std::string key = ChatKey(peer);
+    Conversation& cv = chats[key];
+    cv.peer = key;
     cv.messages.push_back(m);
     MarkDirty();
 }
 
 ChatMessage* Engine::FindBatchMessage(const std::string& peer, uint64_t batch) {
-    auto it = chats.find(peer);
+    auto it = chats.find(ChatKey(peer));
     if (it == chats.end()) return nullptr;
     for (auto& m : it->second.messages)
         if (m.kind == MsgKind::Files && m.batch == batch) return &m;
@@ -554,7 +1092,8 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
             hello = {{"app", kAppId}, {"proto", kProtocolVersion}, {"id", settings.deviceId}, {"name", settings.displayName},
                      {"user", UserName()}, {"host", HostName()}, {"platform", PlatformName()}, {"macs", MacAddresses()},
                      {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}, {"caps", localCaps},
-                     {"pv", settings.profileVer}, {"avh", settings.avatarHash}};
+                     {"pv", settings.profileVer}, {"avh", settings.avatarHash},
+                     {"acc", account_.PubHex()}, {"acs", accountCert_}, {"av", settings.accountVer}};
         }
         Queue(c, Msg::Hello, hello);
         Spawn([this, c] { ReaderLoop(c); });
@@ -786,6 +1325,12 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 CloseConn(c, "bad signature");
                 return;
             }
+            // the account it belongs to: valid only with the account key's signature over this device
+            std::string helloAcc;
+            {
+                std::string acc = j.value("acc", ""), acs = j.value("acs", "");
+                if (!acc.empty() && VerifyData(acc, "device", id + "\n" + pub, acs)) helloAcc = acc;
+            }
             bool isNew = devices.find(id) == devices.end();
             KnownDevice& d = Device(id);
             if (d.blocked) {
@@ -807,8 +1352,19 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             if (d.pubKey.empty()) {
                 d.pubKey = pub;  // trust on first use
                 d.verified = false;
-                AddSystemMessage(id, "End-to-end encrypted. Safety number: " + SafetyNumber(identity_.PubHex(), pub) +
-                                         " - compare it on both devices to make sure nobody is in between.");
+                bool knownPerson = !helloAcc.empty() && !DevicesOf("@" + helloAcc).empty();
+                if (helloAcc == MyAccount()) {
+                    // one of my own devices: nothing to verify
+                } else if (knownPerson) {
+                    d.accountPub = helloAcc;  // a new device of someone we know: vouched for by their account
+                    for (auto& o : DevicesOf("@" + helloAcc))
+                        if (o != id && devices[o].verified) d.verified = true;
+                    AddSystemMessage(id, "New device: " + j.value("name", std::string("?")) + " (" + j.value("platform", std::string()) + ")");
+                } else {
+                    AddSystemMessage(id, "End-to-end encrypted. Safety number: " +
+                                             SafetyNumber(helloAcc.empty() ? identity_.PubHex() : MyAccount(), helloAcc.empty() ? pub : helloAcc) +
+                                             " - compare it on both devices to make sure nobody is in between.");
+                }
             }
             d.pendingKey.clear();
             d.name = j.value("name", d.name);
@@ -839,6 +1395,39 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                         AddSystemMessage(id, "Recognised hardware of \"" + od.DisplayName() + "\" (new app identity) - nickname copied.");
                         break;
                     }
+                }
+            }
+            {
+                // account: a valid certificate (account key's signature over this device) makes the device part of
+                // that person; their messages then share one conversation with the person's other devices
+                const std::string& newAcc = helloAcc;
+                if (newAcc != d.accountPub) {
+                    std::string oldAcc = d.accountPub;
+                    d.accountPub = newAcc;
+                    if (!oldAcc.empty() && oldAcc != MyAccount() && DevicesOf("@" + oldAcc).empty())
+                        MergeChatInto("@" + oldAcc, ChatKey(id));  // the person's only device moved: keep the chat
+                    MergeChats(id);
+                    if (!oldAcc.empty() && !newAcc.empty() && newAcc != MyAccount())
+                        AddSystemMessage(id, "This device was linked to another account.");
+                }
+                if (!newAcc.empty()) {
+                    int64_t av = j.value("av", (int64_t)0);
+                    int64_t have = newAcc == MyAccount() ? settings.accountVer : accounts[newAcc].ver;
+                    if (newAcc != MyAccount() && accounts[newAcc].pub.empty()) accounts[newAcc].pub = newAcc;
+                    if (newAcc == MyAccount()) {
+                        bool listed = false;
+                        for (auto& ad : settings.accountDevices) listed |= ad.id == id && ad.pub == pub;
+                        bool removedDev = std::find(settings.accountRemoved.begin(), settings.accountRemoved.end(), id) != settings.accountRemoved.end();
+                        if (!listed && !removedDev) {  // holds the account key but my list lost it (restored here): add it
+                            settings.accountDevices.push_back({id, pub});
+                            settings.accountVer = std::max(NowMs(), std::max(settings.accountVer, av) + 1);
+                            SignAccountDevices();
+                            have = settings.accountVer;
+                            PushAccount();
+                        }
+                    }
+                    if (av > have) Queue(c, Msg::AccountGet, json::object());
+                    else if (newAcc == MyAccount() && av < have) Queue(c, Msg::AccountData, AccountJson());  // my device is behind
                 }
             }
             {
@@ -885,29 +1474,116 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             break;
         case Msg::Chat: {
             std::string mid = j.value("mid", "");
-            Conversation& cv = chats[c->peerId];
-            cv.peer = c->peerId;
+            std::string key = ChatKey(c->peerId);
+            Conversation& cv = chats[key];
+            cv.peer = key;
             bool dup = false;
             for (auto& m : cv.messages)
-                if (m.mid == mid && !m.outgoing) dup = true;
+                if (m.mid == mid && !m.outgoing) dup = true;  // (a person's devices each send their copy)
             if (!dup && !mid.empty()) {
                 ChatMessage m;
                 m.mid = mid;
                 m.ts = NowMs();
                 m.text = j.value("text", "");
                 m.delivered = true;
+                m.pendingTo = MyOtherDevices();  // my other devices get it too, in case the sender didn't know them
                 cv.messages.push_back(m);
                 cv.unread++;
-                Emit({EventType::ChatReceived, c->peerId, m.text});
+                for (auto& d : m.pendingTo) QueueChatTo(d, key, m);
+                Emit({EventType::ChatReceived, key, m.text});
                 MarkDirty();
             }
             Queue(c, Msg::ChatAck, {{"mid", mid}});
             break;
         }
+        case Msg::ChatSync: {
+            // from another device of my own account: a message it sent or received
+            std::string mid = j.value("mid", ""), key = j.value("chat", "");
+            auto dv = devices.find(c->peerId);
+            if (dv == devices.end() || dv->second.accountPub != MyAccount() || mid.empty() || key.empty() || key == settings.deviceId) break;
+            if (key == c->peerId) break;  // a chat with that device itself stays separate
+            Conversation& cv = chats[key];
+            cv.peer = key;
+            bool out = j.value("out", false), dup = false;
+            for (auto& m : cv.messages)
+                if (m.mid == mid) dup = true;
+            if (!dup) {
+                ChatMessage m;
+                m.mid = mid;
+                m.outgoing = out;
+                m.ts = j.value("ts", NowMs());
+                m.text = j.value("text", "");
+                m.delivered = true;
+                cv.messages.push_back(m);
+                std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
+                if (!out) {
+                    cv.unread++;
+                    Emit({EventType::ChatReceived, key, m.text});
+                }
+                MarkDirty();
+            }
+            Queue(c, Msg::ChatSyncAck, {{"mid", mid}});
+            break;
+        }
+        case Msg::ChatSyncAck: {
+            std::string mid = j.value("mid", "");
+            for (auto& [k, cv] : chats)
+                for (auto& m : cv.messages)
+                    if (m.mid == mid) {
+                        auto& p = m.pendingTo;
+                        p.erase(std::remove(p.begin(), p.end(), c->peerId), p.end());
+                        MarkDirty();
+                    }
+            break;
+        }
+        case Msg::AccountGet:
+            Queue(c, Msg::AccountData, AccountJson());
+            break;
+        case Msg::AccountData:
+            HandleAccount(c, j);
+            break;
+        case Msg::LinkOffer: {
+            auto dv = devices.find(c->peerId);
+            if (dv == devices.end() || dv->second.blocked || dv->second.accountPub == MyAccount()) break;
+            linkAsked_[c->peerId] = SteadyMs();
+            Event ev{EventType::LinkRequest, c->peerId, c->sec->Code()};
+            ev.a = j.value("name", PeerName(c->peerId));
+            Emit(ev);
+            break;
+        }
+        case Msg::LinkAnswer: {
+            auto lo = linkOffered_.find(c->peerId);
+            if (lo == linkOffered_.end() || SteadyMs() - lo->second > 10 * 60000) break;
+            linkOffered_.erase(lo);
+            if (!j.value("accept", false)) {
+                Emit({EventType::LinkDone, c->peerId, "Linking was declined on " + PeerName(c->peerId) + "."});
+                break;
+            }
+            KnownDevice& d = Device(c->peerId);
+            auto& list = settings.accountDevices;
+            list.erase(std::remove_if(list.begin(), list.end(), [&](const AccountDevice& a) { return a.id == c->peerId; }), list.end());
+            list.push_back({c->peerId, d.pubKey});
+            auto& rm = settings.accountRemoved;
+            rm.erase(std::remove(rm.begin(), rm.end(), c->peerId), rm.end());
+            settings.accountVer = std::max(NowMs(), settings.accountVer + 1);
+            SignAccountDevices();
+            d.accountPub = MyAccount();
+            d.trusted = true;
+            Queue(c, Msg::LinkGrant, AccountPayload(c->peerId));
+            // tell my other devices and my contacts about the new member
+            for (auto& o : conns)
+                if (o != c && o->ready && !o->closed) Queue(o, Msg::AccountData, AccountJson());
+            Emit({EventType::LinkDone, c->peerId, PeerName(c->peerId) + " is now linked to your account."});
+            MarkDirty();
+            break;
+        }
+        case Msg::LinkGrant:
+            HandleLinkGrant(c, j);
+            break;
         case Msg::ChatDelete: {
             // only messages this device sent us can be removed this way
             json mids = j.value("mids", json::array());
-            auto it = chats.find(c->peerId);
+            auto it = chats.find(ChatKey(c->peerId));
             if (it != chats.end() && mids.is_array()) {
                 auto& msgs = it->second.messages;
                 size_t before = msgs.size();
@@ -920,7 +1596,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                            msgs.end());
                 if (msgs.size() != before) {
                     it->second.unread = std::max(0, it->second.unread - (int)(before - msgs.size()));
-                    Emit({EventType::ChatDeleted, c->peerId, ""});
+                    Emit({EventType::ChatDeleted, ChatKey(c->peerId), ""});
                     MarkDirty();
                 }
             }
@@ -929,7 +1605,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::ChatDeleteAck: {
             json mids = j.value("mids", json::array());
-            auto it = chats.find(c->peerId);
+            auto it = chats.find(ChatKey(c->peerId));
             if (it != chats.end() && mids.is_array()) {
                 auto& pd = it->second.pendingDeletes;
                 for (auto& x : mids)
@@ -941,7 +1617,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::ChatReact: {
             std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
             if (emoji.size() > 64) break;  // one emoji, not a message
-            auto it = chats.find(c->peerId);
+            auto it = chats.find(ChatKey(c->peerId));
             if (it != chats.end())
                 for (auto& m : it->second.messages)
                     if (m.mid == mid && m.kind != MsgKind::System) {
@@ -951,7 +1627,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                             if (!emoji.empty()) {
                                 std::string about = m.kind == MsgKind::Files ? "[files] " + m.text : m.text;
                                 if (about.size() > 60) about = about.substr(0, 57) + "...";
-                                Event ev{EventType::ChatReaction, c->peerId, emoji};
+                                Event ev{EventType::ChatReaction, ChatKey(c->peerId), emoji};
                                 ev.a = about;
                                 Emit(ev);
                             }
@@ -969,7 +1645,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             break;
         case Msg::ChatReactAck: {
             std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
-            auto it = chats.find(c->peerId);
+            auto it = chats.find(ChatKey(c->peerId));
             if (it != chats.end())
                 for (auto& m : it->second.messages)
                     if (m.mid == mid && m.myReaction == emoji && !m.reactionSent) {
@@ -980,10 +1656,14 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::ChatAck: {
             std::string mid = j.value("mid", "");
-            auto it = chats.find(c->peerId);
+            auto it = chats.find(ChatKey(c->peerId));
             if (it != chats.end())
                 for (auto& m : it->second.messages)
-                    if (m.outgoing && m.mid == mid) { m.delivered = true; MarkDirty(); }
+                    if (m.outgoing && m.mid == mid) {
+                        m.delivered = true;
+                        m.pendingTo.erase(std::remove(m.pendingTo.begin(), m.pendingTo.end(), c->peerId), m.pendingTo.end());
+                        MarkDirty();
+                    }
             break;
         }
         case Msg::FileOffer: {
@@ -1055,8 +1735,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.batch = t->batch;
                 m.text = t->batchName;
                 m.delivered = true;
-                Conversation& cv = chats[c->peerId];
-                cv.peer = c->peerId;
+                std::string key = ChatKey(c->peerId);
+                Conversation& cv = chats[key];
+                cv.peer = key;
                 cv.messages.push_back(m);
                 cv.unread++;
                 bm = &cv.messages.back();
@@ -1303,10 +1984,14 @@ void Engine::HandleData(const std::shared_ptr<Connection>& c, const Frame& f) {
 void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
-    auto it = chats.find(peer);
+    // messages waiting for this device: in its person's conversation, or (my own device) in any conversation
+    for (auto& [key, cv] : chats)
+        for (auto& m : cv.messages)
+            if (std::find(m.pendingTo.begin(), m.pendingTo.end(), peer) != m.pendingTo.end()) QueueChatTo(peer, key, m);
+    auto it = chats.find(ChatKey(peer));
     if (it != chats.end()) {
         for (auto& m : it->second.messages)
-            if (m.outgoing && !m.delivered && m.kind == MsgKind::Text)
+            if (m.outgoing && !m.delivered && m.kind == MsgKind::Text && m.pendingTo.empty())  // (from older versions)
                 Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
         for (auto& m : it->second.messages)
@@ -1748,19 +2433,32 @@ void Engine::StartBtServer() {
 
 // ============================================================================ public actions
 
-void Engine::SendChat(const std::string& peer, const std::string& text) {
+void Engine::SendChat(const std::string& peerArg, const std::string& text) {
     if (text.empty()) return;
     auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
     ChatMessage m;
     m.mid = RandomHex(8);
     m.outgoing = true;
     m.ts = NowMs();
     m.text = text;
+    // to every device of the person, and a copy to my other devices
+    for (auto& d : DevicesOf(peer)) m.pendingTo.push_back(d);
+    for (auto& d : MyOtherDevices()) m.pendingTo.push_back(d);
     Conversation& cv = chats[peer];
     cv.peer = peer;
     cv.messages.push_back(m);
-    QueueToPeer(peer, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
+    for (auto& d : m.pendingTo) QueueChatTo(d, peer, m);
     MarkDirty();
+}
+
+void Engine::QueueChatTo(const std::string& device, const std::string& key, const ChatMessage& m) {
+    auto c = ReadyConn(device);
+    if (!c) return;
+    auto d = devices.find(device);
+    bool mine = d != devices.end() && d->second.accountPub == MyAccount();
+    if (mine) Queue(c, Msg::ChatSync, {{"chat", key}, {"mid", m.mid}, {"ts", m.ts}, {"text", m.text}, {"out", m.outgoing}});
+    else if (m.outgoing) Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
 }
 
 uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::string>& paths) {
@@ -1777,6 +2475,7 @@ uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::strin
         batchName = (paths.size() == 1 ? batchName + " - " : std::string()) + std::to_string(files.size()) + " files";
     if (files.size() == 1) batchName = files[0].second;
     auto lk = Lock();
+    std::string key = IsContactKey(peer) ? peer : ChatKey(peer), device = Resolve(peer);
     ChatMessage m;
     m.mid = "b" + TidHex(batch);
     m.outgoing = true;
@@ -1793,7 +2492,7 @@ uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::strin
         t->batch = batch;
         t->batchName = batchName;
         t->batchCount = (int)files.size();
-        t->peer = peer;
+        t->peer = device;
         t->outgoing = true;
         t->localPath = abs;
         t->rel = SanitizeRelativePath(rel);
@@ -1806,8 +2505,8 @@ uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::strin
         std::lock_guard<std::mutex> l(hashMtx_);
         hashQueue_.push_back(t);
     }
-    Conversation& cv = chats[peer];
-    cv.peer = peer;
+    Conversation& cv = chats[key];
+    cv.peer = key;
     cv.messages.push_back(m);
     hashCv_.notify_all();
     MarkDirty();
@@ -1954,8 +2653,13 @@ void Engine::ConnectAddress(const std::string& host, uint16_t port) {
     });
 }
 
-void Engine::ConnectPeer(const std::string& peer) {
+void Engine::ConnectPeer(const std::string& peerOrKey) {
     auto lk = Lock();
+    if (IsContactKey(peerOrKey)) {
+        for (auto& d : DevicesOf(peerOrKey)) ConnectPeer(d);
+        return;
+    }
+    const std::string& peer = peerOrKey;
     if (IsConnected(peer)) return;
     auto o = online.find(peer);
     if (o != online.end() && o->second.OnLan()) {
@@ -1993,7 +2697,7 @@ void Engine::Disconnect(const std::string& peer) {
     {
         auto lk = Lock();
         for (auto& c : conns)
-            if (c->peerId == peer) cs.push_back(c);
+            if (c->peerId == peer || (IsContactKey(peer) && c->ready && ChatKey(c->peerId) == peer)) cs.push_back(c);
     }
     for (auto& c : cs) {
         Queue(c, Msg::Bye, json::object());
@@ -2002,31 +2706,37 @@ void Engine::Disconnect(const std::string& peer) {
     for (auto& c : cs) CloseConn(c, "user");
 }
 
+// (for a person: applies to all of their devices)
 void Engine::SetCustomName(const std::string& peer, const std::string& name) {
     auto lk = Lock();
-    Device(peer).customName = name;
+    for (auto& d : DevicesOf(peer)) Device(d).customName = name;
     MarkDirty();
 }
 
 void Engine::SetTrusted(const std::string& peer, bool v) {
     auto lk = Lock();
-    Device(peer).trusted = v;
+    for (auto& d : DevicesOf(peer)) Device(d).trusted = v;
     MarkDirty();
 }
 
 void Engine::SetBlocked(const std::string& peer, bool v) {
+    std::vector<std::string> ds;
     {
         auto lk = Lock();
-        Device(peer).blocked = v;
-        if (v) Device(peer).trusted = false;
+        ds = DevicesOf(peer);
+        for (auto& d : ds) {
+            Device(d).blocked = v;
+            if (v) Device(d).trusted = false;
+        }
         MarkDirty();
     }
-    if (v) Disconnect(peer);
+    if (v)
+        for (auto& d : ds) Disconnect(d);
 }
 
 void Engine::SetVerified(const std::string& peer, bool v) {
     auto lk = Lock();
-    Device(peer).verified = v;
+    for (auto& d : DevicesOf(peer)) Device(d).verified = v;
     MarkDirty();
 }
 
@@ -2046,30 +2756,44 @@ void Engine::AcceptNewKey(const std::string& peer) {
 
 std::string Engine::SafetyNumberWith(const std::string& peer) {
     auto lk = Lock();
+    // a person (or a device of one): compare account keys - the same number for all their devices
+    if (IsContactKey(peer)) return SafetyNumber(MyAccount(), peer.substr(1));
     auto it = devices.find(peer);
+    if (it != devices.end() && !it->second.accountPub.empty()) return SafetyNumber(MyAccount(), it->second.accountPub);
     if (it == devices.end() || it->second.pubKey.empty()) return "";
     return SafetyNumber(identity_.PubHex(), it->second.pubKey);
 }
 
 void Engine::ForgetDevice(const std::string& peer) {
-    Disconnect(peer);
+    std::vector<std::string> ds;
+    {
+        auto lk = Lock();
+        ds = DevicesOf(peer);
+    }
+    for (auto& d : ds) Disconnect(d);
     auto lk = Lock();
-    auto dv = devices.find(peer);
-    if (dv != devices.end() && !dv->second.avatarHash.empty()) RemoveFile(AvatarFile(peer, dv->second.avatarHash));
-    devices.erase(peer);
+    for (auto& d : ds) {
+        auto dv = devices.find(d);
+        if (dv != devices.end() && !dv->second.avatarHash.empty()) RemoveFile(AvatarFile(d, dv->second.avatarHash));
+        devices.erase(d);
+        chats.erase(d);
+    }
+    if (IsContactKey(peer)) accounts.erase(peer.substr(1));
     chats.erase(peer);
     MarkDirty();
 }
 
-void Engine::ClearChat(const std::string& peer) {
+void Engine::ClearChat(const std::string& peerArg) {
     auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
     auto it = chats.find(peer);
     if (it != chats.end()) it->second.messages.clear();
     MarkDirty();
 }
 
-void Engine::DeleteMessages(const std::string& peer, const std::vector<std::string>& mids, bool forEveryone) {
+void Engine::DeleteMessages(const std::string& peerArg, const std::vector<std::string>& mids, bool forEveryone) {
     auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
     auto it = chats.find(peer);
     if (it == chats.end() || mids.empty()) return;
     std::vector<std::string> remote;
@@ -2085,13 +2809,14 @@ void Engine::DeleteMessages(const std::string& peer, const std::vector<std::stri
         auto& pd = it->second.pendingDeletes;
         pd.insert(pd.end(), remote.begin(), remote.end());
         if (pd.size() > 500) pd.erase(pd.begin(), pd.begin() + (ptrdiff_t)(pd.size() - 500));
-        QueueToPeer(peer, Msg::ChatDelete, {{"mids", remote}});
+        for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, {{"mids", remote}});
     }
     MarkDirty();
 }
 
-void Engine::React(const std::string& peer, const std::string& mid, const std::string& emoji) {
+void Engine::React(const std::string& peerArg, const std::string& mid, const std::string& emoji) {
     auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
     auto it = chats.find(peer);
     if (it == chats.end()) return;
     for (auto& m : it->second.messages)
@@ -2099,14 +2824,15 @@ void Engine::React(const std::string& peer, const std::string& mid, const std::s
             if (m.myReaction == emoji) return;
             m.myReaction = emoji;
             m.reactionSent = false;
-            QueueToPeer(peer, Msg::ChatReact, {{"mid", mid}, {"emoji", emoji}});
+            for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatReact, {{"mid", mid}, {"emoji", emoji}});
             MarkDirty();
             return;
         }
 }
 
-void Engine::MarkRead(const std::string& peer) {
+void Engine::MarkRead(const std::string& peerArg) {
     auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
     auto it = chats.find(peer);
     if (it != chats.end()) it->second.unread = 0;
 }
@@ -2135,6 +2861,12 @@ void Engine::ApplySettings(const Settings& s) {
     settings.deviceId = old.deviceId;
     settings.identitySecret = old.identitySecret;
     settings.avatarHash = old.avatarHash;  // only SetAvatar changes the profile picture
+    settings.accountSecret = old.accountSecret;  // the account changes only through linking / recovery
+    settings.accountDevices = old.accountDevices;
+    settings.accountRemoved = old.accountRemoved;
+    settings.accountVer = old.accountVer;
+    settings.accountSig = old.accountSig;
+    settings.accountBackedUp = old.accountBackedUp;
     settings.profileVer = old.profileVer;
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);
@@ -2272,8 +3004,9 @@ bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {
     return c && std::find(c->caps.begin(), c->caps.end(), cap) != c->caps.end();
 }
 
-uint64_t Engine::StartCall(const std::string& peer, const std::string& media) {
+uint64_t Engine::StartCall(const std::string& peerOrKey, const std::string& media) {
     auto lk = Lock();
+    std::string peer = Resolve(peerOrKey);  // (ringing all of a person's devices comes with the push channel)
     if (call.state != CallState::None || !PeerHasCap(peer, CapForMedia(media)) ||
         std::find(localCaps.begin(), localCaps.end(), CapForMedia(media)) == localCaps.end())
         return 0;

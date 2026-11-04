@@ -45,6 +45,13 @@ struct Identity {
 std::string SignData(const Identity& id, const std::string& context, const std::string& data);  // hex
 bool VerifyData(const std::string& pubHex, const std::string& context, const std::string& data, const std::string& sigHex);
 
+// Account recovery: the 32-byte account seed as 24 words (BIP-39 English list, 8-bit SHA-256 checksum) and back.
+std::string SeedToPhrase(const std::string& seedHex);
+bool PhraseToSeed(const std::string& phrase, std::string& seedHex, std::string* err);
+// Password-protected blobs (account backup files): Argon2id (32 MiB, 3 passes) + XChaCha20-Poly1305.
+std::string PasswordEncrypt(const std::string& plain, const std::string& password);
+bool PasswordDecrypt(const std::string& blob, const std::string& password, std::string& plain);
+
 std::string Base64Encode(const std::string& bin);
 bool Base64Decode(const std::string& text, std::string& out);
 
@@ -65,6 +72,9 @@ public:
     bool Recv(SocketHandle s, Frame& out);
 
     std::string Sign(const Identity& id) const;  // hex signature for our role
+    // 6 digits both ends of THIS connection compute identically (from the handshake hash): shown on both screens
+    // before something important (linking a device), so a man in the middle would be noticed.
+    std::string Code() const;
     bool VerifyPeer(const std::string& pubHex, const std::string& sigHex) const;
 
 private:

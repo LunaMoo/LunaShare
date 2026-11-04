@@ -1,8 +1,11 @@
 #include "crypto.h"
 
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
+#include "hash.h"
 #include "monocypher.h"
 
 #if defined(_WIN32)
@@ -223,6 +226,117 @@ bool VerifyData(const std::string& pubHex, const std::string& context, const std
     return crypto_eddsa_check(sig, pk, (const uint8_t*)m.data(), m.size()) == 0;
 }
 
+static const char* const kWords[2048] = {
+#include "wordlist_en.inc"
+};
+
+std::string SeedToPhrase(const std::string& seedHex) {
+    uint8_t seed[32];
+    if (!FromHex(seedHex, seed, 32)) return {};
+    uint8_t h[32];
+    {
+        Sha256 sh;
+        sh.Update(seed, 32);
+        sh.Final(h);
+    }
+    // 256 bits of seed + 8 checksum bits = 24 x 11 bits
+    std::string out;
+    for (int w = 0; w < 24; w++) {
+        int v = 0;
+        for (int b = 0; b < 11; b++) {
+            int bit = w * 11 + b;
+            int byte = bit < 256 ? (seed[bit / 8] >> (7 - bit % 8)) & 1 : (h[0] >> (7 - (bit - 256))) & 1;
+            v = v << 1 | byte;
+        }
+        if (w) out += ' ';
+        out += kWords[v];
+    }
+    crypto_wipe(seed, sizeof(seed));
+    return out;
+}
+
+bool PhraseToSeed(const std::string& phrase, std::string& seedHex, std::string* err) {
+    std::vector<int> idx;
+    std::string word;
+    auto flush = [&]() -> bool {
+        if (word.empty()) return true;
+        for (auto& ch : word) ch = (char)tolower((unsigned char)ch);
+        // the first four letters identify a word (as in BIP-39), so short forms work too
+        int found = -1;
+        for (int i = 0; i < 2048 && found < 0; i++)
+            if (word == kWords[i] || (word.size() >= 4 && strncmp(kWords[i], word.c_str(), 4) == 0 && strlen(kWords[i]) >= 4)) found = i;
+        if (found < 0) {
+            if (err) *err = "unknown word: " + word;
+            return false;
+        }
+        idx.push_back(found);
+        word.clear();
+        return true;
+    };
+    for (char ch : phrase) {
+        if (isalpha((unsigned char)ch)) word.push_back(ch);
+        else if (!flush()) return false;
+    }
+    if (!flush()) return false;
+    if (idx.size() != 24) {
+        if (err) *err = "the recovery phrase has 24 words (got " + std::to_string(idx.size()) + ")";
+        return false;
+    }
+    uint8_t seed[32] = {}, check = 0;
+    for (int w = 0; w < 24; w++)
+        for (int b = 0; b < 11; b++) {
+            int bit = w * 11 + b, v = (idx[(size_t)w] >> (10 - b)) & 1;
+            if (bit < 256) seed[bit / 8] |= (uint8_t)(v << (7 - bit % 8));
+            else check |= (uint8_t)(v << (7 - (bit - 256)));
+        }
+    uint8_t h[32];
+    Sha256 sh;
+    sh.Update(seed, 32);
+    sh.Final(h);
+    if (h[0] != check) {
+        if (err) *err = "the words don't match (a typo or a word missing?)";
+        return false;
+    }
+    seedHex = ToHex(seed, 32);
+    crypto_wipe(seed, sizeof(seed));
+    return true;
+}
+
+static void PasswordKey(const std::string& password, const uint8_t salt[16], uint8_t key[32]) {
+    crypto_argon2_config cfg = {CRYPTO_ARGON2_ID, 32768, 3, 1};  // 32 MiB
+    std::vector<uint8_t> work((size_t)cfg.nb_blocks * 1024);
+    crypto_argon2_inputs in = {(const uint8_t*)password.data(), salt, (uint32_t)password.size(), 16};
+    crypto_argon2(key, 32, work.data(), cfg, in, crypto_argon2_no_extras);
+    crypto_wipe(work.data(), work.size());
+}
+
+std::string PasswordEncrypt(const std::string& plain, const std::string& password) {
+    uint8_t salt[16], nonce[24], key[32], mac[16];
+    SecureRandom(salt, 16);
+    SecureRandom(nonce, 24);
+    PasswordKey(password, salt, key);
+    std::string out = "LSB1";
+    out.append((const char*)salt, 16);
+    out.append((const char*)nonce, 24);
+    std::string ct(plain.size(), '\0');
+    crypto_aead_lock((uint8_t*)&ct[0], mac, key, nonce, (const uint8_t*)"LSB1", 4, (const uint8_t*)plain.data(), plain.size());
+    crypto_wipe(key, 32);
+    out.append((const char*)mac, 16);
+    return out + ct;
+}
+
+bool PasswordDecrypt(const std::string& blob, const std::string& password, std::string& plain) {
+    if (blob.size() < 60 || blob.compare(0, 4, "LSB1") != 0) return false;
+    const uint8_t* p = (const uint8_t*)blob.data();
+    uint8_t key[32];
+    PasswordKey(password, p + 4, key);
+    plain.assign(blob.size() - 60, '\0');
+    int r = crypto_aead_unlock((uint8_t*)&plain[0], p + 44, key, p + 20, (const uint8_t*)"LSB1", 4, p + 60, blob.size() - 60);
+    crypto_wipe(key, 32);
+    if (r != 0) plain.clear();
+    return r == 0;
+}
+
 static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 std::string Base64Encode(const std::string& bin) {
@@ -264,6 +378,19 @@ bool Base64Decode(const std::string& text, std::string& out) {
         }
     }
     return true;
+}
+
+std::string SecureChannel::Code() const {
+    uint8_t h[32];
+    static const char ctx[] = "LunaShare confirmation code";
+    uint8_t buf[64 + sizeof(ctx)];
+    memcpy(buf, ctx, sizeof(ctx));
+    memcpy(buf + sizeof(ctx), th_, 64);
+    crypto_blake2b(h, sizeof(h), buf, sizeof(buf));
+    uint32_t v = (uint32_t)h[0] | (uint32_t)h[1] << 8 | (uint32_t)h[2] << 16 | (uint32_t)h[3] << 24;
+    char out[8];
+    snprintf(out, sizeof(out), "%06u", v % 1000000u);
+    return std::string(out, 3) + " " + std::string(out + 3, 3);
 }
 
 std::string SecureChannel::Sign(const Identity& id) const {

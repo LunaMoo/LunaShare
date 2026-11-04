@@ -69,7 +69,10 @@ struct OnlinePeer {
 
 enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed, PeerOnline, WifiCreds, Info, Error,
                        CallIncoming, CallStarted, CallEnded, ChatDeleted,
-                       ChatReaction };  // text = emoji, a = the message text (shortened)
+                       ChatReaction,  // text = emoji, a = the message text (shortened)
+                       LinkRequest,   // a device asks this one to join its account: text = confirmation code, a = name
+                       LinkDone,      // linking finished: text = what happened
+                       };
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
 std::string CapForMedia(const std::string& media);  // capability a call type needs ("webcam" -> "video")
@@ -132,6 +135,34 @@ public:
     void SetVerified(const std::string& peer, bool v);
     void AcceptNewKey(const std::string& peer);  // after a key change warning
     std::string MyPublicKey() const { return identity_.PubHex(); }
+
+    // ---- accounts. A conversation belongs to a person: its key is "@" + their account key, or the device id for
+    // devices without an account (older versions) and for my own other devices. The functions below that take a
+    // `peer` accept either; device-level actions (files, calls, connect) then pick the best device of that person.
+    std::string MyAccount() const { return account_.PubHex(); }
+    static bool IsContactKey(const std::string& k) { return !k.empty() && k[0] == '@'; }
+    std::string ChatKey(const std::string& device);          // conversation the messages of `device` belong to
+    std::vector<std::string> DevicesOf(const std::string& key);  // a person's devices (just `key` for a device id)
+    std::string Resolve(const std::string& key);             // best device: connected (fastest link) > online > last seen
+    bool IsOnline(const std::string& key);
+    std::vector<std::string> MyOtherDevices();               // devices linked to my account (not this one)
+    std::vector<std::string> Conversations();                // every chat key the UI can list
+    const KnownDevice* DeviceFor(const std::string& key);    // the best device's entry (under Lock())
+    std::map<std::string, AccountInfo> accounts;             // other people's accounts (key: account key hex)
+    // Linking: on the device that has the account, LinkDevice(other) asks `other` (connected) to join it. `other`
+    // gets a LinkRequest event and calls AnswerLink. Both show LinkCode(other device) - the same digits.
+    bool LinkDevice(const std::string& device);
+    void AnswerLink(const std::string& device, bool accept);
+    std::string LinkCode(const std::string& device);
+    bool LinkPending(const std::string& device);  // we offered to link it, no answer yet
+    // Recovery. The phrase / backup restore this account on a device (its other devices then join it again).
+    std::string RecoveryPhrase();
+    bool RestoreFromPhrase(const std::string& phrase, std::string* err);
+    bool SaveBackup(const std::string& path, const std::string& password, std::string* err);
+    bool RestoreBackup(const std::string& path, const std::string& password, std::string* err);
+    void MarkBackedUp();
+    // Takes one of my other devices off my account (it gets an account of its own when it hears about it).
+    void RemoveMyDevice(const std::string& device);
     // ---- profile picture. jpeg: an already cropped / scaled JPEG (the app makes one, <= kMaxAvatarBytes);
     // empty removes the picture. Sent to every connected device and to others when they connect.
     static constexpr size_t kMaxAvatarBytes = 96 * 1024;
@@ -221,6 +252,19 @@ private:
     void HandleFrame(const std::shared_ptr<Connection>& c, Frame& f);
     void HandleData(const std::shared_ptr<Connection>& c, const Frame& f);
     json ProfileJson();  // under Lock()
+    json AccountJson();  // my account's signed device list (under Lock())
+    void HandleAccount(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
+    void SignAccountDevices();
+    void MergeChats(const std::string& device);  // after a device joined an account: its chat moves to the person's
+    void QueueChatTo(const std::string& device, const std::string& key, const ChatMessage& m);
+    std::string accountCert_;  // account's signature over this device
+    std::map<std::string, int64_t> linkOffered_, linkAsked_, linkJoining_;  // device -> when (steady ms)
+    void HandleLinkGrant(const std::shared_ptr<Connection>& c, const json& j);
+    json AccountPayload(const std::string& exceptDevice);  // what a device needs to become me (link grant / backup)
+    bool AdoptAccount(const json& payload, const std::string& fromDevice, bool requireSelf, std::string* err);
+    void LeaveAccount();  // removed from my account by another device: start a fresh one
+    void PushAccount();   // send my device list to every connected device
+    void MergeChatInto(const std::string& fromKey, const std::string& toKey);
     void HandleProfile(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
     std::string DataDir();
     std::string AvatarFile(const std::string& peer, const std::string& hash);
@@ -282,6 +326,7 @@ private:
     bool OnDiscovered(const std::string& id, const std::string& name, const std::string& platform, const std::string& ip,
                       uint16_t port, bool viaMdns);
     Identity identity_;
+    Identity account_;
 
     // global upload throttle (token bucket)
     std::mutex throttleMtx_;

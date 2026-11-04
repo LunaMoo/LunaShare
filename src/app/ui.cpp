@@ -254,6 +254,7 @@ void App::Frame() {
 }
 
 void App::PullEvents() {
+    auto lk = eng.Lock();
     for (auto& e : eng.PopEvents()) {
         Toast t;
         t.type = e.type;
@@ -281,7 +282,7 @@ void App::PullEvents() {
                 wantAttention = true;
                 break;
             case EventType::TransferDone:
-                if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !ui::M().mobile) continue;
+                if (eng.ChatKey(e.peer) == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !ui::M().mobile) continue;
                 t.title = T("Transfer complete (verified)");
                 t.text = e.text + (who.empty() ? "" : "  -  " + who);
                 break;
@@ -306,6 +307,18 @@ void App::PullEvents() {
                 t.text = e.text;
                 t.ttl = 8.0f;
                 break;
+            case EventType::LinkRequest:
+                linkAskPeer = e.peer;
+                linkAskCode = e.text;
+                linkAskName = e.a;
+                openLinkAsk = true;
+                wantAttention = true;
+                continue;
+            case EventType::LinkDone:
+                linkTarget.clear();
+                infoMessage = TDynamic(e.text);
+                openInfo = true;
+                continue;
             case EventType::CallIncoming:
                 openIncomingCall = true;
                 wantAttention = true;
@@ -335,23 +348,29 @@ void App::PullEvents() {
     }
 }
 
-std::vector<std::string> App::SortedPeers() {
+// people: one entry per person (their devices share a conversation); otherwise every device (Devices tab)
+std::vector<std::string> App::SortedPeers(bool people) {
     std::set<std::string> ids;
-    for (auto& [id, d] : eng.devices) ids.insert(id);
-    for (auto& [id, p] : eng.online) ids.insert(id);
+    if (people) {
+        for (auto& k : eng.Conversations()) ids.insert(k);
+    } else {
+        for (auto& [id, d] : eng.devices) ids.insert(id);
+        for (auto& [id, p] : eng.online) ids.insert(id);
+    }
     for (auto& c : eng.conns)
-        if (c->ready && !c->closed) ids.insert(c->peerId);
+        if (c->ready && !c->closed) ids.insert(people ? eng.ChatKey(c->peerId) : c->peerId);
+    ids.erase(eng.settings.deviceId);
     std::vector<std::string> v(ids.begin(), ids.end());
     auto rank = [&](const std::string& id) {
-        auto d = eng.devices.find(id);
-        if (d != eng.devices.end() && d->second.blocked) return 3;
+        const KnownDevice* d = eng.DeviceFor(id);
+        if (d && d->blocked) return 3;
         if (eng.IsConnected(id)) return 0;
-        if (eng.online.count(id)) return 1;
+        if (eng.IsOnline(id)) return 1;
         return 2;
     };
     auto lastSeen = [&](const std::string& id) {
-        auto d = eng.devices.find(id);
-        return d == eng.devices.end() ? 0 : d->second.lastSeen;
+        const KnownDevice* d = eng.DeviceFor(id);
+        return d ? d->lastSeen : 0;
     };
     std::sort(v.begin(), v.end(), [&](const std::string& a, const std::string& b) {
         int ra = rank(a), rb = rank(b);
@@ -363,15 +382,15 @@ std::vector<std::string> App::SortedPeers() {
 }
 
 void App::SelectPeer(const std::string& peer) {
-    if (selectedPeer != peer) {
+    if (selectedPeer != peer && selectedPeer != eng.ChatKey(peer)) {
         selMsgs.clear();
         selectionMode = false;
         lastSelIndex = -1;
     }
-    selectedPeer = peer;
-    eng.MarkRead(peer);
+    selectedPeer = eng.IsContactKey(peer) ? peer : eng.ChatKey(peer);  // a device's messages are in its person's chat
+    eng.MarkRead(selectedPeer);
     scrollToBottom = true;
-    if (!eng.IsConnected(peer)) eng.ConnectPeer(peer);
+    if (!eng.IsConnected(selectedPeer)) eng.ConnectPeer(selectedPeer);
 }
 
 void App::OnDrop(const std::vector<std::string>& paths) {
@@ -530,17 +549,22 @@ void App::DrawAvatarEditor() {
 
 bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     ImGui::PushID(peer.c_str());
-    auto d = eng.devices.find(peer);
+    const KnownDevice* d = eng.DeviceFor(peer);  // (a person: their best device)
+    std::string dev = eng.Resolve(peer);
     bool connected = eng.IsConnected(peer);
-    bool online = eng.online.count(peer) > 0;
-    bool blocked = d != eng.devices.end() && (d->second.blocked || !d->second.pendingKey.empty());
+    bool online = eng.IsOnline(peer);
+    bool blocked = d && (d->blocked || !d->pendingKey.empty());
     std::string name = eng.PeerName(peer);
     std::string sub;
-    if (d != eng.devices.end()) sub = d->second.platform;
-    else if (online) sub = eng.online[peer].platform;
+    if (d) sub = d->platform;
+    else if (online) sub = eng.online[dev].platform;
+    if (eng.IsContactKey(peer)) {
+        size_t n = eng.DevicesOf(peer).size();
+        if (n > 1) sub = TF("%d devices", (int)n);
+    }
     auto conn = eng.ReadyConn(peer);
     if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + TF("via %s", T(TransportName(conn->transport))) + (conn->addr == "relay" ? T(" (relay)") : "");
-    else if (online) sub += "  " + TF("online (%s)", TS(eng.online[peer].Via()).c_str());
+    else if (online) sub += "  " + TF("online (%s)", TS(eng.online[dev].Via()).c_str());
     else sub += sub.empty() ? T("offline") : std::string("  ") + T("offline");
 
     int unread = 0;
@@ -549,7 +573,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     // aggregated live transfer progress
     int64_t tDone = 0, tSize = 0;
     for (auto& [id, t] : eng.transfers)
-        if (t->peer == peer && t->state == TState::Active) { tDone += t->done.load(); tSize += t->size; }
+        if ((t->peer == peer || eng.ChatKey(t->peer) == peer) && t->state == TState::Active) { tDone += t->done.load(); tSize += t->size; }
 
     float lh = ImGui::GetTextLineHeightWithSpacing();
     if (height <= 0) height = lh * 2.2f;
@@ -590,10 +614,10 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         if (ImGui::Selectable(connected ? T("Disconnect") : T("Connect"), false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
         if (ImGui::Selectable(T("Rename..."), false, 0, ImVec2(0, h))) {
             renamePeer = peer;
-            renameBuf = d != eng.devices.end() ? d->second.customName : "";
+            renameBuf = d ? d->customName : "";
             openRename = true;
         }
-        bool trusted = d != eng.devices.end() && d->second.trusted;
+        bool trusted = d && d->trusted;
         if (ImGui::Selectable(trusted ? T("Untrust") : T("Trust (auto-accept files)"), false, 0, ImVec2(0, h))) eng.SetTrusted(peer, !trusted);
         if (ImGui::Selectable(T("Send files..."), false, 0, ImVec2(0, h))) {
             SelectPeer(peer);
@@ -601,7 +625,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
             browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", name.c_str()), browser.lastDir);
         }
         if (ImGui::Selectable(T("Device details"), false, 0, ImVec2(0, h))) {
-            devicesSel = peer;
+            devicesSel = dev;
             if (ui::M().mobile) { backStack.push_back(screen); screen = MScreen::Devices; }
             else { tab = Tab::Devices; tabForce = true; }
         }
@@ -868,7 +892,7 @@ void App::DrawMobileNav() {
 void App::DrawChat(const std::string& peer) {
     bool mobile = ui::M().mobile;
     bool connected = eng.IsConnected(peer);
-    auto d = eng.devices.find(peer);
+    const KnownDevice* d = eng.DeviceFor(peer);
     if (!mobile) {
         float ad = ImGui::GetFontSize() * 1.7f;
         ImVec2 ap = ImGui::GetCursorScreenPos();
@@ -883,21 +907,21 @@ void App::DrawChat(const std::string& peer) {
     auto conn = eng.ReadyConn(peer);
     if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
                                       conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
-    else if (eng.online.count(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
+    else if (eng.IsOnline(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
     else ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
-    if (d != eng.devices.end() && !d->second.pendingKey.empty()) {
+    if (d && !d->pendingKey.empty()) {
         ImGui::SameLine();
         ui::Badge(T("KEY CHANGED"), ui::ColErr());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("This device presented a different identity key. Review it in the device details."));
     } else if (connected) {
         ImGui::SameLine();
-        bool verified = d != eng.devices.end() && d->second.verified;
+        bool verified = d && d->verified;
         ui::Badge(verified ? T("encrypted - verified") : T("encrypted"), verified ? IM_COL32(40, 150, 90, 255) : IM_COL32(70, 90, 140, 255));
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip(T("End-to-end encrypted (X25519 + XChaCha20-Poly1305).\nSafety number: %s\n%s"), eng.SafetyNumberWith(peer).c_str(),
                               verified ? T("You verified this device.") : T("Compare the safety number on both devices (Device details) to verify."));
     }
-    if (d != eng.devices.end() && d->second.trusted) {
+    if (d && d->trusted) {
         ImGui::SameLine();
         ui::Badge("trusted", IM_COL32(60, 120, 200, 255));
     }
@@ -2041,7 +2065,7 @@ void App::DrawHistory() {
 
 void App::DrawDevices() {
     bool mobile = ui::M().mobile;
-    auto peers = SortedPeers();
+    auto peers = SortedPeers(false);
     if (peers.empty()) {
         ImGui::TextDisabled("%s", T("No devices yet."));
         return;
@@ -2362,6 +2386,8 @@ void App::DrawSettings() {
     if (ImGui::IsItemActive()) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 
+    DrawAccountSettings(fieldW, h);
+
     ImGui::SeparatorText(T("Internet"));
     ImGui::TextUnformatted(T("Rendezvous server (optional)"));
     ImGui::SetNextItemWidth(fieldW);
@@ -2604,6 +2630,17 @@ void App::DrawPopups() {
                 else infoMessage = T("Export failed: ") + err;
                 openInfo = true;
                 break;
+            case BrowseFor::BackupSave:
+            case BrowseFor::BackupOpen:
+                if (!res.empty()) {
+                    backupPath = res[0];
+                    backupSaving = browseFor == BrowseFor::BackupSave;
+                    backupPass.clear();
+                    backupPass2.clear();
+                    accountError.clear();
+                    openBackupPass = true;
+                }
+                break;
             case BrowseFor::Avatar:
                 if (!res.empty()) {
                     avatarSrc = res[0];
@@ -2641,8 +2678,8 @@ void App::DrawPopups() {
         ImGui::BeginChild("pick", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 24, std::min(ImGui::GetFontSize() * 16, vp->WorkSize.y * 0.5f)), ImGuiChildFlags_Borders);
         if (mobile) ui::TouchScroll();
         for (auto& p : peers) {
-            auto d = eng.devices.find(p);
-            if (d != eng.devices.end() && d->second.blocked) continue;
+            const KnownDevice* d = eng.DeviceFor(p);
+            if (d && d->blocked) continue;
             if (DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0)) {
                 eng.SendPaths(p, pendingSend);
                 SelectPeer(p);
@@ -2677,8 +2714,8 @@ void App::DrawPopups() {
     if (openRename) { ImGui::OpenPopup(T("Rename device")); openRename = false; }
     centerNext(0.3f);
     if (ImGui::BeginPopupModal(T("Rename device"), nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
-        auto d = eng.devices.find(renamePeer);
-        ImGui::Text(T("Nickname for %s"), d != eng.devices.end() ? d->second.name.c_str() : renamePeer.c_str());
+        const KnownDevice* d = eng.DeviceFor(renamePeer);
+        ImGui::Text(T("Nickname for %s"), d ? d->name.c_str() : renamePeer.c_str());
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 18);
         bool enter = ImGui::InputTextWithHint("##rn", T("leave empty to use the announced name"), &renameBuf, ImGuiInputTextFlags_EnterReturnsTrue);
@@ -2720,6 +2757,7 @@ void App::DrawPopups() {
     }
 
     DrawAvatarEditor();
+    DrawAccountPopups();
 
     // ---- quit
     if (openQuit) { ImGui::OpenPopup(T("Quit LunaShare?")); openQuit = false; }
@@ -2824,8 +2862,8 @@ bool App::WebcamButtonShown(const std::string& peer) const {
     if (!Media().VideoAvailable()) return false;
     if (Media().VcamOn()) return true;  // this PC has LunaShare Camera: ask the other device for its camera
     // a phone offering its camera to a Windows PC
-    auto it = eng.devices.find(peer);
-    return IsMobilePlatform() && it != eng.devices.end() && (it->second.platform.find("Windows") != std::string::npos || it->second.platform.find("Linux") != std::string::npos);
+    const KnownDevice* d = const_cast<ls::Engine&>(eng).DeviceFor(peer);
+    return IsMobilePlatform() && d && (d->platform.find("Windows") != std::string::npos || d->platform.find("Linux") != std::string::npos);
 }
 
 bool App::WebcamButton(const std::string& peer, float size) {

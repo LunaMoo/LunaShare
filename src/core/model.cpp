@@ -62,10 +62,17 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
         {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
+        {"accountVer", s.accountVer}, {"accountSig", s.accountSig},
     };
+    json ad = json::array();
+    for (auto& d : s.accountDevices) ad.push_back({{"id", d.id}, {"pub", d.pub}});
+    j["accountDevices"] = ad;
+    j["accountRemoved"] = s.accountRemoved;
+    j["accountBackedUp"] = s.accountBackedUp;
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
         j["identitySecret"] = s.identitySecret;
+        j["accountSecret"] = s.accountSecret;
     }
     return j;
 }
@@ -75,6 +82,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     if (withIdentity) {
         Get(j, "deviceId", s.deviceId);
         Get(j, "identitySecret", s.identitySecret);
+        Get(j, "accountSecret", s.accountSecret);
     }
     Get(j, "displayName", s.displayName);
     Get(j, "downloadDir", s.downloadDir);
@@ -110,6 +118,19 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "emojiRecent", s.emojiRecent);
     Get(j, "language", s.language);
     Get(j, "avatarHash", s.avatarHash);
+    Get(j, "accountVer", s.accountVer);
+    Get(j, "accountSig", s.accountSig);
+    Get(j, "accountRemoved", s.accountRemoved);
+    Get(j, "accountBackedUp", s.accountBackedUp);
+    if (j.contains("accountDevices") && j["accountDevices"].is_array()) {
+        s.accountDevices.clear();
+        for (auto& d : j["accountDevices"]) {
+            AccountDevice ad;
+            Get(d, "id", ad.id);
+            Get(d, "pub", ad.pub);
+            if (!ad.id.empty() && !ad.pub.empty()) s.accountDevices.push_back(ad);
+        }
+    }
     Get(j, "profileVer", s.profileVer);
     Get(j, "emojiTone", s.emojiTone);
     if (s.emojiTone < 0 || s.emojiTone > 5) s.emojiTone = 0;
@@ -148,7 +169,7 @@ json ToJson(const KnownDevice& d) {
             {"platform", d.platform}, {"macs", d.macs}, {"lastIp", d.lastIp}, {"lastPort", d.lastPort},
             {"btAddr", d.btAddr}, {"firstSeen", d.firstSeen}, {"lastSeen", d.lastSeen}, {"trusted", d.trusted},
             {"blocked", d.blocked}, {"notes", d.notes}, {"pubKey", d.pubKey}, {"verified", d.verified},
-            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}};
+            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}, {"accountPub", d.accountPub}};
 }
 
 KnownDevice DeviceFromJson(const json& j) {
@@ -173,6 +194,7 @@ KnownDevice DeviceFromJson(const json& j) {
     Get(j, "pendingKey", d.pendingKey);
     Get(j, "avatarHash", d.avatarHash);
     Get(j, "profileVer", d.profileVer);
+    Get(j, "accountPub", d.accountPub);
     return d;
 }
 
@@ -182,6 +204,7 @@ json ToJson(const ChatMessage& m) {
     if (!m.myReaction.empty() || !m.reactionSent) j["myReact"] = m.myReaction;
     if (!m.reactionSent) j["reactPending"] = true;
     if (!m.theirReaction.empty()) j["theirReact"] = m.theirReaction;
+    if (!m.pendingTo.empty()) j["pend"] = m.pendingTo;
     return j;
 }
 
@@ -202,6 +225,7 @@ ChatMessage MessageFromJson(const json& j) {
     bool pending = false;
     Get(j, "reactPending", pending);
     m.reactionSent = !pending;
+    Get(j, "pend", m.pendingTo);
     return m;
 }
 

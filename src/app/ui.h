@@ -43,7 +43,7 @@ private:
     };
 
     void PullEvents();
-    std::vector<std::string> SortedPeers();
+    std::vector<std::string> SortedPeers(bool people = true);
     bool IsMobileLayout();
 
     // layouts
@@ -147,7 +147,17 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen } browseFor = BrowseFor::None;
+    // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
+    void DrawAccountSettings(float fieldW, float h);
+    void DrawAccountPopups();
+    bool openLinkPick = false, openLinkAsk = false, openPhrase = false, openRestore = false, openBackupPass = false;
+    std::string linkTarget;               // device we offered to link (waiting for its answer)
+    std::string linkAskPeer, linkAskCode, linkAskName;  // a device asks this one to join its account
+    std::string phraseShown, restoreBuf, backupPass, backupPass2, backupPath, accountError;
+    bool backupSaving = false;            // password popup: saving (true) or opening (false) a backup
+    std::string removeDeviceAsk;
+    bool openRemoveDevice = false;
     // profile picture: round picture (or coloured circle with the initial) of a device; peer "" = this device
     void DrawAvatar(ImDrawList* dl, ImVec2 center, float diameter, const std::string& peer, const std::string& name);
     void DrawAvatarEditor();

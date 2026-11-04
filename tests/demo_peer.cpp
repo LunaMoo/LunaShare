@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
         std::string first, second;
         {
             auto l = e.Lock();
-            auto& ms = e.chats[peer].messages;
+            auto& ms = e.chats[e.ChatKey(peer)].messages;
             for (auto& m : ms)
                 if (m.kind == MsgKind::Text) {
                     if (first.empty()) first = m.mid;
@@ -132,7 +132,16 @@ int main(int argc, char** argv) {
         e.React(peer, second, u8"\U0001F44D");
     }
     int secs = getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30;
-    std::this_thread::sleep_for(std::chrono::seconds(secs));
+    for (int64_t end = SteadyMs() + secs * 1000; SteadyMs() < end;) {
+        for (auto& ev : e.PopEvents())  // DEMO_LINK: accept a request to join the other side's account
+            if (ev.type == EventType::LinkRequest && getenv("DEMO_LINK")) {
+                printf("link request, code %s\n", ev.text.c_str());
+                e.AnswerLink(ev.peer, true);
+            } else if (ev.type == EventType::LinkDone) {
+                printf("%s\n", ev.text.c_str());
+            }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
     e.Stop();
     return 0;
 }

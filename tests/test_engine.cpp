@@ -254,11 +254,11 @@ int main() {
         CHECK(A->conns.size() >= 1, "conns");
     }
     A->SendChat(idB, u8"cześć Bob! zażółć gęślą jaźń");
-    CHECK(WaitFor([&] { auto l = B->Lock(); return !B->chats[idA].messages.empty(); }, 3000), "chat arrives");
-    CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[idB].messages.back().delivered; }, 3000), "chat delivered ack");
+    CHECK(WaitFor([&] { auto l = B->Lock(); return !B->chats[B->ChatKey(idA)].messages.empty(); }, 3000), "chat arrives");
+    CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[A->ChatKey(idB)].messages.back().delivered; }, 3000), "chat delivered ack");
     {
         auto lk = B->Lock();
-        CHECK(B->chats[idA].messages.back().text == u8"cześć Bob! zażółć gęślą jaźń", "utf8 text");
+        CHECK(B->chats[B->ChatKey(idA)].messages.back().text == u8"cześć Bob! zażółć gęślą jaźń", "utf8 text");
         CHECK(B->devices[idA].name == "alice", "device name from hello");
     }
 
@@ -266,30 +266,30 @@ int main() {
     printf("[delete messages]\n");
     A->SendChat(idB, "oops, wrong chat");
     A->SendChat(idB, "keep this one");
-    CHECK(WaitFor([&] { auto l = B->Lock(); return B->chats[idA].messages.size() >= 3; }, 3000), "two more chats arrive");
-    CHECK(WaitFor([&] { auto l = A->Lock(); auto& m = A->chats[idB].messages; return m.size() >= 3 && m[m.size() - 2].delivered; }, 3000), "delivered");
+    CHECK(WaitFor([&] { auto l = B->Lock(); return B->chats[B->ChatKey(idA)].messages.size() >= 3; }, 3000), "two more chats arrive");
+    CHECK(WaitFor([&] { auto l = A->Lock(); auto& m = A->chats[A->ChatKey(idB)].messages; return m.size() >= 3 && m[m.size() - 2].delivered; }, 3000), "delivered");
     std::string oops, keep;
     {
         auto l = A->Lock();
-        auto& m = A->chats[idB].messages;
+        auto& m = A->chats[A->ChatKey(idB)].messages;
         oops = m[m.size() - 2].mid;
         keep = m.back().mid;
     }
     A->DeleteMessages(idB, {oops}, true);
     {
         auto l = A->Lock();
-        for (auto& m : A->chats[idB].messages) CHECK(m.mid != oops, "deleted locally");
+        for (auto& m : A->chats[A->ChatKey(idB)].messages) CHECK(m.mid != oops, "deleted locally");
     }
     CHECK(WaitFor([&] {
         auto l = B->Lock();
-        for (auto& m : B->chats[idA].messages) if (m.mid == oops) return false;
+        for (auto& m : B->chats[B->ChatKey(idA)].messages) if (m.mid == oops) return false;
         return true;
     }, 3000), "deleted on the other device");
-    CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[idB].pendingDeletes.empty(); }, 3000), "delete acknowledged");
+    CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[A->ChatKey(idB)].pendingDeletes.empty(); }, 3000), "delete acknowledged");
     {
         auto l = B->Lock();
         bool kept = false;
-        for (auto& m : B->chats[idA].messages) kept |= m.mid == keep;
+        for (auto& m : B->chats[B->ChatKey(idA)].messages) kept |= m.mid == keep;
         CHECK(kept, "other message kept");
     }
     // "for me" only: stays on the other side
@@ -298,7 +298,7 @@ int main() {
     {
         auto l = B->Lock();
         bool kept = false;
-        for (auto& m : B->chats[idA].messages) kept |= m.mid == keep;
+        for (auto& m : B->chats[B->ChatKey(idA)].messages) kept |= m.mid == keep;
         CHECK(kept, "delete for me stays local");
     }
 
@@ -307,24 +307,24 @@ int main() {
     A->SendChat(idB, "react to this");
     {
         auto l = A->Lock();
-        keep = A->chats[idB].messages.back().mid;
+        keep = A->chats[A->ChatKey(idB)].messages.back().mid;
     }
     CHECK(WaitFor([&] {
         auto l = B->Lock();
-        for (auto& m : B->chats[idA].messages) if (m.mid == keep) return true;
+        for (auto& m : B->chats[B->ChatKey(idA)].messages) if (m.mid == keep) return true;
         return false;
     }, 3000), "message to react to arrives");
     B->React(idA, keep, "\xE2\x9D\xA4\xEF\xB8\x8F");  // B reacts to A's message
     auto theirOn = [&](Engine& e, const std::string& peer, const std::string& want) {
         auto l = e.Lock();
-        for (auto& m : e.chats[peer].messages)
+        for (auto& m : e.chats[e.ChatKey(peer)].messages)
             if (m.mid == keep) return m.theirReaction == want;
         return false;
     };
     CHECK(WaitFor([&] { return theirOn(*A, idB, "\xE2\x9D\xA4\xEF\xB8\x8F"); }, 3000), "reaction arrives");
     CHECK(WaitFor([&] {
         auto l = B->Lock();
-        for (auto& m : B->chats[idA].messages)
+        for (auto& m : B->chats[B->ChatKey(idA)].messages)
             if (m.mid == keep) return m.reactionSent && m.myReaction == "\xE2\x9D\xA4\xEF\xB8\x8F";
         return false;
     }, 3000), "reaction acknowledged");
@@ -376,6 +376,113 @@ int main() {
         CHECK(WaitFor([&] { return cached(pic1); }, 3000), "picture fetched after reconnecting");
         CHECK(A->SetAvatar(""), "remove picture");
         CHECK(WaitFor([&] { return B->AvatarPath(idA).empty(); }, 3000), "removal arrives");
+    }
+
+    // ------------------------------------------------------------ accounts
+    printf("[accounts: linking a second device]\n");
+    {
+        CHECK(A->MyAccount() != B->MyAccount() && !A->MyAccount().empty(), "every device starts with its own account");
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->ChatKey(idA) == "@" + A->MyAccount(); }, 3000), "the other side sees a person");
+        auto A2 = MakeEngine("alice-phone", 48130, false, false);
+        std::string idA2 = A2->settings.deviceId;
+        A2->ConnectAddress("127.0.0.1", A->boundPort);
+        CHECK(WaitFor([&] { return A->IsConnected(idA2) && A2->IsConnected(idA); }, 5000), "new device connects");
+        CHECK(A->LinkDevice(idA2), "link offered");
+        std::string code;
+        CHECK(WaitFor([&] {
+            for (auto& e : A2->PopEvents())
+                if (e.type == EventType::LinkRequest && e.peer == idA) code = e.text;
+            return !code.empty();
+        }, 3000), "link request arrives");
+        CHECK(code.size() == 7 && code == A->LinkCode(idA2), "both show the same code (%s / %s)", code.c_str(), A->LinkCode(idA2).c_str());
+        A2->AnswerLink(idA, true);
+        CHECK(WaitFor([&] { return A2->MyAccount() == A->MyAccount(); }, 3000), "joined the account");
+        CHECK(A2->GetSettings().displayName == "alice", "took the person's name");
+        {
+            auto l = A2->Lock();
+            CHECK(A2->devices.count(idB) == 1, "contacts copied");
+            auto it = A2->chats.find("@" + B->MyAccount());
+            size_t onA = 0;
+            {
+                auto la = A->Lock();
+                onA = A->chats["@" + B->MyAccount()].messages.size();
+            }
+            CHECK(it != A2->chats.end() && it->second.messages.size() >= onA && onA > 0, "conversations copied (%zu of %zu)",
+                  it == A2->chats.end() ? (size_t)0 : it->second.messages.size(), onA);
+        }
+        CHECK(WaitFor([&] { return A->IsConnected(idA2) && A2->IsConnected(idA); }, 5000), "reconnected after linking");
+        {
+            auto l = A->Lock();
+            CHECK(A->devices[idA2].accountPub == A->MyAccount() && A->ChatKey(idA2) == idA2, "own devices stay separate");
+        }
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->devices.count(idA2) && B->ChatKey(idA2) == B->ChatKey(idA); }, 3000),
+              "the contact learns about the new device");
+        A2->ConnectAddress("127.0.0.1", B->boundPort);
+        CHECK(WaitFor([&] { return A2->IsConnected(idB) && B->IsConnected(idA2); }, 5000), "new device reaches the contact");
+        auto has = [](Engine& e, const std::string& key, const std::string& text, bool out) {
+            auto l = e.Lock();
+            auto it = e.chats.find(key);
+            if (it == e.chats.end()) return false;
+            for (auto& m : it->second.messages)
+                if (m.text == text && m.outgoing == out) return true;
+            return false;
+        };
+        B->SendChat("@" + A->MyAccount(), "to both of your devices");
+        std::string bKey = "@" + B->MyAccount();
+        CHECK(WaitFor([&] { return has(*A, bKey, "to both of your devices", false) && has(*A2, bKey, "to both of your devices", false); }, 3000),
+              "a message to the person reaches all their devices");
+        {
+            auto l = A->Lock();
+            int n = 0;
+            for (auto& m : A->chats[bKey].messages) n += m.text == "to both of your devices";
+            CHECK(n == 1, "no duplicates (%d)", n);
+        }
+        A->SendChat(idB, "sent from the computer");
+        CHECK(WaitFor([&] { return has(*A2, bKey, "sent from the computer", true); }, 3000), "my sent message appears on my other device");
+        CHECK(WaitFor([&] { return has(*B, "@" + A->MyAccount(), "sent from the computer", false); }, 3000), "and reaches the contact");
+        A2->Stop();
+    }
+    printf("[accounts: recovery phrase, backup, removing a device]\n");
+    {
+        std::string phrase = A->RecoveryPhrase(), seed, err;
+        int words = 1;
+        for (char ch : phrase) words += ch == ' ';
+        CHECK(words == 24, "24 words (%d)", words);
+        CHECK(PhraseToSeed(phrase, seed, &err) && SeedToPhrase(seed) == phrase, "phrase round trip");
+        std::string typo = phrase.substr(0, phrase.rfind(' ')) + (phrase.substr(phrase.rfind(' ') + 1) == "zoo" ? " abandon" : " zoo");
+        CHECK(!PhraseToSeed(typo, seed, &err), "a wrong word is noticed (%s)", err.c_str());
+        CHECK(!PhraseToSeed("abandon ability", seed, &err), "too few words");
+
+        std::string bk = JoinPath(Root(), "alice.lunabackup");
+        CHECK(!A->SaveBackup(bk, "123", &err), "short password refused");
+        CHECK(A->SaveBackup(bk, "correct horse", &err), "backup saved: %s", err.c_str());
+        auto A3 = MakeEngine("alice-new-phone", 48140, false, false);
+        std::string idA3 = A3->settings.deviceId;
+        CHECK(!A3->RestoreBackup(bk, "wrong horse", &err), "wrong password refused (%s)", err.c_str());
+        CHECK(A3->RestoreBackup(bk, "correct horse", &err), "backup restored: %s", err.c_str());
+        CHECK(A3->MyAccount() == A->MyAccount() && A3->GetSettings().displayName == "alice", "same account and name");
+        {
+            auto l = A3->Lock();
+            auto it = A3->chats.find("@" + B->MyAccount());
+            CHECK(A3->devices.count(idB) && it != A3->chats.end() && !it->second.messages.empty(), "contacts and chats restored");
+        }
+        A3->ConnectAddress("127.0.0.1", A->boundPort);
+        auto listed = [&](Engine& e, const std::string& id) {
+            auto l = e.Lock();
+            for (auto& d : e.settings.accountDevices)
+                if (d.id == id) return true;
+            return false;
+        };
+        CHECK(WaitFor([&] { return listed(*A, idA3) && listed(*A3, idA); }, 6000), "restored device and old device find each other in the account");
+        A->RemoveMyDevice(idA3);
+        CHECK(WaitFor([&] { return A3->MyAccount() != A->MyAccount(); }, 3000), "removed device leaves the account");
+        CHECK(!listed(*A, idA3), "no longer listed");
+        A3->Stop();
+
+        auto A4 = MakeEngine("alice-tablet", 48150, false, false);
+        CHECK(!A4->RestoreFromPhrase(typo, &err), "phrase with a typo refused");
+        CHECK(A4->RestoreFromPhrase(phrase, &err) && A4->MyAccount() == A->MyAccount(), "account restored from the phrase");
+        A4->Stop();
     }
 
     // ------------------------------------------------------------ pause / resume
@@ -635,7 +742,7 @@ int main() {
         }, 10000);
         CHECK(p2p, "hole-punched peer-to-peer connection");
         F->SendChat(idG, "hello over the internet");
-        CHECK(WaitFor([&] { auto l = G->Lock(); return !G->chats[idF].messages.empty(); }, 5000), "chat over internet");
+        CHECK(WaitFor([&] { auto l = G->Lock(); return !G->chats[G->ChatKey(idF)].messages.empty(); }, 5000), "chat over internet");
         std::string fw = JoinPath(Root(), "src/wan.bin");
         WriteRandomFile(fw, 24 << 20, 11);
         std::string shaw = Sha256File(fw);
@@ -723,7 +830,7 @@ int main() {
         CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::None; }, 3000), "hang up reaches the other side");
         {
             auto l = Q->Lock();
-            auto& msgs = Q->chats[idP].messages;
+            auto& msgs = Q->chats[Q->ChatKey(idP)].messages;
             CHECK(!msgs.empty() && msgs.back().text.find("Incoming call - 0:0") == 0, "call logged: %s", msgs.empty() ? "" : msgs.back().text.c_str());
         }
         // declined
@@ -733,7 +840,7 @@ int main() {
         CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::None; }, 3000), "declined");
         {
             auto l = P->Lock();
-            CHECK(P->chats[idQ].messages.back().text == "Call declined", "declined logged: %s", P->chats[idQ].messages.back().text.c_str());
+            CHECK(P->chats[P->ChatKey(idQ)].messages.back().text == "Call declined", "declined logged: %s", P->chats[P->ChatKey(idQ)].messages.back().text.c_str());
         }
         // connection loss ends an active call
         P->StartCall(idQ);

@@ -20,8 +20,15 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Several files stream in parallel (configurable). There's an optional upload speed limit and a free-space check before accepting.
 - Before sending, the app checks that the source file hasn't changed (size + mtime) since it was hashed.
 
+**People, accounts and profile pictures** (see [docs/ACCOUNTS.md](docs/ACCOUNTS.md))
+- Your **account** is a key that belongs to you; no sign-up, no server account. Link your phone and computer to it
+  (*Settings → Your account → Link another device…*, both screens show the same 6-digit code): messages to you reach all
+  your devices, what you write on one appears on the others, and your contacts see one person instead of several devices.
+- A **profile picture** (crop it in a round preview) is shared with, and cached by, everyone you connect to.
+- Keep your account safe with the **24-word recovery phrase** or a password-protected **backup file**.
+
 **Chat**
-- Text chat per device. Messages queue while the other device is offline and show delivered/queued state.
+- Text chat per person. Messages queue while the other side is offline and show delivered/queued state.
 - Selecting and copying: click to select, Ctrl/Shift+click for several, Ctrl+C copies them (with timestamps when several are selected). Double-click or *Select text…* opens a view where you can select part of a message. On phones, long-press enters selection mode.
 - Pictures appear as thumbnails in the chat (EXIF rotation is respected). Tapping one opens a **full-screen viewer**:
   swipe left/right (or arrow keys and the side buttons) to go to the previous/next picture, pinch, mouse wheel or +/- to zoom,
@@ -77,7 +84,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   XChaCha20-Poly1305 for every frame, and a per-device EdDSA identity key ([Monocypher](https://monocypher.org)).
 - The identity key signs the key exchange, so a man in the middle can't relay it. Keys are pinned to the device on first contact. If a known device later shows up
   with a different key, the connection is refused and you have to review it (*Accept new key* or *Block*).
-- Each pair of devices has a **safety number** (30 digits, identical on both screens). Compare it once and mark the device as *verified*.
+- Each pair of people has a **safety number** (30 digits from the two account keys, identical on both screens). Compare it once and mark them as *verified*; their other devices are vouched for by their account.
 - Bluetooth links and hotspot logins sent over them are encrypted the same way. Only the discovery beacons (name, ID, port) are plain.
 
 **Audio and video files in chat (optional player module)**
