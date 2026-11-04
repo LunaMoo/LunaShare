@@ -203,6 +203,69 @@ void SecureChannel::AuthMessage(bool initiatorRole, uint8_t* msg, size_t* len) c
     *len = 15 + 64;
 }
 
+static std::string SignedMessage(const std::string& context, const std::string& data) {
+    std::string m = "LunaShare sig v1\n" + context;
+    m.push_back('\0');
+    return m + data;
+}
+
+std::string SignData(const Identity& id, const std::string& context, const std::string& data) {
+    uint8_t sig[64];
+    std::string m = SignedMessage(context, data);
+    crypto_eddsa_sign(sig, id.sk, (const uint8_t*)m.data(), m.size());
+    return ToHex(sig, 64);
+}
+
+bool VerifyData(const std::string& pubHex, const std::string& context, const std::string& data, const std::string& sigHex) {
+    uint8_t pk[32], sig[64];
+    if (!FromHex(pubHex, pk, 32) || !FromHex(sigHex, sig, 64)) return false;
+    std::string m = SignedMessage(context, data);
+    return crypto_eddsa_check(sig, pk, (const uint8_t*)m.data(), m.size()) == 0;
+}
+
+static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string Base64Encode(const std::string& bin) {
+    std::string out;
+    out.reserve((bin.size() + 2) / 3 * 4);
+    size_t i = 0;
+    for (; i + 2 < bin.size(); i += 3) {
+        uint32_t v = (uint8_t)bin[i] << 16 | (uint8_t)bin[i + 1] << 8 | (uint8_t)bin[i + 2];
+        for (int k = 3; k >= 0; k--) out.push_back(kB64[(v >> (k * 6)) & 63]);
+    }
+    if (i < bin.size()) {
+        uint32_t v = (uint8_t)bin[i] << 16 | (i + 1 < bin.size() ? (uint8_t)bin[i + 1] << 8 : 0);
+        out.push_back(kB64[(v >> 18) & 63]);
+        out.push_back(kB64[(v >> 12) & 63]);
+        out.push_back(i + 1 < bin.size() ? kB64[(v >> 6) & 63] : '=');
+        out.push_back('=');
+    }
+    return out;
+}
+
+bool Base64Decode(const std::string& text, std::string& out) {
+    out.clear();
+    uint32_t v = 0;
+    int bits = 0;
+    for (char ch : text) {
+        int d;
+        if (ch >= 'A' && ch <= 'Z') d = ch - 'A';
+        else if (ch >= 'a' && ch <= 'z') d = ch - 'a' + 26;
+        else if (ch >= '0' && ch <= '9') d = ch - '0' + 52;
+        else if (ch == '+' || ch == '-') d = 62;
+        else if (ch == '/' || ch == '_') d = 63;
+        else if (ch == '=' || ch == '\n' || ch == '\r') continue;
+        else return false;
+        v = v << 6 | (uint32_t)d;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back((char)((v >> bits) & 0xFF));
+        }
+    }
+    return true;
+}
+
 std::string SecureChannel::Sign(const Identity& id) const {
     uint8_t msg[80], sig[64];
     size_t len;

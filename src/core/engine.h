@@ -132,6 +132,12 @@ public:
     void SetVerified(const std::string& peer, bool v);
     void AcceptNewKey(const std::string& peer);  // after a key change warning
     std::string MyPublicKey() const { return identity_.PubHex(); }
+    // ---- profile picture. jpeg: an already cropped / scaled JPEG (the app makes one, <= kMaxAvatarBytes);
+    // empty removes the picture. Sent to every connected device and to others when they connect.
+    static constexpr size_t kMaxAvatarBytes = 96 * 1024;
+    bool SetAvatar(const std::string& jpeg, std::string* err = nullptr);
+    // Cached picture of a device ("" = mine). Empty when there is none. The file name changes with the picture.
+    std::string AvatarPath(const std::string& peer);
     std::string SafetyNumberWith(const std::string& peer);
     void ForgetDevice(const std::string& peer);
     void ClearChat(const std::string& peer);
@@ -214,6 +220,10 @@ private:
     void OnReady(const std::shared_ptr<Connection>& c);
     void HandleFrame(const std::shared_ptr<Connection>& c, Frame& f);
     void HandleData(const std::shared_ptr<Connection>& c, const Frame& f);
+    json ProfileJson();  // under Lock()
+    void HandleProfile(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
+    std::string DataDir();
+    std::string AvatarFile(const std::string& peer, const std::string& hash);
     bool ProduceChunk(const std::shared_ptr<Connection>& c, std::vector<uint8_t>& buf, int64_t& throttleWaitMs);
 
     void OfferTransfer(const std::shared_ptr<Transfer>& t, bool resumeRequest);

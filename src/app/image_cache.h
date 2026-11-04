@@ -66,3 +66,6 @@ private:
 };
 
 ImageCache& Images();
+
+// Synchronous decode of a picture file to RGBA, EXIF orientation applied, longest side <= maxSide.
+bool DecodeImageFile(const std::string& path, int maxSide, std::vector<unsigned char>& rgba, int& w, int& h);

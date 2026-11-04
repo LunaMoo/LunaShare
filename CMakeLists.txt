@@ -310,6 +310,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/android_bridge.cpp
         src/app/ui_viewer.cpp
         src/app/image_cache.cpp
+        src/app/avatar.cpp
         src/app/gl_funcs.cpp
         src/app/media_host.cpp src/app/player_host.cpp src/app/emoji_host.cpp src/app/i18n.cpp
         ${imgui_SOURCE_DIR}/imgui.cpp

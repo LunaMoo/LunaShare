@@ -61,7 +61,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
         {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
-        {"callOutputDevice", s.callOutputDevice},
+        {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
     };
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
@@ -109,6 +109,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "browserGrid", s.browserGrid);
     Get(j, "emojiRecent", s.emojiRecent);
     Get(j, "language", s.language);
+    Get(j, "avatarHash", s.avatarHash);
+    Get(j, "profileVer", s.profileVer);
     Get(j, "emojiTone", s.emojiTone);
     if (s.emojiTone < 0 || s.emojiTone > 5) s.emojiTone = 0;
     Get(j, "browserPicturesOnly", s.browserPicturesOnly);
@@ -146,7 +148,7 @@ json ToJson(const KnownDevice& d) {
             {"platform", d.platform}, {"macs", d.macs}, {"lastIp", d.lastIp}, {"lastPort", d.lastPort},
             {"btAddr", d.btAddr}, {"firstSeen", d.firstSeen}, {"lastSeen", d.lastSeen}, {"trusted", d.trusted},
             {"blocked", d.blocked}, {"notes", d.notes}, {"pubKey", d.pubKey}, {"verified", d.verified},
-            {"pendingKey", d.pendingKey}};
+            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}};
 }
 
 KnownDevice DeviceFromJson(const json& j) {
@@ -169,6 +171,8 @@ KnownDevice DeviceFromJson(const json& j) {
     Get(j, "pubKey", d.pubKey);
     Get(j, "verified", d.verified);
     Get(j, "pendingKey", d.pendingKey);
+    Get(j, "avatarHash", d.avatarHash);
+    Get(j, "profileVer", d.profileVer);
     return d;
 }
 

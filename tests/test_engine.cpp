@@ -338,6 +338,46 @@ int main() {
         CHECK(ev, "reaction event");
     }
 
+    // ------------------------------------------------------------ profile pictures
+    printf("[profile picture]\n");
+    {
+        auto jpeg = [](uint8_t fill) {
+            std::string j = "\xFF\xD8\xFF\xE0";
+            j.append(2000, (char)fill);
+            return j + "\xFF\xD9";
+        };
+        std::string pic1 = jpeg(1), pic2 = jpeg(2);
+        CHECK(!A->SetAvatar("not a jpeg"), "rejects non-JPEG");
+        CHECK(!A->SetAvatar(std::string("\xFF\xD8\xFF", 3) + std::string(Engine::kMaxAvatarBytes, 'x')), "rejects too large");
+        CHECK(A->SetAvatar(pic1), "set picture");
+        auto cached = [&](const std::string& want) {
+            std::string p = B->AvatarPath(idA), got;
+            if (p.empty()) return false;
+            FILE* f = OpenFile(p, "rb");
+            if (!f) return false;
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) got.append(buf, n);
+            fclose(f);
+            return got == want;
+        };
+        CHECK(WaitFor([&] { return cached(pic1); }, 3000), "picture pushed to the connected device");
+        std::string p1 = B->AvatarPath(idA);
+        CHECK(A->SetAvatar(pic2), "change picture");
+        CHECK(WaitFor([&] { return cached(pic2); }, 3000), "changed picture arrives");
+        CHECK(B->AvatarPath(idA) != p1 && !FileExists(p1), "new file name, old one removed");
+        CHECK(!A->AvatarPath("").empty(), "own picture path");
+        // a device that missed the change catches up on the next connection
+        A->Disconnect(idB);
+        CHECK(WaitFor([&] { return !A->IsConnected(idB) && !B->IsConnected(idA); }, 3000), "disconnected");
+        CHECK(A->SetAvatar(pic1), "change while offline");
+        A->ConnectAddress("127.0.0.1", B->boundPort);
+        CHECK(WaitFor([&] { return A->IsConnected(idB) && B->IsConnected(idA); }, 5000), "reconnect");
+        CHECK(WaitFor([&] { return cached(pic1); }, 3000), "picture fetched after reconnecting");
+        CHECK(A->SetAvatar(""), "remove picture");
+        CHECK(WaitFor([&] { return B->AvatarPath(idA).empty(); }, 3000), "removal arrives");
+    }
+
     // ------------------------------------------------------------ pause / resume
     printf("[pause/resume]\n");
     const int64_t SZ = 24 << 20;

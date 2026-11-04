@@ -276,6 +276,113 @@ std::vector<Event> Engine::PopEvents() {
     return e;
 }
 
+// ============================================================================ profile pictures
+
+static std::string ProfileSigned(int64_t ver, const std::string& name, const std::string& avh) {
+    return std::to_string(ver) + "\n" + name + "\n" + avh;
+}
+
+std::string Engine::DataDir() { return configDir.empty() ? ConfigDir() : configDir; }
+
+std::string Engine::AvatarFile(const std::string& peer, const std::string& hash) {
+    if (hash.size() < 16) return {};
+    // the name contains the hash: a new picture is a new file (image caches key on the path)
+    if (peer.empty()) return JoinPath(DataDir(), "avatar_" + hash.substr(0, 16) + ".jpg");
+    std::string safe;
+    for (char ch : peer) safe.push_back(isalnum((unsigned char)ch) || ch == '-' ? ch : '_');
+    return JoinPath(JoinPath(DataDir(), "avatars"), safe + "_" + hash.substr(0, 16) + ".jpg");
+}
+
+std::string Engine::AvatarPath(const std::string& peer) {
+    auto lk = Lock();
+    std::string h;
+    if (peer.empty()) h = settings.avatarHash;
+    else if (auto it = devices.find(peer); it != devices.end()) h = it->second.avatarHash;
+    return h.empty() ? std::string() : AvatarFile(peer, h);  // called every frame: no file system check
+}
+
+static bool ReadWholeFile(const std::string& path, std::string& out, size_t maxBytes) {
+    FILE* f = OpenFile(path, "rb");
+    if (!f) return false;
+    out.clear();
+    char buf[16384];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0 && out.size() <= maxBytes) out.append(buf, n);
+    fclose(f);
+    return out.size() <= maxBytes;
+}
+
+static bool WriteWholeFile(const std::string& path, const std::string& data) {
+    std::string tmp = path + ".tmp";
+    FILE* f = OpenFile(tmp, "wb");
+    if (!f) return false;
+    bool ok = fwrite(data.data(), 1, data.size(), f) == data.size();
+    ok = fclose(f) == 0 && ok;
+    if (!ok) { RemoveFile(tmp); return false; }
+    RemoveFile(path);
+    return RenameFile(tmp, path);
+}
+
+static bool LooksLikeJpeg(const std::string& d) {
+    return d.size() > 4 && (uint8_t)d[0] == 0xFF && (uint8_t)d[1] == 0xD8 && (uint8_t)d[2] == 0xFF;
+}
+
+json Engine::ProfileJson() {
+    std::string img;
+    if (!settings.avatarHash.empty()) ReadWholeFile(AvatarFile("", settings.avatarHash), img, kMaxAvatarBytes);
+    return {{"ver", settings.profileVer}, {"name", settings.displayName}, {"avh", settings.avatarHash},
+            {"img", Base64Encode(img)},
+            {"sig", SignData(identity_, "profile", ProfileSigned(settings.profileVer, settings.displayName, settings.avatarHash))}};
+}
+
+bool Engine::SetAvatar(const std::string& jpeg, std::string* err) {
+    if (!jpeg.empty() && (jpeg.size() > kMaxAvatarBytes || !LooksLikeJpeg(jpeg))) {
+        if (err) *err = "not a JPEG picture or too large";
+        return false;
+    }
+    std::string hash = jpeg.empty() ? std::string() : Sha256Hex(jpeg.data(), jpeg.size());
+    auto lk = Lock();
+    std::string old = settings.avatarHash;
+    if (!hash.empty() && !WriteWholeFile(AvatarFile("", hash), jpeg)) {
+        if (err) *err = "could not save the picture";
+        return false;
+    }
+    if (!old.empty() && old != hash) RemoveFile(AvatarFile("", old));
+    settings.avatarHash = hash;
+    settings.profileVer = std::max(NowMs(), settings.profileVer + 1);
+    MarkDirty();
+    json pj = ProfileJson();
+    for (auto& c : conns)
+        if (c->ready && !c->closed) Queue(c, Msg::ProfileData, pj);
+    return true;
+}
+
+void Engine::HandleProfile(const std::shared_ptr<Connection>& c, const json& j) {
+    auto it = devices.find(c->peerId);
+    if (it == devices.end()) return;
+    KnownDevice& d = it->second;
+    int64_t ver = j.value("ver", (int64_t)0);
+    std::string name = j.value("name", ""), avh = j.value("avh", ""), img64 = j.value("img", ""), sig = j.value("sig", "");
+    if (ver < d.profileVer) return;  // older than what we have (out-of-order push)
+    if (!VerifyData(d.pubKey, "profile", ProfileSigned(ver, name, avh), sig)) {
+        Emit({EventType::Error, c->peerId, "Ignored a profile with an invalid signature from " + d.DisplayName()});
+        return;
+    }
+    std::string img;
+    if (!avh.empty()) {
+        if (img64.size() > kMaxAvatarBytes * 4 / 3 + 8 || !Base64Decode(img64, img) || img.size() > kMaxAvatarBytes ||
+            !LooksLikeJpeg(img) || Sha256Hex(img.data(), img.size()) != avh)
+            return;
+        MakeDirs(JoinPath(DataDir(), "avatars"));
+        if (!WriteWholeFile(AvatarFile(c->peerId, avh), img)) return;
+    }
+    if (!d.avatarHash.empty() && d.avatarHash != avh) RemoveFile(AvatarFile(c->peerId, d.avatarHash));
+    d.avatarHash = avh;
+    d.profileVer = ver;
+    if (!name.empty()) d.name = name;
+    MarkDirty();
+}
+
 std::string Engine::PartDir() {
     std::string d = JoinPath(settings.downloadDir, ".lunashare-partial");
     MakeDirs(d);
@@ -446,7 +553,8 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
             conns.push_back(c);
             hello = {{"app", kAppId}, {"proto", kProtocolVersion}, {"id", settings.deviceId}, {"name", settings.displayName},
                      {"user", UserName()}, {"host", HostName()}, {"platform", PlatformName()}, {"macs", MacAddresses()},
-                     {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}, {"caps", localCaps}};
+                     {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}, {"caps", localCaps},
+                     {"pv", settings.profileVer}, {"avh", settings.avatarHash}};
         }
         Queue(c, Msg::Hello, hello);
         Spawn([this, c] { ReaderLoop(c); });
@@ -733,6 +841,13 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                     }
                 }
             }
+            {
+                // profile picture: fetch when theirs is newer than ours (or the cached file went missing)
+                int64_t pv = j.value("pv", (int64_t)0);
+                std::string avh = j.value("avh", "");
+                bool missing = !avh.empty() && !FileExists(AvatarFile(id, avh));
+                if (pv > d.profileVer || (avh != d.avatarHash && pv >= d.profileVer) || missing) Queue(c, Msg::ProfileGet, json::object());
+            }
             c->caps.clear();
             for (auto& cp : j.value("caps", json::array()))
                 if (cp.is_string()) c->caps.push_back(cp.get<std::string>());
@@ -846,6 +961,12 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             Queue(c, Msg::ChatReactAck, {{"mid", mid}, {"emoji", emoji}});
             break;
         }
+        case Msg::ProfileGet:
+            Queue(c, Msg::ProfileData, ProfileJson());
+            break;
+        case Msg::ProfileData:
+            HandleProfile(c, j);
+            break;
         case Msg::ChatReactAck: {
             std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
             auto it = chats.find(c->peerId);
@@ -1933,6 +2054,8 @@ std::string Engine::SafetyNumberWith(const std::string& peer) {
 void Engine::ForgetDevice(const std::string& peer) {
     Disconnect(peer);
     auto lk = Lock();
+    auto dv = devices.find(peer);
+    if (dv != devices.end() && !dv->second.avatarHash.empty()) RemoveFile(AvatarFile(peer, dv->second.avatarHash));
     devices.erase(peer);
     chats.erase(peer);
     MarkDirty();
@@ -2011,6 +2134,8 @@ void Engine::ApplySettings(const Settings& s) {
     settings = s;
     settings.deviceId = old.deviceId;
     settings.identitySecret = old.identitySecret;
+    settings.avatarHash = old.avatarHash;  // only SetAvatar changes the profile picture
+    settings.profileVer = old.profileVer;
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);
     if (settings.tcpPort != old.tcpPort && running_) restartListener_ = true;

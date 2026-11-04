@@ -9,6 +9,7 @@
 
 #include "crypto.h"
 #include "hash.h"
+#include "avatar.h"
 #include "image_cache.h"
 #include "media_host.h"
 #include "player_host.h"
@@ -224,6 +225,14 @@ void App::Frame() {
     } else if (m.mobile && VideoVisible() && !videoAutoOpened) {
         videoFull = videoAutoOpened = true;  // a video call opens full screen on phones
     }
+    static bool devAvatar = getenv("LUNASHARE_AVATAR") != nullptr;  // dev hook: crop dialog for this picture
+    if (devAvatar && ImGui::GetFrameCount() > 5) {
+        devAvatar = false;
+        avatarSrc = getenv("LUNASHARE_AVATAR");
+        avatarZoom = 1.4f;
+        avatarCx = avatarCy = 0.5f;
+        openAvatarEditor = true;
+    }
     static bool devPanel = getenv("LUNASHARE_CAMPANEL") != nullptr;  // dev hook for screenshots
     if (devPanel && eng.call.state == CallState::Active && (Media().CameraOn() || !strcmp(getenv("LUNASHARE_CAMPANEL"), "audio"))) { camPanel = true; devPanel = false; }
     if (m.mobile && videoFull && VideoVisible()) DrawVideoOverlay();
@@ -393,6 +402,130 @@ bool App::RequestQuit() {
     return false;
 }
 
+// ============================================================================ profile pictures
+
+void App::DrawAvatar(ImDrawList* dl, ImVec2 c, float d, const std::string& peer, const std::string& name) {
+    std::string path = eng.AvatarPath(peer);
+    if (!path.empty()) {
+        const ImageTex& t = Images().Get(path, ImageCache::Size::Thumb);
+        if (t.state == ImageTex::Ready) {
+            dl->AddImageRounded(t.Id(), ImVec2(c.x - d * 0.5f, c.y - d * 0.5f), ImVec2(c.x + d * 0.5f, c.y + d * 0.5f), ImVec2(0, 0),
+                                ImVec2(1, 1), IM_COL32_WHITE, d * 0.5f);
+            return;
+        }
+    }
+    std::string key = peer.empty() ? eng.settings.deviceId : peer;
+    ImU32 col = (ImGui::GetColorU32(ImHashStr(key.c_str()) | 0xFF000000) & 0xFF9F9F9F) | 0xFF404040;
+    dl->AddCircleFilled(c, d * 0.5f, col);
+    char initial[8] = {};
+    int len = 1;  // first UTF-8 character of the name
+    unsigned char c0 = name.empty() ? '?' : (unsigned char)name[0];
+    if (c0 >= 0xF0) len = 4; else if (c0 >= 0xE0) len = 3; else if (c0 >= 0xC0) len = 2;
+    memcpy(initial, name.empty() ? "?" : name.c_str(), std::min<size_t>((size_t)len, name.empty() ? 1 : name.size()));
+    if (len == 1) initial[0] = (char)toupper((unsigned char)initial[0]);
+    float fs = std::min(ImGui::GetFontSize() * std::max(1.0f, d / (ImGui::GetFontSize() * 2.2f)), d * 0.6f);
+    ImVec2 its = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, initial);
+    dl->AddText(ImGui::GetFont(), fs, ImVec2(c.x - its.x * 0.5f, c.y - its.y * 0.5f), IM_COL32_WHITE, initial);
+}
+
+// Settings > Profile: the picture with "Choose" / "Remove"
+void App::DrawProfilePicture(float h) {
+    float d = ImGui::GetFontSize() * 4.5f;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##mypic", ImVec2(d, d));
+    bool click = ImGui::IsItemClicked();
+    DrawAvatar(ImGui::GetWindowDrawList(), ImVec2(p.x + d * 0.5f, p.y + d * 0.5f), d, "", eng.settings.displayName);
+    ImGui::SameLine();
+    ImGui::BeginGroup();
+    ImGui::Dummy(ImVec2(0, std::max(0.0f, (d - (h > 0 ? h : ImGui::GetFrameHeight()) * 2 - ImGui::GetStyle().ItemSpacing.y) * 0.5f)));
+    if (ImGui::Button(T("Choose picture..."), ImVec2(0, h)) || click) {
+        browseFor = BrowseFor::Avatar;
+        browser.Open(FileBrowser::Mode::OpenFile, T("Profile picture"), browser.lastDir);
+    }
+    bool has = !eng.settings.avatarHash.empty();
+    ImGui::BeginDisabled(!has);
+    if (ImGui::Button(T("Remove picture"), ImVec2(0, h))) eng.SetAvatar("");
+    ImGui::EndDisabled();
+    ImGui::EndGroup();
+}
+
+// Crop dialog: drag to move, zoom with the slider / mouse wheel; the circle is what others will see.
+void App::DrawAvatarEditor() {
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    if (openAvatarEditor) {
+        ImGui::OpenPopup(T("Profile picture##crop"));
+        openAvatarEditor = false;
+    }
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(T("Profile picture##crop"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    float box = std::min(mobile ? vp->WorkSize.x * 0.85f : ImGui::GetFontSize() * 20, vp->WorkSize.y * 0.55f);
+    const ImageTex& t = Images().Get(avatarSrc, true);
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("##crop", ImVec2(box, box));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p0, ImVec2(p0.x + box, p0.y + box), IM_COL32(20, 20, 20, 255));
+    if (t.state == ImageTex::Ready && t.w > 0 && t.h > 0) {
+        // the visible square (side = shorter image side / zoom) fills the box
+        float side = std::min(t.w, t.h) / avatarZoom;
+        float u = side / t.w, v = side / t.h;
+        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(0, 0)) {
+            ImVec2 dd = ImGui::GetIO().MouseDelta;
+            avatarCx -= dd.x / box * u;
+            avatarCy -= dd.y / box * v;
+        }
+        if (ImGui::IsItemHovered() && ImGui::GetIO().MouseWheel != 0)
+            avatarZoom = std::clamp(avatarZoom * (ImGui::GetIO().MouseWheel > 0 ? 1.1f : 1 / 1.1f), 1.0f, 5.0f);
+        side = std::min(t.w, t.h) / avatarZoom;
+        u = side / t.w;
+        v = side / t.h;
+        avatarCx = std::clamp(avatarCx, u * 0.5f, 1 - u * 0.5f);
+        avatarCy = std::clamp(avatarCy, v * 0.5f, 1 - v * 0.5f);
+        dl->AddImage(t.Id(), p0, ImVec2(p0.x + box, p0.y + box), ImVec2(avatarCx - u * 0.5f, avatarCy - v * 0.5f),
+                     ImVec2(avatarCx + u * 0.5f, avatarCy + v * 0.5f));
+        // darken outside the circle: a thick ring from the circle to past the corners, clipped to the box
+        ImVec2 c(p0.x + box * 0.5f, p0.y + box * 0.5f);
+        float r = box * 0.5f;
+        for (int q = 0; q < 4; q++) {  // each corner: from the box corner along two edges, back along a quarter arc
+            float a0 = q * 1.5707963f;
+            ImVec2 pts[40];
+            int n = 0;
+            ImVec2 dirA(std::cos(a0), std::sin(a0)), dirB(std::cos(a0 + 1.5707963f), std::sin(a0 + 1.5707963f));
+            pts[n++] = ImVec2(c.x + dirA.x * r, c.y + dirA.y * r);
+            pts[n++] = ImVec2(c.x + (dirA.x + dirB.x) * r, c.y + (dirA.y + dirB.y) * r);
+            pts[n++] = ImVec2(c.x + dirB.x * r, c.y + dirB.y * r);
+            for (int i = 1; i < 32; i++) {
+                float a = a0 + 1.5707963f * (1.0f - i / 32.0f);
+                pts[n++] = ImVec2(c.x + std::cos(a) * r, c.y + std::sin(a) * r);
+            }
+            dl->AddConcavePolyFilled(pts, n, IM_COL32(0, 0, 0, 150));
+        }
+        dl->AddCircle(c, r, IM_COL32(255, 255, 255, 200), 128, 2.0f);
+    } else if (t.state == ImageTex::Failed) {
+        ImVec2 ts = ImGui::CalcTextSize(T("This picture can't be opened."));
+        dl->AddText(ImVec2(p0.x + (box - ts.x) * 0.5f, p0.y + box * 0.5f), ui::ColErr(), T("This picture can't be opened."));
+    }
+    ImGui::SetNextItemWidth(box);
+    ImGui::SliderFloat("##zoom", &avatarZoom, 1.0f, 5.0f, T("Zoom %.1fx"));
+    bool ok = t.state == ImageTex::Ready;
+    ImGui::BeginDisabled(!ok);
+    if (ImGui::Button(T("Use this picture"), ImVec2(mobile ? box : 0, h))) {
+        std::string jpeg, err;
+        if (MakeAvatarJpeg(avatarSrc, avatarCx, avatarCy, avatarZoom, jpeg, &err) && eng.SetAvatar(jpeg, &err)) {
+            ImGui::CloseCurrentPopup();
+        } else {
+            infoMessage = T("The picture could not be used: ") + TS(err);
+            openInfo = true;
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::EndDisabled();
+    if (!mobile) ImGui::SameLine();
+    if (ImGui::Button(T("Cancel"), ImVec2(mobile ? box : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 // ============================================================================ peer rows
 
 bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
@@ -430,23 +563,10 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     ImU32 dot = blocked ? ui::ColErr() : connected ? ui::ColOk() : online ? ui::ColWarn() : ui::ColMuted();
     float pad = ImGui::GetStyle().FramePadding.x;
     float cy = p0.y + height * 0.5f;
-    // avatar circle with initial
+    // profile picture, or a circle with the initial
     float av = std::min(height * 0.8f, ImGui::GetFontSize() * 2.2f);
     ImVec2 ac(p0.x + pad + av * 0.5f, cy);
-    ImU32 avCol = ImGui::GetColorU32(ImHashStr(peer.c_str()) | 0xFF000000) & 0xFF9F9F9F;
-    avCol |= 0xFF404040;
-    dl->AddCircleFilled(ac, av * 0.5f, avCol);
-    char initial[8] = {};
-    {
-        // first UTF-8 character of the name
-        int len = 1;
-        unsigned char c0 = name.empty() ? '?' : (unsigned char)name[0];
-        if (c0 >= 0xF0) len = 4; else if (c0 >= 0xE0) len = 3; else if (c0 >= 0xC0) len = 2;
-        memcpy(initial, name.empty() ? "?" : name.c_str(), std::min<size_t>((size_t)len, name.empty() ? 1 : name.size()));
-        if (len == 1) initial[0] = (char)toupper((unsigned char)initial[0]);
-    }
-    ImVec2 its = ImGui::CalcTextSize(initial);
-    dl->AddText(ImVec2(ac.x - its.x * 0.5f, ac.y - its.y * 0.5f), IM_COL32_WHITE, initial);
+    DrawAvatar(dl, ac, av, peer, name);
     dl->AddCircleFilled(ImVec2(ac.x + av * 0.35f, ac.y + av * 0.35f), r, dot);
     float tx = p0.x + pad * 2 + av;
     float textH = ImGui::GetTextLineHeight();
@@ -621,6 +741,14 @@ void App::DrawMobile() {
     float hb = nb ? std::min(rowH, ((rowEnd - titleX) * 0.7f - sp * (float)(nb - 1)) / (float)nb) : 0;
     float buttonsW = nb ? hb * (float)nb + sp * (float)nb : 0;
     float rowY = ImGui::GetCursorPosY();
+    float adW = rowH * 0.72f;
+    if (chatScreen && rowEnd - titleX - buttonsW - adW - sp > ImGui::GetFontSize() * 6) {  // their picture, if the name still fits
+        float ad = adW;
+        ImVec2 sp0 = ImGui::GetCursorScreenPos();
+        DrawAvatar(ImGui::GetWindowDrawList(), ImVec2(sp0.x + ad * 0.5f, sp0.y + rowH * 0.5f), ad, selectedPeer, peerTitle);
+        titleX += ad + sp;
+        ImGui::SetCursorPosX(titleX);
+    }
     ImGui::SetCursorPosY(rowY + (rowH - ImGui::GetFontSize() * 1.3f) * 0.5f);
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.3f);
     {
@@ -742,6 +870,11 @@ void App::DrawChat(const std::string& peer) {
     bool connected = eng.IsConnected(peer);
     auto d = eng.devices.find(peer);
     if (!mobile) {
+        float ad = ImGui::GetFontSize() * 1.7f;
+        ImVec2 ap = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(ImVec2(ad, ad * 0.75f));
+        DrawAvatar(ImGui::GetWindowDrawList(), ImVec2(ap.x + ad * 0.5f, ap.y + ad * 0.4f), ad, peer, eng.PeerName(peer));
+        ImGui::SameLine();
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.2f);
         ImGui::TextUnformatted(eng.PeerName(peer).c_str());
         ImGui::PopFont();
@@ -2222,6 +2355,7 @@ void App::DrawSettings() {
     float fieldW = mobile ? -1 : ImGui::GetFontSize() * 22;
 
     ImGui::SeparatorText(T("Profile"));
+    DrawProfilePicture(h);
     ImGui::TextUnformatted(T("Name shown to other devices"));
     ImGui::SetNextItemWidth(fieldW);
     ImGui::InputText("##dname", &edit.displayName);
@@ -2470,6 +2604,14 @@ void App::DrawPopups() {
                 else infoMessage = T("Export failed: ") + err;
                 openInfo = true;
                 break;
+            case BrowseFor::Avatar:
+                if (!res.empty()) {
+                    avatarSrc = res[0];
+                    avatarZoom = 1;
+                    avatarCx = avatarCy = 0.5f;
+                    openAvatarEditor = true;
+                }
+                break;
             case BrowseFor::Import:
                 if (eng.ImportSettings(res[0], importIdentity, &err)) { infoMessage = T("Settings imported from\n") + res[0]; styleGeneration++; s = eng.settings; s.lastBrowseDir = browser.lastDir; }
                 else infoMessage = T("Import failed: ") + err;
@@ -2576,6 +2718,8 @@ void App::DrawPopups() {
         if (ImGui::Button(T("OK"), ImVec2(mobile ? -1 : ImGui::GetFontSize() * 6, h)) || ImGui::IsKeyPressed(ImGuiKey_Enter)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+
+    DrawAvatarEditor();
 
     // ---- quit
     if (openQuit) { ImGui::OpenPopup(T("Quit LunaShare?")); openQuit = false; }
@@ -3216,8 +3360,16 @@ void App::DrawIncomingCall() {
     ImVec2 p = ImGui::GetCursorScreenPos();
     ImGui::Dummy(ImVec2(avail, sz * 1.3f));
     ImVec2 cc(p.x + avail * 0.5f, p.y + sz * 0.65f);
-    ImGui::GetWindowDrawList()->AddCircleFilled(cc, sz * 0.6f * pulse, IM_COL32(40, 150, 90, 255));
-    ui::DrawIcon(ImGui::GetWindowDrawList(), Icon::Phone, cc, sz * 0.6f, IM_COL32_WHITE);
+    if (!eng.AvatarPath(eng.call.peer).empty()) {  // their picture with a pulsing ring and a small phone badge
+        ImGui::GetWindowDrawList()->AddCircle(cc, sz * 0.64f * pulse, IM_COL32(40, 150, 90, 255), 64, sz * 0.06f);
+        DrawAvatar(ImGui::GetWindowDrawList(), cc, sz * 1.1f, eng.call.peer, who);
+        ImVec2 bc(cc.x + sz * 0.42f, cc.y + sz * 0.42f);
+        ImGui::GetWindowDrawList()->AddCircleFilled(bc, sz * 0.2f, IM_COL32(40, 150, 90, 255));
+        ui::DrawIcon(ImGui::GetWindowDrawList(), Icon::Phone, bc, sz * 0.2f, IM_COL32_WHITE);
+    } else {
+        ImGui::GetWindowDrawList()->AddCircleFilled(cc, sz * 0.6f * pulse, IM_COL32(40, 150, 90, 255));
+        ui::DrawIcon(ImGui::GetWindowDrawList(), Icon::Phone, cc, sz * 0.6f, IM_COL32_WHITE);
+    }
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.4f);
     ImVec2 ts = ImGui::CalcTextSize(who.c_str());
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail - ts.x) * 0.5f));

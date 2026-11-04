@@ -72,6 +72,7 @@ private:
     void DrawDeviceDetails(const std::string& peer);
     void DrawNearby();
     void DrawSettings();
+    void DrawProfilePicture(float h);
 
     // popups / overlays
     void DrawPopups();
@@ -146,7 +147,13 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar } browseFor = BrowseFor::None;
+    // profile picture: round picture (or coloured circle with the initial) of a device; peer "" = this device
+    void DrawAvatar(ImDrawList* dl, ImVec2 center, float diameter, const std::string& peer, const std::string& name);
+    void DrawAvatarEditor();
+    std::string avatarSrc;  // picture being cropped
+    float avatarZoom = 1, avatarCx = 0.5f, avatarCy = 0.5f;
+    bool openAvatarEditor = false;
     bool exportHistory = true, exportIdentity = false, importIdentity = false;
 
     std::string historyFilter;

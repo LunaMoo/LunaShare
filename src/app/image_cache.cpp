@@ -257,6 +257,44 @@ void ImageCache::Worker() {
     }
 }
 
+bool DecodeImageFile(const std::string& path, int maxSide, std::vector<unsigned char>& rgba, int& w, int& h) {
+    std::vector<unsigned char> file;
+    if (FILE* f = ls::OpenFile(path, "rb")) {
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz > 0 && sz < (512l << 20)) {
+            file.resize((size_t)sz);
+            if (fread(file.data(), 1, file.size(), f) != file.size()) file.clear();
+        }
+        fclose(f);
+    }
+    int ch = 0;
+    unsigned char* px = file.empty() ? nullptr : stbi_load_from_memory(file.data(), (int)file.size(), &w, &h, &ch, 4);
+    if (!px || w <= 0 || h <= 0) {
+        if (px) stbi_image_free(px);
+        return false;
+    }
+    int nw = w, nh = h;
+    if (std::max(w, h) > maxSide) {
+        double s = (double)maxSide / std::max(w, h);
+        nw = std::max(1, (int)(w * s));
+        nh = std::max(1, (int)(h * s));
+    }
+    rgba = (nw != w || nh != h) ? Downscale(px, w, h, nw, nh) : std::vector<unsigned char>(px, px + (size_t)w * h * 4);
+    stbi_image_free(px);
+    w = nw;
+    h = nh;
+    int o = ExifOrientation(file.data(), file.size());
+    if (o != 1) {
+        int ow, oh;
+        rgba = Orient(rgba, w, h, o, ow, oh);
+        w = ow;
+        h = oh;
+    }
+    return true;
+}
+
 void ImageCache::Update() {
     frame_++;
     frameAtomic_ = frame_;

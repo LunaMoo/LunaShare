@@ -40,6 +40,14 @@ struct Identity {
     ~Identity();
 };
 
+// Detached signatures with an identity key (profiles, and later account statements / sealed messages).
+// `context` separates uses: a signature made for one purpose never verifies for another.
+std::string SignData(const Identity& id, const std::string& context, const std::string& data);  // hex
+bool VerifyData(const std::string& pubHex, const std::string& context, const std::string& data, const std::string& sigHex);
+
+std::string Base64Encode(const std::string& bin);
+bool Base64Decode(const std::string& text, std::string& out);
+
 // Short human readable fingerprint of a public key, e.g. "K7Q2-9MXA-P4RT-WD3E".
 std::string KeyFingerprint(const std::string& pubHex);
 // Symmetric 30-digit code both devices display identically ("12345 67890 ..."), for verification.

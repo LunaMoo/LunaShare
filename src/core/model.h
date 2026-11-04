@@ -20,6 +20,9 @@ struct Settings {
     std::string deviceId;
     std::string identitySecret;  // EdDSA seed (hex) - private key of this device
     std::string displayName;
+    // profile picture (avatar.jpg in the config folder); changed only through Engine::SetAvatar
+    std::string avatarHash;        // SHA-256 hex of avatar.jpg, empty = no picture
+    int64_t profileVer = 0;        // bumped whenever the picture changes; peers fetch when theirs is older
 
     std::string downloadDir;
     uint16_t tcpPort = 47820;
@@ -90,6 +93,8 @@ struct KnownDevice {
     std::string pubKey;      // pinned identity key (hex), set on first encrypted contact
     bool verified = false;   // user compared the safety number
     std::string pendingKey;  // a DIFFERENT key was presented: connection refused until the user accepts it
+    std::string avatarHash;  // their profile picture (verified, cached in avatars/), empty = none
+    int64_t profileVer = 0;  // version of the profile we have
     std::string DisplayName() const { return customName.empty() ? (name.empty() ? id.substr(0, 8) : name) : customName; }
     std::string Fingerprint() const;  // short, readable form of the identity key (or id if unknown)
 };

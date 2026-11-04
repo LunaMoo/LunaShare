@@ -33,6 +33,16 @@ int main(int argc, char** argv) {
     if (videoCall) e.localCaps.push_back("video");
 #endif
     e.Start();
+    if (const char* av = getenv("DEMO_AVATAR")) {  // a profile picture (JPEG file) for screenshots
+        std::string jpeg;
+        if (FILE* f = fopen(av, "rb")) {
+            char buf[8192];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) jpeg.append(buf, n);
+            fclose(f);
+        }
+        e.SetAvatar(jpeg);
+    }
     if (std::string(argv[3]) == "-") {  // just stay online (discovery testing)
         std::this_thread::sleep_for(std::chrono::seconds(getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30));
         e.Stop();
