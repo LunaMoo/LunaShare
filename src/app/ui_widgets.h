@@ -18,7 +18,8 @@ Metrics& M();
 
 void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 center, float size, ImU32 col);
 // Square button with a vector icon (tooltip on hover). size 0 = frame height.
-bool IconButton(const char* id, Icon icon, const char* tooltip = nullptr, float size = 0, bool danger = false);
+// caption: a short word under the icon (call buttons on phones, so nobody has to guess what they do)
+bool IconButton(const char* id, Icon icon, const char* tooltip = nullptr, float size = 0, bool danger = false, const char* caption = nullptr);
 // Button with icon + text label.
 bool IconTextButton(const char* label, Icon icon, ImVec2 size = ImVec2(0, 0));
 // Large full-width button for mobile layouts.

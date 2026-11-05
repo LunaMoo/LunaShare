@@ -536,6 +536,8 @@
 {"this device has no account", "to urządzenie nie ma konta"},
 {"invalid signature", "nieprawidłowy podpis"},
 {"server full", "serwer jest pełny"},
+{"Switch", "Przełącz"},
+{"End", "Rozłącz"},
 {"Call settings", "Ustawienia rozmowy"},
 {"Call settings (sound, camera, quality...)", "Ustawienia rozmowy (dźwięk, kamera, jakość...)"},
 {"Sound", "Dźwięk"},

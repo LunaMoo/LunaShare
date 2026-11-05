@@ -2951,7 +2951,16 @@ bool App::CallButton(const std::string& peer, float size, bool video) {
                                         : T("Voice call - the other device does not have the voice module"))
                     : busy ? T("Already in a call") : video ? T("Video call") : T("Voice call");
     ImGui::BeginDisabled(!capable || busy);
+    // green when a call can be made: the usual colour for "call"
+    bool green = capable && !busy;
+    if (green) {
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 140, 85, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(55, 170, 105, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(35, 120, 75, 255));
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32_WHITE);
+    }
     bool clicked = ui::IconButton(video ? "vcall" : "call", video ? Icon::Video : Icon::Phone, tip, size);
+    if (green) ImGui::PopStyleColor(4);
     ImGui::EndDisabled();
     if (clicked) {
         Media().WantCameraAtStart(video);
@@ -3010,27 +3019,31 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
     if (c.state == CallState::Active) {
         bool muted = Media().Muted();
         if (muted) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
-        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? T("Unmute") : T("Mute"), bw)) Media().SetMute(!muted);
+        const bool cap = ui::M().mobile;  // phones: a word under each call button
+        if (ui::IconButton("mute", muted ? Icon::MicOff : Icon::Mic, muted ? T("Unmute") : T("Mute"), bw, false, cap ? (muted ? T("Unmute##cap") : T("Mute##cap")) : nullptr))
+            Media().SetMute(!muted);
         if (muted) ImGui::PopStyleColor();
         ImGui::SameLine();
         if (withVideo && Media().VideoRunning()) {
             bool on = Media().CameraOn();
             if (!on) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(170, 60, 60, 255));
-            if (ui::IconButton("cam", on ? Icon::Video : Icon::VideoOff, on ? T("Turn camera off") : T("Turn camera on"), bw)) {
+            if (ui::IconButton("cam", on ? Icon::Video : Icon::VideoOff, on ? T("Turn camera off") : T("Turn camera on"), bw, false,
+                               cap ? T("Camera##cap") : nullptr)) {
                 Media().SetCameraOn(!on);
                 if (!on && ui::M().mobile) videoFull = true;
             }
             if (!on) ImGui::PopStyleColor();
             ImGui::SameLine();
             if (on) {
-                if (ui::IconButton("flip", Icon::FlipCamera, T("Switch camera"), bw)) Media().NextCamera();
+                if (ui::IconButton("flip", Icon::FlipCamera, T("Switch camera"), bw, false, cap ? T("Switch##cap") : nullptr)) Media().NextCamera();
                 ImGui::SameLine();
             }
         }
         if (Media().Available()) {
             if (camPanel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
             bool wasOpen = camPanel;
-            if (ui::IconButton("camset", Icon::Sliders, T("Call settings (sound, camera, quality...)"), bw)) camPanel = !camPanel;
+            if (ui::IconButton("camset", Icon::Sliders, T("Call settings (sound, camera, quality...)"), bw, false, cap ? T("Settings##cap") : nullptr))
+                camPanel = !camPanel;
             if (wasOpen) ImGui::PopStyleColor();
             ImGui::SameLine();
         }
@@ -3040,7 +3053,8 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             bool spk = cur && cur->kind == "speaker";
             bool hl = cur && cur->kind != "earpiece";
             if (hl) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : T("Audio output"), bw)) {
+            if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : T("Audio output"), bw, false,
+                               cap ? (spk ? T("Speaker##cap") : T("Sound##cap")) : nullptr)) {
                 Media().RefreshRoutes();
                 auto& rs = Media().Routes();
                 if (rs.size() > 2) {
@@ -3063,7 +3077,7 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
     }
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(200, 50, 50, 255));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(230, 70, 70, 255));
-    if (ui::IconButton("hangup", Icon::HangUp, T("Hang up"), bw)) eng.EndCall();
+    if (ui::IconButton("hangup", Icon::HangUp, T("Hang up"), bw, false, ui::M().mobile ? T("End##cap") : nullptr)) eng.EndCall();
     ImGui::PopStyleColor(2);
 }
 
@@ -3549,7 +3563,7 @@ void App::DrawIncomingCall() {
             Media().WantCameraAtStart(true);
             accept = true;
         }
-    } else if (ui::IconTextButton(T("Accept"), Icon::Phone, ImVec2(bw, bh))) {
+    } else if (ui::IconTextButton(T("Answer"), Icon::Phone, ImVec2(bw, bh))) {
         Media().WantCameraAtStart(false);
         accept = true;
     }

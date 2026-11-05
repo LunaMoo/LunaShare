@@ -167,19 +167,27 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
         }
         case Icon::Phone:
         case Icon::HangUp: {
-            // handset: two ear/mouth pieces joined by an arc
-            float rot = icon == Icon::HangUp ? 2.36f : 0.0f;
+            // the classic telephone receiver: a thick curved handle with an ear pad (top left) and a mouth pad
+            // (bottom right); hang up = the same receiver lying down
+            float rot = icon == Icon::HangUp ? 2.356f : 0.0f;
             auto R = [&](float x, float y) {
                 float cs = cosf(rot), sn = sinf(rot);
                 return ImVec2(c.x + (x * cs - y * sn) * h, c.y + (x * sn + y * cs) * h);
             };
-            for (int i = 0; i <= 12; i++) {
-                float a = 2.4f + (float)i / 12.0f * 1.9f;
-                dl->PathLineTo(R(0.25f + cosf(a) * 0.75f, -0.25f - sinf(a) * 0.75f));
-            }
-            dl->PathStroke(col, 0, t * 2.2f);
-            dl->AddCircleFilled(R(-0.62f, -0.05f), h * 0.2f, col);
-            dl->AddCircleFilled(R(0.05f, 0.62f), h * 0.2f, col);
+            const float cx = 0.42f, cy = -0.42f, rad = 1.02f;  // the handle bends around this point
+            auto A = [&](float a, float r) { return R(cx + cosf(a) * r, cy + sinf(a) * r); };
+            const float a0 = 3.14159f * 0.98f, a1 = 3.14159f * 0.52f;
+            for (int i = 0; i <= 16; i++) dl->PathLineTo(A(a0 + (a1 - a0) * (float)i / 16.0f, rad));
+            dl->PathStroke(col, 0, h * 0.34f);
+            // pads: wide rounded pieces at both ends, pointing in towards the bend
+            auto pad = [&](float a) {
+                ImVec2 outer = A(a, rad + 0.06f), inner = A(a, rad - 0.42f);
+                dl->AddLine(outer, inner, col, h * 0.46f);
+                dl->AddCircleFilled(outer, h * 0.23f, col);
+                dl->AddCircleFilled(inner, h * 0.23f, col);
+            };
+            pad(a0 + 0.06f);
+            pad(a1 - 0.06f);
             break;
         }
         case Icon::Mic:
@@ -277,7 +285,7 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
     }
 }
 
-bool IconButton(const char* id, Icon icon, const char* tooltip, float size, bool danger) {
+bool IconButton(const char* id, Icon icon, const char* tooltip, float size, bool danger, const char* caption) {
     if (size <= 0) size = M().mobile ? M().rowH : ImGui::GetFrameHeight();
     ImGui::PushID(id);
     if (danger) ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.25f, 0.25f, 1.0f));
@@ -285,7 +293,22 @@ bool IconButton(const char* id, Icon icon, const char* tooltip, float size, bool
     if (danger) ImGui::PopStyleColor();
     ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
     ImU32 col = ImGui::GetColorU32(ImGui::GetItemFlags() & ImGuiItemFlags_Disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text);
-    DrawIcon(ImGui::GetWindowDrawList(), icon, ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f), size * 0.55f, col);
+    float bh = mx.y - mn.y, bw = mx.x - mn.x;
+    if (caption && *caption && bh > ImGui::GetFontSize() * 2.6f) {
+        ImFont* f = ImGui::GetFont();
+        const char* end = strstr(caption, "##");  // (id suffix of a translated label)
+        float fs = ImGui::GetFontSize() * 0.78f;
+        ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0, caption, end);
+        if (ts.x > bw * 0.94f) {  // long word: smaller
+            fs *= bw * 0.94f / ts.x;
+            ts = f->CalcTextSizeA(fs, FLT_MAX, 0, caption, end);
+        }
+        float iconH = bh - ts.y - bh * 0.12f;
+        DrawIcon(ImGui::GetWindowDrawList(), icon, ImVec2((mn.x + mx.x) * 0.5f, mn.y + bh * 0.06f + iconH * 0.5f), std::min(size * 0.48f, iconH * 0.8f), col);
+        ImGui::GetWindowDrawList()->AddText(f, fs, ImVec2((mn.x + mx.x - ts.x) * 0.5f, mx.y - ts.y - bh * 0.07f), col, caption, end);
+    } else {
+        DrawIcon(ImGui::GetWindowDrawList(), icon, ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f), size * 0.55f, col);
+    }
     if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort | ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tooltip);
     ImGui::PopID();
     return r;
