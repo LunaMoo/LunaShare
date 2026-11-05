@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - groups, group calls and watching together
+
+Groups, group calls and watching together work between devices that all have 1.2.0. Group calls *through the
+server* also need the server updated to 1.2.0 (the OPNsense plugin's binary too); everything else works with a 1.1
+server.
 
 - **Library: Shared folders.** Put files into your *Shared* folder and your contacts can browse and download them
   (*Library* tab). A file is downloaded from every contact that has it at the same time, piece by piece, each piece
