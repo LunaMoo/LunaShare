@@ -583,7 +583,7 @@
 {"Voice only", "Tylko głos"},
 {"Video", "Wideo"},
 {"Calls", "Rozmowy"},
-{"Voice calls are an optional module and are not installed (%s). To enable them, put the lunashare_media library next to the LunaShare program (or install the \"LunaShare + Calls\" app on Android) and restart.", "Rozmowy głosowe to opcjonalny moduł, który nie jest zainstalowany (%s). Aby je włączyć, umieść bibliotekę lunashare_media obok programu LunaShare (albo zainstaluj aplikację \"LunaShare + Calls\" na Androidzie) i uruchom ponownie."},
+{"Voice calls are an optional module and are not installed (%s). To enable them, put the lunashare_media library next to the LunaShare program and restart.", "Rozmowy głosowe to opcjonalny moduł, który nie jest zainstalowany (%s). Aby je włączyć, umieść bibliotekę lunashare_media obok programu LunaShare i uruchom ponownie."},
 {"system default", "domyślne systemowe"},
 {"System default", "Domyślne systemowe"},
 {"Echo cancellation", "Usuwanie echa"},

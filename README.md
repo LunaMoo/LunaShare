@@ -97,7 +97,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   Phone videos are shown upright using their rotation tag.
 - **Windows:** `lunashare_player.dll` plus the shared trimmed FFmpeg in `modules/` (about 8 MB together with the video module's files).
   Video is decoded on the graphics card where possible.
-- **Android:** the phone's own hardware decoders, so it adds almost nothing to the app and is included in both the lite and the calls APK.
+- **Android:** the phone's own hardware decoders, so it adds almost nothing to the app.
 - **Linux:** `liblunashare_player.so` with the same FFmpeg as the Linux video module, in `modules/`.
 
 ![Video in chat](docs/player.png)
@@ -137,7 +137,8 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Call bar: timer, mic/speaker levels, link stats (loss, jitter, delay), and buttons for mute, speaker (phones) and hang up. Incoming calls get a ringtone and a full-screen answer screen on phones.
 - Calls are logged in the chat (*Outgoing call – 2:31*, *Missed call*, …).
 - *Settings → Calls*: choose input and output devices, turn echo cancellation, noise suppression and auto gain on or off, set quality, and run a microphone test.
-- Android ships as two APKs: **lite** (no modules, no microphone or camera permission) and **calls** (`org.lunamoo.lunashare.calls`, voice + video).
+- Android ships as one APK with everything (`org.lunamoo.lunashare`). Microphone and camera are asked for only the first
+  time you call or record; build with `-DLUNASHARE_BUILD_VOICE=OFF -DLUNASHARE_BUILD_VIDEO=OFF` for a version without them.
 - The module has a small, versioned C ABI (`src/media_api/lunashare_media.h`), so a video module can be added later the same way.
 
 ![Voice call](docs/voice-call.png)

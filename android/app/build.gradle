@@ -23,35 +23,19 @@ android {
         applicationId 'org.lunamoo.lunashare'
         minSdk 24          // getifaddrs() + modern Wi-Fi APIs
         targetSdk 35
-        versionCode 110   // major * 100 + minor * 10 + patch
-        versionName '1.1.0'
+        versionCode 111   // major * 100 + minor * 10 + patch
+        versionName '1.1.1'
+        manifestPlaceholders = [appLabel: 'LunaShare']
         externalNativeBuild {
             cmake {
-                arguments '-DANDROID_STL=c++_shared', '-DLUNASHARE_BUILD_TESTS=OFF',
+                // one app with everything (voice + video calls); build your own without them with -DLUNASHARE_BUILD_VOICE=OFF / VIDEO=OFF
+                arguments '-DANDROID_STL=c++_shared', '-DLUNASHARE_BUILD_TESTS=OFF', '-DLUNASHARE_BUILD_VOICE=ON', '-DLUNASHARE_BUILD_VIDEO=ON',
                           "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdlDir.absolutePath}"
                 cppFlags '-std=c++17'
             }
         }
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
-        }
-    }
-
-    // Two variants of the same app: "lite" (chat + files only, no microphone permission) and "calls"
-    // (adds the optional voice module liblunashare_media.so and the RECORD_AUDIO permission).
-    flavorDimensions 'features'
-    productFlavors {
-        lite {
-            dimension 'features'
-            manifestPlaceholders = [appLabel: 'LunaShare']
-            externalNativeBuild { cmake { arguments '-DLUNASHARE_BUILD_VOICE=OFF', '-DLUNASHARE_BUILD_VIDEO=OFF' } }
-        }
-        calls {
-            dimension 'features'
-            applicationIdSuffix '.calls'
-            versionNameSuffix '-calls'
-            manifestPlaceholders = [appLabel: 'LunaShare + Calls']
-            externalNativeBuild { cmake { arguments '-DLUNASHARE_BUILD_VOICE=ON', '-DLUNASHARE_BUILD_VIDEO=ON' } }
         }
     }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- **One Android app:** "LunaShare" now always includes voice and video calls (the separate "LunaShare + Calls" app is
+  gone; it was only about 2 MB larger). Microphone and camera are asked for only when you first call or record.
+- **Coming from "LunaShare + Calls":** in the old app save a backup (*Settings → Your account → Save backup file…*,
+  e.g. to Downloads), install LunaShare and restore it there (*Restore account… → Open a backup file…*), then uninstall
+  the old app. Your account, contacts and chats move over.
+
 ## 1.1.0 - people, accounts and messages that wait
 
 Update all your devices and your server (the OPNsense plugin too). Devices with 1.0.x still talk to 1.1.0, as

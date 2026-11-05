@@ -169,21 +169,20 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "cmake;3.22.1" "platforms;android-35"
       - name: Build APK
         working-directory: android
-        run: gradle assembleLiteRelease assembleCallsRelease --no-daemon
-      - name: Check modules in the APKs
+        run: gradle assembleRelease --no-daemon
+      - name: Check modules in the APK
         run: |
-          calls=$(ls android/app/build/outputs/apk/calls/release/*.apk); lite=$(ls android/app/build/outputs/apk/lite/release/*.apk)
-          unzip -l "$calls" | grep -E "lib(lunashare_media|lunashare_video)\.so" | head
-          unzip -l "$calls" | grep -q "arm64-v8a/liblunashare_video.so" || { echo "video module missing from calls APK"; exit 1; }
-          unzip -l "$calls" | grep -q "arm64-v8a/liblunashare_media.so" || { echo "voice module missing from calls APK"; exit 1; }
-          for a in "$calls" "$lite"; do unzip -l "$a" | grep -q "arm64-v8a/liblunashare_player.so" || { echo "player module missing from $a"; exit 1; }; done
-          for a in "$calls" "$lite"; do unzip -l "$a" | grep -q "arm64-v8a/liblunashare_emoji.so" || { echo "emoji module missing from $a"; exit 1; }; done
-          if unzip -l "$lite" | grep -qE "lunashare_(media|video)"; then echo "lite APK must not contain call modules"; exit 1; fi
-          unzip -p "$calls" 'classes*.dex' | grep -aq "Lorg/lunamoo/lunashare/VideoEngine;" || { echo "VideoEngine missing from calls APK"; exit 1; }
+          apk=$(ls android/app/build/outputs/apk/release/*.apk)
+          unzip -l "$apk" | grep -E "lib(lunashare_media|lunashare_video)\.so" | head
+          for m in video media player emoji; do
+            unzip -l "$apk" | grep -q "arm64-v8a/liblunashare_$m.so" || { echo "$m module missing from the APK"; exit 1; }
+          done
+          unzip -p "$apk" 'classes*.dex' | grep -aq "Lorg/lunamoo/lunashare/VideoEngine;" || { echo "VideoEngine missing from the APK"; exit 1; }
+          mkdir -p apk-out && cp "$apk" apk-out/app-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: LunaShare-android
-          path: android/app/build/outputs/apk/*/release/*.apk
+          path: apk-out/*.apk
 
   opnsense:
     runs-on: ubuntu-24.04
@@ -258,6 +257,7 @@ jobs:
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true || true
           gh release edit latest -R "$GITHUB_REPOSITORY" --notes "Automatic build of main ($git_sha)."
           gh release upload latest out/* -R "$GITHUB_REPOSITORY" --clobber
+          for old in app-calls-release.apk app-lite-release.apk; do gh release delete-asset latest "$old" -R "$GITHUB_REPOSITORY" -y 2>/dev/null || true; done
           # a version that has no release yet: publish it from this commit
           ver=$(sed -n 's/^project(LunaShare VERSION \([0-9.]*\).*/\1/p' src/CMakeLists.txt)
           if [ -n "$ver" ] && ! gh release view "v$ver" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

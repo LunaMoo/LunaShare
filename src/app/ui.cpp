@@ -3602,7 +3602,7 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     if (!Media().Available()) {
         ImGui::PushTextWrapPos(0);
         ImGui::TextDisabled(T("Voice calls are an optional module and are not installed (%s). To enable them, put the "
-                            "lunashare_media library next to the LunaShare program (or install the \"LunaShare + Calls\" app on Android) "
+                            "lunashare_media library next to the LunaShare program "
                             "and restart."), Media().loadInfo.c_str());
         ImGui::PopTextWrapPos();
         return;
