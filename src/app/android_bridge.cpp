@@ -20,6 +20,7 @@ using namespace ls;
 static ls::Engine* g_engine = nullptr;
 static jclass g_cls = nullptr;
 static jclass g_notify = nullptr;  // org.lunamoo.lunashare.Notify (looked up once: other threads can't FindClass app classes)
+static JNIEnv* Env();
 
 // static void method of Notify with string / bool arguments; s = signature
 static void NotifyV(const char* name, const char* sig, ...) {
