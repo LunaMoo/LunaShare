@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2
+
+- **Japanese, Chinese, Korean, Thai... on Android:** the phone's own fonts for other scripts are found through its
+  font list (file names differ between phone makers), so e.g. "日本語" sound tracks and Japanese titles show their
+  letters. On Windows the Japanese, Thai and Indian system fonts are used too.
+
 ## 1.2.1 - watching movies together, fixed
 
 - **Voices in 5.1 movies:** surround sound is mixed down to stereo properly - before, only the front left and right

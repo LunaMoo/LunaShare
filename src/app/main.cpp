@@ -33,6 +33,79 @@ void AndroidBridgeInit(ls::Engine* engine);  // android_bridge.cpp (no-op elsewh
 void AndroidBridgeShutdown();
 std::string AndroidDeviceName();
 
+#if defined(__ANDROID__)
+// The phone's fallback fonts for other scripts, from its own list (/system/etc/fonts.xml, font_fallback.xml on
+// newer Android): file names differ between makers and versions (NotoSansCJK-Regular.ttc, NotoSansCJKjp..., ...).
+// Returns (path, index in a .ttc) for Japanese, Chinese, Korean, Thai, Hindi, Hebrew, Arabic and a few more.
+static std::vector<std::pair<std::string, int>> AndroidFallbackFonts() {
+    std::vector<std::pair<std::string, int>> out;
+    std::string xml;
+    for (const char* f : {"/system/etc/font_fallback.xml", "/system/etc/fonts.xml"}) {
+        FILE* fp = fopen(f, "rb");
+        if (!fp) continue;
+        char buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) xml.append(buf, n);
+        fclose(fp);
+        if (!xml.empty()) break;
+    }
+    // language tag | script tag (fonts.xml uses either: lang="ja" or lang="und-Thai")
+    const char* wanted[][2] = {{"ja", "Jpan"}, {"zh-Hans", "Hans"}, {"zh-Hant", "Hant"}, {"ko", "Kore"}, {"th", "Thai"}, {"hi", "Deva"},
+                               {"he", "Hebr"}, {"ar", "Arab"}, {"bn", "Beng"}, {"ta", "Taml"}, {"ka", "Geor"}, {"hy", "Armn"},
+                               {"am", "Ethi"}, {"km", "Khmr"}, {"my", "Mymr"}, {nullptr, nullptr}};
+    bool used[16] = {};
+    std::vector<std::pair<int, std::pair<std::string, int>>> found;
+    size_t at = 0;
+    while ((at = xml.find("<family", at)) != std::string::npos) {
+        size_t end = xml.find("</family>", at);
+        if (end == std::string::npos) break;
+        std::string fam = xml.substr(at, end - at);
+        at = end;
+        size_t lp = fam.find("lang=\"");
+        if (lp == std::string::npos || fam.find("variant=\"compact\"") != std::string::npos) continue;
+        std::string lang = fam.substr(lp + 6, fam.find('"', lp + 6) - lp - 6);
+        int which = -1;
+        for (int i = 0; wanted[i][0] && which < 0; i++) {
+            std::string w = wanted[i][0];  // "ja", "zh-Hans,zh-Bopo", "und-Thai"...
+            if (lang == w || lang.rfind(w + ",", 0) == 0 || lang.find("," + w) != std::string::npos || lang.find(wanted[i][1]) != std::string::npos)
+                which = i;
+        }
+        if (which < 0 || used[which]) continue;
+        // the regular-weight font of the family: <font weight="400" ... index="N">File.ttc ...</font>
+        size_t fp = 0;
+        std::string file;
+        int index = 0;
+        while ((fp = fam.find("<font", fp)) != std::string::npos) {
+            size_t close = fam.find('>', fp);
+            if (close == std::string::npos) break;
+            std::string tag = fam.substr(fp, close - fp);
+            size_t nameEnd = fam.find_first_of("<", close + 1);
+            std::string name = fam.substr(close + 1, nameEnd - close - 1);
+            size_t a = name.find_first_not_of(" \t\r\n"), b = name.find_last_not_of(" \t\r\n");
+            name = a == std::string::npos ? "" : name.substr(a, b - a + 1);
+            fp = close;
+            if (name.empty() || tag.find("style=\"italic\"") != std::string::npos || tag.find("fallbackFor=") != std::string::npos) continue;
+            bool regular = tag.find("weight=\"400\"") != std::string::npos;
+            if (file.empty() || regular) {
+                file = name;
+                size_t ip = tag.find("index=\"");
+                index = ip == std::string::npos ? 0 : atoi(tag.c_str() + ip + 7);
+            }
+            if (regular) break;
+        }
+        if (file.empty()) continue;
+        std::string path = file[0] == '/' ? file : "/system/fonts/" + file;
+        if (!ls::FileExists(path)) continue;
+        used[which] = true;
+        found.push_back({which, {path, index}});
+    }
+    // Japanese first (Han characters then take Japanese shapes), then the others in the order above
+    std::sort(found.begin(), found.end(), [](auto& a, auto& b) { return a.first < b.first; });
+    for (auto& f : found) out.push_back(f.second);
+    return out;
+}
+#endif
+
 static void LoadFonts() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
@@ -52,14 +125,17 @@ static void LoadFonts() {
     // Fallback fonts merged in for symbols and CJK (glyphs load on demand, so this is cheap).
     const char* extra[] = {
 #if defined(_WIN32)
-        "C:\\Windows\\Fonts\\seguisym.ttf", "C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\malgun.ttf",
+        "C:\\Windows\\Fonts\\seguisym.ttf", "C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\YuGothM.ttc", "C:\\Windows\\Fonts\\meiryo.ttc",
+        "C:\\Windows\\Fonts\\malgun.ttf", "C:\\Windows\\Fonts\\LeelawUI.ttf", "C:\\Windows\\Fonts\\Nirmala.ttc",
 #elif defined(__ANDROID__)
         "/system/fonts/NotoSansSymbols-Regular-Subsetted.ttf", "/system/fonts/NotoSansCJK-Regular.ttc",
 #elif defined(__APPLE__)
         "/System/Library/Fonts/PingFang.ttc",
 #else
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf", "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 #endif
         nullptr};
     ImFont* f = nullptr;
@@ -75,6 +151,15 @@ static void LoadFonts() {
         cfg.MergeMode = true;
         io.Fonts->AddFontFromFileTTF(extra[i], 0.0f, &cfg);
     }
+#if defined(__ANDROID__)
+    for (auto& [path, index] : AndroidFallbackFonts()) {
+        if (path == "/system/fonts/NotoSansCJK-Regular.ttc" && index == 0) continue;  // (already in)
+        ImFontConfig cfg;
+        cfg.MergeMode = true;
+        cfg.FontNo = index;
+        io.Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &cfg);
+    }
+#endif
 }
 
 static void ApplyStyle(int theme, float scale, bool mobile) {
