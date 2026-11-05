@@ -6,6 +6,13 @@
   (*Library* tab). A file is downloaded from every contact that has it at the same time, piece by piece, each piece
   checked by its hash; what you download is offered on to others, like a torrent within your contacts. See
   docs/LIBRARY.md.
+- **Group chats.** *New group*: a name and the people. Messages go to every device of everyone in the group, also to
+  people who have never met each other (the group vouches for their devices) and through the server's mailbox when
+  someone is offline. Anyone in the group can add people and rename it, everyone can leave, whoever created it can
+  remove people. Option *Group chats and calls through the server*: group members you don't know otherwise never
+  connect to your device directly.
+- **Own picture in full quality:** a setting (and a switch in the camera panel) to see your own camera in the same
+  quality as it's sent.
 - **Clearer call buttons:** a real phone receiver icon, words under the call buttons on phones, green call buttons,
   "Answer" for incoming calls.
 

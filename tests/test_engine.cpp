@@ -458,6 +458,87 @@ int main() {
         CHECK(WaitFor([&] { return has(*B, "@" + A->MyAccount(), "sent from the computer", false); }, 3000), "and reaches the contact");
         A2->Stop();
     }
+    printf("[group conversations]\n");
+    {
+        auto C = MakeEngine("carol", 48140, false, false);
+        std::string idC = C->settings.deviceId;
+        C->ConnectAddress("127.0.0.1", A->boundPort);
+        CHECK(WaitFor([&] { auto l = C->Lock(); return C->ChatKey(idA) == "@" + A->MyAccount() && A->IsConnected(idC); }, 5000), "carol knows alice");
+        {
+            auto l = B->Lock();
+            CHECK(B->devices.count(idC) == 0, "bob has never met carol");
+        }
+        std::string gk = A->CreateGroup("Family", {"@" + B->MyAccount(), "@" + C->MyAccount()});
+        CHECK(Engine::IsGroupKey(gk), "group created (%s)", gk.c_str());
+        auto inGroup = [&](Engine& e, size_t n) {
+            auto l = e.Lock();
+            auto g = e.GroupOf(gk);
+            return g && !g->left && g->members.size() == n && g->name == "Family";
+        };
+        CHECK(WaitFor([&] { return inGroup(*B, 3) && inGroup(*C, 3); }, 3000), "both members get the group");
+        {
+            auto l = B->Lock();
+            CHECK(B->devices.count(idC) == 1 && B->devices[idC].accountPub == C->MyAccount() && B->devices[idC].viaGroup,
+                  "bob learns carol's device from the group (vouched by her account)");
+            auto cs = B->Conversations();
+            CHECK(std::find(cs.begin(), cs.end(), gk) != cs.end() && std::find(cs.begin(), cs.end(), "@" + C->MyAccount()) == cs.end(),
+                  "the group is listed, carol is not a contact of bob");
+        }
+        auto gHas = [&](Engine& e, const std::string& text, const std::string& from) {
+            auto l = e.Lock();
+            auto it = e.chats.find(gk);
+            if (it == e.chats.end()) return false;
+            for (auto& m : it->second.messages)
+                if (m.text == text && m.from == from && !m.outgoing) return true;
+            return false;
+        };
+        A->SendChat(gk, "hello everyone");
+        std::string aKey = "@" + A->MyAccount();
+        CHECK(WaitFor([&] { return gHas(*B, "hello everyone", aKey) && gHas(*C, "hello everyone", aKey); }, 3000), "a group message reaches every member");
+        {
+            auto l = B->Lock();
+            CHECK(B->chats["@" + A->MyAccount()].messages.end() ==
+                      std::find_if(B->chats[aKey].messages.begin(), B->chats[aKey].messages.end(), [](auto& m) { return m.text == "hello everyone"; }),
+                  "and stays out of the direct conversation");
+        }
+        C->SendChat(gk, "hi from carol");
+        CHECK(WaitFor([&] { return gHas(*A, "hi from carol", "@" + C->MyAccount()); }, 3000), "carol's message reaches alice");
+        C->ConnectAddress("127.0.0.1", B->boundPort);  // (on the internet: the server would put them in touch)
+        CHECK(WaitFor([&] { return gHas(*B, "hi from carol", "@" + C->MyAccount()); }, 5000), "and bob, once they connect, though they never met");
+        B->React(gk, [&] {
+            auto l = B->Lock();
+            for (auto& m : B->chats[gk].messages)
+                if (m.text == "hi from carol") return m.mid;
+            return std::string();
+        }(), "\xe2\x9d\xa4");
+        CHECK(WaitFor([&] {
+            auto l = C->Lock();
+            for (auto& m : C->chats[gk].messages)
+                if (m.text == "hi from carol" && m.theirReaction == "\xe2\x9d\xa4") return true;
+            return false;
+        }, 3000), "reactions in the group");
+        // a stranger can't post into the group, members can't remove each other
+        C->LeaveGroup(gk);
+        CHECK(WaitFor([&] { return inGroup(*A, 2) && inGroup(*B, 2); }, 3000), "carol leaves: the others see it");
+        {
+            auto l = C->Lock();
+            CHECK(C->GroupOf(gk) && C->GroupOf(gk)->left, "carol is out");
+        }
+        A->SendChat(gk, "after carol left");
+        CHECK(WaitFor([&] { return gHas(*B, "after carol left", aKey); }, 3000), "the group goes on");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(!gHas(*C, "after carol left", aKey), "carol no longer gets the messages");
+        B->RemoveFromGroup(gk, A->MyAccount());
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(inGroup(*A, 2) && inGroup(*B, 2), "only the creator removes people");
+        A->AddToGroup(gk, {"@" + C->MyAccount()});
+        CHECK(WaitFor([&] { return inGroup(*C, 3); }, 3000), "carol added back");
+        A->RemoveFromGroup(gk, C->MyAccount());
+        CHECK(WaitFor([&] { auto l = C->Lock(); return C->GroupOf(gk) && C->GroupOf(gk)->left; }, 3000) && WaitFor([&] { return inGroup(*B, 2); }, 3000),
+              "the creator removes carol");
+        C->Stop();
+    }
+
     printf("[accounts: recovery phrase, backup, removing a device]\n");
     {
         std::string phrase = A->RecoveryPhrase(), seed, err;

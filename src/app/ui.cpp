@@ -123,6 +123,12 @@ void App::Frame() {
                 break;
             }
     }
+    static const char* autoGroup = getenv("LUNASHARE_AUTOGROUP");  // dev: open the first group (screenshots)
+    if (autoGroup && !Engine::IsGroupKey(selectedPeer) && !eng.groups.empty()) {
+        SelectPeer("#" + eng.groups.begin()->first);
+        if (m.mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+        if (*autoGroup == 'm') OpenGroupMembers(selectedPeer);
+    }
     static const char* autoScreen = getenv("LUNASHARE_SCREEN");
     static bool autoScreenDone = false;
     if (autoScreen && !autoScreenDone) {
@@ -412,7 +418,7 @@ void App::SelectPeer(const std::string& peer) {
         selectionMode = false;
         lastSelIndex = -1;
     }
-    selectedPeer = eng.IsContactKey(peer) ? peer : eng.ChatKey(peer);  // a device's messages are in its person's chat
+    selectedPeer = eng.IsContactKey(peer) || Engine::IsGroupKey(peer) ? peer : eng.ChatKey(peer);  // a device's messages are in its person's chat
     notify::ClearChat(selectedPeer);
     eng.MarkRead(selectedPeer);
     scrollToBottom = true;
@@ -422,7 +428,8 @@ void App::SelectPeer(const std::string& peer) {
 void App::OnDrop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
     auto lk = eng.Lock();
-    bool chatVisible = !selectedPeer.empty() && ((!ui::M().mobile && tab == Tab::Chat) || (ui::M().mobile && screen == MScreen::Chat));
+    bool chatVisible = !selectedPeer.empty() && !Engine::IsGroupKey(selectedPeer) &&
+                       ((!ui::M().mobile && tab == Tab::Chat) || (ui::M().mobile && screen == MScreen::Chat));
     if (chatVisible) {
         eng.SendPaths(selectedPeer, paths);
         scrollToBottom = true;
@@ -462,6 +469,10 @@ void App::DrawAvatar(ImDrawList* dl, ImVec2 c, float d, const std::string& peer,
     std::string key = peer.empty() ? eng.settings.deviceId : peer;
     ImU32 col = (ImGui::GetColorU32(ImHashStr(key.c_str()) | 0xFF000000) & 0xFF9F9F9F) | 0xFF404040;
     dl->AddCircleFilled(c, d * 0.5f, col);
+    if (Engine::IsGroupKey(peer)) {  // a group: people, not an initial
+        ui::DrawIcon(dl, Icon::Users, c, d * 0.55f, IM_COL32_WHITE);
+        return;
+    }
     char initial[8] = {};
     int len = 1;  // first UTF-8 character of the name
     unsigned char c0 = name.empty() ? '?' : (unsigned char)name[0];
@@ -580,7 +591,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     bool connected = eng.IsConnected(peer);
     bool online = eng.IsOnline(peer);
     bool blocked = d && (d->blocked || !d->pendingKey.empty());
-    std::string name = eng.PeerName(peer);
+    std::string name = Emoji().Display(eng.PeerName(peer));
     std::string sub;
     if (d) sub = d->platform;
     else if (online) sub = eng.online[dev].platform;
@@ -588,8 +599,17 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         size_t n = eng.DevicesOf(peer).size();
         if (n > 1) sub = TF("%d devices", (int)n);
     }
+    const Group* grp = eng.GroupOf(peer);
     auto conn = eng.ReadyConn(peer);
-    if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + TF("via %s", T(TransportName(conn->transport))) + (conn->addr == "relay" ? T(" (relay)") : "");
+    if (grp) {
+        sub = TF("%d people", (int)grp->members.size());
+        int on = 0;
+        for (auto& m : grp->members)
+            if (m.acc != eng.MyAccount() && (eng.IsConnected("@" + m.acc) || eng.IsOnline("@" + m.acc))) on++;
+        if (on) sub += "  " + TF("%d online", on);
+        connected = false;
+        online = on > 0;
+    } else if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + TF("via %s", T(TransportName(conn->transport))) + (conn->addr == "relay" ? T(" (relay)") : "");
     else if (online) sub += "  " + TF("online (%s)", TS(eng.online[dev].Via()).c_str());
     else sub += sub.empty() ? T("offline") : std::string("  ") + T("offline");
 
@@ -634,7 +654,14 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         dl->AddRectFilled(b0, ImVec2(b0.x + bw, b0.y + textH), ui::ColErr(), textH * 0.5f);
         dl->AddText(ImVec2(b0.x + (bw - us.x) * 0.5f, b0.y), IM_COL32_WHITE, u.c_str());
     }
-    if (rightClick) ImGui::OpenPopup("peerctx");
+    if (rightClick) ImGui::OpenPopup(grp ? "groupctx" : "peerctx");
+    if (ImGui::BeginPopup("groupctx")) {
+        float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
+        if (ImGui::Selectable(T("People in this group"), false, 0, ImVec2(0, h))) OpenGroupMembers(peer);
+        if (grp && !grp->left && ImGui::Selectable(T("Add people"), false, 0, ImVec2(0, h))) OpenAddToGroup(peer);
+        if (grp && !grp->left && ImGui::Selectable(T("Leave the group"), false, 0, ImVec2(0, h))) eng.LeaveGroup(peer);
+        ImGui::EndPopup();
+    }
     if (ImGui::BeginPopup("peerctx")) {
         float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
         if (ImGui::Selectable(connected ? T("Disconnect") : T("Connect"), false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
@@ -743,9 +770,14 @@ void App::DrawSidebar() {
     }
     ImGui::EndChild();
     ImGui::Separator();
-    if (ui::IconTextButton(T("Connect..."), Icon::Link, ImVec2(-1, 0))) {
-        tab = Tab::Nearby;
-        tabForce = true;
+    {
+        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+        if (ui::IconTextButton(T("Connect..."), Icon::Link, ImVec2(half, 0))) {
+            tab = Tab::Nearby;
+            tabForce = true;
+        }
+        ImGui::SameLine();
+        if (ui::IconTextButton(T("New group"), Icon::Users, ImVec2(-1, 0))) OpenNewGroup();
     }
     double up = 0, down = 0;
     for (auto& [id, t] : eng.transfers)
@@ -777,7 +809,7 @@ void App::DrawMobile() {
     std::string peerTitle;
     switch (screen) {
         case MScreen::Home: title = "LunaShare"; break;
-        case MScreen::Chat: peerTitle = eng.PeerName(selectedPeer); title = peerTitle.c_str(); break;
+        case MScreen::Chat: peerTitle = Emoji().Display(eng.PeerName(selectedPeer)); title = peerTitle.c_str(); break;
         case MScreen::Transfers: title = T("Transfers"); break;
         case MScreen::History: title = T("Shared files"); break;
         case MScreen::Library: title = T("Library"); break;
@@ -787,9 +819,10 @@ void App::DrawMobile() {
     }
     // chat: buttons on the right; the title gets what's left (shortened with "..."), buttons shrink on tiny screens
     bool chatScreen = screen == MScreen::Chat;
-    bool callable = chatScreen && Media().Available();
+    bool groupChat = chatScreen && Engine::IsGroupKey(selectedPeer);
+    bool callable = chatScreen && !groupChat && Media().Available();
     bool videoable = callable && Media().VideoAvailable();
-    bool webcam = chatScreen && WebcamButtonShown(selectedPeer);
+    bool webcam = chatScreen && !groupChat && WebcamButtonShown(selectedPeer);
     int nb = chatScreen ? 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) : 0;
     float sp = ImGui::GetStyle().ItemSpacing.x;
     float rowEnd = ImGui::GetContentRegionMax().x;
@@ -836,7 +869,8 @@ void App::DrawMobile() {
             CallButton(selectedPeer, hb, true);
             ImGui::SameLine();
         }
-        if (ui::IconButton("attach", Icon::Attach, nullptr, hb)) {
+        if (groupChat) GroupButtons(selectedPeer, hb);
+        else if (ui::IconButton("attach", Icon::Attach, nullptr, hb)) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", peerTitle.c_str()), browser.lastDir);
         }
@@ -881,6 +915,10 @@ void App::DrawMobileHome() {
             backStack.push_back(MScreen::Home);
             screen = MScreen::Chat;
         }
+    }
+    if (!peers.empty()) {
+        ImGui::Spacing();
+        if (ui::BigButton(T("New group"), Icon::Users)) OpenNewGroup();
     }
 }
 
@@ -939,17 +977,32 @@ void App::DrawChat(const std::string& peer) {
         DrawAvatar(ImGui::GetWindowDrawList(), ImVec2(ap.x + ad * 0.5f, ap.y + ad * 0.4f), ad, peer, eng.PeerName(peer));
         ImGui::SameLine();
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.2f);
-        ImGui::TextUnformatted(eng.PeerName(peer).c_str());
+        ImGui::TextUnformatted(Emoji().Display(eng.PeerName(peer)).c_str());
         ImGui::PopFont();
         ImGui::SameLine();
     }
+    const Group* grp = eng.GroupOf(peer);
     auto conn = eng.ReadyConn(peer);
-    if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
+    if (grp) {
+        int on = 0;
+        std::string names;
+        for (auto& m : grp->members) {
+            if (m.acc == eng.MyAccount()) continue;
+            if (eng.IsConnected("@" + m.acc) || eng.IsOnline("@" + m.acc)) on++;
+            std::string n = eng.DevicesOf("@" + m.acc).empty() && !m.name.empty() ? m.name : eng.PeerName("@" + m.acc);
+            names += (names.empty() ? "" : ", ") + n;
+        }
+        if (grp->left) ImGui::TextDisabled("%s", T("You are no longer in this group."));
+        else if (on) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), "%s", TF("%d online", on).c_str());
+        else ImGui::TextDisabled("%s", T("nobody online - messages wait on your server"));
+        if (ImGui::IsItemHovered() && !names.empty()) ImGui::SetTooltip("%s", names.c_str());
+    } else if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
                                       conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
     else if (eng.IsOnline(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
     else if (eng.WanStatus().rfind("connected", 0) == 0) ImGui::TextDisabled("%s", T("offline - messages wait on your server, files are queued"));
     else ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
-    if (d && !d->pendingKey.empty()) {
+    if (grp) {
+    } else if (d && !d->pendingKey.empty()) {
         ImGui::SameLine();
         ui::Badge(T("KEY CHANGED"), ui::ColErr());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("This device presented a different identity key. Review it in the device details."));
@@ -967,10 +1020,10 @@ void App::DrawChat(const std::string& peer) {
     }
     if (!mobile) {
         float bw = ImGui::GetFrameHeight();
-        bool callable = Media().Available();
+        bool callable = Media().Available() && !grp;
         bool videoable = callable && Media().VideoAvailable();
-        bool webcam = WebcamButtonShown(peer);
-        int nb = 3 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
+        bool webcam = !grp && WebcamButtonShown(peer);
+        int nb = (grp ? 1 : 3) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (webcam) {
             WebcamButton(peer, bw);
@@ -984,6 +1037,9 @@ void App::DrawChat(const std::string& peer) {
             CallButton(peer, bw, true);
             ImGui::SameLine();
         }
+        if (grp) {
+            GroupButtons(peer, bw);
+        } else {
         if (ui::IconButton("sendfiles", Icon::Attach, T("Send files or folders"))) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", eng.PeerName(peer).c_str()), browser.lastDir);
@@ -996,6 +1052,7 @@ void App::DrawChat(const std::string& peer) {
             devicesSel = peer;
             tab = Tab::Devices;
             tabForce = true;
+        }
         }
     }
 
@@ -1112,7 +1169,14 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SetKeyboardFocusHere();
         focusInput = false;
     }
-    bool showVmsg = chatInput.empty() && Media().CanRecordVideoMessages() && !Media().Recording();
+    bool groupChat = Engine::IsGroupKey(peer);
+    const Group* gInfo = eng.GroupOf(peer);
+    if (gInfo && gInfo->left) {
+        ImGui::TextDisabled("%s", T("You are no longer in this group."));
+        DrawDeleteConfirm(peer);
+        return;
+    }
+    bool showVmsg = !groupChat && chatInput.empty() && Media().CanRecordVideoMessages() && !Media().Recording();
     float vmsgW = showVmsg ? inputH + ImGui::GetStyle().ItemSpacing.x : 0;
     (void)emojiW;
     bool send = ImGui::InputTextMultiline("##input", &chatInput, ImVec2(ImGui::GetContentRegionAvail().x - sendW - vmsgW - ImGui::GetStyle().ItemSpacing.x, inputH),
@@ -1136,7 +1200,7 @@ void App::DrawChat(const std::string& peer) {
         }
         ImGui::SameLine();
     }
-    if (chatInput.empty() && Media().CanRecordMessages() && !Media().Recording()) {
+    if (!groupChat && chatInput.empty() && Media().CanRecordMessages() && !Media().Recording()) {
         // nothing typed: the button records a voice message
         if (ui::IconTextButton(mobile ? T("Voice") : T("Voice"), Icon::Mic, ImVec2(sendW, inputH))) {
             std::string dir = JoinPath(ConfigDir(), "voice");
@@ -1334,6 +1398,20 @@ void App::DrawMessages(const std::string& peer) {
             continue;
         }
         bool sel = selMsgs.count(m.mid) > 0;
+        if (Engine::IsGroupKey(peer) && !m.outgoing && !m.from.empty()) {  // who wrote it (once for a run of messages)
+            const ChatMessage* prev = i > 0 ? &cv.messages[(size_t)i - 1] : nullptr;
+            if (!prev || prev->from != m.from || prev->outgoing || prev->kind == MsgKind::System || m.ts - prev->ts > 600000) {
+                std::string n = eng.PeerName(m.from);
+                if (const Group* g = eng.GroupOf(peer))
+                    for (auto& gm : g->members)
+                        if ("@" + gm.acc == m.from && !gm.name.empty() && eng.DevicesOf(m.from).empty()) n = gm.name;
+                ImU32 col = (ImHashStr(m.from.c_str()) & 0x007F7F7F) | 0xFF808080;
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pad * 0.5f);
+                ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.85f);
+                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(col), "%s", n.c_str());
+                ImGui::PopFont();
+            }
+        }
         float x0 = ImGui::GetCursorPosX();
         if (m.kind == MsgKind::Files) {
             float w = mobile ? avail * 0.97f : std::min(maxW, ImGui::GetFontSize() * 26.0f);
@@ -2627,6 +2705,11 @@ void App::DrawSettings() {
         changed |= ImGui::Checkbox(T("Relay through the server when a direct connection fails"), &edit.wanRelay);
         ui::HelpMarker(T("Some networks can't be reached directly at all (mobile data and other carrier-grade NAT on both sides, "
                        "strict firewalls). The server then passes the data along. It stays end-to-end encrypted, the server can't read it."));
+        changed |= ImGui::Checkbox(T("Group chats and calls through the server"), &edit.groupsViaServer);
+        ui::HelpMarker(T("People in your groups whom you don't know otherwise don't connect to your device directly, so they don't "
+                       "learn your internet address. Messages go through the server's mailbox and calls through the server, "
+                       "end-to-end encrypted. In a group call everyone also sends their voice and video only once, to the "
+                       "server, instead of to every person - easier on phones."));
         changed |= ImGui::Checkbox(T("Ask the router for a port mapping (UPnP / NAT-PMP)"), &edit.wanNatPmp);
         ui::HelpMarker(T("Most home routers allow this automatically. It makes direct connections work behind routers that change the "
                        "port for every destination."));
@@ -2695,6 +2778,7 @@ void App::DrawSettings() {
 // ============================================================================ popups & toasts
 
 void App::DrawPopups() {
+    DrawGroupPopups();
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH : 0;
     ImGuiViewport* vp = ImGui::GetMainViewport();

@@ -145,6 +145,21 @@ int main(int argc, char** argv) {
         e.React(peer, first, u8"\u2764\uFE0F");
         e.React(peer, second, u8"\U0001F44D");
     }
+    if (getenv("DEMO_GROUP")) {  // a group with the other side (screenshots of group chats)
+        std::string them;
+        for (int i = 0; i < 50 && them.empty(); i++) {
+            {
+                auto l = e.Lock();
+                std::string k = e.ChatKey(peer);
+                if (Engine::IsContactKey(k)) them = k;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        std::string g = e.CreateGroup(u8"Rodzina 🏡", {them});
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        e.SendChat(g, u8"Cześć wszystkim! Tu jest nasza grupa.");
+        e.SendChat(g, u8"W niedzielę obiad u babci o 14:00 🍽");
+    }
     int secs = getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30;
     for (int64_t end = SteadyMs() + secs * 1000; SteadyMs() < end;) {
         for (auto& ev : e.PopEvents())  // DEMO_LINK: accept a request to join the other side's account

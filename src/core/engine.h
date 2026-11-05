@@ -82,6 +82,22 @@ enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
 std::string CapForMedia(const std::string& media);  // capability a call type needs ("webcam" -> "video")
+// ---- groups: a conversation (and calls) with several people. Key "#" + id. Members are accounts.
+struct GroupMember {
+    std::string acc, name;  // account key, the name the one who added them knew them by
+};
+struct Group {
+    std::string id, name, creator;  // creator: account key (may remove others)
+    std::vector<GroupMember> members;
+    int64_t ver = 0;
+    bool left = false;              // I left / was removed
+    bool Has(const std::string& acc) const {
+        for (auto& m : members)
+            if (m.acc == acc) return true;
+        return false;
+    }
+};
+
 // ---- shared library (Shared folders of my contacts, multi-source downloads)
 constexpr int64_t kPieceSize = 1 << 20;
 struct LibFile {
@@ -192,6 +208,15 @@ public:
     std::vector<std::string> Conversations();                // every chat key the UI can list
     const KnownDevice* DeviceFor(const std::string& key);    // the best device's entry (under Lock())
     std::map<std::string, AccountInfo> accounts;             // other people's accounts (key: account key hex)
+    // ---- groups (key "#" + id: usable wherever a conversation key is)
+    static bool IsGroupKey(const std::string& k) { return !k.empty() && k[0] == '#'; }
+    std::map<std::string, Group> groups;                     // id -> group (under Lock())
+    std::string CreateGroup(const std::string& name, const std::vector<std::string>& people);  // people: "@acc" keys; returns the key
+    void AddToGroup(const std::string& key, const std::vector<std::string>& people);
+    void RemoveFromGroup(const std::string& key, const std::string& acc);  // the creator removes someone
+    void LeaveGroup(const std::string& key);
+    void RenameGroup(const std::string& key, const std::string& name);
+    const Group* GroupOf(const std::string& key);
     // Linking: on the device that has the account, LinkDevice(other) asks `other` (connected) to join it. `other`
     // gets a LinkRequest event and calls AnswerLink. Both show LinkCode(other device) - the same digits.
     bool LinkDevice(const std::string& device);
@@ -362,6 +387,14 @@ private:
     void LeaveAccount();  // removed from my account by another device: start a fresh one
     void PushAccount();   // send my device list to every connected device
     void HandleServerReply(const std::string& text);
+    void HandleGroupInfo(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
+    void SendGroupInfo(const Group& g, const std::vector<std::string>& alsoTo = {});  // to every member device
+    json GroupJson(const Group& g);
+    bool GroupOnlyHidden(const std::string& device);  // "through the server" is on and it's a group-only stranger
+    std::string FrameKey(const std::shared_ptr<Connection>& c, const json& j);  // conversation of an incoming chat frame
+    json KeyField(const std::string& key, json j);  // adds "gid" for a group conversation (outgoing chat frames)
+    Group& EnsureGroup(const std::string& gid, const std::string& senderAcc);  // a group heard of before its GroupInfo
+    bool ApplyAccountList(const json& j, bool fromGroup);  // a verified, signed device list of someone's account
     void MergeChatInto(const std::string& fromKey, const std::string& toKey);
     void HandleProfile(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
     std::string DataDir();

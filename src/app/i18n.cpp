@@ -153,6 +153,7 @@ std::string TF(const char* fmt, ...) {
 // i18n-keys: "use a password of at least 6 characters", "could not write the file", "not a LunaShare account backup", "wrong password (or the file is damaged)",
 // i18n-keys: "the backup is damaged", "the account key is not valid", "the account's device list is not valid", "This device was linked to another account.",
 // i18n-keys: "Call answered on another device", "this device has no account", "invalid signature", "server full"
+// i18n-keys: "You created the group.", "You left the group.", "Group"
 // Sentences the core writes (in English, also into the chat history). "%s" parts are copied over.
 static const char* const kPatterns[] = {
     "End-to-end encrypted. Safety number: %s - compare it on both devices to make sure nobody is in between.",
@@ -173,6 +174,15 @@ static const char* const kPatterns[] = {
     "cannot resolve %s",
     "UDP port %s is busy, using a random one",
     "server: %s",
+    "You added %s.",
+    "You removed %s.",
+    "You named the group \"%s\".",
+    "%s added you to the group.",
+    "%s removed you from the group.",
+    "%s left the group.",
+    "%s named the group \"%s\".",
+    "%s added %s.",
+    "%s removed %s.",
 };
 
 std::string TDynamic(const std::string& en) {

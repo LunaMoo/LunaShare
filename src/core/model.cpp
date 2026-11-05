@@ -56,7 +56,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"btChannel", s.btChannel}, {"wanEnabled", s.wanEnabled}, {"wanServer", s.wanServer}, {"wanRoom", s.wanRoom},
         {"wanPassword", s.wanPassword}, {"wanNatPmp", s.wanNatPmp}, {"wanLocalPort", s.wanLocalPort},
         {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
-        {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"backgroundRun", s.backgroundRun}, {"shareLibrary", s.shareLibrary}, {"shareOnMobileData", s.shareOnMobileData}, {"sharedDir", s.sharedDir}, {"closeToTray", s.closeToTray}, {"keepHistory", s.keepHistory},
+        {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"backgroundRun", s.backgroundRun}, {"shareLibrary", s.shareLibrary}, {"shareOnMobileData", s.shareOnMobileData}, {"groupsViaServer", s.groupsViaServer}, {"sharedDir", s.sharedDir}, {"closeToTray", s.closeToTray}, {"keepHistory", s.keepHistory},
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
@@ -108,6 +108,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "maxParallel", s.maxParallel);
     Get(j, "shareLibrary", s.shareLibrary);
     Get(j, "shareOnMobileData", s.shareOnMobileData);
+    Get(j, "groupsViaServer", s.groupsViaServer);
     Get(j, "sharedDir", s.sharedDir);
     Get(j, "backgroundRun", s.backgroundRun);
     Get(j, "closeToTray", s.closeToTray);
@@ -175,7 +176,7 @@ json ToJson(const KnownDevice& d) {
             {"platform", d.platform}, {"macs", d.macs}, {"lastIp", d.lastIp}, {"lastPort", d.lastPort},
             {"btAddr", d.btAddr}, {"firstSeen", d.firstSeen}, {"lastSeen", d.lastSeen}, {"trusted", d.trusted},
             {"blocked", d.blocked}, {"notes", d.notes}, {"pubKey", d.pubKey}, {"verified", d.verified},
-            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}, {"accountPub", d.accountPub}};
+            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}, {"accountPub", d.accountPub}, {"viaGroup", d.viaGroup}};
 }
 
 KnownDevice DeviceFromJson(const json& j) {
@@ -201,6 +202,7 @@ KnownDevice DeviceFromJson(const json& j) {
     Get(j, "avatarHash", d.avatarHash);
     Get(j, "profileVer", d.profileVer);
     Get(j, "accountPub", d.accountPub);
+    Get(j, "viaGroup", d.viaGroup);
     return d;
 }
 
@@ -212,6 +214,7 @@ json ToJson(const ChatMessage& m) {
     if (!m.theirReaction.empty()) j["theirReact"] = m.theirReaction;
     if (!m.pendingTo.empty()) j["pend"] = m.pendingTo;
     if (!m.mailedTo.empty()) j["mailed"] = m.mailedTo;
+    if (!m.from.empty()) j["from"] = m.from;
     if (m.read) j["read"] = true;
     if (!m.readSent) j["readPending"] = true;
     return j;
@@ -236,6 +239,7 @@ ChatMessage MessageFromJson(const json& j) {
     m.reactionSent = !pending;
     Get(j, "pend", m.pendingTo);
     Get(j, "mailed", m.mailedTo);
+    Get(j, "from", m.from);
     Get(j, "read", m.read);
     bool rp = false;
     Get(j, "readPending", rp);

@@ -72,6 +72,8 @@ struct Settings {
     bool notifySound = true;
     bool shareLibrary = true;      // contacts may download what is in my Shared folder
     bool shareOnMobileData = false;  // phones: also while on mobile data
+    bool groupsViaServer = false;    // group chats and calls go through the server: no direct connections to group
+                                     // members who aren't my contacts (they don't learn my address)
     std::string sharedDir;         // empty = "Shared" inside the folder for received files
     bool backgroundRun = true;     // phones: stay connected in the background (notifications for messages and calls)
     bool closeToTray = false;      // computers: closing the window keeps LunaShare running (tray icon on Windows)
@@ -125,6 +127,7 @@ struct KnownDevice {
     std::string avatarHash;  // their profile picture (verified, cached in avatars/), empty = none
     int64_t profileVer = 0;  // version of the profile we have
     std::string accountPub;  // the account this device belongs to (verified certificate), empty = none / old version
+    bool viaGroup = false;   // known only as a member of a group (not listed as a contact by itself)
     std::string DisplayName() const { return customName.empty() ? (name.empty() ? id.substr(0, 8) : name) : customName; }
     std::string Fingerprint() const;  // short, readable form of the identity key (or id if unknown)
 };
@@ -144,6 +147,7 @@ struct ChatMessage {
     bool reactionSent = true;               // false until the other device confirmed myReaction
     std::vector<std::string> pendingTo;     // devices that still have to get this message (contact's + my other ones)
     std::vector<std::string> mailedTo;      // ... of those, the ones it was left for in the server mailbox
+    std::string from;                       // groups: who wrote it ("@account" key), empty = me / not a group
     bool read = false;                      // outgoing: the other person has seen it
     bool readSent = true;                   // incoming: false until we told the sender it was seen
 };

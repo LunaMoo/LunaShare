@@ -73,6 +73,15 @@ private:
     void DrawNearby();
     void DrawSettings();
     void DrawLibrary();  // ui_library.cpp
+    // groups (ui_groups.cpp)
+    void OpenNewGroup();
+    void OpenAddToGroup(const std::string& key);
+    void OpenGroupMembers(const std::string& key);
+    void GroupButtons(const std::string& key, float size);
+    void DrawGroupPopups();
+    bool openGroupDlg = false, groupDlgAdd = false, openGroupMembers = false;
+    std::string groupDlgKey, groupNameBuf;
+    std::set<std::string> groupPick;
     std::string librarySearch;
     void DrawProfilePicture(float h);
 

@@ -165,6 +165,9 @@ void Engine::Stop() {
 
 // ============================================================================ persistence
 
+static std::vector<std::string> JsonStrings(const json& a);
+static std::vector<AccountDevice> JsonDevices(const json& a);
+
 void Engine::Load() {
     auto lk = Lock();
     std::string dir = configDir.empty() ? ConfigDir() : configDir;
@@ -177,6 +180,28 @@ void Engine::Load() {
                 KnownDevice kd = DeviceFromJson(d);
                 if (!kd.id.empty()) devices[kd.id] = kd;
             }
+        for (auto& a : j.value("accounts", json::array())) {
+            if (!a.is_object()) continue;
+            AccountInfo ai;
+            ai.pub = a.value("pub", "");
+            ai.ver = a.value("ver", (int64_t)0);
+            ai.devices = JsonDevices(a.value("devices", json::array()));
+            ai.removed = JsonStrings(a.value("removed", json::array()));
+            ai.sig = a.value("sig", "");
+            if (!ai.pub.empty()) accounts[ai.pub] = ai;
+        }
+        for (auto& gj : j.value("groups", json::array())) {
+            if (!gj.is_object()) continue;
+            Group g;
+            g.id = gj.value("gid", "");
+            g.name = gj.value("name", "");
+            g.creator = gj.value("creator", "");
+            g.ver = gj.value("ver", (int64_t)0);
+            g.left = gj.value("left", false);
+            for (auto& m : gj.value("members", json::array()))
+                if (m.is_object()) g.members.push_back({m.value("acc", ""), m.value("name", "")});
+            if (!g.id.empty()) groups[g.id] = g;
+        }
     }
     if (LoadJsonFile(JoinPath(dir, "history.json"), j)) {
         if (j.contains("chats") && j["chats"].is_object())
@@ -229,6 +254,18 @@ void Engine::Save() {
         js["settings"] = ToJson(settings, true);
         js["devices"] = json::array();
         for (auto& [id, d] : devices) js["devices"].push_back(ToJson(d));
+        js["accounts"] = json::array();
+        for (auto& [pub, a] : accounts) {
+            json ds = json::array();
+            for (auto& d : a.devices) ds.push_back({{"id", d.id}, {"pub", d.pub}});
+            js["accounts"].push_back({{"pub", pub}, {"ver", a.ver}, {"devices", ds}, {"removed", a.removed}, {"sig", a.sig}});
+        }
+        js["groups"] = json::array();
+        for (auto& [id, g] : groups) {
+            json gj = GroupJson(g);
+            gj["left"] = g.left;
+            js["groups"].push_back(gj);
+        }
         jh["chats"] = json::object();
         if (settings.keepHistory) {
             for (auto& [peer, cv] : chats) {
@@ -267,6 +304,10 @@ KnownDevice& Engine::Device(const std::string& id) {
 std::string Engine::PeerName(const std::string& peerOrKey) {
     auto lk = Lock();
     std::string peer = peerOrKey;
+    if (IsGroupKey(peerOrKey)) {
+        auto g = groups.find(peerOrKey.substr(1));
+        return g == groups.end() || g->second.name.empty() ? "Group" : g->second.name;
+    }
     if (IsContactKey(peerOrKey)) {
         // a person: a nickname given to any of their devices, else the name of the device seen last
         const KnownDevice* best = nullptr;
@@ -334,6 +375,15 @@ std::string Engine::ChatKey(const std::string& device) {
 }
 
 std::vector<std::string> Engine::DevicesOf(const std::string& key) {
+    if (IsGroupKey(key)) {  // every device of every other member
+        std::vector<std::string> out;
+        auto g = groups.find(key.substr(1));
+        if (g == groups.end() || g->second.left) return out;
+        for (auto& m : g->second.members)
+            if (m.acc != MyAccount())
+                for (auto& d : DevicesOf("@" + m.acc)) out.push_back(d);
+        return out;
+    }
     if (!IsContactKey(key)) return {key};
     std::vector<std::string> out;
     std::string acc = key.substr(1);
@@ -379,9 +429,13 @@ std::vector<std::string> Engine::MyOtherDevices() {
 std::vector<std::string> Engine::Conversations() {
     std::set<std::string> keys;
     for (auto& [id, d] : devices)
-        if (id != settings.deviceId) keys.insert(ChatKey(id));
-    for (auto& [id, o] : online)
-        if (id != settings.deviceId) keys.insert(ChatKey(id));
+        if (id != settings.deviceId && !d.viaGroup) keys.insert(ChatKey(id));
+    for (auto& [id, o] : online) {
+        auto d = devices.find(id);
+        if (id != settings.deviceId && (d == devices.end() || !d->second.viaGroup)) keys.insert(ChatKey(id));
+    }
+    for (auto& [id, g] : groups)
+        if (!g.left) keys.insert("#" + id);
     for (auto& [k, cv] : chats)
         if (!cv.messages.empty()) keys.insert(k);
     return std::vector<std::string>(keys.begin(), keys.end());
@@ -436,21 +490,28 @@ void Engine::PushAccount() {
 void Engine::HandleAccount(const std::shared_ptr<Connection>& c, const json& j) {
     auto dv = devices.find(c->peerId);
     if (dv == devices.end()) return;
+    if (j.value("pub", "") != dv->second.accountPub) return;  // only the account the sending device belongs to
+    ApplyAccountList(j, false);
+}
+
+bool Engine::ApplyAccountList(const json& j, bool fromGroup) {
+    if (!j.is_object()) return false;
     std::string pub = j.value("pub", ""), sig = j.value("sig", "");
     int64_t ver = j.value("ver", (int64_t)0);
-    if (pub.empty() || pub != dv->second.accountPub) return;  // only the account the sending device belongs to
+    if (pub.size() != 64) return false;
     std::vector<AccountDevice> list = JsonDevices(j.value("devices", json::array()));
     std::vector<std::string> removed = JsonStrings(j.value("removed", json::array()));
-    if (list.empty() || list.size() > 64 || removed.size() > 256 || !VerifyData(pub, "devices", DeviceListText(ver, list, removed), sig)) return;
+    if (list.empty() || list.size() > 64 || removed.size() > 256 || !VerifyData(pub, "devices", DeviceListText(ver, list, removed), sig)) return false;
     bool mine = pub == MyAccount();
+    if (mine && fromGroup) return false;  // my own devices tell me about my account
     std::vector<AccountDevice> old = mine ? settings.accountDevices : accounts[pub].devices;
-    if (ver <= (mine ? settings.accountVer : accounts[pub].ver)) return;
+    if (ver <= (mine ? settings.accountVer : accounts[pub].ver)) return false;
     if (mine) {
         bool self = false;
         for (auto& d : list) self |= d.id == settings.deviceId;
         if (!self && std::find(removed.begin(), removed.end(), settings.deviceId) != removed.end()) {
             LeaveAccount();  // another of my devices removed this one
-            return;
+            return true;
         }
         settings.accountDevices = list;
         settings.accountRemoved = removed;
@@ -477,9 +538,11 @@ void Engine::HandleAccount(const std::shared_ptr<Connection>& c, const json& j) 
         if (ad.id == settings.deviceId) continue;
         auto it = devices.find(ad.id);
         if (it == devices.end()) {
+            bool known = !DevicesOf("@" + pub).empty();
             KnownDevice& nd = Device(ad.id);
             nd.pubKey = ad.pub;
             nd.accountPub = pub;
+            nd.viaGroup = fromGroup && !known && !mine;
             nd.name = mine ? settings.displayName : PeerName("@" + pub);
         } else if (it->second.pubKey == ad.pub && it->second.accountPub != pub) {
             it->second.accountPub = pub;
@@ -493,6 +556,7 @@ void Engine::HandleAccount(const std::shared_ptr<Connection>& c, const json& j) 
             if (it != devices.end() && it->second.accountPub == pub) it->second.accountPub.clear();
         }
     MarkDirty();
+    return true;
 }
 
 void Engine::MergeChats(const std::string& device) {
@@ -1432,6 +1496,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 CloseConn(c, "blocked");
                 return;
             }
+            if (GroupOnlyHidden(id)) {  // a group member I don't know: through the server only
+                CloseConn(c, "groups via server");
+                return;
+            }
             if (!d.pubKey.empty() && d.pubKey != pub) {
                 // Same device id, different key: reinstalled app, or someone impersonating it. Never connect silently.
                 bool firstWarning = d.pendingKey != pub;
@@ -1569,7 +1637,11 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             break;
         case Msg::Chat: {
             std::string mid = j.value("mid", "");
-            std::string key = ChatKey(c->peerId);
+            std::string key = FrameKey(c, j);
+            if (key.empty()) {
+                Queue(c, Msg::ChatAck, KeyField("#" + j.value("gid", ""), {{"mid", mid}}));  // (so it isn't sent again)
+                break;
+            }
             Conversation& cv = chats[key];
             cv.peer = key;
             bool dup = false;
@@ -1582,6 +1654,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.text = j.value("text", "");
                 m.delivered = true;
                 m.readSent = false;
+                if (IsGroupKey(key)) m.from = ChatKey(c->peerId);
+                else
+                    for (auto& d : DevicesOf(key)) devices[d].viaGroup = false;
                 m.pendingTo = MyOtherDevices();  // my other devices get it too, in case the sender didn't know them
                 cv.messages.push_back(m);
                 if (c->mailbox) std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
@@ -1595,7 +1670,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 Emit({EventType::ChatReceived, key, m.text});
                 MarkDirty();
             }
-            Queue(c, Msg::ChatAck, {{"mid", mid}});
+            Queue(c, Msg::ChatAck, KeyField(key, {{"mid", mid}}));
             break;
         }
         case Msg::ChatSync: {
@@ -1604,6 +1679,14 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             auto dv = devices.find(c->peerId);
             if (dv == devices.end() || dv->second.accountPub != MyAccount() || mid.empty() || key.empty() || key == settings.deviceId) break;
             if (key == c->peerId) break;  // a chat with that device itself stays separate
+            if (IsGroupKey(key)) {
+                auto g = groups.find(key.substr(1));
+                if (g != groups.end() && g->second.left) {
+                    Queue(c, Msg::ChatSyncAck, {{"mid", mid}});
+                    break;
+                }
+                if (g == groups.end()) EnsureGroup(key.substr(1), "");
+            }
             Conversation& cv = chats[key];
             cv.peer = key;
             bool out = j.value("out", false), dup = false;
@@ -1615,6 +1698,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.outgoing = out;
                 m.ts = j.value("ts", NowMs());
                 m.text = j.value("text", "");
+                m.from = j.value("from", "");
                 m.delivered = true;
                 cv.messages.push_back(m);
                 std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
@@ -1634,7 +1718,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             // "seen": from the person's device (my messages were read), or from my own device (I read them there)
             auto dv = devices.find(c->peerId);
             bool mine = dv != devices.end() && dv->second.accountPub == MyAccount();
-            std::string key = mine ? j.value("chat", "") : ChatKey(c->peerId);
+            std::string key = mine ? j.value("chat", "") : FrameKey(c, j);
             auto it = chats.find(key);
             if (it == chats.end()) break;
             std::set<std::string> mids;
@@ -1712,12 +1796,14 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::ChatDelete: {
             // only messages this device sent us can be removed this way
             json mids = j.value("mids", json::array());
-            auto it = chats.find(ChatKey(c->peerId));
+            std::string key = FrameKey(c, j), who = ChatKey(c->peerId);
+            auto it = chats.find(key);
             if (it != chats.end() && mids.is_array()) {
                 auto& msgs = it->second.messages;
                 size_t before = msgs.size();
                 msgs.erase(std::remove_if(msgs.begin(), msgs.end(), [&](const ChatMessage& m) {
                                if (m.outgoing || m.kind == MsgKind::System) return false;
+                               if (IsGroupKey(key) && m.from != who) return false;  // only their own messages
                                for (auto& x : mids)
                                    if (x.is_string() && x.get<std::string>() == m.mid) return true;
                                return false;
@@ -1725,17 +1811,17 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                            msgs.end());
                 if (msgs.size() != before) {
                     it->second.unread = std::max(0, it->second.unread - (int)(before - msgs.size()));
-                    Emit({EventType::ChatDeleted, ChatKey(c->peerId), ""});
+                    Emit({EventType::ChatDeleted, key, ""});
                     MarkDirty();
                 }
             }
-            Queue(c, Msg::ChatDeleteAck, {{"mids", mids}});
+            Queue(c, Msg::ChatDeleteAck, KeyField(key, {{"mids", mids}}));
             break;
         }
         case Msg::ChatDeleteAck: {
             json mids = j.value("mids", json::array());
-            auto it = chats.find(ChatKey(c->peerId));
-            if (it != chats.end() && mids.is_array()) {
+            auto it = chats.find(FrameKey(c, j));
+            if (it != chats.end() && mids.is_array() && !IsGroupKey(it->first)) {  // (in a group: kept for the others)
                 auto& pd = it->second.pendingDeletes;
                 for (auto& x : mids)
                     if (x.is_string()) pd.erase(std::remove(pd.begin(), pd.end(), x.get<std::string>()), pd.end());
@@ -1746,7 +1832,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::ChatReact: {
             std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
             if (emoji.size() > 64) break;  // one emoji, not a message
-            auto it = chats.find(ChatKey(c->peerId));
+            std::string key = FrameKey(c, j);
+            auto it = chats.find(key);
             if (it != chats.end())
                 for (auto& m : it->second.messages)
                     if (m.mid == mid && m.kind != MsgKind::System) {
@@ -1756,16 +1843,19 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                             if (!emoji.empty()) {
                                 std::string about = m.kind == MsgKind::Files ? "[files] " + m.text : m.text;
                                 if (about.size() > 60) about = about.substr(0, 57) + "...";
-                                Event ev{EventType::ChatReaction, ChatKey(c->peerId), emoji};
+                                Event ev{EventType::ChatReaction, key, emoji};
                                 ev.a = about;
                                 Emit(ev);
                             }
                         }
                         break;
                     }
-            Queue(c, Msg::ChatReactAck, {{"mid", mid}, {"emoji", emoji}});
+            Queue(c, Msg::ChatReactAck, KeyField(key, {{"mid", mid}, {"emoji", emoji}}));
             break;
         }
+        case Msg::GroupInfo:
+            HandleGroupInfo(c, j);
+            break;
         case Msg::ProfileGet:
             Queue(c, Msg::ProfileData, ProfileJson());
             break;
@@ -1774,8 +1864,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             break;
         case Msg::ChatReactAck: {
             std::string mid = j.value("mid", ""), emoji = j.value("emoji", "");
-            auto it = chats.find(ChatKey(c->peerId));
-            if (it != chats.end())
+            auto it = chats.find(FrameKey(c, j));
+            if (it != chats.end() && !IsGroupKey(it->first))  // (in a group: resent to whoever connects)
                 for (auto& m : it->second.messages)
                     if (m.mid == mid && m.myReaction == emoji && !m.reactionSent) {
                         m.reactionSent = true;
@@ -1785,7 +1875,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::ChatAck: {
             std::string mid = j.value("mid", "");
-            auto it = chats.find(ChatKey(c->peerId));
+            auto it = chats.find(FrameKey(c, j));
             if (it != chats.end())
                 for (auto& m : it->second.messages)
                     if (m.outgoing && m.mid == mid) {
@@ -2154,6 +2244,21 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
         for (auto& m : it->second.messages)
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
+    }
+    // groups this device is in (or one of mine): the current member list, deletions and reactions
+    {
+        auto dv = devices.find(peer);
+        std::string acc = dv != devices.end() ? dv->second.accountPub : "";
+        for (auto& [gid, g] : groups) {
+            if (acc.empty() || g.ver <= 0 || (acc != MyAccount() && !g.Has(acc))) continue;
+            if (g.left && acc != MyAccount()) continue;
+            Queue(c, Msg::GroupInfo, GroupJson(g));
+            auto gc = chats.find("#" + gid);
+            if (gc == chats.end() || g.left) continue;
+            if (!gc->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", gc->second.pendingDeletes}, {"gid", gid}});
+            for (auto& m : gc->second.messages)
+                if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}, {"gid", gid}});
+        }
     }
     std::vector<std::shared_ptr<Transfer>> outs;
     for (auto& [id, t] : transfers)
@@ -2613,7 +2718,10 @@ void Engine::SendChat(const std::string& peerArg, const std::string& text) {
     m.ts = NowMs();
     m.text = text;
     // to every device of the person, and a copy to my other devices
-    for (auto& d : DevicesOf(peer)) m.pendingTo.push_back(d);
+    for (auto& d : DevicesOf(peer)) {
+        m.pendingTo.push_back(d);
+        if (!IsGroupKey(peer)) devices[d].viaGroup = false;  // a group member I now talk to directly: a contact
+    }
     for (auto& d : MyOtherDevices()) m.pendingTo.push_back(d);
     Conversation& cv = chats[peer];
     cv.peer = peer;
@@ -2629,10 +2737,15 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
     if (!mine && !m.outgoing) return;
     Msg type = mine ? Msg::ChatSync : Msg::Chat;
     json j = mine ? json{{"chat", key}, {"mid", m.mid}, {"ts", m.ts}, {"text", m.text}, {"out", m.outgoing}}
-                  : json{{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}};
+                  : KeyField(key, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
+    if (mine && !m.from.empty()) j["from"] = m.from;
     if (auto c = ReadyConn(device)) {
         Queue(c, type, j);
         return;
+    }
+    if (IsGroupKey(key) && wan_.Running() && SteadyMs() - lastWanConnect_[device] > 60000 && !GroupOnlyHidden(device)) {
+        lastWanConnect_[device] = SteadyMs();  // a group member we may never have met: try to reach them directly
+        wan_.Connect(device);
     }
     // not reachable now: leave it in the server mailbox (once), if the message isn't too old
     if (std::find(m.mailedTo.begin(), m.mailedTo.end(), device) != m.mailedTo.end()) return;
@@ -2676,7 +2789,7 @@ bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
     Msg type = (Msg)inner.value("t", 0);
     switch (type) {
         case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
-        case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: break;
+        case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: case Msg::GroupInfo: break;
         default: return true;  // nothing else travels by mail
     }
     {
@@ -2914,6 +3027,11 @@ void Engine::ConnectAddress(const std::string& host, uint16_t port) {
 
 void Engine::ConnectPeer(const std::string& peerOrKey) {
     auto lk = Lock();
+    if (IsGroupKey(peerOrKey)) {
+        for (auto& d : DevicesOf(peerOrKey))
+            if (!GroupOnlyHidden(d)) ConnectPeer(d);
+        return;
+    }
     if (IsContactKey(peerOrKey)) {
         for (auto& d : DevicesOf(peerOrKey)) ConnectPeer(d);
         return;
@@ -3068,7 +3186,7 @@ void Engine::DeleteMessages(const std::string& peerArg, const std::vector<std::s
         auto& pd = it->second.pendingDeletes;
         pd.insert(pd.end(), remote.begin(), remote.end());
         if (pd.size() > 500) pd.erase(pd.begin(), pd.begin() + (ptrdiff_t)(pd.size() - 500));
-        for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, {{"mids", remote}});
+        for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, KeyField(peer, {{"mids", remote}}));
     }
     MarkDirty();
 }
@@ -3083,7 +3201,7 @@ void Engine::React(const std::string& peerArg, const std::string& mid, const std
             if (m.myReaction == emoji) return;
             m.myReaction = emoji;
             m.reactionSent = false;
-            for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatReact, {{"mid", mid}, {"emoji", emoji}});
+            for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatReact, KeyField(peer, {{"mid", mid}, {"emoji", emoji}}));
             MarkDirty();
             return;
         }
@@ -3109,7 +3227,7 @@ void Engine::MarkRead(const std::string& peerArg) {
     std::vector<std::string> to = DevicesOf(peer);
     for (auto& d : MyOtherDevices()) to.push_back(d);
     for (auto& d : to) {
-        json j = {{"mids", mids}, {"chat", peer}};
+        json j = KeyField(peer, {{"mids", mids}, {"chat", peer}});
         if (!QueueToPeer(d, Msg::ChatRead, j)) MailTo(d, Msg::ChatRead, j);
     }
     MarkDirty();
