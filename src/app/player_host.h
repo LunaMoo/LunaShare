@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -41,6 +42,12 @@ public:
     void Seek(double seconds);
     void Stop();
     bool IsCurrent(const std::string& path) const { return !cur_.empty() && cur_ == path; }
+    // watch together: a file arriving from another device. Opening reads its beginning (and maybe its end) over the
+    // network, so it happens in the background: OpenState() says how far it got. `read` must stay valid until Stop().
+    void OpenStream(const std::string& id, int64_t size, std::function<int(int64_t, uint8_t*, int)> read);
+    enum class Opening { None, Busy, Failed, Ready };
+    Opening OpenState();
+    void SetPlaying(bool on);
     bool Playing() const;
     double Position() const;
     double Duration() const { return info_.duration; }
@@ -79,6 +86,14 @@ private:
     LspInfo info_{};
     uint32_t dev_ = 0;
     std::mutex pm_;  // guards p_ against the audio callback
+    // stream being opened in the background
+    std::thread opener_;
+    std::atomic<int> openState_{0};
+    LspPlayer* opened_ = nullptr;
+    LspInfo openedInfo_{};
+    std::string openingId_;
+    std::function<int(int64_t, uint8_t*, int)> streamRead_;
+    LspStream stream_{};
 };
 
 PlayerHost& Player();

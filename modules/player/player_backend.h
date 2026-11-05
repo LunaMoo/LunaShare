@@ -20,6 +20,7 @@ class Source {
 public:
     virtual ~Source() = default;
     virtual bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) = 0;
+    virtual bool OpenStream(const LspStream* s, LspInfo* info, bool wantAudio, std::string* err) = 0;
     // decode a little; returns 1 = go on, 0 = end of file, -1 = error
     virtual int Step(Sink& sink) = 0;
     virtual bool Seek(double seconds) = 0;

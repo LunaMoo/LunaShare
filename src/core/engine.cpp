@@ -1253,6 +1253,12 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
         if (!other) {
             if (call.state != CallState::None && call.peer == c->peerId) FinishCall("connection lost", false);
             if (call.state == CallState::Active && !call.group.empty() && !call.hub) GroupPeerLeft(c->peerId);
+            if (watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), c->peerId) != watchViewers_.end()) {
+                watchViewers_.erase(std::remove(watchViewers_.begin(), watchViewers_.end(), c->peerId), watchViewers_.end());
+                watchBuffering_.erase(c->peerId);  // (a viewer that went away doesn't keep everyone waiting)
+                WatchUpdateHold();
+                WatchBroadcast();
+            }
             InterruptPeerTransfers(c->peerId);
             Device(c->peerId).lastSeen = NowMs();
         } else {
@@ -1293,6 +1299,10 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
             HandlePieceData(c, f);
             continue;
         }
+        if (f.type == Msg::WatchData) {
+            HandleWatchData(c, f);
+            continue;
+        }
         if (f.type == Msg::FileData) {
             HandleData(c, f);
             continue;
@@ -1319,16 +1329,18 @@ void Engine::WriterLoop(std::shared_ptr<Connection> c) {
     bool pieceTurn = false;
     while (!c->closed) {
         std::pair<Msg, std::string> msg;
-        bool haveCtrl = false, haveData = false, havePiece = false;
+        bool haveCtrl = false, haveData = false, havePiece = false, haveWatch = false;
         {
             std::unique_lock<std::mutex> l(c->qm);
             c->qcv.wait_for(l, std::chrono::milliseconds(200),
-                            [&] { return c->closed || !c->ctrl.empty() || !c->sending.empty() || !c->pieces.empty(); });
+                            [&] { return c->closed || !c->ctrl.empty() || !c->sending.empty() || !c->pieces.empty() || !c->watchOut.empty(); });
             if (c->closed) break;
             if (!c->ctrl.empty()) {
                 msg = std::move(c->ctrl.front());
                 c->ctrl.pop_front();
                 haveCtrl = true;
+            } else if (!c->watchOut.empty()) {
+                haveWatch = true;
             } else {
                 haveData = !c->sending.empty();
                 havePiece = !c->pieces.empty();
@@ -1337,6 +1349,14 @@ void Engine::WriterLoop(std::shared_ptr<Connection> c) {
         if (haveCtrl) {
             if (!c->sec->Send(c->sock, msg.first, msg.second)) break;
             c->bytesOut += (int64_t)msg.second.size() + 5;
+            continue;
+        }
+        if (haveWatch) {  // watch together: the movie comes before anything else that's bulk
+            if (ProduceWatch(c, buf)) {
+                if (!c->sec->Send(c->sock, Msg::WatchData, buf.data(), buf.size())) break;
+                c->bytesOut += (int64_t)buf.size() + 5;
+                totalUp += (int64_t)buf.size() - 16;
+            }
             continue;
         }
         // shared-library pieces take turns with ordinary transfers
@@ -2096,6 +2116,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::CallJoin: case Msg::CallWant:
             HandleGroupCall(c, f.type, j);
             break;
+        case Msg::WatchInvite: case Msg::WatchJoin: case Msg::WatchLeave: case Msg::WatchCtl: case Msg::WatchState:
+        case Msg::WatchReport: case Msg::WatchRead:
+            if (!c->mailbox) HandleWatch(c, f.type, j);
+            break;
         case Msg::CallInvite: {
             uint64_t id = j.value("call", (uint64_t)0);
             if (j.contains("gid")) {
@@ -2259,6 +2283,13 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
         for (auto& m : it->second.messages)
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
+    }
+    // watching together: someone of that conversation (or one of my devices) came online - they're invited too
+    if (watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), peer) == watchViewers_.end()) {
+        auto to = DevicesOf(watch.key);
+        auto mine = MyOtherDevices();
+        if (std::find(to.begin(), to.end(), peer) != to.end() || std::find(mine.begin(), mine.end(), peer) != mine.end())
+            Queue(c, Msg::WatchInvite, KeyField(watch.key, {{"sid", watch.sid}, {"name", watch.name}, {"size", watch.size}}));
     }
     // a group call going on that this device's person is in: "I'm in"
     if (call.state == CallState::Active && !call.group.empty() && !call.hub) {
@@ -2710,6 +2741,7 @@ void Engine::MaintenanceLoop() {
             if ((call.state == CallState::OutgoingRinging || call.state == CallState::IncomingRinging) && now - call.started > 45000)
                 FinishCall(call.outgoing ? "no answer" : "missed", call.outgoing);
             GroupCallTick();
+            WatchTick();
         }
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();

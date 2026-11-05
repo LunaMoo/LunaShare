@@ -249,6 +249,52 @@ bool PlayerHost::Play(const std::string& path) {
     return true;
 }
 
+void PlayerHost::OpenStream(const std::string& id, int64_t size, std::function<int(int64_t, uint8_t*, int)> read) {
+    if (!mod_ || mod_->api_version < 2 || !mod_->open_stream) {
+        openState_ = (int)Opening::Failed;
+        return;
+    }
+    Stop();
+    streamRead_ = std::move(read);
+    stream_.user = this;
+    stream_.size = size;
+    stream_.read = [](void* u, int64_t off, uint8_t* buf, int len) { return ((PlayerHost*)u)->streamRead_(off, buf, len); };
+    openingId_ = id;
+    openState_ = (int)Opening::Busy;
+    opener_ = std::thread([this] {
+        LspInfo info{};
+        LspPlayer* p = mod_->open_stream(&stream_, 48000, 2, &info);
+        opened_ = p;
+        openedInfo_ = info;
+        openState_ = p ? (int)Opening::Ready : (int)Opening::Failed;
+    });
+}
+
+PlayerHost::Opening PlayerHost::OpenState() {
+    Opening s = (Opening)openState_.load();
+    if (s != Opening::Busy && opener_.joinable()) {
+        opener_.join();
+        if (opened_) {  // opened: becomes the current player (paused)
+            {
+                std::lock_guard<std::mutex> l(pm_);
+                p_ = opened_;
+            }
+            opened_ = nullptr;
+            cur_ = openingId_;
+            info_ = openedInfo_;
+            Media().ClearPlayerVideo();
+            if (!OpenAudio()) SDL_Log("player: no audio device");
+        }
+    }
+    return s;
+}
+
+void PlayerHost::SetPlaying(bool on) {
+    if (!p_) return;
+    if (on && !OpenAudio()) SDL_Log("player: no audio device");
+    mod_->set_playing(p_, on ? 1 : 0);
+}
+
 void PlayerHost::Pause() {
     if (p_) mod_->set_playing(p_, 0);
 }
@@ -263,6 +309,12 @@ void PlayerHost::Seek(double t) {
 }
 
 void PlayerHost::Stop() {
+    if (opener_.joinable()) {  // (its reads have to return first: the caller cancels the stream before)
+        opener_.join();
+        if (opened_) mod_->close(opened_);
+        opened_ = nullptr;
+    }
+    openState_ = (int)Opening::None;
     CloseAudio();
     LspPlayer* p;
     {

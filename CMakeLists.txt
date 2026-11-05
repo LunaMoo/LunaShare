@@ -42,6 +42,7 @@ add_library(lunashare_core STATIC
     src/core/library.cpp
     src/core/groups.cpp
     src/core/group_calls.cpp
+    src/core/watch.cpp
     src/core/crypto.cpp
     src/core/mdns.cpp
     src/core/wan.cpp
@@ -315,6 +316,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_account.cpp
         src/app/ui_library.cpp
         src/app/ui_groups.cpp
+        src/app/ui_watch.cpp
         src/app/notify.cpp
         src/app/tray.cpp
         src/app/image_cache.cpp

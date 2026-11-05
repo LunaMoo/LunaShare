@@ -619,6 +619,48 @@ int main() {
         C->Stop();
     }
 
+    printf("[watch together]\n");
+    {
+        std::string movie = JoinPath(Root(), "src/movie.bin");
+        WriteRandomFile(movie, 20 << 20, 77);
+        std::string bob = "@" + B->MyAccount();
+        uint64_t sid = A->StartWatch(bob, movie);
+        CHECK(sid != 0, "watching started");
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watchInvites.empty() && B->watchInvites.back().sid == sid; }, 3000), "the other side is invited");
+        CHECK(B->JoinWatch(sid), "joined");
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->watch.hold && A->watch.people.size() == 2; }, 3000), "everyone waits while the new viewer loads");
+        // the viewer's player reads here and there (like a player looking at the start, the end, then playing)
+        FILE* mf = OpenFile(movie, "rb");
+        std::mt19937 rng(5);
+        bool same = true;
+        int64_t t0 = SteadyMs();
+        for (int i = 0; i < 40 && same; i++) {
+            int64_t off = i == 0 ? 0 : i == 1 ? (20 << 20) - 1000 : (int64_t)(rng() % ((20 << 20) - 70000));
+            std::vector<uint8_t> got(65536), want(65536);
+            int n = B->WatchRead(off, got.data(), (int)got.size());
+            FileSeek(mf, off);
+            size_t w = fread(want.data(), 1, (size_t)n > 0 ? (size_t)n : 0, mf);
+            same = n > 0 && (size_t)n == w && memcmp(got.data(), want.data(), (size_t)n) == 0;
+        }
+        fclose(mf);
+        CHECK(same, "what the player reads is the file");
+        printf("  40 reads anywhere in the movie: %.2f s\n", (double)(SteadyMs() - t0) / 1000.0);
+        std::vector<uint8_t> tmp(65536);
+        B->WatchRead(0, tmp.data(), 1000);  // (back to the start: playing from there)
+        CHECK(WaitFor([&] { auto l = A->Lock(); return !A->watch.hold; }, 5000), "once loaded, nobody waits");
+        B->WatchControl(true, 12.5);  // the viewer presses play at 12.5 s
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->watch.playing && std::abs(A->watch.Target(SteadyMs()) - 12.5) < 1.0; }, 3000),
+              "a viewer's play / seek reaches the host");
+        A->WatchControl(false, 30);  // the host pauses at 30 s
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watch.playing && std::abs(B->watch.Target(SteadyMs()) - 30) < 0.01; }, 3000),
+              "and the host's reaches everyone");
+        CHECK(B->WatchLoaded() > 0.1, "loaded %.0f%%", B->WatchLoaded() * 100);
+        A->LeaveWatch();
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "the host ends it for everyone");
+        CHECK(B->WatchRead(0, tmp.data(), 100) < 0, "the player stops reading");
+        CHECK(!FileExists(JoinPath(B->configDir, "watch/" + ToHex((const uint8_t*)&sid, 8) + ".part")), "the temporary copy is gone");
+    }
+
     printf("[accounts: recovery phrase, backup, removing a device]\n");
     {
         std::string phrase = A->RecoveryPhrase(), seed, err;

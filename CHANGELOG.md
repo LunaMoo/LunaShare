@@ -11,6 +11,10 @@
   someone is offline. Anyone in the group can add people and rename it, everyone can leave, whoever created it can
   remove people. Option *Group chats and calls through the server*: group members you don't know otherwise never
   connect to your device directly.
+- **Watch together.** The ▶ button in a chat streams a movie from your device to the person or the whole group:
+  everyone sees the same moment, anyone can pause or jump and it happens for everyone, and when someone is still
+  loading, everyone waits for them. The original file is played (no re-encoding, nothing sent in advance); what
+  arrived is deleted afterwards. Works together with a (group) call. See docs/WATCH.md.
 - **Group calls (voice and video).** The call buttons in a group call everyone in it; whoever answers joins, everyone
   hears everyone (the voice module mixes them). In a video call you watch one person at a time: the one with the
   camera on who talks, or whoever you tap in the row of people (only the people watching you get your video, so it

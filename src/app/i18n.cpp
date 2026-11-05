@@ -155,7 +155,8 @@ std::string TF(const char* fmt, ...) {
 // i18n-keys: "Call answered on another device", "this device has no account", "invalid signature", "server full"
 // i18n-keys: "You created the group.", "You left the group.", "Group", "Declined group call", "Missed group call",
 // i18n-keys: "Missed group call (you were in another call)", "Missed group call - calls are not installed on this device (voice module missing)",
-// i18n-keys: "Incoming group call", "this server doesn't relay calls", "call full"
+// i18n-keys: "Incoming group call", "this server doesn't relay calls", "call full",
+// i18n-keys: "Watching together ended (connection lost).", "Watch together: could not create a temporary file"
 // Sentences the core writes (in English, also into the chat history). "%s" parts are copied over.
 static const char* const kPatterns[] = {
     "End-to-end encrypted. Safety number: %s - compare it on both devices to make sure nobody is in between.",
@@ -186,6 +187,9 @@ static const char* const kPatterns[] = {
     "%s added %s.",
     "%s removed %s.",
     "Group call - %s",
+    "You started watching \"%s\" together.",
+    "%s invites you to watch \"%s\" together.",
+    "%s stopped the movie.",
     "Group call through the server: %s",
 };
 

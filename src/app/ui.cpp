@@ -123,6 +123,8 @@ void App::Frame() {
                 break;
             }
     }
+    static const char* autoWatch = getenv("LUNASHARE_AUTOWATCH");  // dev: join the first movie invitation (screenshots)
+    if (autoWatch && !eng.watch.sid && !eng.watchInvites.empty() && eng.JoinWatch(eng.watchInvites.back().sid)) watchShown = *autoWatch != 'b';
     static const char* autoGroup = getenv("LUNASHARE_AUTOGROUP");  // dev: open the first group (screenshots)
     if (autoGroup && !Engine::IsGroupKey(selectedPeer) && !eng.groups.empty()) {
         SelectPeer("#" + eng.groups.begin()->first);
@@ -226,12 +228,13 @@ void App::Frame() {
         autoRecDone = true;
     }
 
+    WatchSync();
     busy = false;
     int unread = 0;
     for (auto& [id, t] : eng.transfers)
         if (t->state == TState::Active || t->state == TState::Hashing || t->state == TState::Verifying) busy = true;
     for (auto& [peer, cv] : eng.chats) unread += cv.unread;
-    if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing()) busy = true;  // keep the timer / seek bar moving
+    if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing() || eng.watch.sid) busy = true;  // keep the timer / seek bar moving
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 
     ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -267,6 +270,7 @@ void App::Frame() {
     static bool devPanel = getenv("LUNASHARE_CAMPANEL") != nullptr;  // dev hook for screenshots
     if (devPanel && eng.call.state == CallState::Active && (Media().CameraOn() || !strcmp(getenv("LUNASHARE_CAMPANEL"), "audio"))) { camPanel = true; devPanel = false; }
     if (m.mobile && videoFull && VideoVisible()) DrawVideoOverlay();
+    if (watchShown) DrawWatch();
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawToasts();
     if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
@@ -823,7 +827,8 @@ void App::DrawMobile() {
     bool callable = chatScreen && Media().Available();
     bool videoable = callable && Media().VideoAvailable();
     bool webcam = chatScreen && !groupChat && WebcamButtonShown(selectedPeer);
-    int nb = chatScreen ? 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) : 0;
+    bool watchable = chatScreen && Player().Available();
+    int nb = chatScreen ? 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0) : 0;
     float sp = ImGui::GetStyle().ItemSpacing.x;
     float rowEnd = ImGui::GetContentRegionMax().x;
     float titleX = ImGui::GetCursorPosX();
@@ -867,6 +872,10 @@ void App::DrawMobile() {
         }
         if (videoable) {
             CallButton(selectedPeer, hb, true);
+            ImGui::SameLine();
+        }
+        if (watchable) {
+            if (ui::IconButton("watch", Icon::Play, nullptr, hb)) OpenWatchPicker(selectedPeer);
             ImGui::SameLine();
         }
         if (groupChat) GroupButtons(selectedPeer, hb);
@@ -1023,7 +1032,8 @@ void App::DrawChat(const std::string& peer) {
         bool callable = Media().Available() && !(grp && grp->left);
         bool videoable = callable && Media().VideoAvailable();
         bool webcam = !grp && WebcamButtonShown(peer);
-        int nb = (grp ? 1 : 3) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
+        bool watchable = Player().Available() && !(grp && grp->left);
+        int nb = (grp ? 1 : 3) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (webcam) {
             WebcamButton(peer, bw);
@@ -1035,6 +1045,10 @@ void App::DrawChat(const std::string& peer) {
         }
         if (videoable) {
             CallButton(peer, bw, true);
+            ImGui::SameLine();
+        }
+        if (watchable) {
+            if (ui::IconButton("watch", Icon::Play, T("Watch a movie together"), bw)) OpenWatchPicker(peer);
             ImGui::SameLine();
         }
         if (grp) {
@@ -1056,6 +1070,7 @@ void App::DrawChat(const std::string& peer) {
         }
     }
 
+    DrawWatchBanner(peer);
     // selection toolbar
     if (!selMsgs.empty()) {
         float h = mobile ? ui::M().rowH : 0;
@@ -2817,6 +2832,9 @@ void App::DrawPopups() {
             case BrowseFor::SendFiles:
                 if (!selectedPeer.empty()) { eng.SendPaths(selectedPeer, res); scrollToBottom = true; }
                 else OpenSendTo(res);
+                break;
+            case BrowseFor::Watch:
+                if (!selectedPeer.empty() && !res.empty() && eng.StartWatch(selectedPeer, res[0])) watchShown = true;
                 break;
             case BrowseFor::DownloadDir:
                 edit.downloadDir = res[0];

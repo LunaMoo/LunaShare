@@ -36,6 +36,10 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   with the camera on who talks, or whoever you tap). Directly between the devices, or **through your server**, where
   every phone uploads its voice and video only once (and group members you don't know never connect to you).
 
+**Watch together** (see [docs/WATCH.md](docs/WATCH.md))
+- Stream a movie from your device to a person or a group and watch it in sync: pausing or jumping affects everyone,
+  and everyone waits for whoever is still loading. Original quality, nothing to send in advance.
+
 **Library (Shared folders)** (see [docs/LIBRARY.md](docs/LIBRARY.md))
 - Files in your *Shared* folder can be browsed and downloaded by your contacts. A download comes from every contact
   that has the file at once (piece by piece, each piece verified), and you then share it on.

@@ -40,6 +40,15 @@ enum class Msg : uint8_t {
     LinkAnswer = 33,  // {accept}
     ChatRead = 36,    // {mids[], chat}  "seen": to the sender's devices (and to my own, which then clear their badge)
     LinkGrant = 34,
+    // ---- watch together: one device streams a file, everyone's player plays it at the same moment
+    WatchInvite = 80,  // {sid, name, size[, gid]}            host -> the people it's shared with
+    WatchJoin = 81,    // {sid}                               -> host
+    WatchLeave = 82,   // {sid[, end]}                        a viewer leaves / the host ends it for everyone
+    WatchCtl = 83,     // {sid, playing, pos}                 a viewer plays / pauses / seeks -> host
+    WatchState = 84,   // {sid, playing, pos, hold, wait, people, ver}  host -> viewers (on change and every second)
+    WatchReport = 85,  // {sid, buffering}                    viewer -> host
+    WatchRead = 86,    // {sid, off, len}                     viewer -> host: send me these bytes
+    WatchData = 87,    // binary: [sid u64][offset u64][data] host -> viewer
     GroupInfo = 70,   // {gid, name, creator, ver, members[{acc, name, devs[{id, pub}]}]}  to every member device
                       // (chat frames of a group carry "gid": Chat, ChatAck, ChatSync(chat="#gid", from), ChatRead(chat),
                       //  ChatReact(Ack), ChatDelete(Ack))   // {secret, account{...AccountData}, name, avh, img, pv, devices[], accounts[], chats{}}

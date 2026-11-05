@@ -155,6 +155,20 @@ int main(int argc, char** argv) {
         e.React(peer, first, u8"\u2764\uFE0F");
         e.React(peer, second, u8"\U0001F44D");
     }
+    if (const char* mv = getenv("DEMO_WATCH")) {  // watch a movie together with the other side
+        std::string them;
+        for (int i = 0; i < 50 && them.empty(); i++) {
+            {
+                auto l = e.Lock();
+                std::string k = e.ChatKey(peer);
+                if (Engine::IsContactKey(k)) them = k;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        e.StartWatch(them, mv);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        e.WatchControl(true, 20);  // play from 0:20 (the clock; the demo itself doesn't decode)
+    }
     if (getenv("DEMO_GROUP")) {  // a group with the other side (screenshots of group chats)
         std::string them;
         for (int i = 0; i < 50 && them.empty(); i++) {

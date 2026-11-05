@@ -4,6 +4,7 @@ import android.graphics.Rect;
 import android.media.Image;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
+import android.media.MediaDataSource;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.os.Build;
@@ -29,11 +30,30 @@ public final class PlayerEngine {
     private String vMime = "", aMime = "";
     private final MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo();
 
-    public static PlayerEngine open(String path, boolean wantAudio) {
+    static native int nativeRead(long stream, long position, byte[] buffer, int offset, int size);
+
+    /** A file that is still arriving ("watch together"): reads wait in native code until the bytes are here. */
+    static final class StreamSource extends MediaDataSource {
+        private final long stream, size;
+        StreamSource(long stream, long size) { this.stream = stream; this.size = size; }
+        @Override public int readAt(long position, byte[] buffer, int offset, int len) {
+            if (position >= size) return -1;
+            int n = nativeRead(stream, position, buffer, offset, len);
+            return n == 0 ? -1 : n < 0 ? -1 : n;
+        }
+        @Override public long getSize() { return size; }
+        @Override public void close() {}
+    }
+
+    public static PlayerEngine open(String path, boolean wantAudio) { return openFrom(path, 0, 0, wantAudio); }
+    public static PlayerEngine openStream(long stream, long size, boolean wantAudio) { return openFrom(null, stream, size, wantAudio); }
+
+    private static PlayerEngine openFrom(String path, long stream, long size, boolean wantAudio) {
         PlayerEngine p = new PlayerEngine();
         try {
             p.ex = new MediaExtractor();
-            p.ex.setDataSource(path);
+            if (path != null) p.ex.setDataSource(path);
+            else p.ex.setDataSource(new StreamSource(stream, size));
             for (int i = 0; i < p.ex.getTrackCount(); i++) {
                 MediaFormat f = p.ex.getTrackFormat(i);
                 String mime = f.getString(MediaFormat.KEY_MIME);

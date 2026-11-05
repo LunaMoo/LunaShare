@@ -464,6 +464,7 @@ int main(int argc, char** argv) {
     if (ls::Bridge().backgroundService) ls::Bridge().backgroundService(false);
     AndroidBridgeShutdown();
     engine.onEvent = nullptr;
+    engine.LeaveWatch();  // (unblocks a movie still being read from another device)
     Player().Shutdown();
     Media().Shutdown();
     engine.Stop();

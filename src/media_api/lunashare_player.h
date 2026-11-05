@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSP_API_VERSION 1
+#define LSP_API_VERSION 2
 
 #if defined(_WIN32)
 #define LSP_EXPORT __declspec(dllexport)
@@ -52,6 +52,15 @@ typedef struct LspPlayer LspPlayer;
 
 typedef void (*LspImageFn)(void* user, const LsvImage* img);
 
+/* since version 2: a file that is not (all) here yet - "watch together" streams it from another device. read()
+ * fills up to len bytes at offset, waiting until they have arrived; returns the bytes read, 0 at the end, < 0 when
+ * the stream was cancelled (the player then stops). It is called from the player's decode thread. */
+typedef struct LspStream {
+    void* user;
+    int64_t size;
+    int (*read)(void* user, int64_t offset, uint8_t* buf, int len);
+} LspStream;
+
 typedef struct LspModule {
     int api_version;
     const char* name;
@@ -70,6 +79,8 @@ typedef struct LspModule {
     int (*video_frame)(LspPlayer* p, LspImageFn fn, void* user);
     double (*position)(LspPlayer* p);
     int (*state)(LspPlayer* p);
+    /* --- since version 2: like open(), but reading through `stream` (which must stay valid until close) */
+    LspPlayer* (*open_stream)(const LspStream* stream, int sample_rate, int channels, LspInfo* info);
 } LspModule;
 
 typedef const LspModule* (*LspGetModuleFn)(void);

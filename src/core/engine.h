@@ -56,6 +56,12 @@ struct Connection {
         uint32_t idx = 0;
     };
     std::deque<PieceOut> pieces;    // shared-library pieces this peer asked for
+    struct WatchOut {
+        uint64_t sid = 0;
+        int64_t off = 0;
+        int len = 0;
+    };
+    std::deque<WatchOut> watchOut;  // watch together: parts of the movie this peer is waiting for
     size_t rr = 0;
 };
 
@@ -97,6 +103,30 @@ struct Group {
         return false;
     }
 };
+
+// ---- watch together
+struct WatchInfo {
+    uint64_t sid = 0;          // 0 = not watching
+    std::string key;           // the conversation (person or group)
+    std::string host;          // device that has the file ("" = this one)
+    std::string name;          // file name
+    std::string path;          // host: the file
+    int64_t size = 0;
+    // the shared clock (the host's; viewers follow it)
+    bool playing = false;
+    double pos = 0;            // seconds at `at`
+    int64_t at = 0;            // steady ms
+    bool hold = false;         // someone is still loading: everyone waits
+    std::string waitFor;       // ... who
+    std::vector<std::string> people;  // names of everyone watching
+    double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 : 0); }
+};
+struct WatchInviteInfo {
+    uint64_t sid = 0;
+    std::string key, host, name;
+    int64_t size = 0, at = 0;
+};
+struct WatchCache;  // watch.cpp
 
 // ---- shared library (Shared folders of my contacts, multi-source downloads)
 constexpr int64_t kPieceSize = 1 << 20;
@@ -307,7 +337,17 @@ public:
     std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
     bool PeerHasCap(const std::string& peer, const std::string& cap);
     uint64_t StartCall(const std::string& peer, const std::string& media = "voice");  // peer: a device, person or group
-    void SetSpotlight(const std::string& device);  // group video call: whose picture is shown big ("" = automatic)
+    void SetSpotlight(const std::string& device);
+    // ---- watch together (watch.cpp)
+    WatchInfo watch;                          // under Lock()
+    std::vector<WatchInviteInfo> watchInvites;
+    uint64_t StartWatch(const std::string& key, const std::string& path);  // share a file to watch it together
+    bool JoinWatch(uint64_t sid);
+    void LeaveWatch();
+    void WatchControl(bool playing, double pos);  // play / pause / seek (pos < 0: keep the position)
+    bool WatchBuffering();                    // this viewer is waiting for data
+    double WatchLoaded();                     // viewer: fraction of the file here (0..1)
+    int WatchRead(int64_t off, uint8_t* buf, int len);  // viewer's player: blocks until the bytes arrive; < 0 cancelled  // group video call: whose picture is shown big ("" = automatic)
     void AcceptCall();
     void EndCall(const std::string& reason = "hangup");
     // thread-safe (audio/video threads). data[0] is the media kind: 1 = audio, 2 = video. Audio always goes ahead of
@@ -476,6 +516,27 @@ private:
     void AcceptGroupCall();
     void FinishGroupCall(const std::string& reason);
     void UpdateSpotlight();
+    // watch together
+    std::shared_ptr<WatchCache> watchCache_;  // viewer (under Lock() to swap; has its own lock)
+    struct WatchServe {
+        std::mutex m;
+        uint64_t sid = 0;
+        FILE* f = nullptr;
+        int64_t size = 0;
+    } watchServe_;
+    std::map<std::string, bool> watchBuffering_;  // host: viewer device -> still loading
+    std::vector<std::string> watchViewers_;       // host: devices watching
+    int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
+    bool watchReportedBuffering_ = false;
+    void HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    void HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& f);
+    bool ProduceWatch(const std::shared_ptr<Connection>& c, std::vector<uint8_t>& buf);
+    void WatchRequest(int64_t from);   // viewer: ask the host for what's missing ahead of `from`
+    void WatchBroadcast();             // host: the clock to every viewer
+    void WatchTick();
+    void WatchUpdateHold();
+    void EndWatchLocked(const std::string& why);
+    json WatchStateJson();
     std::shared_ptr<Connection> CallConn();
     std::string PartDir();
 

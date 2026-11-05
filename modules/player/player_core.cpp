@@ -249,6 +249,23 @@ LspPlayer* ApiOpen(const char* path, int rate, int channels, LspInfo* info) {
     return p;
 }
 
+LspPlayer* ApiOpenStream(const LspStream* s, int rate, int channels, LspInfo* info) {
+    if (!g_init || !s || !s->read) return nullptr;
+    auto* p = new LspPlayer();
+    p->src = CreateSource(&g_host);
+    p->rate = rate > 0 ? rate : 48000;
+    p->channels = channels == 1 ? 1 : 2;
+    std::string err;
+    if (!p->src || !p->src->OpenStream(s, &p->info, true, &err)) {
+        Log("cannot open the stream: " + err);
+        delete p;
+        return nullptr;
+    }
+    if (info) *info = p->info;
+    p->th = std::thread([p] { p->DecodeLoop(); });
+    return p;
+}
+
 void ApiClose(LspPlayer* p) {
     if (!p) return;
     {
@@ -351,8 +368,8 @@ int ApiState(LspPlayer* p) {
     return p->state;
 }
 
-const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.0", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
-                           ApiSeek, ApiReadAudio, ApiVideoFrame, ApiPosition, ApiState};
+const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.1", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
+                           ApiSeek, ApiReadAudio, ApiVideoFrame, ApiPosition, ApiState, ApiOpenStream};
 
 }  // namespace
 }  // namespace lsp

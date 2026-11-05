@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -62,6 +63,13 @@ struct Api {
     int (*hwframe_transfer_data)(AVFrame*, const AVFrame*, int);
     double (*display_rotation_get)(const int32_t*);
     void (*log_set_level)(int);
+    // custom input (streams)
+    AVFormatContext* (*format_alloc_context)(void);
+    AVIOContext* (*avio_alloc_context)(unsigned char*, int, int, void*, int (*)(void*, uint8_t*, int), int (*)(void*, const uint8_t*, int),
+                                       int64_t (*)(void*, int64_t, int));
+    void (*avio_context_free)(AVIOContext**);
+    void* (*malloc_)(size_t);
+    void (*freep)(void*);
 };
 Api A;
 std::mutex g_m;
@@ -145,7 +153,9 @@ bool LoadFf(std::string* err) {
                   G(lu, a.frame_free, "av_frame_free") && G(lu, a.frame_unref, "av_frame_unref") &&
                   G(lu, a.hwdevice_ctx_create, "av_hwdevice_ctx_create") && G(lu, a.buffer_ref, "av_buffer_ref") &&
                   G(lu, a.buffer_unref, "av_buffer_unref") && G(lu, a.hwframe_transfer_data, "av_hwframe_transfer_data") &&
-                  G(lu, a.display_rotation_get, "av_display_rotation_get") && G(lu, a.log_set_level, "av_log_set_level");
+                  G(lu, a.display_rotation_get, "av_display_rotation_get") && G(lu, a.log_set_level, "av_log_set_level") &&
+                  G(lf, a.format_alloc_context, "avformat_alloc_context") && G(lf, a.avio_alloc_context, "avio_alloc_context") &&
+                  G(lf, a.avio_context_free, "avio_context_free") && G(lu, a.malloc_, "av_malloc") && G(lu, a.freep, "av_freep");
         if (!ok) continue;
         A = a;
         A.log_set_level(AV_LOG_ERROR);
@@ -170,14 +180,54 @@ public:
         if (vctx_) A.free_context(&vctx_);
         if (actx_) A.free_context(&actx_);
         if (fmt_) A.close_input(&fmt_);
+        if (io_) {
+            A.freep(&io_->buffer);
+            A.avio_context_free(&io_);
+        }
         if (pkt_) A.packet_free(&pkt_);
         if (frame_) A.frame_free(&frame_);
         if (sw_) A.frame_free(&sw_);
         if (hw_) A.buffer_unref(&hw_);
     }
 
-    bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) override {
-        if (A.open_input(&fmt_, path.c_str(), nullptr, nullptr) < 0) {
+    bool OpenStream(const LspStream* s, LspInfo* info, bool wantAudio, std::string* err) override {
+        stream_ = *s;
+        const int kBuf = 256 * 1024;
+        auto* buf = (unsigned char*)A.malloc_(kBuf);
+        io_ = A.avio_alloc_context(buf, kBuf, 0, this, &FfSource::IoRead, nullptr, &FfSource::IoSeek);
+        fmt_ = A.format_alloc_context();
+        if (!io_ || !fmt_) {
+            *err = "out of memory";
+            return false;
+        }
+        fmt_->pb = io_;
+        fmt_->flags |= AVFMT_FLAG_CUSTOM_IO;
+        return OpenCommon("", info, wantAudio, err);
+    }
+
+    bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) override { return OpenCommon(path, info, wantAudio, err); }
+
+    static int IoRead(void* o, uint8_t* buf, int size) {
+        auto* self = (FfSource*)o;
+        int n = self->stream_.read(self->stream_.user, self->pos_, buf, size);
+        if (n < 0) return AVERROR(EIO);
+        if (n == 0) return AVERROR_EOF;
+        self->pos_ += n;
+        return n;
+    }
+    static int64_t IoSeek(void* o, int64_t off, int whence) {
+        auto* self = (FfSource*)o;
+        int64_t size = self->stream_.size;
+        if (whence & AVSEEK_SIZE) return size;
+        whence &= ~AVSEEK_FORCE;
+        int64_t to = whence == SEEK_SET ? off : whence == SEEK_CUR ? self->pos_ + off : whence == SEEK_END ? size + off : -1;
+        if (to < 0) return -1;
+        self->pos_ = to;
+        return to;
+    }
+
+    bool OpenCommon(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) {
+        if (A.open_input(&fmt_, io_ ? nullptr : path.c_str(), nullptr, nullptr) < 0) {
             *err = "cannot open file";
             return false;
         }
@@ -378,6 +428,9 @@ private:
     }
 
     AVFormatContext* fmt_ = nullptr;
+    AVIOContext* io_ = nullptr;
+    LspStream stream_{};
+    int64_t pos_ = 0;
     AVCodecContext* vctx_ = nullptr;
     AVCodecContext* actx_ = nullptr;
     AVPacket* pkt_ = nullptr;

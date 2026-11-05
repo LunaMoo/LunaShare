@@ -79,6 +79,15 @@ private:
     void OpenGroupMembers(const std::string& key);
     void GroupButtons(const std::string& key, float size);
     void DrawGroupPopups();
+    // watch together (ui_watch.cpp)
+    void WatchSync();
+    void DrawWatch();
+    void DrawWatchBanner(const std::string& peer);
+    void OpenWatchPicker(const std::string& peer);
+    bool watchShown = false, watchFailed = false;
+    std::string watchOpened;
+    int64_t watchLastSeek = 0;
+    float watchDrag = -1;
     void GroupCallStrip(float tile, bool onVideo);  // the people in a group call (tap: watch their video)
     std::string CallPeerName(const ls::CallPeer& p);
     bool openGroupDlg = false, groupDlgAdd = false, openGroupMembers = false;
@@ -160,7 +169,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

@@ -58,6 +58,16 @@ void JNICALL NAudio(JNIEnv* env, jclass, jlong target, jobject buf, jint off, ji
     sink->audio(pcm.data(), frames, rate, ch, pts / 1e6);
 }
 
+jint JNICALL NRead(JNIEnv* env, jclass, jlong stream, jlong pos, jbyteArray buf, jint off, jint size) {
+    auto* s = (const LspStream*)(intptr_t)stream;
+    if (!s || size <= 0) return -1;
+    thread_local std::vector<uint8_t> tmp;
+    tmp.resize((size_t)size);
+    int n = s->read(s->user, (int64_t)pos, tmp.data(), size);
+    if (n > 0) env->SetByteArrayRegion(buf, off, n, (const jbyte*)tmp.data());
+    return n;
+}
+
 void JNICALL NVideo(JNIEnv* env, jclass, jlong target, jobject y, jobject u, jobject v, jint ys, jint uvs, jint ps, jint w, jint h,
                     jint rot, jlong pts) {
     auto* sink = (Sink*)(intptr_t)target;
@@ -88,22 +98,41 @@ public:
         }
     }
 
-    bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) override {
+    bool OpenStream(const LspStream* s, LspInfo* info, bool wantAudio, std::string* err) override {
+        stream_ = *s;
+        return OpenWith(nullptr, info, wantAudio, err);
+    }
+
+    bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) override { return OpenWith(&path, info, wantAudio, err); }
+
+    bool OpenWith(const std::string* path, LspInfo* info, bool wantAudio, std::string* err) {
         JNIEnv* e = Env();
         if (!e || !g_cls) {
             *err = "no Java VM";
             return false;
         }
-        jmethodID open = e->GetStaticMethodID(g_cls, "open", "(Ljava/lang/String;Z)Lorg/lunamoo/lunashare/PlayerEngine;");
-        if (!open) {
+        jobject o = nullptr;
+        if (path) {
+            jmethodID open = e->GetStaticMethodID(g_cls, "open", "(Ljava/lang/String;Z)Lorg/lunamoo/lunashare/PlayerEngine;");
+            if (!open) {
+                Clear(e);
+                *err = "PlayerEngine missing";
+                return false;
+            }
+            jstring js = e->NewStringUTF(path->c_str());
+            o = e->CallStaticObjectMethod(g_cls, open, js, (jboolean)wantAudio);
             Clear(e);
-            *err = "PlayerEngine missing";
-            return false;
+            e->DeleteLocalRef(js);
+        } else {
+            jmethodID open = e->GetStaticMethodID(g_cls, "openStream", "(JJZ)Lorg/lunamoo/lunashare/PlayerEngine;");
+            if (!open) {
+                Clear(e);
+                *err = "PlayerEngine missing";
+                return false;
+            }
+            o = e->CallStaticObjectMethod(g_cls, open, (jlong)(intptr_t)&stream_, (jlong)stream_.size, (jboolean)wantAudio);
+            Clear(e);
         }
-        jstring js = e->NewStringUTF(path.c_str());
-        jobject o = e->CallStaticObjectMethod(g_cls, open, js, (jboolean)wantAudio);
-        Clear(e);
-        e->DeleteLocalRef(js);
         if (!o) {
             *err = "this phone can't play the file";
             return false;
@@ -153,6 +182,7 @@ public:
 private:
     jobject obj_ = nullptr;
     jmethodID step_ = nullptr, seek_ = nullptr;
+    LspStream stream_{};
 };
 
 }  // namespace
@@ -169,8 +199,9 @@ bool InitBackend(const LspHost* host, std::string* err) {
     static const JNINativeMethod natives[] = {
         {(char*)"nativeAudio", (char*)"(JLjava/nio/ByteBuffer;IIIIZJ)V", (void*)NAudio},
         {(char*)"nativeVideo", (char*)"(JLjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIIJ)V", (void*)NVideo},
+        {(char*)"nativeRead", (char*)"(JJ[BII)I", (void*)NRead},
     };
-    if (e->RegisterNatives(g_cls, natives, 2) != 0) {
+    if (e->RegisterNatives(g_cls, natives, 3) != 0) {
         Clear(e);
         *err = "cannot register natives";
         return false;
