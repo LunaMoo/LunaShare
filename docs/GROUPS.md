@@ -41,7 +41,7 @@ for phones. Group video is limited to 720p / 30 fps.
   lost piece is repaired without asking again. Group members you don't know otherwise never connect to your device
   directly, so they don't learn your internet address; messages to them go through the mailbox.
 
-The server needs relaying allowed (`--no-relay` turns it off); `--relay-kbps` limits what each person may send.
+The server needs relaying allowed (`--no-relay` turns it off); `--relay-limit KBPS` limits what each person may send.
 
 ### Under the hood
 
