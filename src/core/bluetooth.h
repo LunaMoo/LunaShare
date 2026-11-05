@@ -43,6 +43,11 @@ struct HostBridge {
     std::function<bool()> batteryRestricted;          // Android: battery optimisation may cut the network
     std::function<void()> requestBatteryExemption;
     std::function<void()> moveToBack;                 // Android: back on the home screen -> background, don't close
+    // watching a movie: Android turns sideways (landscape, even with rotation locked) and hides the system bars;
+    // computers go full screen (setFullscreen); keepAwake: no screen saver / screen off while it plays
+    std::function<void(bool on)> movieMode;
+    std::function<void(bool on)> setFullscreen;
+    std::function<void(bool on)> keepAwake;
     std::function<bool()> isMetered;                  // on mobile data (or another metered network)
     // Android call audio routes: "current id\n" + lines "id\tkind\tname" (kind: earpiece/speaker/bluetooth/wired/usb)
     std::function<std::string()> callRoutes;

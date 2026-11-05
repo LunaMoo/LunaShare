@@ -115,6 +115,43 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
+    /** Watching a movie: sideways (even with rotation locked), no status / navigation bars, screen stays on. */
+    private static boolean barsWereShown = true;
+    private static int uiFlagsBefore = 0;
+
+    @SuppressWarnings("deprecation")
+    public static void movieMode(final boolean on) {
+        ui(() -> {
+            LunaShareActivity a = self;
+            if (a == null) return;
+            a.setRequestedOrientation(on ? android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                         : android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            android.view.Window w = a.getWindow();
+            if (on) w.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsetsController c = w.getInsetsController();
+                android.view.WindowInsets wi = w.getDecorView().getRootWindowInsets();
+                if (on) barsWereShown = wi == null || wi.isVisible(android.view.WindowInsets.Type.statusBars());
+                if (c != null) {
+                    if (on) {
+                        c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                        c.hide(android.view.WindowInsets.Type.systemBars());
+                    } else if (barsWereShown) {  // (back to how the app was)
+                        c.show(android.view.WindowInsets.Type.systemBars());
+                    }
+                }
+            } else {
+                android.view.View d = w.getDecorView();
+                if (on) uiFlagsBefore = d.getSystemUiVisibility();
+                d.setSystemUiVisibility(on ? android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                                               | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                               | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                           : uiFlagsBefore);
+            }
+        });
+    }
+
     /** Back on the home screen: keep running in the background instead of closing (like other messengers). */
     public static void moveToBack() { ui(() -> { if (self != null) self.moveTaskToBack(true); }); }
 

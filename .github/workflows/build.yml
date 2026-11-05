@@ -15,7 +15,7 @@ jobs:
         id: cache
         with:
           path: ffwin
-          key: ffmpeg-n7.1-win64-player-v2
+          key: ffmpeg-n7.1-win64-player-v3
       - name: Build FFmpeg (mingw-w64 cross)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -25,9 +25,9 @@ jobs:
           ../ffsrc/configure --prefix=$GITHUB_WORKSPACE/ffwin --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
             --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale \
             --disable-avfilter --disable-network --disable-autodetect --enable-w32threads --enable-d3d11va \
-            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi \
-            --enable-decoder=h264,hevc,av1,vp8,vp9,mpeg4,aac,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
-            --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac \
+            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt \
+            --enable-decoder=h264,hevc,av1,vp8,vp9,mpeg4,aac,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp2,mp2float,aac_latm,wmav2,wmapro,pcm_s16be,pcm_dvd,pcm_bluray,mpeg2video,mpeg1video,vc1,wmv3,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
+            --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac,ac3,dca,mlp,mpegvideo,vc1,aac_latm,dvdsub,dvbsub \
             --enable-hwaccel=h264_d3d11va,h264_d3d11va2,hevc_d3d11va,hevc_d3d11va2,av1_d3d11va,av1_d3d11va2,vp9_d3d11va,vp9_d3d11va2 \
             --enable-shared --disable-static --disable-debug --extra-ldflags=-static-libgcc
           make -j4 && make install
@@ -46,7 +46,7 @@ jobs:
         id: cache
         with:
           path: fflin
-          key: ffmpeg-n7.1-linux-x264-dav1d-gpu-v2
+          key: ffmpeg-n7.1-linux-x264-dav1d-gpu-v3
       - name: Build x264, dav1d and FFmpeg
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -71,11 +71,11 @@ jobs:
             --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter \
             --disable-postproc --disable-network --disable-autodetect --enable-gpl --enable-libx264 --enable-libdav1d --enable-pthreads \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-vaapi \
-            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi \
-            --enable-decoder=h264,hevc,av1,libdav1d,vp8,vp9,mpeg4,mjpeg,aac,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
+            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt \
+            --enable-decoder=h264,hevc,av1,libdav1d,vp8,vp9,mpeg4,mjpeg,aac,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp2,mp2float,aac_latm,wmav2,wmapro,pcm_s16be,pcm_dvd,pcm_bluray,mpeg2video,mpeg1video,vc1,wmv3,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
             --enable-encoder=libx264,h264_nvenc,h264_vaapi \
             --enable-hwaccel=h264_vaapi,hevc_vaapi,av1_vaapi,vp9_vaapi,h264_nvdec,hevc_nvdec,av1_nvdec,vp9_nvdec \
-            --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac,mjpeg \
+            --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac,ac3,dca,mlp,mpegvideo,vc1,aac_latm,dvdsub,dvbsub,mjpeg \
             --enable-shared --disable-static --disable-debug --extra-ldflags=-Wl,-Bsymbolic
           make -j4 && make install
           cp -L $W/deps/lib/libva.so.2 $W/deps/lib/libva-drm.so.2 $W/fflin/lib/

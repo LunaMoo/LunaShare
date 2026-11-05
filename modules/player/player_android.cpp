@@ -58,6 +58,16 @@ void JNICALL NAudio(JNIEnv* env, jclass, jlong target, jobject buf, jint off, ji
     sink->audio(pcm.data(), frames, rate, ch, pts / 1e6);
 }
 
+void JNICALL NSubtitle(JNIEnv* env, jclass, jlong target, jstring text, jlong pts) {
+    auto* sink = (Sink*)(intptr_t)target;
+    if (!sink || !sink->subtitle || !text) return;
+    const char* c = env->GetStringUTFChars(text, nullptr);
+    std::string t = c ? c : "";
+    if (c) env->ReleaseStringUTFChars(text, c);
+    static const std::vector<uint8_t> none;
+    sink->subtitle(pts / 1e6, -1, t, none, 0, 0, 0, 0, 0, 0);
+}
+
 jint JNICALL NRead(JNIEnv* env, jclass, jlong stream, jlong pos, jbyteArray buf, jint off, jint size) {
     auto* s = (const LspStream*)(intptr_t)stream;
     if (!s || size <= 0) return -1;
@@ -160,6 +170,60 @@ public:
         return step_ && seek_;
     }
 
+    std::vector<TrackInfo> Tracks() override {
+        std::vector<TrackInfo> out;
+        JNIEnv* e = Env();
+        if (!e || !obj_) return out;
+        jmethodID m = e->GetMethodID(g_cls, "tracks", "()Ljava/lang/String;");
+        if (!m) { Clear(e); return out; }
+        auto s = (jstring)e->CallObjectMethod(obj_, m);
+        Clear(e);
+        if (!s) return out;
+        const char* c = e->GetStringUTFChars(s, nullptr);
+        std::string txt = c ? c : "";
+        if (c) e->ReleaseStringUTFChars(s, c);
+        e->DeleteLocalRef(s);
+        size_t a = 0;
+        while (a < txt.size()) {
+            size_t nl = txt.find('\n', a);
+            std::string line = txt.substr(a, nl == std::string::npos ? std::string::npos : nl - a);
+            a = nl == std::string::npos ? txt.size() : nl + 1;
+            std::vector<std::string> f;
+            size_t b = 0;
+            for (;;) {
+                size_t t = line.find('\t', b);
+                f.push_back(line.substr(b, t == std::string::npos ? std::string::npos : t - b));
+                if (t == std::string::npos) break;
+                b = t + 1;
+            }
+            if (f.size() < 8) continue;
+            TrackInfo ti;
+            ti.kind = atoi(f[0].c_str());
+            ti.id = atoi(f[1].c_str());
+            ti.lang = f[2];
+            ti.title = f[3];
+            ti.codec = f[4];
+            ti.channels = atoi(f[5].c_str());
+            ti.playable = f[6] == "1";
+            ti.selected = f[7] == "1";
+            out.push_back(ti);
+        }
+        return out;
+    }
+
+    bool SelectAudio(int id) override { return CallBool("selectAudio", id); }
+    bool SelectSubtitle(int id) override { return CallBool("selectSubtitle", id); }
+
+    bool CallBool(const char* name, int arg) {
+        JNIEnv* e = Env();
+        if (!e || !obj_) return false;
+        jmethodID m = e->GetMethodID(g_cls, name, "(I)Z");
+        if (!m) { Clear(e); return false; }
+        jboolean r = e->CallBooleanMethod(obj_, m, (jint)arg);
+        Clear(e);
+        return r;
+    }
+
     int Step(Sink& sink) override {
         JNIEnv* e = Env();
         if (!e) return -1;
@@ -200,8 +264,9 @@ bool InitBackend(const LspHost* host, std::string* err) {
         {(char*)"nativeAudio", (char*)"(JLjava/nio/ByteBuffer;IIIIZJ)V", (void*)NAudio},
         {(char*)"nativeVideo", (char*)"(JLjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIIJ)V", (void*)NVideo},
         {(char*)"nativeRead", (char*)"(JJ[BII)I", (void*)NRead},
+        {(char*)"nativeSubtitle", (char*)"(JLjava/lang/String;J)V", (void*)NSubtitle},
     };
-    if (e->RegisterNatives(g_cls, natives, 3) != 0) {
+    if (e->RegisterNatives(g_cls, natives, 4) != 0) {
         Clear(e);
         *err = "cannot register natives";
         return false;

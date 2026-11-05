@@ -7,6 +7,16 @@ just joined, someone jumped ahead, or their connection is slow - everyone waits 
 and then all go on together. *Back* returns to the chat while the movie goes on; a group or voice call works at
 the same time (mute and hang up are on the movie screen).
 
+## Sound, subtitles, full screen
+
+- The ☰ button: the sound track (language) and subtitles. Subtitles come from the movie itself (text, or the
+  picture subtitles of Blu-ray / DVD rips), from files next to the movie with the same name (`movie.srt`,
+  `movie.pl.srt`, `movie.eng.ass`... - the device sharing it sends them to everyone) or from any subtitle file you
+  pick. Everyone chooses their own. Subtitle files in Windows-1250 / ISO-8859-2 (common for Polish) are recognised.
+- Surround sound (5.1, 7.1) is mixed down to stereo with the centre channel - the voices - in both speakers.
+- The controls hide after 3 seconds while the movie plays; tap the screen or move the mouse to show them. Phones turn
+  sideways and hide the status / navigation bars; on computers *Full screen* (F, double-click; Esc leaves it).
+
 ## How it works
 
 - Nothing is sent before watching. The movie stays on the device that shared it; everyone else's player reads it

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Voices in 5.1 movies:** surround sound is mixed down to stereo properly - before, only the front left and right
+  channels were played, so the music came through but the dialogue (in the centre channel) didn't.
+- **Sound tracks and subtitles** (watching together): the ☰ button picks the language of the sound and turns on
+  subtitles - from the movie itself (text, and the picture subtitles of Blu-ray / DVD rips), from a file next to it
+  (`movie.srt`, `movie.pl.srt`... - sent to everyone watching) or from any .srt / .ass / .vtt file. Polish subtitle
+  files in Windows-1250 or ISO-8859-2 show their letters right. Each person chooses their own.
+- **More movies play** on computers: AC-3, E-AC-3, DTS, TrueHD, MP2 and WMA sound, MPEG-2 and VC-1 video, 10-bit
+  video (HDR / anime releases), .ts / .m2ts / .vob / .flv / .wmv files. When the main sound track can't be decoded,
+  another one is used instead of none.
+- **Movie screen:** the picture fills the screen, the controls lie on top and hide after 3 seconds (tap / move the
+  mouse to bring them back). Phones turn sideways and hide the system bars (also with rotation locked); computers
+  get *Full screen* (F or double-click). The screen stays on while the movie plays.
+
 ## 1.2.0 - groups, group calls and watching together
 
 Groups, group calls and watching together work between devices that all have 1.2.0. Group calls *through the

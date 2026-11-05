@@ -88,6 +88,10 @@ private:
     std::string watchOpened;
     int64_t watchLastSeek = 0;
     float watchDrag = -1;
+    int64_t watchActive = 0;  // last time someone touched / moved the mouse (controls hide a few seconds later)
+    bool watchFullscreen = false, watchMovie = false, watchAwake = false, watchDevSub = false;
+    std::set<std::string> watchSubsAdded;
+    void WatchTracksPopup();
     void GroupCallStrip(float tile, bool onVideo);  // the people in a group call (tap: watch their video)
     std::string CallPeerName(const ls::CallPeer& p);
     bool openGroupDlg = false, groupDlgAdd = false, openGroupMembers = false;
@@ -169,7 +173,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

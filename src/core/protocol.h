@@ -49,6 +49,7 @@ enum class Msg : uint8_t {
     WatchReport = 85,  // {sid, buffering}                    viewer -> host
     WatchRead = 86,    // {sid, off, len}                     viewer -> host: send me these bytes
     WatchData = 87,    // binary: [sid u64][offset u64][data] host -> viewer
+    WatchSubs = 88,    // {sid, name, data (base64)}          host -> viewer: a subtitle file lying next to the movie
     GroupInfo = 70,   // {gid, name, creator, ver, members[{acc, name, devs[{id, pub}]}]}  to every member device
                       // (chat frames of a group carry "gid": Chat, ChatAck, ChatSync(chat="#gid", from), ChatRead(chat),
                       //  ChatReact(Ack), ChatDelete(Ack))   // {secret, account{...AccountData}, name, avh, img, pv, devices[], accounts[], chats{}}

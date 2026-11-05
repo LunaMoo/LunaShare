@@ -70,6 +70,11 @@ struct Api {
     void (*avio_context_free)(AVIOContext**);
     void* (*malloc_)(size_t);
     void (*freep)(void*);
+    // tracks / subtitles
+    const AVCodec* (*find_decoder)(enum AVCodecID);
+    int (*decode_subtitle2)(AVCodecContext*, AVSubtitle*, int*, const AVPacket*);
+    void (*subtitle_free)(AVSubtitle*);
+    AVDictionaryEntry* (*dict_get)(const AVDictionary*, const char*, const AVDictionaryEntry*, int);
 };
 Api A;
 std::mutex g_m;
@@ -155,7 +160,9 @@ bool LoadFf(std::string* err) {
                   G(lu, a.buffer_unref, "av_buffer_unref") && G(lu, a.hwframe_transfer_data, "av_hwframe_transfer_data") &&
                   G(lu, a.display_rotation_get, "av_display_rotation_get") && G(lu, a.log_set_level, "av_log_set_level") &&
                   G(lf, a.format_alloc_context, "avformat_alloc_context") && G(lf, a.avio_alloc_context, "avio_alloc_context") &&
-                  G(lf, a.avio_context_free, "avio_context_free") && G(lu, a.malloc_, "av_malloc") && G(lu, a.freep, "av_freep");
+                  G(lf, a.avio_context_free, "avio_context_free") && G(lu, a.malloc_, "av_malloc") && G(lu, a.freep, "av_freep") &&
+                  G(lc, a.find_decoder, "avcodec_find_decoder") && G(lc, a.decode_subtitle2, "avcodec_decode_subtitle2") &&
+                  G(lc, a.subtitle_free, "avsubtitle_free") && G(lu, a.dict_get, "av_dict_get");
         if (!ok) continue;
         A = a;
         A.log_set_level(AV_LOG_ERROR);
@@ -170,7 +177,9 @@ enum AVPixelFormat PickFormat(AVCodecContext* ctx, const enum AVPixelFormat* fmt
     for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++)
         if (ctx->hw_device_ctx && *p == AV_PIX_FMT_D3D11) return *p;
     for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++)
-        if (*p == AV_PIX_FMT_YUV420P || *p == AV_PIX_FMT_YUVJ420P || *p == AV_PIX_FMT_NV12) return *p;
+        if (*p == AV_PIX_FMT_YUV420P || *p == AV_PIX_FMT_YUVJ420P || *p == AV_PIX_FMT_NV12 || *p == AV_PIX_FMT_YUV420P10LE ||
+            *p == AV_PIX_FMT_P010LE)
+            return *p;
     return fmts[0];
 }
 
@@ -179,6 +188,7 @@ public:
     ~FfSource() override {
         if (vctx_) A.free_context(&vctx_);
         if (actx_) A.free_context(&actx_);
+        if (sctx_) A.free_context(&sctx_);
         if (fmt_) A.close_input(&fmt_);
         if (io_) {
             A.freep(&io_->buffer);
@@ -243,6 +253,14 @@ public:
         if (vs_ >= 0 && (fmt_->streams[vs_]->disposition & AV_DISPOSITION_ATTACHED_PIC)) vs_ = -1;
         if (vs_ >= 0 && !(vc && OpenVideo(vc))) vs_ = -1;
         if (as_ >= 0 && !(ac && OpenAudio(ac))) as_ = -1;
+        if (as_ < 0)  // the main sound track can't be decoded here (DTS, TrueHD...): any other one that can
+            for (unsigned i = 0; i < fmt_->nb_streams && as_ < 0; i++) {
+                if (fmt_->streams[i]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) continue;
+                const AVCodec* c = A.find_decoder(fmt_->streams[i]->codecpar->codec_id);
+                as_ = (int)i;
+                if (!c || !OpenAudio(c)) as_ = -1;
+            }
+        UpdateDiscard();
         if (!wantAudio && as_ >= 0) {
             A.free_context(&actx_);
             infoAudioOnly_ = true;
@@ -278,6 +296,130 @@ public:
         return true;
     }
 
+    std::vector<TrackInfo> Tracks() override {
+        std::vector<TrackInfo> out;
+        for (unsigned i = 0; fmt_ && i < fmt_->nb_streams; i++) {
+            AVStream* st = fmt_->streams[i];
+            auto type = st->codecpar->codec_type;
+            if (type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_SUBTITLE) continue;
+            TrackInfo t;
+            t.kind = type == AVMEDIA_TYPE_AUDIO ? LSP_TRACK_AUDIO : LSP_TRACK_SUBTITLE;
+            t.id = (int)i;
+            t.selected = (int)i == (type == AVMEDIA_TYPE_AUDIO ? as_ : ss_);
+            t.playable = A.find_decoder(st->codecpar->codec_id) != nullptr;
+            t.channels = type == AVMEDIA_TYPE_AUDIO ? st->codecpar->ch_layout.nb_channels : 0;
+            if (auto* e = A.dict_get(st->metadata, "language", nullptr, 0)) t.lang = e->value;
+            if (auto* e = A.dict_get(st->metadata, "title", nullptr, 0)) t.title = e->value;
+            t.codec = A.codec_get_name(st->codecpar->codec_id);
+            out.push_back(t);
+        }
+        return out;
+    }
+
+    bool SelectAudio(int id) override {
+        if (!fmt_ || id < 0 || id >= (int)fmt_->nb_streams || fmt_->streams[id]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) return false;
+        const AVCodec* c = A.find_decoder(fmt_->streams[id]->codecpar->codec_id);
+        if (!c) return false;
+        int old = as_;
+        if (actx_) A.free_context(&actx_);
+        as_ = id;
+        if (!OpenAudio(c)) {
+            as_ = old;  // (back to the one that worked)
+            const AVCodec* oc = old >= 0 ? A.find_decoder(fmt_->streams[old]->codecpar->codec_id) : nullptr;
+            if (!oc || !OpenAudio(oc)) as_ = -1;
+        }
+        UpdateDiscard();
+        return as_ == id;
+    }
+
+    bool SelectSubtitle(int id) override {
+        if (sctx_) A.free_context(&sctx_);
+        ss_ = -1;
+        if (fmt_ && id >= 0 && id < (int)fmt_->nb_streams && fmt_->streams[id]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+            const AVCodec* c = A.find_decoder(fmt_->streams[id]->codecpar->codec_id);
+            if (c) {
+                sctx_ = A.alloc_context3(c);
+                A.params_to_context(sctx_, fmt_->streams[id]->codecpar);
+                sctx_->pkt_timebase = fmt_->streams[id]->time_base;
+                if (A.open2(sctx_, c, nullptr) >= 0) ss_ = id;
+                else A.free_context(&sctx_);
+            }
+        }
+        UpdateDiscard();
+        return ss_ == id;
+    }
+
+    // only the streams being played are read (others are skipped by the demuxer)
+    void UpdateDiscard() {
+        for (unsigned i = 0; fmt_ && i < fmt_->nb_streams; i++)
+            fmt_->streams[i]->discard = ((int)i == vs_ || (int)i == as_ || (int)i == ss_) ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
+    }
+
+    void DecodeSubtitle(Sink& sink) {
+        if (!sink.subtitle) return;
+        AVSubtitle sub{};
+        int got = 0;
+        if (A.decode_subtitle2(sctx_, &sub, &got, pkt_) < 0 || !got) return;
+        AVStream* st = fmt_->streams[ss_];
+        double tb = av_q2d(st->time_base);
+        int64_t ts = pkt_->pts != AV_NOPTS_VALUE ? pkt_->pts : pkt_->dts;
+        double base = ts != AV_NOPTS_VALUE ? (ts - (st->start_time != AV_NOPTS_VALUE ? st->start_time : 0)) * tb : 0;
+        double start = base + sub.start_display_time / 1000.0;
+        double end = -1;
+        if (sub.end_display_time && sub.end_display_time != UINT32_MAX) end = base + sub.end_display_time / 1000.0;
+        else if (pkt_->duration > 0) end = base + pkt_->duration * tb;
+        std::string text;
+        std::vector<uint8_t> rgba;
+        int bx0 = 1 << 30, by0 = 1 << 30, bx1 = 0, by1 = 0;
+        for (unsigned r = 0; r < sub.num_rects; r++) {
+            AVSubtitleRect* rc = sub.rects[r];
+            if (rc->type == SUBTITLE_ASS && rc->ass) {
+                // "ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text"
+                std::string a = rc->ass;
+                size_t at = 0;
+                for (int k = 0; k < 8 && at != std::string::npos; k++) at = a.find(',', at == 0 && k == 0 ? 0 : at + 1);
+                text += (text.empty() ? "" : "\n") + (at == std::string::npos ? a : a.substr(at + 1));
+            } else if (rc->type == SUBTITLE_TEXT && rc->text) {
+                text += (text.empty() ? "" : "\n") + std::string(rc->text);
+            } else if (rc->type == SUBTITLE_BITMAP && rc->w > 0 && rc->h > 0) {
+                bx0 = std::min(bx0, rc->x);
+                by0 = std::min(by0, rc->y);
+                bx1 = std::max(bx1, rc->x + rc->w);
+                by1 = std::max(by1, rc->y + rc->h);
+            }
+        }
+        int bw = bx1 - bx0, bh = by1 - by0;
+        float fx = 0, fy = 0, fw = 0, fh = 0;
+        if (bw > 0 && bh > 0 && bw <= 8192 && bh <= 8192) {  // picture subtitles: all the pieces into one RGBA image
+            rgba.assign((size_t)bw * bh * 4, 0);
+            for (unsigned r = 0; r < sub.num_rects; r++) {
+                AVSubtitleRect* rc = sub.rects[r];
+                if (rc->type != SUBTITLE_BITMAP || !rc->data[0] || !rc->data[1]) continue;
+                const uint32_t* pal = (const uint32_t*)rc->data[1];  // ARGB (native endian)
+                for (int y = 0; y < rc->h; y++)
+                    for (int x = 0; x < rc->w; x++) {
+                        uint32_t c = pal[rc->data[0][(size_t)y * rc->linesize[0] + x]];
+                        uint8_t* d = &rgba[(((size_t)(rc->y - by0 + y)) * bw + (rc->x - bx0 + x)) * 4];
+                        d[0] = (uint8_t)(c >> 16);
+                        d[1] = (uint8_t)(c >> 8);
+                        d[2] = (uint8_t)c;
+                        d[3] = (uint8_t)(c >> 24);
+                    }
+            }
+            // positions are in the subtitle's own frame (the video size for Blu-ray / DVD)
+            int fwid = sctx_->width > 0 ? sctx_->width : vctx_ ? vctx_->width : bw;
+            int fhei = sctx_->height > 0 ? sctx_->height : vctx_ ? vctx_->height : bh;
+            fx = (float)bx0 / (float)fwid;
+            fy = (float)by0 / (float)fhei;
+            fw = (float)bw / (float)fwid;
+            fh = (float)bh / (float)fhei;
+        } else {
+            bw = bh = 0;
+        }
+        sink.subtitle(start, end, text, rgba, bw, bh, fx, fy, fw, fh);
+        A.subtitle_free(&sub);
+    }
+
     int Step(Sink& sink) override {
         int r = A.read_frame(fmt_, pkt_);
         if (r < 0) {
@@ -291,6 +433,7 @@ public:
         }
         if (pkt_->stream_index == vs_ && vctx_) Decode(vctx_, pkt_, sink, true);
         else if (pkt_->stream_index == as_ && actx_) Decode(actx_, pkt_, sink, false);
+        else if (pkt_->stream_index == ss_ && sctx_) DecodeSubtitle(sink);
         A.packet_unref(pkt_);
         return 1;
     }
@@ -300,6 +443,7 @@ public:
         int r = A.seek_file(fmt_, -1, INT64_MIN, ts, ts, 0);
         if (vctx_) A.flush_buffers(vctx_);
         if (actx_) A.flush_buffers(actx_);
+        if (sctx_) A.flush_buffers(sctx_);
         drained_ = false;
         skipBefore_ = t;  // decode up to the target quietly (seeking lands on the keyframe before it)
         return r >= 0;
@@ -393,8 +537,39 @@ private:
             im.v = pic->data[2];
             im.uv_stride = pic->linesize[1];
             im.uv_pixel_stride = 1;
+        } else if (pic->format == AV_PIX_FMT_YUV420P10LE || pic->format == AV_PIX_FMT_P010LE) {
+            // 10-bit (HDR and anime releases): to 8 bits
+            int w = pic->width, h = pic->height, cw = (w + 1) / 2, ch = (h + 1) / 2;
+            b8y_.resize((size_t)w * h);
+            b8uv_.resize((size_t)cw * ch * 2);
+            bool planar = pic->format == AV_PIX_FMT_YUV420P10LE;
+            for (int y = 0; y < h; y++) {
+                const uint16_t* s = (const uint16_t*)(pic->data[0] + (size_t)y * pic->linesize[0]);
+                uint8_t* d = &b8y_[(size_t)y * w];
+                for (int x = 0; x < w; x++) d[x] = (uint8_t)(planar ? std::min(255, s[x] >> 2) : s[x] >> 8);
+            }
+            for (int y = 0; y < ch; y++) {
+                uint8_t* d = &b8uv_[(size_t)y * cw * 2];
+                if (planar) {
+                    const uint16_t* u = (const uint16_t*)(pic->data[1] + (size_t)y * pic->linesize[1]);
+                    const uint16_t* v = (const uint16_t*)(pic->data[2] + (size_t)y * pic->linesize[2]);
+                    for (int x = 0; x < cw; x++) {
+                        d[x * 2] = (uint8_t)std::min(255, u[x] >> 2);
+                        d[x * 2 + 1] = (uint8_t)std::min(255, v[x] >> 2);
+                    }
+                } else {
+                    const uint16_t* uv = (const uint16_t*)(pic->data[1] + (size_t)y * pic->linesize[1]);
+                    for (int x = 0; x < cw * 2; x++) d[x] = (uint8_t)(uv[x] >> 8);
+                }
+            }
+            im.y = b8y_.data();
+            im.y_stride = w;
+            im.u = b8uv_.data();
+            im.v = b8uv_.data() + 1;
+            im.uv_stride = cw * 2;
+            im.uv_pixel_stride = 2;
         } else {
-            return;  // 10-bit / 4:4:4 etc. aren't converted (rare in shared clips)
+            return;  // 4:2:2 / 4:4:4 etc. aren't converted (rare)
         }
         if (sink.video) sink.video(im, pts);
         if (pic == sw_) A.frame_unref(sw_);
@@ -433,6 +608,9 @@ private:
     int64_t pos_ = 0;
     AVCodecContext* vctx_ = nullptr;
     AVCodecContext* actx_ = nullptr;
+    AVCodecContext* sctx_ = nullptr;
+    int ss_ = -1;
+    std::vector<uint8_t> b8y_, b8uv_;
     AVPacket* pkt_ = nullptr;
     AVFrame* frame_ = nullptr;
     AVFrame* sw_ = nullptr;

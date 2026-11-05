@@ -2117,7 +2117,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             HandleGroupCall(c, f.type, j);
             break;
         case Msg::WatchInvite: case Msg::WatchJoin: case Msg::WatchLeave: case Msg::WatchCtl: case Msg::WatchState:
-        case Msg::WatchReport: case Msg::WatchRead:
+        case Msg::WatchReport: case Msg::WatchRead: case Msg::WatchSubs:
             if (!c->mailbox) HandleWatch(c, f.type, j);
             break;
         case Msg::CallInvite: {

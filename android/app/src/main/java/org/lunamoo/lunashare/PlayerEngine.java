@@ -31,6 +31,10 @@ public final class PlayerEngine {
     private final MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo();
 
     static native int nativeRead(long stream, long position, byte[] buffer, int offset, int size);
+    static native void nativeSubtitle(long target, String text, long ptsUs);
+
+    private int st = -1;  // subtitle track being read
+    private boolean wantAudioOut = true;
 
     /** A file that is still arriving ("watch together"): reads wait in native code until the bytes are here. */
     static final class StreamSource extends MediaDataSource {
@@ -74,17 +78,17 @@ public final class PlayerEngine {
                 p.ex.selectTrack(p.vt);
                 p.vDone = false;
             }
+            p.wantAudioOut = wantAudio;
             if (p.at >= 0) {
                 MediaFormat f = p.ex.getTrackFormat(p.at);
                 if (f.containsKey(MediaFormat.KEY_DURATION)) p.durationUs = Math.max(p.durationUs, f.getLong(MediaFormat.KEY_DURATION));
-                p.rate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE);
-                p.channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
-                if (wantAudio) {
-                    p.adec = MediaCodec.createDecoderByType(p.aMime);
-                    p.adec.configure(f, null, null, 0);
-                    p.adec.start();
-                    p.ex.selectTrack(p.at);
-                    p.aDone = false;
+                if (wantAudio && !p.startAudio(p.at)) {
+                    // the main sound track can't be decoded on this phone (DTS...): any other one that can
+                    for (int i = 0; i < p.ex.getTrackCount() && p.adec == null; i++) {
+                        String m = p.ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME);
+                        if (i != p.at && m != null && m.startsWith("audio/")) p.startAudio(i);
+                    }
+                    if (p.adec == null) p.at = -1;
                 }
             }
             if (p.vdec == null && p.at < 0) { p.close(); return null; }
@@ -94,6 +98,81 @@ public final class PlayerEngine {
             return null;
         }
     }
+
+    private boolean startAudio(int track) {
+        try {
+            MediaFormat f = ex.getTrackFormat(track);
+            String mime = f.getString(MediaFormat.KEY_MIME);
+            MediaCodec c = MediaCodec.createDecoderByType(mime);
+            try {
+                c.configure(f, null, null, 0);
+                c.start();
+            } catch (Exception e) {
+                c.release();
+                return false;
+            }
+            if (adec != null) { try { adec.stop(); adec.release(); } catch (Exception ignored) {} }
+            if (at >= 0 && at != track) { try { ex.unselectTrack(at); } catch (Exception ignored) {} }
+            adec = c;
+            at = track;
+            aMime = mime;
+            rate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+            channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+            ex.selectTrack(track);
+            aDone = false;
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isSubtitle(String mime) {
+        return mime != null && (mime.equals("application/x-subrip") || mime.equals("text/vtt") || mime.equals("text/3gpp-tt")
+                || mime.startsWith("text/"));
+    }
+
+    /** One line per sound / subtitle track: kind(0 sound, 1 subtitles) \t id \t lang \t title \t codec \t channels \t playable \t selected */
+    public String tracks() {
+        StringBuilder sb = new StringBuilder();
+        android.media.MediaCodecList list = new android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS);
+        for (int i = 0; i < ex.getTrackCount(); i++) {
+            MediaFormat f = ex.getTrackFormat(i);
+            String mime = f.getString(MediaFormat.KEY_MIME);
+            if (mime == null) continue;
+            boolean audio = mime.startsWith("audio/");
+            if (!audio && !isSubtitle(mime)) continue;
+            String lang = f.containsKey(MediaFormat.KEY_LANGUAGE) ? f.getString(MediaFormat.KEY_LANGUAGE) : "";
+            int ch = audio && f.containsKey(MediaFormat.KEY_CHANNEL_COUNT) ? f.getInteger(MediaFormat.KEY_CHANNEL_COUNT) : 0;
+            boolean playable = !audio || list.findDecoderForFormat(f) != null || i == at;
+            boolean sel = audio ? i == at : i == st;
+            String codec = mime.replace("audio/", "").replace("application/", "").replace("text/", "");
+            sb.append(audio ? 0 : 1).append('\t').append(i).append('\t').append(lang == null ? "" : lang.replace('\t', ' ')).append("\t\t")
+              .append(codec).append('\t').append(ch).append('\t').append(playable ? 1 : 0).append('\t').append(sel ? 1 : 0).append('\n');
+        }
+        return sb.toString();
+    }
+
+    public boolean selectAudio(int track) {
+        if (!wantAudioOut) return false;
+        return startAudio(track);
+    }
+
+    public boolean selectSubtitle(int track) {
+        try {
+            if (st >= 0) ex.unselectTrack(st);
+            st = -1;
+            if (track >= 0 && isSubtitle(ex.getTrackFormat(track).getString(MediaFormat.KEY_MIME))) {
+                ex.selectTrack(track);
+                st = track;
+            }
+            return st == track;
+        } catch (Exception e) {
+            st = -1;
+            return false;
+        }
+    }
+
+    private ByteBuffer subBuf;
 
     /** "duration_s \t has_video \t has_audio \t width \t height \t rotation \t video codec \t audio codec" (upright size) */
     public String info() {
@@ -113,7 +192,26 @@ public final class PlayerEngine {
                     queueEos(adec);
                 } else {
                     MediaCodec c = track == vt ? vdec : track == at ? adec : null;
-                    if (c != null) {
+                    if (track == st && st >= 0) {  // a subtitle: its text
+                        if (subBuf == null) subBuf = ByteBuffer.allocate(64 * 1024);
+                        subBuf.clear();
+                        int n = ex.readSampleData(subBuf, 0);
+                        long t = ex.getSampleTime();
+                        if (n > 0) {
+                            byte[] b = new byte[n];
+                            subBuf.get(b, 0, n);
+                            int off = 0;
+                            if ("text/3gpp-tt".equals(ex.getTrackFormat(st).getString(MediaFormat.KEY_MIME)) && n >= 2) {
+                                int len = ((b[0] & 0xFF) << 8) | (b[1] & 0xFF);
+                                off = 2;
+                                n = Math.min(n - 2, len);
+                            } else {
+                                n -= off;
+                            }
+                            nativeSubtitle(target, new String(b, off, n, java.nio.charset.StandardCharsets.UTF_8), t);
+                        }
+                        ex.advance();
+                    } else if (c != null) {
                         int in = c.dequeueInputBuffer(5000);
                         if (in >= 0) {
                             ByteBuffer b = c.getInputBuffer(in);

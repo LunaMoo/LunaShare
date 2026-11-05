@@ -119,6 +119,7 @@ struct WatchInfo {
     bool hold = false;         // someone is still loading: everyone waits
     std::string waitFor;       // ... who
     std::vector<std::string> people;  // names of everyone watching
+    std::vector<std::string> subFiles;  // subtitle files for the movie (host: next to it; viewer: received copies)
     double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 : 0); }
 };
 struct WatchInviteInfo {

@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "lunashare_player.h"
 
@@ -14,6 +15,17 @@ struct Sink {
     std::function<void(const float* pcm, int frames, int rate, int channels, double pts)> audio;
     // a decoded picture (rotation filled in), valid only during the call
     std::function<void(const LsvImage& img, double pts)> video;
+    // a subtitle: text, or a picture (straight RGBA) placed at x/y/w/h (fractions of the video). end <= start: until
+    // the next one
+    std::function<void(double start, double end, const std::string& text, const std::vector<uint8_t>& rgba, int w, int h, float x,
+                       float y, float sw, float sh)>
+        subtitle;
+};
+
+struct TrackInfo {
+    int kind = 0, id = 0, channels = 0;
+    bool playable = true, selected = false;
+    std::string lang, title, codec;
 };
 
 class Source {
@@ -24,6 +36,10 @@ public:
     // decode a little; returns 1 = go on, 0 = end of file, -1 = error
     virtual int Step(Sink& sink) = 0;
     virtual bool Seek(double seconds) = 0;
+    virtual std::vector<TrackInfo> Tracks() { return {}; }
+    // decode thread, between Step()s; the core seeks to the current position afterwards
+    virtual bool SelectAudio(int id) { (void)id; return false; }
+    virtual bool SelectSubtitle(int id) { (void)id; return false; }  // -1 = none
 };
 
 std::unique_ptr<Source> CreateSource(const LspHost* host);

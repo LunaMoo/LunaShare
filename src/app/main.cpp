@@ -223,6 +223,9 @@ int main(int argc, char** argv) {
     }
     SDL_GL_MakeCurrent(window, gl);
     SDL_GL_SetSwapInterval(1);
+    if (!ls::IsMobilePlatform())
+        ls::Bridge().setFullscreen = [window](bool on) { SDL_SetWindowFullscreen(window, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); };
+    ls::Bridge().keepAwake = [](bool on) { on ? SDL_DisableScreenSaver() : SDL_EnableScreenSaver(); };
     if (!glf::Load()) printf("warning: some OpenGL functions are missing\n");
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
 

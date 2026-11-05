@@ -2833,6 +2833,12 @@ void App::DrawPopups() {
                 if (!selectedPeer.empty()) { eng.SendPaths(selectedPeer, res); scrollToBottom = true; }
                 else OpenSendTo(res);
                 break;
+            case BrowseFor::WatchSubs: {
+                int id = res.empty() ? -1 : Player().AddSubtitles(res[0]);
+                if (id >= 0) Player().SelectTrack(LSP_TRACK_SUBTITLE, id);
+                else toasts.push_back({EventType::Error, T("Subtitles"), T("Could not read the subtitles (.srt, .ass or .vtt)."), "", 0, 4.0f});
+                break;
+            }
             case BrowseFor::Watch:
                 if (!selectedPeer.empty() && !res.empty() && eng.StartWatch(selectedPeer, res[0])) watchShown = true;
                 break;

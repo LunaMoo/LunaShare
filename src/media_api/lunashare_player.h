@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSP_API_VERSION 2
+#define LSP_API_VERSION 3
 
 #if defined(_WIN32)
 #define LSP_EXPORT __declspec(dllexport)
@@ -61,6 +61,25 @@ typedef struct LspStream {
     int (*read)(void* user, int64_t offset, uint8_t* buf, int len);
 } LspStream;
 
+/* since version 3: sound tracks (languages) and subtitles */
+enum { LSP_TRACK_AUDIO = 0, LSP_TRACK_SUBTITLE = 1 };
+typedef struct LspTrack {
+    int kind, id;           /* id: for select_track() */
+    int selected;
+    int playable;           /* this device can decode it */
+    int channels;           /* sound: 2 = stereo, 6 = 5.1... */
+    int external;           /* subtitles from a separate file */
+    char lang[16];          /* "pol", "eng"... (may be empty) */
+    char title[96];
+    char codec[32];
+} LspTrack;
+typedef struct LspSubtitle {
+    const char* text;       /* UTF-8, lines separated by '\n'; empty when none */
+    const uint8_t* rgba;    /* or a picture (Blu-ray / DVD subtitles), straight RGBA, w x h */
+    int w, h;
+    float x, y, sw, sh;     /* where the picture goes, as fractions of the video picture */
+} LspSubtitle;
+
 typedef struct LspModule {
     int api_version;
     const char* name;
@@ -81,6 +100,12 @@ typedef struct LspModule {
     int (*state)(LspPlayer* p);
     /* --- since version 2: like open(), but reading through `stream` (which must stay valid until close) */
     LspPlayer* (*open_stream)(const LspStream* stream, int sample_rate, int channels, LspInfo* info);
+    /* --- since version 3 */
+    int (*tracks)(LspPlayer* p, LspTrack* out, int max);
+    int (*select_track)(LspPlayer* p, int kind, int id);  /* subtitles: id -1 = none */
+    int (*add_subtitles)(LspPlayer* p, const char* path_utf8);  /* .srt / .ass / .ssa / .vtt; returns its track id, -1 = can't read */
+    /* UI thread: the subtitle for the current position; returns a number that changes whenever it does */
+    int (*subtitle)(LspPlayer* p, LspSubtitle* out);
 } LspModule;
 
 typedef const LspModule* (*LspGetModuleFn)(void);

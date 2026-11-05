@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
         }
         e.StartWatch(them, mv);
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
-        e.WatchControl(true, 20);  // play from 0:20 (the clock; the demo itself doesn't decode)
+        e.WatchControl(true, getenv("DEMO_WATCH_AT") ? atof(getenv("DEMO_WATCH_AT")) : 20);  // (the clock; the demo itself doesn't decode)
     }
     if (getenv("DEMO_GROUP")) {  // a group with the other side (screenshots of group chats)
         std::string them;

@@ -8,10 +8,12 @@
 // or their connection is slow - the host holds the clock and everyone waits, then all go on together. Players
 // follow the clock and jump when they are more than about a second off.
 #include <algorithm>
+#include <cctype>
 #include <condition_variable>
 #include <cstring>
 
 #include "engine.h"
+#include "crypto.h"
 #include "platform.h"
 
 namespace ls {
@@ -72,6 +74,20 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
         watchServe_.f = OpenFile(path, "rb");
         watchServe_.sid = watch.sid;
         watchServe_.size = size;
+    }
+    {  // subtitles lying next to it (movie.srt, movie.pl.srt...) go to the viewers too
+        std::string dir = DirName(path), stem = watch.name;
+        size_t dot = stem.find_last_of('.');
+        if (dot != std::string::npos) stem = stem.substr(0, dot);
+        auto lower = [](std::string s) { for (auto& ch : s) ch = (char)tolower((unsigned char)ch); return s; };
+        for (auto& e : ListDir(dir)) {
+            std::string n = lower(e.name);
+            bool sub = !e.isDir && e.size < (4 << 20) && n.size() > 4 &&
+                       (n.compare(n.size() - 4, 4, ".srt") == 0 || n.compare(n.size() - 4, 4, ".ass") == 0 ||
+                        n.compare(n.size() - 4, 4, ".ssa") == 0 || n.compare(n.size() - 4, 4, ".vtt") == 0);
+            if (sub && n.rfind(lower(stem), 0) == 0) watch.subFiles.push_back(JoinPath(dir, e.name));
+        }
+        std::sort(watch.subFiles.begin(), watch.subFiles.end());
     }
     json inv = KeyField(key, {{"sid", watch.sid}, {"name", watch.name}, {"size", size}});
     std::vector<std::string> to = DevicesOf(key);
@@ -142,6 +158,8 @@ void Engine::EndWatchLocked(const std::string& why) {
             c->f = nullptr;
             RemoveFile(c->path);
         }
+        for (auto& f : w.subFiles) RemoveFile(f);  // (the copies)
+        if (!w.subFiles.empty()) RemoveFile(DirName(w.subFiles[0]));  // (their folder, where that works for folders)
     } else {
         for (auto& d : watchViewers_) QueueToPeer(d, Msg::WatchLeave, {{"sid", w.sid}, {"end", true}});
         std::lock_guard<std::mutex> l(watchServe_.m);
@@ -269,7 +287,19 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
         }
         case Msg::WatchJoin:
             if (sid != watch.sid || !watch.host.empty()) return;
-            if (std::find(watchViewers_.begin(), watchViewers_.end(), dev) == watchViewers_.end()) watchViewers_.push_back(dev);
+            if (std::find(watchViewers_.begin(), watchViewers_.end(), dev) == watchViewers_.end()) {
+                watchViewers_.push_back(dev);
+                for (auto& f : watch.subFiles) {
+                    std::string data;
+                    FILE* fp = OpenFile(f, "rb");
+                    if (!fp) continue;
+                    char b[65536];
+                    size_t n;
+                    while ((n = fread(b, 1, sizeof(b), fp)) > 0 && data.size() < (4u << 20)) data.append(b, n);
+                    fclose(fp);
+                    Queue(c, Msg::WatchSubs, {{"sid", sid}, {"name", BaseName(f)}, {"data", Base64Encode(data)}});
+                }
+            }
             watchBuffering_[dev] = true;
             WatchUpdateHold();
             WatchBroadcast();
@@ -296,6 +326,20 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.playing = j.value("playing", false);
             watch.at = now;
             WatchBroadcast();
+            break;
+        }
+        case Msg::WatchSubs: {
+            if (sid != watch.sid || dev != watch.host) return;
+            std::string name = BaseName(j.value("name", "")), data;
+            if (name.empty() || name.size() > 200 || !Base64Decode(j.value("data", ""), data) || data.size() > (4u << 20)) return;
+            std::string dir = JoinPath(JoinPath(ConfigPath(), "watch"), ToHex((const uint8_t*)&sid, 8));
+            MakeDirs(dir);
+            std::string p = JoinPath(dir, name);
+            FILE* fp = OpenFile(p, "wb");
+            if (!fp) return;
+            fwrite(data.data(), 1, data.size(), fp);
+            fclose(fp);
+            if (std::find(watch.subFiles.begin(), watch.subFiles.end(), p) == watch.subFiles.end()) watch.subFiles.push_back(p);
             break;
         }
         case Msg::WatchState: {

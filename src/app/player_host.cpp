@@ -192,6 +192,7 @@ void PlayerHost::Update() {
             m.th = pd.h;
         }
     }
+    UpdateSubtitle();
     // current picture of the playing video
     if (p_ && info_.has_video)
         mod_->video_frame(p_, [](void*, const LsvImage* im) { Media().PushPlayerFrame(*im); }, nullptr);
@@ -293,6 +294,74 @@ void PlayerHost::SetPlaying(bool on) {
     if (!p_) return;
     if (on && !OpenAudio()) SDL_Log("player: no audio device");
     mod_->set_playing(p_, on ? 1 : 0);
+}
+
+std::vector<LspTrack> PlayerHost::Tracks() const {
+    std::vector<LspTrack> v;
+    if (!p_ || mod_->api_version < 3 || !mod_->tracks) return v;
+    v.resize(64);
+    v.resize((size_t)std::max(0, mod_->tracks(p_, v.data(), (int)v.size())));
+    return v;
+}
+
+void PlayerHost::SelectTrack(int kind, int id) {
+    if (p_ && mod_->select_track) mod_->select_track(p_, kind, id);
+}
+
+int PlayerHost::AddSubtitles(const std::string& path) {
+    if (!p_ || !mod_->add_subtitles) return -1;
+    return mod_->add_subtitles(p_, path.c_str());
+}
+
+void PlayerHost::AddSidecarSubtitles(const std::string& videoPath) {
+    std::string dir = DirName(videoPath), base = BaseName(videoPath);
+    size_t dot = base.find_last_of('.');
+    std::string stem = dot == std::string::npos ? base : base.substr(0, dot);
+    auto lower = [](std::string s) { for (auto& c : s) c = (char)tolower((unsigned char)c); return s; };
+    std::vector<std::string> names;
+    for (auto& e : ListDir(dir)) {
+        if (e.isDir) continue;
+        std::string n = lower(e.name);
+        bool sub = n.size() > 4 && (n.rfind(".srt") == n.size() - 4 || n.rfind(".ass") == n.size() - 4 || n.rfind(".ssa") == n.size() - 4 ||
+                                    n.rfind(".vtt") == n.size() - 4);
+        if (sub && n.rfind(lower(stem), 0) == 0) names.push_back(e.name);  // movie.srt, movie.pl.srt, movie.English.srt
+    }
+    std::sort(names.begin(), names.end());
+    for (auto& n : names) AddSubtitles(JoinPath(dir, n));
+}
+
+void PlayerHost::UpdateSubtitle() {
+    if (!p_ || mod_->api_version < 3 || !mod_->subtitle) {
+        if (subSerial_ != -1) {
+            if (sub_.tex) glf::DeleteTextures(1, &sub_.tex);
+            sub_ = Sub();
+            subSerial_ = -1;
+        }
+        return;
+    }
+    LspSubtitle s{};
+    int serial = mod_->subtitle(p_, &s);
+    if (serial == subSerial_) return;
+    subSerial_ = serial;
+    if (sub_.tex) glf::DeleteTextures(1, &sub_.tex);
+    sub_ = Sub();
+    sub_.text = s.text ? s.text : "";
+    if (s.rgba && s.w > 0 && s.h > 0) {
+        glf::GenTextures(1, &sub_.tex);
+        glf::BindTexture(glf::TEXTURE_2D, sub_.tex);
+        glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_MIN_FILTER, glf::LINEAR);
+        glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_MAG_FILTER, glf::LINEAR);
+        glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_WRAP_S, glf::CLAMP_TO_EDGE);
+        glf::TexParameteri(glf::TEXTURE_2D, glf::TEXTURE_WRAP_T, glf::CLAMP_TO_EDGE);
+        glf::PixelStorei(glf::UNPACK_ALIGNMENT, 4);
+        glf::TexImage2D(glf::TEXTURE_2D, 0, glf::RGBA, s.w, s.h, 0, glf::RGBA, glf::UNSIGNED_BYTE, s.rgba);
+        sub_.w = s.w;
+        sub_.h = s.h;
+        sub_.x = s.x;
+        sub_.y = s.y;
+        sub_.sw = s.sw;
+        sub_.sh = s.sh;
+    }
 }
 
 void PlayerHost::Pause() {

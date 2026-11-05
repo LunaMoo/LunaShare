@@ -48,6 +48,18 @@ public:
     enum class Opening { None, Busy, Failed, Ready };
     Opening OpenState();
     void SetPlaying(bool on);
+    // sound tracks and subtitles of what's playing
+    std::vector<LspTrack> Tracks() const;
+    void SelectTrack(int kind, int id);
+    int AddSubtitles(const std::string& path);  // -1 = can't read it
+    void AddSidecarSubtitles(const std::string& videoPath);  // movie.srt, movie.pl.srt... next to the file
+    struct Sub {
+        std::string text;
+        unsigned tex = 0;  // picture subtitles
+        int w = 0, h = 0;
+        float x = 0, y = 0, sw = 0, sh = 0;
+    };
+    const Sub& Subtitle() const { return sub_; }
     bool Playing() const;
     double Position() const;
     double Duration() const { return info_.duration; }
@@ -94,6 +106,9 @@ private:
     std::string openingId_;
     std::function<int(int64_t, uint8_t*, int)> streamRead_;
     LspStream stream_{};
+    Sub sub_;
+    int subSerial_ = -1;
+    void UpdateSubtitle();
 };
 
 PlayerHost& Player();
