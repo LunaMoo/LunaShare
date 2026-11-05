@@ -259,7 +259,15 @@ void PlayerHost::OpenStream(const std::string& id, int64_t size, std::function<i
     streamRead_ = std::move(read);
     stream_.user = this;
     stream_.size = size;
-    stream_.read = [](void* u, int64_t off, uint8_t* buf, int len) { return ((PlayerHost*)u)->streamRead_(off, buf, len); };
+    streamStop_ = false;
+    stream_.read = [](void* u, int64_t off, uint8_t* buf, int len) {
+        auto* self = (PlayerHost*)u;
+        for (;;) {  // (waits in short steps, so closing the player never hangs on a device that went away)
+            if (self->streamStop_) return -1;
+            int n = self->streamRead_(off, buf, len);
+            if (n != -2) return n;
+        }
+    };
     openingId_ = id;
     openState_ = (int)Opening::Busy;
     opener_ = std::thread([this] {
@@ -379,6 +387,7 @@ void PlayerHost::Seek(double t) {
 }
 
 void PlayerHost::Stop() {
+    streamStop_ = true;
     if (opener_.joinable()) {  // (its reads have to return first: the caller cancels the stream before)
         opener_.join();
         if (opened_) mod_->close(opened_);

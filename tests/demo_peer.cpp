@@ -167,6 +167,12 @@ int main(int argc, char** argv) {
         }
         e.StartWatch(them, mv);
         if (const char* hs = getenv("DEMO_HOSTSUB")) e.WatchSetHostSub(hs);  // as if the host had these subtitles on
+        if (const char* next = getenv("DEMO_WATCH_SWAP")) {  // a few seconds later: another movie instead
+            std::this_thread::sleep_for(std::chrono::milliseconds(4000));
+            e.LeaveWatch();
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            e.StartWatch(them, next);
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
         e.WatchControl(true, getenv("DEMO_WATCH_AT") ? atof(getenv("DEMO_WATCH_AT")) : 20);  // (the clock; the demo itself doesn't decode)
     }

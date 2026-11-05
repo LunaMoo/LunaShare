@@ -27,6 +27,8 @@ struct WatchCache {
     std::mutex m;
     std::condition_variable cv;
     uint64_t sid = 0;
+    std::string hostId;                 // the device with the movie
+    std::weak_ptr<Connection> host;     // its connection (kept current by WatchTick)
     std::string path;
     FILE* f = nullptr;
     int64_t size = 0;
@@ -131,7 +133,12 @@ bool Engine::JoinWatch(uint64_t sid) {
         Emit({EventType::Error, "", "Watch together: could not create a temporary file"});
         return false;
     }
-    watchCache_ = c;
+    c->hostId = inv.host;
+    c->host = ReadyConn(inv.host);
+    {
+        std::lock_guard<std::mutex> l(watchCacheMtx_);
+        watchCache_ = c;
+    }
     watchHostSeen_ = SteadyMs();
     watchReportedBuffering_ = true;
     QueueToPeer(inv.host, Msg::WatchJoin, {{"sid", sid}});
@@ -148,8 +155,11 @@ void Engine::LeaveWatch() {
 void Engine::EndWatchLocked(const std::string& why) {
     WatchInfo w = watch;
     if (!w.host.empty()) {
-        std::shared_ptr<WatchCache> c = watchCache_;
-        watchCache_.reset();
+        std::shared_ptr<WatchCache> c;
+        {
+            std::lock_guard<std::mutex> l(watchCacheMtx_);
+            c.swap(watchCache_);
+        }
         if (c) {
             std::lock_guard<std::mutex> l(c->m);
             c->cancelled = true;  // the player's reads return; the file goes when the player lets go of it
@@ -271,13 +281,14 @@ void Engine::WatchTick() {
         EndWatchLocked("Watching together ended (connection lost).");
         return;
     }
-    if (auto c = watchCache_) {
+    if (auto c = WatchCacheNow()) {
         int64_t from;
         {
             std::lock_guard<std::mutex> l(c->m);
             from = c->readPos;
+            c->host = ReadyConn(watch.host);  // (a new connection after a network change)
         }
-        WatchRequest(from);
+        WatchRequestOn(c, from);
     }
 }
 
@@ -427,13 +438,8 @@ void Engine::HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& 
     int64_t off = (int64_t)GetU64(f.payload.data() + 8);
     const uint8_t* data = f.payload.data() + 16;
     int64_t len = (int64_t)f.payload.size() - 16;
-    std::shared_ptr<WatchCache> wc;
-    {
-        auto lk = Lock();
-        if (sid != watch.sid || c->peerId != watch.host) return;
-        wc = watchCache_;
-    }
-    if (!wc) return;
+    std::shared_ptr<WatchCache> wc = WatchCacheNow();
+    if (!wc || wc->sid != sid || c->peerId != wc->hostId) return;
     bool more;
     int64_t from;
     {
@@ -451,18 +457,30 @@ void Engine::HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& 
         more = wc->inflight.size() < kWatchInflight / 2;
         from = wc->readPos;
     }
-    if (more) WatchRequest(from);
+    if (more) WatchRequestOn(wc, from);
+}
+
+std::shared_ptr<WatchCache> Engine::WatchCacheNow() {
+    std::lock_guard<std::mutex> l(watchCacheMtx_);
+    return watchCache_;
 }
 
 void Engine::WatchRequest(int64_t from) {
-    auto lk = Lock();
-    auto wc = watchCache_;
-    if (!wc || !watch.sid || watch.host.empty()) return;
-    auto c = ReadyConn(watch.host);
-    if (!c) return;
+    if (auto wc = WatchCacheNow()) WatchRequestOn(wc, from);
+}
+
+// asks the host for what's missing ahead of `from` (any thread; no engine lock: Queue() only needs the connection's)
+void Engine::WatchRequestOn(const std::shared_ptr<WatchCache>& wc, int64_t from) {
+    std::shared_ptr<Connection> c;
     std::vector<int64_t> ask;
+    uint64_t sid;
+    int64_t size;
     {
         std::lock_guard<std::mutex> l(wc->m);
+        c = wc->host.lock();
+        if (!c || c->closed || wc->cancelled) return;
+        sid = wc->sid;
+        size = wc->size;
         int64_t now = SteadyMs();
         for (auto it = wc->inflight.begin(); it != wc->inflight.end();)
             it = now - it->second > 10000 ? wc->inflight.erase(it) : std::next(it);  // (lost: ask again)
@@ -475,18 +493,16 @@ void Engine::WatchRequest(int64_t from) {
     }
     for (auto b : ask) {
         int64_t off = b * kWatchBlock;
-        Queue(c, Msg::WatchRead, {{"sid", watch.sid}, {"off", off}, {"len", std::min(kWatchBlock, watch.size - off)}});
+        Queue(c, Msg::WatchRead, {{"sid", sid}, {"off", off}, {"len", std::min(kWatchBlock, size - off)}});
     }
 }
 
-int Engine::WatchRead(int64_t off, uint8_t* buf, int len) {
-    std::shared_ptr<WatchCache> wc;
-    {
-        auto lk = Lock();
-        wc = watchCache_;
-    }
+int Engine::WatchRead(int64_t off, uint8_t* buf, int len, int waitMs) {
+    std::shared_ptr<WatchCache> wc = WatchCacheNow();  // (the player's thread: never the engine lock)
     if (!wc || len <= 0) return -1;
+    int64_t t0 = SteadyMs();
     for (;;) {
+        if (waitMs >= 0 && SteadyMs() - t0 > waitMs) return -2;
         {
             std::unique_lock<std::mutex> l(wc->m);
             if (wc->cancelled) return -1;
@@ -499,14 +515,14 @@ int Engine::WatchRead(int64_t off, uint8_t* buf, int len) {
                 wc->readPos = off + n;
                 bool more = wc->inflight.size() < kWatchInflight / 2;
                 l.unlock();
-                if (more) WatchRequest(off + n);
+                if (more) WatchRequestOn(wc, off + n);
                 return n;
             }
             wc->readPos = off;
             wc->buffering = true;
             wc->waiting++;
         }
-        WatchRequest(off);
+        WatchRequestOn(wc, off);
         {
             std::unique_lock<std::mutex> l(wc->m);
             int64_t b = off / kWatchBlock;
@@ -517,8 +533,7 @@ int Engine::WatchRead(int64_t off, uint8_t* buf, int len) {
 }
 
 bool Engine::WatchBuffering() {
-    auto lk = Lock();
-    auto wc = watchCache_;
+    auto wc = WatchCacheNow();
     if (!wc) return false;
     std::lock_guard<std::mutex> l(wc->m);
     if (wc->waiting > 0) return wc->buffering = true;
@@ -530,8 +545,7 @@ bool Engine::WatchBuffering() {
 }
 
 double Engine::WatchLoaded() {
-    auto lk = Lock();
-    auto wc = watchCache_;
+    auto wc = WatchCacheNow();
     if (!wc) return watch.sid ? 1.0 : 0.0;
     std::lock_guard<std::mutex> l(wc->m);
     return wc->Blocks() ? (double)wc->haveCount / (double)wc->Blocks() : 1.0;

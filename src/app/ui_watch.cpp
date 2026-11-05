@@ -69,7 +69,7 @@ void App::WatchSync() {
             else watchFailed = true;
         } else {
             Engine* e = &eng;
-            Player().OpenStream(id, w.size, [e](int64_t off, uint8_t* buf, int len) { return e->WatchRead(off, buf, len); });
+            Player().OpenStream(id, w.size, [e](int64_t off, uint8_t* buf, int len) { return e->WatchRead(off, buf, len, 200); });
         }
     }
     if (!host) {

@@ -105,6 +105,7 @@ private:
     LspInfo openedInfo_{};
     std::string openingId_;
     std::function<int(int64_t, uint8_t*, int)> streamRead_;
+    std::atomic<bool> streamStop_{false};  // Stop(): reads waiting for the network give up
     LspStream stream_{};
     Sub sub_;
     int subSerial_ = -1;

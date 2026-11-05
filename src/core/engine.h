@@ -350,7 +350,9 @@ public:
     void WatchControl(bool playing, double pos);  // play / pause / seek (pos < 0: keep the position)
     bool WatchBuffering();                    // this viewer is waiting for data
     double WatchLoaded();                     // viewer: fraction of the file here (0..1)
-    int WatchRead(int64_t off, uint8_t* buf, int len);  // viewer's player: blocks until the bytes arrive; < 0 cancelled
+    // viewer's player: waits until the bytes arrive; < 0 cancelled. waitMs >= 0: gives up after that long with -2
+    // (the caller checks whether it should stop and asks again)
+    int WatchRead(int64_t off, uint8_t* buf, int len, int waitMs = -1);
     void WatchShareSubtitles(const std::string& path);  // host: a subtitle file picked during the movie goes to everyone
     void WatchSetHostSub(const std::string& desc);      // host: which subtitles are on here (shown to viewers as default)  // group video call: whose picture is shown big ("" = automatic)
     void AcceptCall();
@@ -522,7 +524,10 @@ private:
     void FinishGroupCall(const std::string& reason);
     void UpdateSpotlight();
     // watch together
-    std::shared_ptr<WatchCache> watchCache_;  // viewer (under Lock() to swap; has its own lock)
+    std::shared_ptr<WatchCache> watchCache_;  // viewer (watchCacheMtx_; the cache has its own lock)
+    std::mutex watchCacheMtx_;  // (the player's threads never take the engine lock: the UI holds it while closing the player)
+    std::shared_ptr<WatchCache> WatchCacheNow();
+    void WatchRequestOn(const std::shared_ptr<WatchCache>& wc, int64_t from);
     struct WatchServe {
         std::mutex m;
         uint64_t sid = 0;

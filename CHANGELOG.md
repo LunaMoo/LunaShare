@@ -13,6 +13,10 @@
   another one is used instead of none.
 - **Subtitles at the right time:** subtitles from a movie file were shifted by the moment of their first line (often
   a minute or more), so they seemed not to show at all.
+- **No more freezing when a movie changes:** when the host stopped or swapped the movie (or the player closed while
+  the movie was still loading), the app could hang with an empty screen - the player waited for the app and the app
+  for the player. The movie is now read without waiting for the rest of the app, and a closing player never waits
+  for a device that went away.
 - **MKV subtitles on computers:** FFmpeg on Windows / Linux now has zlib - mkvmerge compresses subtitle tracks with
   it, and without it they couldn't be read.
 - **The host's subtitles for everyone:** viewers see the subtitles the host has on - also a file the host picked -
