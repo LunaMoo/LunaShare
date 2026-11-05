@@ -25,6 +25,8 @@ static std::string Hms(double s) {
     return b;
 }
 
+static int64_t now0() { return SteadyMs(); }
+
 // every frame: open the movie for the session I'm in, and keep it on the shared clock
 void App::WatchSync() {
     const WatchInfo& w = eng.watch;
@@ -60,6 +62,8 @@ void App::WatchSync() {
         watchFailed = false;
         watchLastSeek = 0;
         watchSubsAdded.clear();
+        watchSubFollow = true;
+        watchSubApplied = "-";
         if (host) {
             if (Player().Play(w.path)) Player().Pause();
             else watchFailed = true;
@@ -84,6 +88,34 @@ void App::WatchSync() {
     }
     for (auto& f : w.subFiles)
         if (!host && watchSubsAdded.insert(f).second) Player().AddSubtitles(f);
+    // the subtitles: the host tells which ones it has on; viewers follow that unless they picked their own
+    if (now0() - watchSubCheck > 300) {
+        watchSubCheck = now0();
+        auto tracks = Player().Tracks();
+        if (host) {
+            std::string desc;
+            int n = 0;
+            for (auto& t : tracks) {
+                if (t.kind != LSP_TRACK_SUBTITLE) continue;
+                if (!t.external) n++;
+                if (t.selected) desc = t.external ? std::string("file:") + t.title : "track:" + std::to_string(n) + ":" + t.lang;
+            }
+            eng.WatchSetHostSub(desc);
+        } else if (watchSubFollow && w.hostSub != watchSubApplied) {
+            int id = -2, n = 0;
+            if (w.hostSub.empty()) id = -1;
+            for (auto& t : tracks) {
+                if (t.kind != LSP_TRACK_SUBTITLE) continue;
+                if (!t.external) n++;
+                if (w.hostSub.rfind("file:", 0) == 0 && t.external && w.hostSub.substr(5) == t.title) id = t.id;
+                if (w.hostSub.rfind("track:", 0) == 0 && !t.external && atoi(w.hostSub.c_str() + 6) == n) id = t.id;
+            }
+            if (id != -2) {  // (a file may still be on its way)
+                Player().SelectTrack(LSP_TRACK_SUBTITLE, id);
+                watchSubApplied = w.hostSub;
+            }
+        }
+    }
     static const char* devSub = getenv("LUNASHARE_WATCHSUB");  // dev: subtitles on (screenshots)
     if (devSub && !watchDevSub) {
         for (auto& t : Player().Tracks())
@@ -203,16 +235,38 @@ void App::WatchTracksPopup() {
     }
     if (!anySound) ImGui::TextDisabled("%s", T("no sound"));
     ImGui::SeparatorText(T("Subtitles"));
+    const WatchInfo& w = eng.watch;
+    bool viewer = w.sid && !w.host.empty();
+    bool follow = viewer && watchSubFollow;
+    if (viewer) {  // what the host has on (the default)
+        std::string hs = w.hostSub.empty() ? std::string(T("off")) : w.hostSub.rfind("file:", 0) == 0 ? w.hostSub.substr(5) : "";
+        if (hs.empty()) {  // "track:n:lang"
+            int k = atoi(w.hostSub.c_str() + 6);
+            size_t c = w.hostSub.find(':', 6);
+            std::string lang = c == std::string::npos ? "" : LangName(w.hostSub.substr(c + 1));
+            hs = lang.empty() ? TF("Subtitles %d", k) : lang;
+        }
+        if (ImGui::Selectable((TF("Host's subtitles (%s)", hs.c_str()) + "##hostsub").c_str(), follow, ImGuiSelectableFlags_DontClosePopups, ImVec2(0, h))) {
+            watchSubFollow = true;
+            watchSubApplied = "-";
+            watchSubCheck = 0;
+        }
+    }
     bool anyOn = false;
     for (auto& t : tracks) anyOn |= t.kind == LSP_TRACK_SUBTITLE && t.selected;
-    if (ImGui::Selectable(T("Off"), !anyOn, ImGuiSelectableFlags_DontClosePopups, ImVec2(0, h))) Player().SelectTrack(LSP_TRACK_SUBTITLE, -1);
+    if (ImGui::Selectable(T("Off"), !anyOn && !follow, ImGuiSelectableFlags_DontClosePopups, ImVec2(0, h))) {
+        Player().SelectTrack(LSP_TRACK_SUBTITLE, -1);
+        watchSubFollow = false;
+    }
     n = 0;
     for (auto& t : tracks) {
         if (t.kind != LSP_TRACK_SUBTITLE) continue;
         std::string label = TrackLabel(t, ++n) + (t.external ? std::string("  - ") + T("file") : "");
         ImGui::BeginDisabled(!t.playable);
-        if (ImGui::Selectable((label + "##s" + std::to_string(t.id)).c_str(), t.selected != 0, ImGuiSelectableFlags_DontClosePopups, ImVec2(0, h)))
+        if (ImGui::Selectable((label + "##s" + std::to_string(t.id)).c_str(), t.selected && !follow, ImGuiSelectableFlags_DontClosePopups, ImVec2(0, h))) {
             Player().SelectTrack(LSP_TRACK_SUBTITLE, t.id);
+            watchSubFollow = false;
+        }
         ImGui::EndDisabled();
     }
     if (!mobile) {

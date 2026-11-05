@@ -126,6 +126,53 @@ bool G(void* lib, T& fn, const char* name) {
     return fn != nullptr;
 }
 
+#ifdef LSP_FF_STATIC
+// FFmpeg linked in (Android: the sound and subtitle decoders the phone lacks)
+bool LoadFf(std::string*) {
+    std::lock_guard<std::mutex> l(g_m);
+    if (g_ok) return true;
+    A.open_input = reinterpret_cast<decltype(A.open_input)>(&::avformat_open_input);
+    A.find_stream_info = reinterpret_cast<decltype(A.find_stream_info)>(&::avformat_find_stream_info);
+    A.find_best_stream = reinterpret_cast<decltype(A.find_best_stream)>(&::av_find_best_stream);
+    A.read_frame = reinterpret_cast<decltype(A.read_frame)>(&::av_read_frame);
+    A.seek_file = reinterpret_cast<decltype(A.seek_file)>(&::avformat_seek_file);
+    A.close_input = reinterpret_cast<decltype(A.close_input)>(&::avformat_close_input);
+    A.alloc_context3 = reinterpret_cast<decltype(A.alloc_context3)>(&::avcodec_alloc_context3);
+    A.params_to_context = reinterpret_cast<decltype(A.params_to_context)>(&::avcodec_parameters_to_context);
+    A.open2 = reinterpret_cast<decltype(A.open2)>(&::avcodec_open2);
+    A.free_context = reinterpret_cast<decltype(A.free_context)>(&::avcodec_free_context);
+    A.send_packet = reinterpret_cast<decltype(A.send_packet)>(&::avcodec_send_packet);
+    A.receive_frame = reinterpret_cast<decltype(A.receive_frame)>(&::avcodec_receive_frame);
+    A.flush_buffers = reinterpret_cast<decltype(A.flush_buffers)>(&::avcodec_flush_buffers);
+    A.get_hw_config = reinterpret_cast<decltype(A.get_hw_config)>(&::avcodec_get_hw_config);
+    A.packet_alloc = reinterpret_cast<decltype(A.packet_alloc)>(&::av_packet_alloc);
+    A.packet_free = reinterpret_cast<decltype(A.packet_free)>(&::av_packet_free);
+    A.packet_unref = reinterpret_cast<decltype(A.packet_unref)>(&::av_packet_unref);
+    A.side_data_get = reinterpret_cast<decltype(A.side_data_get)>(&::av_packet_side_data_get);
+    A.codec_get_name = reinterpret_cast<decltype(A.codec_get_name)>(&::avcodec_get_name);
+    A.frame_alloc = reinterpret_cast<decltype(A.frame_alloc)>(&::av_frame_alloc);
+    A.frame_free = reinterpret_cast<decltype(A.frame_free)>(&::av_frame_free);
+    A.frame_unref = reinterpret_cast<decltype(A.frame_unref)>(&::av_frame_unref);
+    A.hwdevice_ctx_create = reinterpret_cast<decltype(A.hwdevice_ctx_create)>(&::av_hwdevice_ctx_create);
+    A.buffer_ref = reinterpret_cast<decltype(A.buffer_ref)>(&::av_buffer_ref);
+    A.buffer_unref = reinterpret_cast<decltype(A.buffer_unref)>(&::av_buffer_unref);
+    A.hwframe_transfer_data = reinterpret_cast<decltype(A.hwframe_transfer_data)>(&::av_hwframe_transfer_data);
+    A.display_rotation_get = reinterpret_cast<decltype(A.display_rotation_get)>(&::av_display_rotation_get);
+    A.log_set_level = reinterpret_cast<decltype(A.log_set_level)>(&::av_log_set_level);
+    A.format_alloc_context = reinterpret_cast<decltype(A.format_alloc_context)>(&::avformat_alloc_context);
+    A.avio_alloc_context = reinterpret_cast<decltype(A.avio_alloc_context)>(&::avio_alloc_context);
+    A.avio_context_free = reinterpret_cast<decltype(A.avio_context_free)>(&::avio_context_free);
+    A.malloc_ = reinterpret_cast<decltype(A.malloc_)>(&::av_malloc);
+    A.freep = reinterpret_cast<decltype(A.freep)>(&::av_freep);
+    A.find_decoder = reinterpret_cast<decltype(A.find_decoder)>(&::avcodec_find_decoder);
+    A.decode_subtitle2 = reinterpret_cast<decltype(A.decode_subtitle2)>(&::avcodec_decode_subtitle2);
+    A.subtitle_free = reinterpret_cast<decltype(A.subtitle_free)>(&::avsubtitle_free);
+    A.dict_get = reinterpret_cast<decltype(A.dict_get)>(&::av_dict_get);
+    A.log_set_level(AV_LOG_ERROR);
+    g_ok = true;
+    return true;
+}
+#else
 bool LoadFf(std::string* err) {
     std::lock_guard<std::mutex> l(g_m);
     if (g_ok) return true;
@@ -172,6 +219,7 @@ bool LoadFf(std::string* err) {
     if (err) *err = std::string(f) + " not found";
     return false;
 }
+#endif
 
 enum AVPixelFormat PickFormat(AVCodecContext* ctx, const enum AVPixelFormat* fmts) {
     for (const enum AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; p++)
@@ -185,6 +233,7 @@ enum AVPixelFormat PickFormat(AVCodecContext* ctx, const enum AVPixelFormat* fmt
 
 class FfSource : public Source {
 public:
+    explicit FfSource(bool noVideo = false) : noVideo_(noVideo) {}
     ~FfSource() override {
         if (vctx_) A.free_context(&vctx_);
         if (actx_) A.free_context(&actx_);
@@ -251,6 +300,7 @@ public:
         as_ = A.find_best_stream(fmt_, AVMEDIA_TYPE_AUDIO, -1, vs_ >= 0 ? vs_ : -1, &ac, 0);
         // pictures attached to music files (cover art) are not a video
         if (vs_ >= 0 && (fmt_->streams[vs_]->disposition & AV_DISPOSITION_ATTACHED_PIC)) vs_ = -1;
+        if (noVideo_) vs_ = -1;  // (the picture comes from elsewhere)
         if (vs_ >= 0 && !(vc && OpenVideo(vc))) vs_ = -1;
         if (as_ >= 0 && !(ac && OpenAudio(ac))) as_ = -1;
         if (as_ < 0)  // the main sound track can't be decoded here (DTS, TrueHD...): any other one that can
@@ -363,7 +413,7 @@ public:
         AVStream* st = fmt_->streams[ss_];
         double tb = av_q2d(st->time_base);
         int64_t ts = pkt_->pts != AV_NOPTS_VALUE ? pkt_->pts : pkt_->dts;
-        double base = ts != AV_NOPTS_VALUE ? (ts - (st->start_time != AV_NOPTS_VALUE ? st->start_time : 0)) * tb : 0;
+        double base = ts != AV_NOPTS_VALUE ? ts * tb - Start() : 0;
         double start = base + sub.start_display_time / 1000.0;
         double end = -1;
         if (sub.end_display_time && sub.end_display_time != UINT32_MAX) end = base + sub.end_display_time / 1000.0;
@@ -438,8 +488,12 @@ public:
         return 1;
     }
 
+    // where the file's clock starts (all streams count from here; a stream's own start - for subtitles the first
+    // line - would shift it)
+    double Start() const { return fmt_ && fmt_->start_time != AV_NOPTS_VALUE ? fmt_->start_time / (double)AV_TIME_BASE : 0; }
+
     bool Seek(double t) override {
-        int64_t ts = (int64_t)(t * AV_TIME_BASE);
+        int64_t ts = (int64_t)((t + Start()) * AV_TIME_BASE);
         int r = A.seek_file(fmt_, -1, INT64_MIN, ts, ts, 0);
         if (vctx_) A.flush_buffers(vctx_);
         if (actx_) A.flush_buffers(actx_);
@@ -503,7 +557,7 @@ private:
             int r = A.receive_frame(ctx, frame_);
             if (r < 0) break;
             int64_t ts = frame_->best_effort_timestamp != AV_NOPTS_VALUE ? frame_->best_effort_timestamp : frame_->pts;
-            double pts = ts != AV_NOPTS_VALUE ? (ts - (st->start_time != AV_NOPTS_VALUE ? st->start_time : 0)) * tb : 0;
+            double pts = ts != AV_NOPTS_VALUE ? ts * tb - Start() : 0;
             if (pts + 0.001 < skipBefore_) {
                 A.frame_unref(frame_);
                 continue;
@@ -602,6 +656,7 @@ private:
         skipBefore_ = 0;
     }
 
+    bool noVideo_ = false;
     AVFormatContext* fmt_ = nullptr;
     AVIOContext* io_ = nullptr;
     LspStream stream_{};
@@ -623,7 +678,13 @@ private:
 
 }  // namespace
 
+#ifdef LSP_FF_SIDE
+// Android: FFmpeg reads sound and subtitles next to the platform's video decoder (player_android.cpp)
+bool InitFf(std::string* err) { return LoadFf(err); }
+std::unique_ptr<Source> CreateFfSource() { return std::make_unique<FfSource>(true); }
+#else
 bool InitBackend(const LspHost*, std::string* err) { return LoadFf(err); }
 std::unique_ptr<Source> CreateSource(const LspHost*) { return std::make_unique<FfSource>(); }
+#endif
 
 }  // namespace lsp

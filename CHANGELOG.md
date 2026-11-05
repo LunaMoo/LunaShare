@@ -11,6 +11,13 @@
 - **More movies play** on computers: AC-3, E-AC-3, DTS, TrueHD, MP2 and WMA sound, MPEG-2 and VC-1 video, 10-bit
   video (HDR / anime releases), .ts / .m2ts / .vob / .flv / .wmv files. When the main sound track can't be decoded,
   another one is used instead of none.
+- **Subtitles at the right time:** subtitles from a movie file were shifted by the moment of their first line (often
+  a minute or more), so they seemed not to show at all.
+- **The host's subtitles for everyone:** viewers see the subtitles the host has on - also a file the host picked -
+  as *Host's subtitles* (the default), and can still choose others for themselves.
+- **Android: sound and subtitles from MKV files:** sound tracks and subtitles are read with FFmpeg (built into the
+  app), the picture still by the phone's decoder - so AC-3 / DTS sound plays on phones without those decoders, and
+  ASS and Blu-ray / DVD subtitles show.
 - **Movie screen:** the picture fills the screen, the controls lie on top and hide after 3 seconds (tap / move the
   mouse to bring them back). Phones turn sideways and hide the system bars (also with rotation locked); computers
   get *Full screen* (F or double-click). The screen stays on while the movie plays.

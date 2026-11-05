@@ -91,6 +91,9 @@ private:
     int64_t watchActive = 0;  // last time someone touched / moved the mouse (controls hide a few seconds later)
     bool watchFullscreen = false, watchMovie = false, watchAwake = false, watchDevSub = false;
     std::set<std::string> watchSubsAdded;
+    bool watchSubFollow = true;       // viewer: subtitles as the host has them (until picking others)
+    std::string watchSubApplied;      // ... the host's choice that was applied
+    int64_t watchSubCheck = 0;
     void WatchTracksPopup();
     void GroupCallStrip(float tile, bool onVideo);  // the people in a group call (tap: watch their video)
     std::string CallPeerName(const ls::CallPeer& p);

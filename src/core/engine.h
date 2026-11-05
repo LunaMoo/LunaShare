@@ -120,6 +120,7 @@ struct WatchInfo {
     std::string waitFor;       // ... who
     std::vector<std::string> people;  // names of everyone watching
     std::vector<std::string> subFiles;  // subtitle files for the movie (host: next to it; viewer: received copies)
+    std::string hostSub;       // the subtitles the host has on: "" none, "file:<name>", "track:<n>:<lang>" (n-th in the file)
     double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 : 0); }
 };
 struct WatchInviteInfo {
@@ -348,7 +349,9 @@ public:
     void WatchControl(bool playing, double pos);  // play / pause / seek (pos < 0: keep the position)
     bool WatchBuffering();                    // this viewer is waiting for data
     double WatchLoaded();                     // viewer: fraction of the file here (0..1)
-    int WatchRead(int64_t off, uint8_t* buf, int len);  // viewer's player: blocks until the bytes arrive; < 0 cancelled  // group video call: whose picture is shown big ("" = automatic)
+    int WatchRead(int64_t off, uint8_t* buf, int len);  // viewer's player: blocks until the bytes arrive; < 0 cancelled
+    void WatchShareSubtitles(const std::string& path);  // host: a subtitle file picked during the movie goes to everyone
+    void WatchSetHostSub(const std::string& desc);      // host: which subtitles are on here (shown to viewers as default)  // group video call: whose picture is shown big ("" = automatic)
     void AcceptCall();
     void EndCall(const std::string& reason = "hangup");
     // thread-safe (audio/video threads). data[0] is the media kind: 1 = audio, 2 = video. Audio always goes ahead of
@@ -538,6 +541,7 @@ private:
     void WatchUpdateHold();
     void EndWatchLocked(const std::string& why);
     json WatchStateJson();
+    void SendWatchSubs(const std::shared_ptr<Connection>& c, const std::string& path);
     std::shared_ptr<Connection> CallConn();
     std::string PartDir();
 

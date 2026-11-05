@@ -40,7 +40,11 @@ static double Play(const LspModule* m, LspPlayer* p, double from, double secs, s
         m->video_frame(p, nullptr, nullptr);
         LspSubtitle s;
         int k = m->subtitle(p, &s);
-        if (texts && k != last && ((s.text && *s.text) || s.rgba)) texts->push_back(s.rgba ? std::string("[picture]") : std::string(s.text));
+        if (texts && k != last && ((s.text && *s.text) || s.rgba)) {
+            char at[32];
+            snprintf(at, sizeof(at), "@%.1f ", m->position(p));
+            texts->push_back(at + (s.rgba ? std::string("[picture]") : std::string(s.text)));
+        }
         last = k;
         std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }

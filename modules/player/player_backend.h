@@ -35,6 +35,12 @@ public:
     virtual bool OpenStream(const LspStream* s, LspInfo* info, bool wantAudio, std::string* err) = 0;
     // decode a little; returns 1 = go on, 0 = end of file, -1 = error
     virtual int Step(Sink& sink) = 0;
+    // the same, knowing what the player is short of (sources made of two decoders step only the one needed)
+    virtual int StepNeeds(Sink& sink, bool needVideo, bool needAudio) {
+        (void)needVideo;
+        (void)needAudio;
+        return Step(sink);
+    }
     virtual bool Seek(double seconds) = 0;
     virtual std::vector<TrackInfo> Tracks() { return {}; }
     // decode thread, between Step()s; the core seeks to the current position afterwards
@@ -43,6 +49,10 @@ public:
 };
 
 std::unique_ptr<Source> CreateSource(const LspHost* host);
+#ifdef LSP_FF_SIDE
+bool InitFf(std::string* err);
+std::unique_ptr<Source> CreateFfSource();  // sound and subtitles only
+#endif
 bool InitBackend(const LspHost* host, std::string* err);
 
 }  // namespace lsp

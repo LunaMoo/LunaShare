@@ -249,6 +249,81 @@ private:
     LspStream stream_{};
 };
 
+
+#ifdef LSP_FF_SIDE
+// The phone's decoder for the picture, FFmpeg for sound and subtitles: phones often can't decode AC-3 / DTS
+// (licensing), and Android reads no ASS or Blu-ray subtitles from MKV files at all.
+class HybridSource : public Source {
+public:
+    bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) override {
+        if (wantAudio) OpenSide([&](Source& s, LspInfo* i, std::string* e) { return s.Open(path, i, true, e); });
+        return OpenMain([&](Source& s, LspInfo* i, bool a, std::string* e) { return s.Open(path, i, a, e); }, info, wantAudio, err);
+    }
+    bool OpenStream(const LspStream* st, LspInfo* info, bool wantAudio, std::string* err) override {
+        if (wantAudio) OpenSide([&](Source& s, LspInfo* i, std::string* e) { return s.OpenStream(st, i, true, e); });
+        return OpenMain([&](Source& s, LspInfo* i, bool a, std::string* e) { return s.OpenStream(st, i, a, e); }, info, wantAudio, err);
+    }
+    int Step(Sink& sink) override { return StepNeeds(sink, true, true); }
+    int StepNeeds(Sink& sink, bool needVideo, bool needAudio) override {
+        if (!sideOk_) return mainOk_ ? main_.Step(sink) : 0;
+        if (!mainDone_ && (needVideo || sideDone_)) {
+            int r = main_.Step(sink);
+            if (r <= 0) mainDone_ = true;
+        }
+        if (!sideDone_ && (needAudio || !sideAudio_ || mainDone_)) {
+            int r = side_->Step(sink);
+            if (r <= 0) sideDone_ = true;
+        }
+        return mainDone_ && sideDone_ ? 0 : 1;
+    }
+    bool Seek(double t) override {
+        mainDone_ = !mainOk_ || (sideAudio_ && !mainVideo_);
+        sideDone_ = false;
+        bool ok = mainOk_ ? main_.Seek(t) : true;
+        if (sideOk_) side_->Seek(t);
+        return ok;
+    }
+    std::vector<TrackInfo> Tracks() override { return sideOk_ ? side_->Tracks() : main_.Tracks(); }
+    bool SelectAudio(int id) override { return sideAudio_ ? side_->SelectAudio(id) : main_.SelectAudio(id); }
+    bool SelectSubtitle(int id) override { return sideOk_ ? side_->SelectSubtitle(id) : main_.SelectSubtitle(id); }
+
+private:
+    template <class F>
+    void OpenSide(F open) {
+        std::string e;
+        if (!InitFf(&e)) return;
+        side_ = CreateFfSource();
+        LspInfo si{};
+        sideOk_ = side_ && open(*side_, &si, &e);
+        if (!sideOk_) {
+            side_.reset();
+            return;
+        }
+        sideAudio_ = si.has_audio;
+        sideInfo_ = si;
+    }
+    template <class F>
+    bool OpenMain(F open, LspInfo* info, bool wantAudio, std::string* err) {
+        // the phone's own sound only when FFmpeg has none to give
+        bool ok = open(main_, info, wantAudio && !sideAudio_, err);
+        if (!ok && !sideAudio_) return false;
+        if (!ok) memset(info, 0, sizeof(*info));
+        if (sideAudio_) {
+            info->has_audio = 1;
+            memcpy(info->audio_codec, sideInfo_.audio_codec, sizeof(info->audio_codec));
+            if (info->duration <= 0) info->duration = sideInfo_.duration;
+        }
+        mainOk_ = ok;
+        mainVideo_ = ok && info->has_video;
+        mainDone_ = !ok || (sideAudio_ && !mainVideo_);  // (sound-only file: FFmpeg does it all)
+        return true;
+    }
+    AndroidSource main_;
+    std::unique_ptr<Source> side_;
+    LspInfo sideInfo_{};
+    bool sideOk_ = false, sideAudio_ = false, mainOk_ = false, mainVideo_ = false, mainDone_ = false, sideDone_ = false;
+};
+#endif
 }  // namespace
 
 bool InitBackend(const LspHost* host, std::string* err) {
@@ -274,6 +349,12 @@ bool InitBackend(const LspHost* host, std::string* err) {
     return true;
 }
 
-std::unique_ptr<Source> CreateSource(const LspHost*) { return std::make_unique<AndroidSource>(); }
+std::unique_ptr<Source> CreateSource(const LspHost*) {
+#ifdef LSP_FF_SIDE
+    return std::make_unique<HybridSource>();
+#else
+    return std::make_unique<AndroidSource>();
+#endif
+}
 
 }  // namespace lsp

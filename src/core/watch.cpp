@@ -174,6 +174,33 @@ void Engine::EndWatchLocked(const std::string& why) {
     Emit({EventType::Info, w.key, ""});
 }
 
+void Engine::SendWatchSubs(const std::shared_ptr<Connection>& c, const std::string& path) {
+    std::string data;
+    FILE* fp = OpenFile(path, "rb");
+    if (!fp) return;
+    char b[65536];
+    size_t n;
+    while ((n = fread(b, 1, sizeof(b), fp)) > 0 && data.size() < (4u << 20)) data.append(b, n);
+    fclose(fp);
+    Queue(c, Msg::WatchSubs, {{"sid", watch.sid}, {"name", BaseName(path)}, {"data", Base64Encode(data)}});
+}
+
+void Engine::WatchShareSubtitles(const std::string& path) {
+    auto lk = Lock();
+    if (!watch.sid || !watch.host.empty() || FileSize(path) <= 0 || FileSize(path) > (4 << 20)) return;
+    if (std::find(watch.subFiles.begin(), watch.subFiles.end(), path) != watch.subFiles.end()) return;
+    watch.subFiles.push_back(path);
+    for (auto& d : watchViewers_)
+        if (auto c = ReadyConn(d)) SendWatchSubs(c, path);
+}
+
+void Engine::WatchSetHostSub(const std::string& desc) {
+    auto lk = Lock();
+    if (!watch.sid || !watch.host.empty() || watch.hostSub == desc) return;
+    watch.hostSub = desc;
+    WatchBroadcast();
+}
+
 // ---------------------------------------------------------------- the clock
 
 json Engine::WatchStateJson() {
@@ -181,7 +208,7 @@ json Engine::WatchStateJson() {
     json people = json::array({settings.displayName});
     for (auto& d : watchViewers_) people.push_back(PeerName(ChatKey(d)));
     return {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.Target(now)}, {"hold", watch.hold},
-            {"wait", watch.waitFor}, {"people", people}, {"ver", ++watchVer_}};
+            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"ver", ++watchVer_}};
 }
 
 void Engine::WatchBroadcast() {
@@ -289,16 +316,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             if (sid != watch.sid || !watch.host.empty()) return;
             if (std::find(watchViewers_.begin(), watchViewers_.end(), dev) == watchViewers_.end()) {
                 watchViewers_.push_back(dev);
-                for (auto& f : watch.subFiles) {
-                    std::string data;
-                    FILE* fp = OpenFile(f, "rb");
-                    if (!fp) continue;
-                    char b[65536];
-                    size_t n;
-                    while ((n = fread(b, 1, sizeof(b), fp)) > 0 && data.size() < (4u << 20)) data.append(b, n);
-                    fclose(fp);
-                    Queue(c, Msg::WatchSubs, {{"sid", sid}, {"name", BaseName(f)}, {"data", Base64Encode(data)}});
-                }
+                for (auto& f : watch.subFiles) SendWatchSubs(c, f);
             }
             watchBuffering_[dev] = true;
             WatchUpdateHold();
@@ -349,6 +367,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.at = SteadyMs();
             watch.hold = j.value("hold", false);
             watch.waitFor = j.value("wait", "");
+            watch.hostSub = j.value("hsub", "");
             watch.people.clear();
             for (auto& p : j.value("people", json::array()))
                 if (p.is_string()) watch.people.push_back(p.get<std::string>());

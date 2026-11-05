@@ -343,6 +343,7 @@ void PlayerHost::UpdateSubtitle() {
     int serial = mod_->subtitle(p_, &s);
     if (serial == subSerial_) return;
     subSerial_ = serial;
+    if (getenv("LUNASHARE_SUBDEBUG")) SDL_Log("subtitle %d: text '%s' picture %dx%d at %.2f,%.2f size %.2f,%.2f", serial, s.text ? s.text : "", s.w, s.h, s.x, s.y, s.sw, s.sh);
     if (sub_.tex) glf::DeleteTextures(1, &sub_.tex);
     sub_ = Sub();
     sub_.text = s.text ? s.text : "";

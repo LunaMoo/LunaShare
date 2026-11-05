@@ -460,6 +460,7 @@ struct LspPlayer {
             double now = PositionLocked();
             while (subs.size() > 50 && subs.front().start < now - 30) subs.erase(subs.begin());
         };
+        bool needV = true, needA = true;
         for (;;) {
             {
                 std::unique_lock<std::mutex> l(m);
@@ -511,8 +512,10 @@ struct LspPlayer {
                 bool audioFull = !info.has_audio || audio.size() >= (size_t)rate * channels;
                 bool videoFull = !info.has_video || frames.size() >= 6;
                 if (audioFull && videoFull) continue;
+                needV = !videoFull;
+                needA = !audioFull;
             }
-            int r = src->Step(sink);
+            int r = src->StepNeeds(sink, needV, needA);
             if (r <= 0) {
                 std::lock_guard<std::mutex> l(m);
                 if (r == 0) eof = true;

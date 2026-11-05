@@ -2835,7 +2835,14 @@ void App::DrawPopups() {
                 break;
             case BrowseFor::WatchSubs: {
                 int id = res.empty() ? -1 : Player().AddSubtitles(res[0]);
-                if (id >= 0) Player().SelectTrack(LSP_TRACK_SUBTITLE, id);
+                if (id >= 0) {
+                    Player().SelectTrack(LSP_TRACK_SUBTITLE, id);
+                    watchSubFollow = false;  // (a viewer's own choice)
+                    if (eng.watch.sid && eng.watch.host.empty()) {
+                        eng.WatchShareSubtitles(res[0]);  // the others get the file too
+                        watchSubsAdded.insert(res[0]);
+                    }
+                }
                 else toasts.push_back({EventType::Error, T("Subtitles"), T("Could not read the subtitles (.srt, .ass or .vtt)."), "", 0, 4.0f});
                 break;
             }

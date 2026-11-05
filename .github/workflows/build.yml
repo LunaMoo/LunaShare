@@ -167,6 +167,36 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "cmake;3.22.1" "platforms;android-35"
+      - uses: actions/cache@v4
+        id: ffandroid
+        with:
+          path: ffandroid
+          key: ffmpeg-n7.1-android-sound-subs-v1
+      - name: Build FFmpeg for Android (sound + subtitle decoders, static)
+        if: steps.ffandroid.outputs.cache-hit != 'true'
+        run: |
+          NDK=$ANDROID_HOME/ndk/27.2.12479018
+          TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+          git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            case $abi in
+              arm64-v8a) arch=aarch64; cc=aarch64-linux-android24-clang ;;
+              armeabi-v7a) arch=arm; cc=armv7a-linux-androideabi24-clang ;;
+              x86_64) arch=x86_64; cc=x86_64-linux-android24-clang ;;
+            esac
+            mkdir -p ffb-$abi && cd ffb-$abi
+            ../ffsrc/configure --prefix=$GITHUB_WORKSPACE/ffandroid/$abi --target-os=android --arch=$arch --enable-cross-compile \
+              --cc=$TC/$cc --cxx=$TC/$cc++ --ar=$TC/llvm-ar --ranlib=$TC/llvm-ranlib --nm=$TC/llvm-nm --strip=$TC/llvm-strip \
+              --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter \
+              --disable-postproc --disable-network --disable-autodetect --enable-zlib --disable-asm --enable-pic --enable-static --disable-shared \
+              --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd \
+              --enable-decoder=aac,aac_latm,mp3,mp3float,mp2,mp2float,opus,vorbis,flac,alac,ac3,ac3_fixed,eac3,dca,truehd,mlp,wmav2,wmapro,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8,pcm_dvd,pcm_bluray,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub \
+              --enable-parser=aac,aac_latm,mpegaudio,opus,vorbis,flac,ac3,dca,mlp,dvdsub,dvbsub \
+              --disable-debug
+            make -j4 && make install
+            cd ..
+          done
+          cp ffsrc/COPYING.LGPLv2.1 ffandroid/FFmpeg-LICENSE.txt
       - name: Build APK
         working-directory: android
         run: gradle assembleRelease --no-daemon

@@ -750,3 +750,4 @@
 {"Full screen (F)", "Pełny ekran (F)"},
 {"Sound %d", "Dźwięk %d"},
 {"Subtitles %d", "Napisy %d"},
+{"Host's subtitles (%s)", "Napisy udostępniającego (%s)"},

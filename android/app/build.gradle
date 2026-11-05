@@ -30,7 +30,9 @@ android {
             cmake {
                 // one app with everything (voice + video calls); build your own without them with -DLUNASHARE_BUILD_VOICE=OFF / VIDEO=OFF
                 arguments '-DANDROID_STL=c++_shared', '-DLUNASHARE_BUILD_TESTS=OFF', '-DLUNASHARE_BUILD_VOICE=ON', '-DLUNASHARE_BUILD_VIDEO=ON',
-                          "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdlDir.absolutePath}"
+                          "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdlDir.absolutePath}",
+                          // FFmpeg for sound tracks and subtitles the phone can't decode (CI builds it into ../ffandroid)
+                          "-DLUNASHARE_FFMPEG_ANDROID=${file("${rootDir}/../ffandroid").absolutePath}"
                 cppFlags '-std=c++17'
             }
         }
