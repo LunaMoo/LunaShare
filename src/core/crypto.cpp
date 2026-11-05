@@ -391,6 +391,20 @@ bool OpenSealed(const Identity& me, const std::string& sealed, std::string& plai
 
 static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+std::string KeySeal(const uint8_t key[32], const std::string& plain) {
+    std::string out(40 + plain.size(), '\0');
+    uint8_t* p = (uint8_t*)&out[0];
+    SecureRandom(p, 24);
+    crypto_aead_lock(p + 40, p + 24, key, p, nullptr, 0, (const uint8_t*)plain.data(), plain.size());
+    return out;
+}
+
+bool KeyOpen(const uint8_t key[32], const uint8_t* data, size_t len, std::string& plain) {
+    if (len < 40) return false;
+    plain.resize(len - 40);
+    return crypto_aead_unlock(plain.empty() ? nullptr : (uint8_t*)&plain[0], data + 24, key, data, nullptr, 0, data + 40, len - 40) == 0;
+}
+
 std::string Base64Encode(const std::string& bin) {
     std::string out;
     out.reserve((bin.size() + 2) / 3 * 4);

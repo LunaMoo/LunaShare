@@ -820,7 +820,7 @@ void App::DrawMobile() {
     // chat: buttons on the right; the title gets what's left (shortened with "..."), buttons shrink on tiny screens
     bool chatScreen = screen == MScreen::Chat;
     bool groupChat = chatScreen && Engine::IsGroupKey(selectedPeer);
-    bool callable = chatScreen && !groupChat && Media().Available();
+    bool callable = chatScreen && Media().Available();
     bool videoable = callable && Media().VideoAvailable();
     bool webcam = chatScreen && !groupChat && WebcamButtonShown(selectedPeer);
     int nb = chatScreen ? 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) : 0;
@@ -1020,7 +1020,7 @@ void App::DrawChat(const std::string& peer) {
     }
     if (!mobile) {
         float bw = ImGui::GetFrameHeight();
-        bool callable = Media().Available() && !grp;
+        bool callable = Media().Available() && !(grp && grp->left);
         bool videoable = callable && Media().VideoAvailable();
         bool webcam = !grp && WebcamButtonShown(peer);
         int nb = (grp ? 1 : 3) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0);
@@ -3038,13 +3038,15 @@ void App::DrawToasts() {
 // ============================================================================ calls
 
 bool App::CallButton(const std::string& peer, float size, bool video) {
-    bool connected = eng.IsConnected(peer);
-    bool capable = connected && eng.PeerHasCap(peer, video ? "video" : "voice");
+    const Group* grp = eng.GroupOf(peer);
+    bool connected = grp ? !grp->left : eng.IsConnected(peer);
+    bool capable = grp ? connected : connected && eng.PeerHasCap(peer, video ? "video" : "voice");
     bool busy = eng.call.state != CallState::None;
     const char* tip = !connected ? (video ? T("Video call (device is offline)") : T("Voice call (device is offline)"))
                     : !capable ? (video ? T("Video call - the other device does not have the video module")
                                         : T("Voice call - the other device does not have the voice module"))
-                    : busy ? T("Already in a call") : video ? T("Video call") : T("Voice call");
+                    : busy ? T("Already in a call") : grp ? (video ? T("Group video call") : T("Group voice call"))
+                    : video ? T("Video call") : T("Voice call");
     ImGui::BeginDisabled(!capable || busy);
     // green when a call can be made: the usual colour for "call"
     bool green = capable && !busy;
@@ -3186,11 +3188,19 @@ void App::DrawCallBar() {
     // phones: the buttons get their own row under the status once there are more than two, so they always fit
     bool twoRows = mobile && nb >= 2;
     float barH = twoRows ? h * 2 + ImGui::GetStyle().ItemSpacing.y : h;
+    bool groupCall = !c.group.empty();
+    bool strip = groupCall && c.state == CallState::Active && c.media != "video";  // (video: in the picture)
+    float stripTile = mobile ? ui::M().rowH * 1.1f : ImGui::GetFontSize() * 2.8f;
+    float stripH = strip ? stripTile + ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemSpacing.y * 2 : 0;
+    barH += stripH;
     ImGui::PushStyleColor(ImGuiCol_ChildBg, c.state == CallState::Active ? IM_COL32(30, 110, 70, 255) : IM_COL32(60, 70, 120, 255));
     ImGui::BeginChild("callbar", ImVec2(0, barH + ImGui::GetStyle().WindowPadding.y * 2), ImGuiChildFlags_AlwaysUseWindowPadding);
-    std::string who = eng.PeerName(c.peer);
+    std::string who = Emoji().Display(eng.PeerName(c.peer));
     char status[160];
-    if (c.state == CallState::Active) {
+    if (c.state == CallState::Active && groupCall) {
+        int secs = (int)((SteadyMs() - c.answered) / 1000);
+        snprintf(status, sizeof(status), "%s  %d:%02d%s", who.c_str(), secs / 60, secs % 60, c.hub ? T("  through the server") : "");
+    } else if (c.state == CallState::Active) {
         int secs = (int)((SteadyMs() - c.answered) / 1000);
         auto conn = eng.ReadyConn(c.peer);
         snprintf(status, sizeof(status), "%s  %d:%02d%s", who.c_str(), secs / 60, secs % 60, conn ? ("  " + TF("via %s", T(TransportName(conn->transport)))).c_str() : "");
@@ -3249,6 +3259,10 @@ void App::DrawCallBar() {
         ImGui::SameLine();
     }
     DrawCallButtons(bw, h, true);
+    if (strip) {
+        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - stripH + ImGui::GetStyle().ItemSpacing.y));
+        GroupCallStrip(stripTile, false);
+    }
     if (!Media().audioError.empty() && c.state == CallState::Active) {
         ImGui::TextColored(ImVec4(1, 0.8f, 0.6f, 1), "%s", Media().audioError.c_str());
     }
@@ -3273,13 +3287,20 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
     int64_t nowMs = (int64_t)SDL_GetTicks64();
     bool remote = Media().RemoteCameraOn() && rv.valid;
     bool local = Media().CameraOn() && lv.valid && nowMs - lv.lastMs < 1500;  // stale = no self-view stream (120 fps)
-    std::string who = eng.PeerName(eng.call.peer);
+    std::string who = Emoji().Display(eng.PeerName(eng.call.peer));
+    bool groupCall = !eng.call.group.empty();
+    if (groupCall) {  // the person whose video is shown
+        who.clear();
+        for (auto& p : eng.call.peers)
+            if (p.dev == eng.call.spotlight) who = CallPeerName(p);
+        if (eng.call.peers.empty()) remote = false;
+    }
     if (remote) {
         Media().DrawVideo(dl, rv, p0, p1, false, Media().RemoteRotation());
     } else if (local) {
         Media().DrawVideo(dl, lv, p0, p1, false);  // nothing from them: show yourself big
     }
-    if (!remote) {
+    if (!remote && !(groupCall && who.empty())) {
         // their camera is off: initial + hint
         ImVec2 c((p0.x + p1.x) * 0.5f, p0.y + size.y * (local ? 0.15f : 0.42f));
         float r = std::min(size.x, size.y) * (local ? 0.07f : 0.13f);
@@ -3310,6 +3331,12 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         ImVec2 a(p1.x - pw - m, p1.y - ph - m - (phone ? ui::M().rowH * 1.6f : 0)), b(a.x + pw, a.y + ph);
         dl->AddRectFilled(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), IM_COL32(255, 255, 255, 90), 6);
         Media().DrawVideo(dl, lv, a, b, true);
+    }
+    if (groupCall) {  // everyone in the call along the top: tap to watch someone else
+        float tile = phone ? ui::M().rowH * 1.1f : ImGui::GetFontSize() * 2.6f;
+        float m = ImGui::GetStyle().ItemSpacing.x;
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + m, p0.y + m + (phone ? ui::M().rowH + m : 0)));
+        GroupCallStrip(tile, true);
     }
     {
         // corner buttons: turn their picture (phones lying sideways...) and, on desktop, bigger / smaller
@@ -3359,7 +3386,7 @@ void App::DrawVideoOverlay() {
     ImGui::SameLine();
     int secs = (int)((SteadyMs() - eng.call.answered) / 1000);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (bw - ImGui::GetTextLineHeight()) * 0.5f);
-    ImGui::Text("%s  %d:%02d", eng.PeerName(eng.call.peer).c_str(), secs / 60, secs % 60);
+    ImGui::Text("%s  %d:%02d", Emoji().Display(eng.PeerName(eng.call.peer)).c_str(), secs / 60, secs % 60);
     // bottom: call buttons, centered
     int nb = CallButtonCount(true);
     float bb = std::min(bw * 1.05f, (full.x - pad * (float)(nb + 1)) / (float)nb);  // always fits the screen width
@@ -3606,7 +3633,7 @@ void App::DrawIncomingCall() {
         ImGui::EndPopup();
         return;
     }
-    std::string who = eng.PeerName(eng.call.peer);
+    std::string who = Emoji().Display(eng.PeerName(eng.call.peer));
     float avail = ImGui::GetContentRegionAvail().x;
     if (mobile) ImGui::Dummy(ImVec2(0, vp->WorkSize.y * 0.2f));
     // pulsing phone icon

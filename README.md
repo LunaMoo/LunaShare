@@ -30,6 +30,12 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   *delivered* / *read*, you can claim a **username** so others can find you, and phones stay connected in the
   **background** with notifications and a ringing call screen.
 
+**Groups** (see [docs/GROUPS.md](docs/GROUPS.md))
+- **Group chats**: a name and the people; messages reach everyone, also people who have never met each other.
+- **Group voice and video calls**: everyone hears everyone; in video calls you watch one person at a time (the one
+  with the camera on who talks, or whoever you tap). Directly between the devices, or **through your server**, where
+  every phone uploads its voice and video only once (and group members you don't know never connect to you).
+
 **Library (Shared folders)** (see [docs/LIBRARY.md](docs/LIBRARY.md))
 - Files in your *Shared* folder can be browsed and downloaded by your contacts. A download comes from every contact
   that has the file at once (piece by piece, each piece verified), and you then share it on.

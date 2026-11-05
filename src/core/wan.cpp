@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "crypto.h"
 #include "ikcp.h"
 #include "monocypher.h"
 #include "platform.h"
@@ -236,6 +237,10 @@ void WanTransport::Loop() {
     socklen_t al = sizeof(any);
     getsockname(udp, (sockaddr*)&any, &al);
     uint16_t localPort = ntohs(any.sin_port);
+    {
+        std::lock_guard<std::mutex> l(hm_);
+        udp_ = (SocketHandle)udp;
+    }
 
     // tests: pretend the NATs can't be punched (probes ignored), so the relay is used
     const bool noDirect = getenv("LUNASHARE_TEST_NO_DIRECT") != nullptr;
@@ -297,6 +302,9 @@ void WanTransport::Loop() {
         server.sin_port = htons(port);
         freeaddrinfo(res);
         serverOk = true;
+        std::lock_guard<std::mutex> l(hm_);
+        hubIp_ = server.sin_addr.s_addr;
+        hubPort_ = server.sin_port;
     };
     auto registerNow = [&] {
         if (!serverOk) return;
@@ -390,6 +398,19 @@ void WanTransport::Loop() {
                 std::lock_guard<std::mutex> l(m_);
                 if (natExtPort == 0) mappedEp_ = m;
             }
+        }
+        {  // group call through the server: (re)join every few seconds, which also keeps the place
+            std::string join, leave;
+            {
+                std::lock_guard<std::mutex> l(hm_);
+                if (!hubId_.empty() && now - hubJoinAt_ > 4000) {
+                    hubJoinAt_ = now;
+                    join = hubId_;
+                }
+                leave.swap(hubLeave_);
+            }
+            if (serverOk && !leave.empty()) send(server, 'R', json{{"t", "hleave"}, {"hub", leave}}.dump());
+            if (serverOk && !join.empty()) send(server, 'R', json{{"t", "hjoin"}, {"hub", join}}.dump());
         }
         if (now - lastReg > 15000 || renamed) {
             registerNow();
@@ -536,6 +557,22 @@ void WanTransport::Loop() {
                     if (took || id.empty() || !onMail) send(server, 'R', json{{"t", "mack"}, {"ids", json::array({id})}}.dump());
                     continue;
                 }
+                if (t == "hub" || t == "herror") {
+                    bool mine;
+                    {
+                        std::lock_guard<std::mutex> l(hm_);
+                        mine = !hubId_.empty() && j.value("hub", "") == hubId_;
+                    }
+                    if (!mine) continue;
+                    if (t == "herror") {
+                        if (onHubError) onHubError(j.value("msg", ""));
+                        continue;
+                    }
+                    std::vector<std::string> ids;
+                    for (auto& x : j.value("members", json::array())) ids.push_back(x.is_string() ? x.get<std::string>() : "");
+                    if (onHubMembers) onHubMembers(j.value("you", -1), ids);
+                    continue;
+                }
                 if (!t.empty() && t[0] == 'u') {  // usernames
                     if (onServerReply) onServerReply(j.dump());
                     continue;
@@ -623,6 +660,8 @@ void WanTransport::Loop() {
                 if (it == sessions.end() || !it->second->relayed) continue;
                 it->second->lastRecv = now;
                 ikcp_input(it->second->kcp, buf.data() + 1, n - 1);
+            } else if (type == 'H' && n > 6 && serverOk && SameEp(from, server)) {
+                HubInput((const uint8_t*)buf.data() + 1, (size_t)n - 1);
             } else if (type == 'X' && n >= 5) {
                 uint32_t conv;
                 memcpy(&conv, buf.data() + 1, 4);
@@ -674,8 +713,144 @@ void WanTransport::Loop() {
     if (serverOk) send(server, 'R', json{{"t", "bye"}, {"room", cfg_.roomHash}, {"id", cfg_.id}}.dump());
     if (natGwKnown && natExtPort) natRequest(natGw, 1, 0);  // release the router mapping
     upnp.Stop();
+    {
+        std::lock_guard<std::mutex> l(hm_);
+        udp_ = kInvalidSocket;
+    }
     CloseSocket((SocketHandle)udp);
     SetStatus("off");
+}
+
+// ---------------------------------------------------------------- group calls through the server
+
+static constexpr size_t kHubChunk = 1100;  // fragment payload (the whole datagram stays well under 1280 bytes)
+static constexpr int kHubGroup = 8;        // one parity fragment per 8
+
+void WanTransport::HubJoin(const std::string& hubId) {
+    std::lock_guard<std::mutex> l(hm_);
+    if (hubId == hubId_) return;
+    if (!hubId_.empty()) hubLeave_ = hubId_;
+    hubId_ = hubId;
+    hubJoinAt_ = 0;  // right away
+    hubHandle_ = 0;
+    uint8_t h[4];
+    if (hubId.size() == 32 && FromHex(hubId.substr(0, 8), h, 4)) hubHandle_ = h[0] | (uint32_t)h[1] << 8 | (uint32_t)h[2] << 16 | (uint32_t)h[3] << 24;
+}
+
+bool WanTransport::HubSend(uint32_t toMask, const std::string& msg) {
+    SocketHandle udp;
+    uint32_t handle, ip;
+    uint16_t port, id;
+    {
+        std::lock_guard<std::mutex> l(hm_);
+        udp = udp_;
+        handle = hubHandle_;
+        ip = hubIp_;
+        port = hubPort_;
+        id = hubMsg_++;
+    }
+    if (udp == kInvalidSocket || !handle || !ip || msg.empty() || !toMask) return false;
+    size_t count = (msg.size() + kHubChunk - 1) / kHubChunk;
+    if (count > 200) return false;
+    size_t groups = (count + kHubGroup - 1) / kHubGroup;
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = ip;
+    to.sin_port = port;
+    uint8_t pkt[17 + kHubChunk];
+    pkt[0] = 'H';
+    for (int i = 0; i < 4; i++) pkt[1 + i] = (uint8_t)(handle >> (8 * i));
+    for (int i = 0; i < 4; i++) pkt[5 + i] = (uint8_t)(toMask >> (8 * i));
+    pkt[9] = (uint8_t)id;
+    pkt[10] = (uint8_t)(id >> 8);
+    pkt[12] = (uint8_t)count;
+    uint32_t total = (uint32_t)msg.size();
+    for (int i = 0; i < 4; i++) pkt[13 + i] = (uint8_t)(total >> (8 * i));
+    const size_t hdr = 17;
+    // (single-fragment messages - voice - get no parity: a lost one is concealed by the decoder anyway)
+    std::vector<uint8_t> parity(kHubChunk);
+    for (size_t g = 0; g < groups; g++) {
+        std::fill(parity.begin(), parity.end(), 0);
+        for (size_t k = g * kHubGroup; k < std::min(count, (g + 1) * kHubGroup); k++) {
+            size_t off = k * kHubChunk, len = std::min(kHubChunk, msg.size() - off);
+            pkt[11] = (uint8_t)k;
+            memcpy(pkt + hdr, msg.data() + off, len);
+            for (size_t b = 0; b < len; b++) parity[b] ^= (uint8_t)msg[off + b];
+            sendto((sock_t)udp, (const char*)pkt, (int)(hdr + len), 0, (const sockaddr*)&to, sizeof(to));
+        }
+        if (count > 1) {
+            pkt[11] = (uint8_t)(count + g);
+            memcpy(pkt + hdr, parity.data(), kHubChunk);
+            sendto((sock_t)udp, (const char*)pkt, (int)(hdr + kHubChunk), 0, (const sockaddr*)&to, sizeof(to));
+        }
+    }
+    return true;
+}
+
+// [hub u32][from u8][msg u16][index u8][count u8][total u32][data]
+void WanTransport::HubInput(const uint8_t* d, size_t n) {
+    if (n < 13) return;
+    uint32_t handle = d[0] | (uint32_t)d[1] << 8 | (uint32_t)d[2] << 16 | (uint32_t)d[3] << 24;
+    {
+        std::lock_guard<std::mutex> l(hm_);
+        if (!handle || handle != hubHandle_) return;
+    }
+    int from = d[4];
+    uint16_t msg = (uint16_t)(d[5] | d[6] << 8);
+    int idx = d[7], count = d[8];
+    uint32_t total = d[9] | (uint32_t)d[10] << 8 | (uint32_t)d[11] << 16 | (uint32_t)d[12] << 24;
+    const uint8_t* data = d + 13;
+    size_t len = n - 13;
+    if (count < 1 || total == 0 || total > (uint32_t)count * kHubChunk || len > kHubChunk) return;
+    if (count == 1) {  // (the common case: one voice packet)
+        if (idx == 0 && len == total && onHub) onHub(from, std::string((const char*)data, len));
+        return;
+    }
+    int groups = (count + kHubGroup - 1) / kHubGroup;
+    if (idx >= count + groups) return;
+    int64_t now = SteadyMs();
+    for (auto it = reasm_.begin(); it != reasm_.end();)
+        it = now - it->second.t > 3000 ? reasm_.erase(it) : std::next(it);
+    if (reasm_.size() > 512) reasm_.clear();
+    uint32_t key = (uint32_t)from << 16 | msg;
+    Reasm& r = reasm_[key];
+    if (r.count != count || r.total != total) {
+        r = Reasm();
+        r.count = count;
+        r.total = total;
+        r.frags.assign((size_t)(count + groups), std::string());
+        r.t = now;
+    }
+    if (r.done || !r.frags[(size_t)idx].empty()) return;
+    r.frags[(size_t)idx].assign((const char*)data, len);
+    auto dataLen = [&](int k) { return k == count - 1 ? total - (uint32_t)(count - 1) * kHubChunk : (uint32_t)kHubChunk; };
+    // a group missing exactly one fragment, with its parity: recover it
+    for (int g = 0; g < groups; g++) {
+        int missing = -1, lost = 0;
+        int end = std::min(count, (g + 1) * kHubGroup);
+        for (int k = g * kHubGroup; k < end; k++)
+            if (r.frags[(size_t)k].empty()) {
+                missing = k;
+                lost++;
+            }
+        const std::string& par = r.frags[(size_t)(count + g)];
+        if (lost != 1 || par.empty()) continue;
+        std::string rec(par);
+        rec.resize(kHubChunk, '\0');
+        for (int k = g * kHubGroup; k < end; k++)
+            if (k != missing)
+                for (size_t b = 0; b < r.frags[(size_t)k].size(); b++) rec[b] ^= r.frags[(size_t)k][b];
+        rec.resize(dataLen(missing));
+        r.frags[(size_t)missing] = rec;
+    }
+    std::string out;
+    out.reserve(total);
+    for (int k = 0; k < count; k++) {
+        if (r.frags[(size_t)k].size() != dataLen(k)) return;  // not complete yet
+        out += r.frags[(size_t)k];
+    }
+    r.done = true;
+    if (onHub) onHub(from, out);
 }
 
 }  // namespace ls

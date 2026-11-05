@@ -72,7 +72,17 @@ int main(int argc, char** argv) {
     if (peer.empty()) { printf("could not connect\n"); return 1; }
     if (getenv("DEMO_CALL")) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-        uint64_t cid = e.StartCall(peer, callKind == "webcam-offer" ? "webcam-offer" : videoCall ? "video" : "voice");
+        std::string target = peer;
+        if (getenv("DEMO_GROUP")) {  // a group call
+            std::string them;
+            {
+                auto l = e.Lock();
+                them = e.ChatKey(peer);
+            }
+            target = e.CreateGroup(u8"Rodzina \U0001F3E1", {them});
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        uint64_t cid = e.StartCall(target, callKind == "webcam-offer" ? "webcam-offer" : videoCall ? "video" : "voice");
         (void)cid;
         fflush(stdout);
 #ifdef LS_DEMO_VOICE
@@ -105,7 +115,7 @@ int main(int argc, char** argv) {
                     vm->init(&vh);
                     vm->start(&vs);
                     vm->set_camera_on(1);
-                    eng->onMedia = [vm](uint64_t, const uint8_t* d, size_t n) { if (n && d[0] == 2) vm->receive(d, n); };
+                    eng->onMedia = [vm](uint64_t, int, const uint8_t* d, size_t n) { if (n && d[0] == 2) vm->receive(d, n); };
                 }
 #endif
             }

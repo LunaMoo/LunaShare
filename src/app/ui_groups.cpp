@@ -1,9 +1,12 @@
 // Groups: "New group" (a name and the people), the people in a group (add, remove, rename, leave).
 #include <algorithm>
 
+#include <cfloat>
+
 #include "i18n.h"
 #include "imgui.h"
 #include "imgui_stdlib.h"
+#include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
 
@@ -191,5 +194,65 @@ void App::DrawGroupPopups() {
         }
         if (ImGui::Button(T("Close"), ImVec2(bw, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
+    }
+}
+
+// ---- group calls: who is in the call (tap someone to watch their video)
+std::string App::CallPeerName(const CallPeer& p) {
+    std::string key = "@" + p.acc;
+    if (!eng.DevicesOf(key).empty()) return eng.PeerName(key);
+    if (const Group* g = eng.GroupOf(eng.call.group))
+        for (auto& m : g->members)
+            if (m.acc == p.acc && !m.name.empty()) return m.name;
+    return eng.PeerName(p.dev);
+}
+
+void App::GroupCallStrip(float tile, bool onVideo) {
+    const CallInfo& c = eng.call;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    bool video = c.media == "video";
+    int64_t now = SteadyMs();
+    if (c.peers.empty()) {
+        const char* t = T("Waiting for the others to answer...");
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImVec2 ts = ImGui::CalcTextSize(t);
+        if (onVideo) dl->AddRectFilled(p, ImVec2(p.x + ts.x + 12, p.y + ts.y + 8), IM_COL32(0, 0, 0, 150), 6);
+        dl->AddText(ImVec2(p.x + 6, p.y + 4), IM_COL32(235, 235, 235, 255), t);
+        ImGui::Dummy(ImVec2(ts.x + 12, ts.y + 8));
+        return;
+    }
+    float nameH = ImGui::GetTextLineHeight() * 0.85f;
+    for (size_t i = 0; i < c.peers.size(); i++) {
+        const CallPeer& p = c.peers[i];
+        if (i) ImGui::SameLine();
+        ImGui::PushID(p.dev.c_str());
+        ImVec2 p0 = ImGui::GetCursorScreenPos();
+        bool clicked = ImGui::InvisibleButton("##cp", ImVec2(tile, tile + nameH));
+        std::string name = CallPeerName(p);
+        if (ImGui::IsItemHovered() && !ui::M().mobile)
+            ImGui::SetTooltip("%s%s", name.c_str(), video ? (std::string("\n") + T("Click to watch their video")).c_str() : "");
+        if (clicked && video) eng.SetSpotlight(p.dev);
+        if (onVideo) dl->AddRectFilled(p0, ImVec2(p0.x + tile, p0.y + tile + nameH), IM_COL32(0, 0, 0, 140), 6);
+        ImVec2 cc(p0.x + tile * 0.5f, p0.y + tile * 0.48f);
+        float av = tile * 0.72f;
+        bool talking = now - p.talking < 500;
+        bool watched = video && p.dev == c.spotlight;
+        if (talking) dl->AddCircle(cc, av * 0.5f + 3, IM_COL32(80, 230, 120, 255), 0, 3);
+        else if (watched) dl->AddCircle(cc, av * 0.5f + 3, IM_COL32(255, 255, 255, 200), 0, 2);
+        DrawAvatar(dl, cc, av, "@" + p.acc, name);
+        if (video)
+            ui::DrawIcon(dl, p.cameraOn ? Icon::Video : Icon::VideoOff, ImVec2(p0.x + tile * 0.84f, p0.y + tile * 0.16f), tile * 0.22f,
+                         p.cameraOn ? IM_COL32(255, 255, 255, 230) : IM_COL32(200, 200, 200, 150));
+        // the name, shortened to the tile
+        std::string n = name;
+        ImFont* f = ImGui::GetFont();
+        float fs = ImGui::GetFontSize() * 0.8f;
+        while (n.size() > 1 && f->CalcTextSizeA(fs, FLT_MAX, 0, n.c_str()).x > tile - 4) {
+            n.pop_back();
+            while (!n.empty() && ((unsigned char)n.back() & 0xC0) == 0x80) n.pop_back();
+        }
+        ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0, n.c_str());
+        dl->AddText(f, fs, ImVec2(p0.x + (tile - ts.x) * 0.5f, p0.y + tile), IM_COL32(240, 240, 240, 255), n.c_str());
+        ImGui::PopID();
     }
 }

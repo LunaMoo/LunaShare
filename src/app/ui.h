@@ -79,6 +79,8 @@ private:
     void OpenGroupMembers(const std::string& key);
     void GroupButtons(const std::string& key, float size);
     void DrawGroupPopups();
+    void GroupCallStrip(float tile, bool onVideo);  // the people in a group call (tap: watch their video)
+    std::string CallPeerName(const ls::CallPeer& p);
     bool openGroupDlg = false, groupDlgAdd = false, openGroupMembers = false;
     std::string groupDlgKey, groupNameBuf;
     std::set<std::string> groupPick;

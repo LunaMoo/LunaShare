@@ -134,15 +134,33 @@ struct SwarmDownload {
     uint32_t Pieces() const { return (uint32_t)((size + pieceSize - 1) / pieceSize); }
 };
 
+struct CallPeer {          // group calls: another device in the call
+    std::string dev, acc;
+    int stream = 0;          // voice stream number (stable for the call)
+    bool cameraOn = false;
+    int64_t talking = 0;     // (steady ms) last time voice came from them
+    int hubIdx = -1;         // through the server: its number in the hub
+};
 struct CallInfo {
     uint64_t id = 0;
-    std::string peer;
+    std::string peer;        // the device (calls with one person), or the group key "#..."
     bool outgoing = false;
     CallState state = CallState::None;
     int64_t started = 0;   // ringing began (steady ms)
     int64_t answered = 0;  // became active (steady ms)
     std::string media = "voice";
     std::vector<std::string> invited;  // outgoing, ringing: every device of the person that was called
+    // ---- group calls
+    std::string group;       // "#id" (then peer == group)
+    std::string inviter;     // incoming: the device that invited me
+    bool hub = false;        // through the server
+    std::string hubId, key;  // hub id (hex), call key (32 bytes) for the hub packets
+    std::vector<CallPeer> peers;
+    std::string spotlight;   // device whose video is shown (and sent to me)
+    bool spotlightPinned = false;
+    int nextStream = 1;
+    std::vector<std::string> hubIds;  // through the server: device id by hub number
+    int64_t aloneSince = 0;  // steady ms
 };
 struct Event {
     EventType type;
@@ -288,7 +306,8 @@ public:
 
     std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
     bool PeerHasCap(const std::string& peer, const std::string& cap);
-    uint64_t StartCall(const std::string& peer, const std::string& media = "voice");
+    uint64_t StartCall(const std::string& peer, const std::string& media = "voice");  // peer: a device, person or group
+    void SetSpotlight(const std::string& device);  // group video call: whose picture is shown big ("" = automatic)
     void AcceptCall();
     void EndCall(const std::string& reason = "hangup");
     // thread-safe (audio/video threads). data[0] is the media kind: 1 = audio, 2 = video. Audio always goes ahead of
@@ -296,7 +315,9 @@ public:
     bool SendMedia(const void* data, size_t len);
     size_t MediaQueuedBytes();  // video+audio bytes waiting on the call connection (congestion signal)
     // Called on a network thread (never with the engine lock held) for each media packet of the active call.
-    std::function<void(uint64_t call, const uint8_t* data, size_t len)> onMedia;
+    // stream: who it's from (0 in a call with one person; group calls: a number per person)
+    std::function<void(uint64_t call, int stream, const uint8_t* data, size_t len)> onMedia;
+    std::function<void(int stream)> onMediaStreamEnd;  // group calls: that person left
     CallInfo call;
     void SetHotspotInfo(const HotspotInfo& h);
 
@@ -422,6 +443,39 @@ private:
     std::weak_ptr<Connection> activeCallConn_;  // guarded by mediaMtx_; lets audio threads send without the engine lock
     std::mutex mediaMtx_;
     std::string activeCallPeerSnapshot();
+    // ---- group calls (group_calls.cpp)
+    struct GcMember {  // what the media threads need to know about each other person in the call
+        std::string dev;
+        int stream = 0, hubIdx = -1;
+        bool wantsMyVideo = false;
+        uint8_t dec = 0;            // video codecs it can decode (from its [2][5] packet), 0 = not heard
+        bool cameraOn = false;
+        int64_t talking = 0;
+        std::weak_ptr<Connection> conn;
+    };
+    std::vector<GcMember> gc_;      // guarded by mediaMtx_
+    std::string gcSpot_;            // device whose video I'm watching (mediaMtx_)
+    std::string gcKey_;             // hub call key (mediaMtx_)
+    bool gcHub_ = false;
+    std::string gcMyCam_, gcMyCaps_;  // my last camera-state / codecs packets (sent to whoever joins)
+    std::atomic<bool> groupCall_{false};
+    uint8_t gcDecSent_ = 0;
+    bool QueueMediaTo(const std::shared_ptr<Connection>& c, uint64_t id, const uint8_t* data, size_t len);
+    bool SendGroupMedia(uint64_t id, const uint8_t* data, size_t len);
+    size_t GroupQueuedBytes();
+    void GroupMediaIn(const std::string& dev, const uint8_t* data, size_t len);  // media threads
+    void GroupHubIn(int from, const std::string& msg);                         // network thread
+    void GroupHubMembers(int you, const std::vector<std::string>& ids);
+    void SyncGroupMedia();          // call.peers -> gc_ (engine lock held)
+    void GroupPeerJoined(const std::string& dev);
+    void GroupPeerLeft(const std::string& dev);
+    void GroupControl(const std::string& dev, Msg type, const json& j);  // to one person in the call
+    void HandleGroupCall(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    void GroupCallTick();
+    uint64_t StartGroupCall(const std::string& key, const std::string& media);
+    void AcceptGroupCall();
+    void FinishGroupCall(const std::string& reason);
+    void UpdateSpotlight();
     std::shared_ptr<Connection> CallConn();
     std::string PartDir();
 

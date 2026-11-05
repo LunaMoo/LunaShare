@@ -60,6 +60,11 @@ bool PasswordDecrypt(const std::string& blob, const std::string& password, std::
 std::string SealTo(const std::string& recipientPubHex, const std::string& plain);
 bool OpenSealed(const Identity& me, const std::string& sealed, std::string& plain);
 
+// Group calls: messages sealed with a key shared by everyone in the call (XChaCha20-Poly1305, random nonce).
+// Output: [nonce 24][mac 16][ciphertext]
+std::string KeySeal(const uint8_t key[32], const std::string& plain);
+bool KeyOpen(const uint8_t key[32], const uint8_t* data, size_t len, std::string& plain);
+
 std::string Base64Encode(const std::string& bin);
 bool Base64Decode(const std::string& text, std::string& out);
 

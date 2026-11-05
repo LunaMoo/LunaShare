@@ -517,6 +517,86 @@ int main() {
                 if (m.text == "hi from carol" && m.theirReaction == "\xe2\x9d\xa4") return true;
             return false;
         }, 3000), "reactions in the group");
+        // ---- group call (directly between the devices)
+        printf("[group calls: directly]\n");
+        {
+            for (Engine* e : {A.get(), B.get(), C.get()}) e->localCaps = {"voice", "video"};
+            std::string idA2 = A->settings.deviceId;
+            std::atomic<int> audioB{0}, audioC{0}, audioA{0}, frameB{0}, frameC{0}, keyAskA{0}, endedA{0};
+            std::set<int> streamsB;
+            std::mutex sm;
+            A->onMedia = [&](uint64_t, int s, const uint8_t* d, size_t n) {
+                if (n >= 2 && d[0] == 2 && d[1] == 2) keyAskA++;
+                if (n && d[0] == 1) audioA++;
+                (void)s;
+            };
+            B->onMedia = [&](uint64_t, int s, const uint8_t* d, size_t n) {
+                if (n && d[0] == 1) {
+                    audioB++;
+                    std::lock_guard<std::mutex> l(sm);
+                    streamsB.insert(s);
+                }
+                if (n >= 2 && d[0] == 2 && d[1] == 1) frameB++;
+            };
+            C->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) {
+                if (n && d[0] == 1) audioC++;
+                if (n >= 2 && d[0] == 2 && d[1] == 1) frameC++;
+            };
+            A->onMediaStreamEnd = [&](int) { endedA++; };
+            uint64_t cid = A->StartCall(gk, "video");
+            CHECK(cid != 0, "group call started");
+            auto ringing = [&](Engine& e) { auto l = e.Lock(); return e.call.state == CallState::IncomingRinging && e.call.group == gk && e.call.id == cid; };
+            CHECK(WaitFor([&] { return ringing(*B) && ringing(*C); }, 3000), "everyone in the group is called");
+            B->AcceptCall();
+            C->AcceptCall();
+            auto peersOf = [&](Engine& e) { auto l = e.Lock(); return e.call.state == CallState::Active ? (int)e.call.peers.size() : -1; };
+            CHECK(WaitFor([&] { return peersOf(*A) == 2 && peersOf(*B) == 2 && peersOf(*C) == 2; }, 5000), "everyone is in the call with everyone (%d %d %d)",
+                  peersOf(*A), peersOf(*B), peersOf(*C));
+            const uint8_t voice[10] = {1, 0, 0, 0, 0, 0, 0, 9, 9, 9};
+            for (int i = 0; i < 5; i++) {
+                A->SendMedia(voice, sizeof(voice));
+                C->SendMedia(voice, sizeof(voice));
+            }
+            CHECK(WaitFor([&] { return audioB >= 10 && audioC >= 5 && audioA >= 5; }, 3000), "everyone hears everyone (%d %d %d)", (int)audioB, (int)audioC, (int)audioA);
+            {
+                std::lock_guard<std::mutex> l(sm);
+                CHECK(streamsB.size() == 2 && !streamsB.count(0), "a voice stream per person");
+            }
+            const uint8_t frame[16] = {2, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1};
+            const uint8_t camOn[3] = {2, 3, 1};
+            A->SendMedia(camOn, sizeof(camOn));
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->call.spotlight == idA2; }, 3000), "the one with the camera on is shown");
+            CHECK(WaitFor([&] { return keyAskA > 0; }, 3000), "the viewer asks for a keyframe");
+            CHECK(WaitFor([&] { auto l = C->Lock(); return C->call.spotlight == idA2; }, 3000), "on everyone's screen");
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));  // (A hears that both watch it)
+            int b0 = frameB, c0 = frameC;
+            for (int i = 0; i < 3; i++) A->SendMedia(frame, sizeof(frame));
+            CHECK(WaitFor([&] { return frameB >= b0 + 3 && frameC >= c0 + 3; }, 3000), "video goes to whoever watches it");
+            C->SetSpotlight(B->settings.deviceId);  // C would rather watch B (camera off: stays chosen)
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));  // (A hears it doesn't want A's video any more)
+            c0 = frameC;
+            b0 = frameB;
+            for (int i = 0; i < 3; i++) A->SendMedia(frame, sizeof(frame));
+            CHECK(WaitFor([&] { return frameB >= b0 + 3; }, 3000), "B still does");
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            CHECK(frameC == c0, "C, watching B now, doesn't get A's video (%d)", (int)frameC - c0);
+            C->EndCall();
+            CHECK(WaitFor([&] { return peersOf(*A) == 1 && peersOf(*B) == 1 && endedA == 1; }, 3000), "C leaves the call");
+            B->EndCall();
+            CHECK(WaitFor([&] { return peersOf(*A) == 0; }, 3000), "B too");
+            A->EndCall();
+            CHECK(peersOf(*A) == -1, "the call is over");
+            {
+                auto l = A->Lock();
+                bool logged = false;
+                for (auto& m : A->chats[gk].messages) logged |= m.kind == MsgKind::System && m.text.rfind("Group call - ", 0) == 0;
+                CHECK(logged, "noted in the group");
+            }
+            for (Engine* e : {A.get(), B.get(), C.get()}) {
+                e->onMedia = nullptr;
+                e->onMediaStreamEnd = nullptr;
+            }
+        }
         // a stranger can't post into the group, members can't remove each other
         C->LeaveGroup(gk);
         CHECK(WaitFor([&] { return inGroup(*A, 2) && inGroup(*B, 2); }, 3000), "carol leaves: the others see it");
@@ -1013,6 +1093,75 @@ int main() {
             ms.Stop();
         }
 
+        // group calls through the server: one upload per person, the server passes it on (sealed with the call key)
+        printf("[group calls: through the server]\n");
+        {
+            RendezvousServer hs;
+            RendezvousServer::Options ho;
+            ho.bind = "127.0.0.1";
+            ho.port = 48193;
+            CHECK(hs.Start(ho, &err), "hub server");
+            auto X = MakeEngine("xena", 48171, true, false, false, false, "127.0.0.1:48193", "hubroom");
+            auto Y = MakeEngine("yuri", 48173, true, false, false, false, "127.0.0.1:48193", "hubroom");
+            auto Z = MakeEngine("zoe", 48175, true, false, false, false, "127.0.0.1:48193", "hubroom");
+            std::string idX = X->settings.deviceId;
+            CHECK(WaitFor([&] { return X->IsConnected(Y->settings.deviceId) && X->IsConnected(Z->settings.deviceId); }, 15000), "met");
+            for (Engine* e : {X.get(), Y.get(), Z.get()}) {
+                auto l = e->Lock();
+                e->settings.groupsViaServer = true;
+                e->localCaps = {"voice", "video"};
+            }
+            CHECK(WaitFor([&] { return X->WanStatus().rfind("connected", 0) == 0; }, 5000), "registered");
+            std::string hk = X->CreateGroup("hub", {"@" + Y->MyAccount(), "@" + Z->MyAccount()});
+            CHECK(WaitFor([&] { auto l = Y->Lock(); auto l2 = Z->Lock(); return Y->GroupOf(hk) && Z->GroupOf(hk); }, 3000), "group");
+            std::atomic<int> audioY{0}, audioZ{0}, bigY{0};
+            Y->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) {
+                if (n && d[0] == 1) audioY++;
+                if (n == 50000 && d[0] == 2 && d[1] == 1 && d[49999] == 0x5A) bigY++;
+            };
+            Z->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n && d[0] == 1) audioZ++; };
+            uint64_t cid = X->StartCall(hk, "video");
+            {
+                auto l = X->Lock();
+                CHECK(cid && X->call.hub && X->call.key.size() == 32, "the call goes through the server");
+            }
+            auto ringing = [&](Engine& e) { auto l = e.Lock(); return e.call.state == CallState::IncomingRinging && e.call.hub; };
+            CHECK(WaitFor([&] { return ringing(*Y) && ringing(*Z); }, 3000), "both are called");
+            Y->AcceptCall();
+            Z->AcceptCall();
+            auto peersOf = [&](Engine& e) { auto l = e.Lock(); return e.call.state == CallState::Active ? (int)e.call.peers.size() : -1; };
+            CHECK(WaitFor([&] { return peersOf(*X) == 2 && peersOf(*Y) == 2 && peersOf(*Z) == 2; }, 8000), "all three in the hub (%d %d %d)",
+                  peersOf(*X), peersOf(*Y), peersOf(*Z));
+            const uint8_t voice[10] = {1, 0, 0, 0, 0, 0, 0, 9, 9, 9};
+            for (int i = 0; i < 10; i++) {
+                X->SendMedia(voice, sizeof(voice));
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            CHECK(WaitFor([&] { return audioY >= 9 && audioZ >= 9; }, 3000), "voice through the server (%d %d)", (int)audioY, (int)audioZ);
+            const uint8_t camOn[3] = {2, 3, 1};
+            X->SendMedia(camOn, sizeof(camOn));
+            CHECK(WaitFor([&] { auto l = Y->Lock(); return Y->call.spotlight == idX; }, 4000), "X's picture is chosen");
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));  // (the request to send it reaches X)
+            std::vector<uint8_t> big(50000, 0x5A);
+            big[0] = 2;
+            big[1] = 1;
+            CHECK(WaitFor([&] {
+                X->SendMedia(big.data(), big.size());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                return bigY >= 3;
+            }, 4000), "a 50 KB picture arrives in pieces and whole (%d)", (int)bigY);
+            Z->EndCall();
+            CHECK(WaitFor([&] { return peersOf(*X) == 1 && peersOf(*Y) == 1; }, 5000), "someone leaves");
+            Y->EndCall();
+            X->EndCall();
+            Y->onMedia = nullptr;
+            Z->onMedia = nullptr;
+            Z->Stop();
+            Y->Stop();
+            X->Stop();
+            hs.Stop();
+        }
+
         // allow-list: a server that only accepts another room rejects us
         RendezvousServer locked;
         RendezvousServer::Options lo;
@@ -1043,8 +1192,8 @@ int main() {
         CHECK(P->PeerHasCap(idQ, "voice") && !P->PeerHasCap(idN, "voice"), "capabilities exchanged");
         CHECK(P->StartCall(idN) == 0, "cannot call a device without the module");
         std::atomic<int> gotP{0}, gotQ{0};
-        P->onMedia = [&](uint64_t, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'q') gotP++; };
-        Q->onMedia = [&](uint64_t, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'p') gotQ++; };
+        P->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'q') gotP++; };
+        Q->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'p') gotQ++; };
         uint64_t cid = P->StartCall(idQ);
         CHECK(cid != 0, "call started");
         CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging && Q->call.id == cid; }, 3000), "ringing");

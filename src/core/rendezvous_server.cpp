@@ -155,6 +155,29 @@ struct Bucket {
     double tokens = 40;
     int64_t ts = 0;
 };
+
+// A group call through the server ("hub"): every member sends its packets once, the server passes each on to the
+// members it is addressed to. The packets are end-to-end encrypted with a key only the people in the call have.
+struct HubMember {
+    bool used = false;
+    sockaddr_in ep{};
+    in_addr via{};
+    std::string id;
+    int64_t lastSeen = 0;
+    double tok = 0;
+    int64_t ts = 0;
+};
+constexpr int kHubMax = 32;
+struct Hub {
+    std::string id;  // 32 hex characters
+    HubMember m[kHubMax];
+    uint64_t bytes = 0;
+    int Count() const {
+        int n = 0;
+        for (auto& x : m) n += x.used;
+        return n;
+    }
+};
 }  // namespace
 
 bool RendezvousServer::Start(const Options& o, std::string* err) {
@@ -218,6 +241,16 @@ void RendezvousServer::Loop() {
     std::mt19937_64 rng(std::random_device{}() ^ (uint64_t)NowMs());
     char buf[8192];
     std::map<uint32_t, Relay> relays;  // conv -> relay
+    std::map<uint32_t, Hub> hubs;      // first 4 bytes of the hub id -> group call
+    auto pushHub = [&](uint32_t h) {
+        auto it = hubs.find(h);
+        if (it == hubs.end()) return;
+        json ids = json::array();
+        for (auto& x : it->second.m) ids.push_back(x.used ? x.id : "");
+        for (int i = 0; i < kHubMax; i++)
+            if (it->second.m[i].used)
+                SendFrom(s, "R" + json{{"t", "hub"}, {"hub", it->second.id}, {"you", i}, {"members", ids}}.dump(), it->second.m[i].ep, it->second.m[i].via);
+    };
     int64_t lastSweep = SteadyMs();
     auto log = [&](const std::string& m) { if (opt_.log) opt_.log(m); };
     in_addr via{};  // local address of the packet being handled
@@ -373,6 +406,21 @@ void RendezvousServer::Loop() {
                 }
                 saveMail();
             }
+            for (auto it = hubs.begin(); it != hubs.end();) {
+                bool changed = false;
+                for (auto& x : it->second.m)
+                    if (x.used && now - x.lastSeen > 15000) {
+                        x = HubMember();
+                        changed = true;
+                    }
+                if (it->second.Count() == 0) {
+                    log("group call " + it->second.id.substr(0, 8) + " ended (" + std::to_string(it->second.bytes / 1024) + " KB)");
+                    it = hubs.erase(it);
+                    continue;
+                }
+                if (changed) pushHub(it->first);
+                ++it;
+            }
             for (auto it = relays.begin(); it != relays.end();) {
                 if (now - it->second.lastSeen > 90000) {
                     log("relay " + std::to_string(it->first) + " closed (" + std::to_string(it->second.bytes / 1024) + " KB)");
@@ -410,6 +458,36 @@ void RendezvousServer::Loop() {
             r.lastSeen = now;
             r.bytes += (uint64_t)n;
             SendFrom(s, std::string(buf, (size_t)n), fromA ? r.b : r.a, fromA ? r.viaB : r.viaA);
+            continue;
+        }
+        if (n >= 9 && buf[0] == 'H') {  // group call: ['H'][hub u32][to mask u32][payload] -> ['H'][hub u32][from u8][payload]
+            const uint8_t* hb = (const uint8_t*)buf + 1;
+            uint32_t h = hb[0] | (uint32_t)hb[1] << 8 | (uint32_t)hb[2] << 16 | (uint32_t)hb[3] << 24;
+            uint32_t mask = hb[4] | (uint32_t)hb[5] << 8 | (uint32_t)hb[6] << 16 | (uint32_t)hb[7] << 24;
+            auto it = hubs.find(h);
+            if (it == hubs.end()) continue;
+            Hub& hub = it->second;
+            int me = -1;
+            for (int i = 0; i < kHubMax; i++)
+                if (hub.m[i].used && hub.m[i].ep.sin_addr.s_addr == from.sin_addr.s_addr && hub.m[i].ep.sin_port == from.sin_port) me = i;
+            if (me < 0) continue;
+            HubMember& sm = hub.m[me];
+            if (opt_.relayKbps > 0) {
+                double rate = opt_.relayKbps * 125.0;
+                if (sm.ts) sm.tok = std::min(rate, sm.tok + (double)(now - sm.ts) * rate / 1000.0);
+                sm.ts = now;
+                if (sm.tok < n) continue;
+                sm.tok -= n;
+            }
+            sm.lastSeen = now;
+            std::string out(buf, 5);
+            out += (char)me;
+            out.append(buf + 9, (size_t)n - 9);
+            for (int i = 0; i < kHubMax; i++)
+                if (i != me && hub.m[i].used && (mask >> i & 1)) {
+                    SendFrom(s, out, hub.m[i].ep, hub.m[i].via);
+                    hub.bytes += out.size();
+                }
             continue;
         }
         if (n < 2 || buf[0] != 'R') continue;
@@ -540,6 +618,65 @@ void RendezvousServer::Loop() {
                 sendTo(other.ep, other.via, {{"t", "relayed"}, {"nonce", nonce}, {"conv", conv}, {"initiator", false}, {"peer", me->id}});
                 log("relaying " + me->name + " <-> " + other.name);
                 break;
+            }
+        } else if (t == "hjoin" || t == "hleave") {
+            // join (and stay in: sent every few seconds) / leave a group call through the server
+            std::string hid = Clip(j.value("hub", ""), 32);
+            Device* me = findSender(from, nullptr);
+            if (!me || hid.size() != 32) continue;
+            uint8_t hb[4];
+            if (!FromHex(hid.substr(0, 8), hb, 4)) continue;
+            uint32_t h = hb[0] | (uint32_t)hb[1] << 8 | (uint32_t)hb[2] << 16 | (uint32_t)hb[3] << 24;
+            if (t == "hleave") {
+                auto it = hubs.find(h);
+                if (it == hubs.end() || it->second.id != hid) continue;
+                for (auto& x : it->second.m)
+                    if (x.used && x.id == me->id) x = HubMember();
+                if (it->second.Count() == 0) hubs.erase(it);
+                else pushHub(h);
+                continue;
+            }
+            if (!opt_.relay) {
+                sendJson(from, {{"t", "herror"}, {"hub", hid}, {"msg", "this server doesn't relay calls"}});
+                continue;
+            }
+            auto it = hubs.find(h);
+            if (it == hubs.end()) {
+                if (hubs.size() >= opt_.maxRelays) {
+                    sendJson(from, {{"t", "herror"}, {"hub", hid}, {"msg", "relay busy"}});
+                    continue;
+                }
+                it = hubs.emplace(h, Hub()).first;
+                it->second.id = hid;
+                log("group call " + hid.substr(0, 8) + " started by " + me->name);
+            } else if (it->second.id != hid) {
+                continue;  // (a different call with the same first bytes)
+            }
+            Hub& hub = it->second;
+            int slot = -1, freeSlot = -1;
+            for (int i = 0; i < kHubMax; i++) {
+                if (hub.m[i].used && hub.m[i].id == me->id) slot = i;
+                if (!hub.m[i].used && freeSlot < 0) freeSlot = i;
+            }
+            bool changed = false;
+            if (slot < 0) {
+                if (freeSlot < 0) {
+                    sendJson(from, {{"t", "herror"}, {"hub", hid}, {"msg", "call full"}});
+                    continue;
+                }
+                slot = freeSlot;
+                hub.m[slot].used = true;
+                hub.m[slot].id = me->id;
+                changed = true;
+            }
+            hub.m[slot].ep = from;
+            hub.m[slot].via = via;
+            hub.m[slot].lastSeen = now;
+            if (changed) pushHub(h);
+            else {
+                json ids = json::array();
+                for (auto& x : hub.m) ids.push_back(x.used ? x.id : "");
+                sendJson(from, {{"t", "hub"}, {"hub", hid}, {"you", slot}, {"members", ids}});
             }
         } else if (t == "mput" && opt_.mailbox) {
             // a room member leaves a sealed message for a device (identified by its public key)

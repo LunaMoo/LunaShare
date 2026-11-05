@@ -306,8 +306,53 @@ static void TestVideoMessageFile() {
     if (g) fclose(g);
 }
 
+// Group calls: two people talking at once (440 Hz and 1000 Hz) on two streams come out mixed; one leaving stops theirs.
+static void TestMix() {
+    printf("[group call: mixing two people]\n");
+    const LsmModule* m = lunashare_media_module();
+    Net net;
+    LsmHost h{LSM_API_VERSION, &net, HostSend, HostLog};
+    LsmSettings s{0, 0, 0, 32000};
+    CHECK(m->start(&h, &s) == 0, "start");
+    int err;
+    OpusEncoder* e1 = opus_encoder_create(R, 1, OPUS_APPLICATION_VOIP, &err);
+    OpusEncoder* e2 = opus_encoder_create(R, 1, OPUS_APPLICATION_VOIP, &err);
+    std::vector<int16_t> out;
+    for (int step = 0; step < 300; step++) {
+        for (int who = 0; who < 2; who++) {
+            if (who == 1 && step >= 150) {  // the second person leaves halfway
+                if (step == 150) m->end_stream(7);
+                continue;
+            }
+            int16_t f[F];
+            double hz = who ? 1000 : 440;
+            for (int i = 0; i < F; i++) f[i] = (int16_t)(7000 * std::sin(2 * PI * hz * (step * F + i) / R));
+            uint8_t pkt[1500];
+            pkt[0] = 1;
+            pkt[1] = (uint8_t)step;
+            pkt[2] = (uint8_t)(step >> 8);
+            uint32_t ts = (uint32_t)(step * F);
+            memcpy(pkt + 3, &ts, 4);
+            int n = opus_encode(who ? e2 : e1, f, F, pkt + 7, 1400);
+            m->receive_from(who ? 7 : 3, pkt, (size_t)n + 7);
+        }
+        int16_t spk[F];
+        m->playback(spk, F);
+        out.insert(out.end(), spk, spk + F);
+    }
+    m->stop();
+    opus_encoder_destroy(e1);
+    opus_encoder_destroy(e2);
+    double a440 = Db(Tone(out, (size_t)R, (size_t)R * 2, 440)), a1000 = Db(Tone(out, (size_t)R, (size_t)R * 2, 1000));
+    double b440 = Db(Tone(out, (size_t)R * 4, (size_t)R * 5, 440)), b1000 = Db(Tone(out, (size_t)R * 4, (size_t)R * 5, 1000));
+    printf("  both talking: 440 Hz %.1f dB, 1000 Hz %.1f dB; after one left: %.1f / %.1f dB\n", a440, a1000, b440, b1000);
+    CHECK(a440 > -30 && a1000 > -30, "both people are heard");
+    CHECK(b440 > -30 && b1000 < a1000 - 30, "the one who left is gone");
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
+    TestMix();
     const LsmModule* m = lunashare_media_module();
     CHECK(m && m->api_version == LSM_API_VERSION && strcmp(m->caps, "voice") == 0, "module descriptor");
     TestLoopback(0.0);

@@ -11,6 +11,12 @@
   someone is offline. Anyone in the group can add people and rename it, everyone can leave, whoever created it can
   remove people. Option *Group chats and calls through the server*: group members you don't know otherwise never
   connect to your device directly.
+- **Group calls (voice and video).** The call buttons in a group call everyone in it; whoever answers joins, everyone
+  hears everyone (the voice module mixes them). In a video call you watch one person at a time: the one with the
+  camera on who talks, or whoever you tap in the row of people (only the people watching you get your video, so it
+  stays light). With *through the server* on, every device sends its voice and video once to the server, which
+  passes it on - end-to-end encrypted with a key only the people in the call have; pictures are split into pieces
+  with parity, so one lost piece in eight is repaired. Group video is limited to 720p / 30 fps.
 - **Own picture in full quality:** a setting (and a switch in the camera panel) to see your own camera in the same
   quality as it's sent.
 - **Clearer call buttons:** a real phone receiver icon, words under the call buttons on phones, green call buttons,

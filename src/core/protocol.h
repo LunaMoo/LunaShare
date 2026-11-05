@@ -57,6 +57,11 @@ enum class Msg : uint8_t {
     CallAccept = 51,  // {call}
     CallEnd = 52,     // {call, reason}  (hangup / declined / busy / no answer / unsupported)
     Media = 53,       // binary: [u64 LE call id][codec payload, interpreted by the media module]
+    CallJoin = 54,    // group call: {call, gid, reply}  "I'm in" (to every member device; answered with reply=true)
+    CallWant = 55,    // group call: {call, want}  "send me your video" / "stop"
+    // Group calls through the server: CallInvite carries {gid, hub, key}; everyone joins the hub, which passes each
+    // packet to the people it is meant for. Hub messages are sealed with the call key: ['M'][media packet] or
+    // ['C'][u8 Msg][json] (CallWant, CallEnd).
     // shared library: the files in each contact's Shared folder, downloaded piece by piece from everyone who has them
     LibGet = 60,      // {}  send me the list of your Shared folder
     LibList = 61,     // {files[{id, rel, size, mtime}], off}  (id: content id, hex SHA-256 of the piece hashes + size)

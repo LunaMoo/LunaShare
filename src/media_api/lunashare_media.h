@@ -7,7 +7,8 @@
  * Without the module the app stays a pure chat + file transfer tool and advertises no call capability.
  *
  * Threading: capture() and playback() are called from audio threads, receive() from a network thread, the rest from
- * the UI thread. The module must be thread-safe accordingly. Only one call is active at a time.
+ * the UI thread. The module must be thread-safe accordingly. Only one call is active at a time (with one or, since
+ * version 6, several other people).
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -21,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSM_API_VERSION 5
+#define LSM_API_VERSION 6
 #define LSM_SAMPLE_RATE 48000 /* audio exchanged with the host: 48 kHz, mono, signed 16-bit (v4; was 16 kHz) */
 
 #if defined(_WIN32)
@@ -81,6 +82,11 @@ typedef struct LsmModule {
     /* --- since version 5: the sound path changed during a call (other speaker / headphones / loudspeaker): the echo
      * canceller forgets what it learned about the old path and adapts again */
     void (*reset_echo)(void);
+    /* --- since version 6: group calls. Packets from several people, each with its own stream number (any int the
+     * host picks, stable per person for the call); the module decodes each and mixes them for playback (and the echo
+     * canceller hears the mix). receive() is receive_from(0, ...). end_stream(): that person left. */
+    void (*receive_from)(int stream, const uint8_t* data, size_t len);
+    void (*end_stream)(int stream);
 } LsmModule;
 
 /* The only exported symbol. */

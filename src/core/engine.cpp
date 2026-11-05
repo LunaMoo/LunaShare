@@ -1252,6 +1252,7 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
             if (o != c && o->ready && !o->closed && o->peerId == c->peerId) other = true;
         if (!other) {
             if (call.state != CallState::None && call.peer == c->peerId) FinishCall("connection lost", false);
+            if (call.state == CallState::Active && !call.group.empty() && !call.hub) GroupPeerLeft(c->peerId);
             InterruptPeerTransfers(c->peerId);
             Device(c->peerId).lastSeen = NowMs();
         } else {
@@ -1297,9 +1298,12 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
             continue;
         }
         if (f.type == Msg::Media) {
-            if (f.payload.size() > 8 && c->peerId == activeCallPeerSnapshot()) {
+            if (f.payload.size() > 8 && groupCall_.load()) {
                 uint64_t id = GetU64(f.payload.data());
-                if (id && id == activeCallId_.load() && onMedia) onMedia(id, f.payload.data() + 8, f.payload.size() - 8);
+                if (id && id == activeCallId_.load()) GroupMediaIn(c->peerId, f.payload.data() + 8, f.payload.size() - 8);
+            } else if (f.payload.size() > 8 && c->peerId == activeCallPeerSnapshot()) {
+                uint64_t id = GetU64(f.payload.data());
+                if (id && id == activeCallId_.load() && onMedia) onMedia(id, 0, f.payload.data() + 8, f.payload.size() - 8);
             }
             continue;
         }
@@ -2089,9 +2093,16 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             }
             break;
         }
+        case Msg::CallJoin: case Msg::CallWant:
+            HandleGroupCall(c, f.type, j);
+            break;
         case Msg::CallInvite: {
             uint64_t id = j.value("call", (uint64_t)0);
-            if (!id) break;
+            if (j.contains("gid")) {
+                HandleGroupCall(c, f.type, j);
+                break;
+            }
+            if (!id || c->mailbox) break;
             std::string media = j.value("media", "voice");
             bool supported = std::find(localCaps.begin(), localCaps.end(), CapForMedia(media)) != localCaps.end();
             if (!supported) {
@@ -2138,6 +2149,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::CallEnd: {
             uint64_t id = j.value("call", (uint64_t)0);
+            if (j.contains("gid")) {
+                HandleGroupCall(c, f.type, j);
+                break;
+            }
             if (call.id != id) break;
             std::string reason = j.value("reason", "hangup");
             auto& inv = call.invited;
@@ -2244,6 +2259,16 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
         for (auto& m : it->second.messages)
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
+    }
+    // a group call going on that this device's person is in: "I'm in"
+    if (call.state == CallState::Active && !call.group.empty() && !call.hub) {
+        auto dv = devices.find(peer);
+        const Group* g = GroupOf(call.group);
+        bool in = false;
+        for (auto& p : call.peers) in |= p.dev == peer;
+        if (!in && g && dv != devices.end() && dv->second.accountPub != MyAccount() && g->Has(dv->second.accountPub))
+            Queue(c, Msg::CallJoin, {{"call", call.id}, {"gid", call.group.substr(1)}});
+        if (in) SyncGroupMedia();  // (a new connection to someone in the call)
     }
     // groups this device is in (or one of mine): the current member list, deletions and reactions
     {
@@ -2546,6 +2571,9 @@ void Engine::StartWan() {
         wan_.SetAccount(MyAccount(), accountCert_);
     }
     wan_.onMail = [this](const std::string& id, const std::string& d) { return HandleMail(id, d); };
+    wan_.onHub = [this](int from, const std::string& msg) { GroupHubIn(from, msg); };
+    wan_.onHubMembers = [this](int you, const std::vector<std::string>& ids) { GroupHubMembers(you, ids); };
+    wan_.onHubError = [this](const std::string& msg) { Emit({EventType::Error, "", "Group call through the server: " + msg}); };
     wan_.Start(
         cfg,
         [this](const std::vector<WanPeer>& peers) {
@@ -2681,6 +2709,7 @@ void Engine::MaintenanceLoop() {
             auto lk = Lock();
             if ((call.state == CallState::OutgoingRinging || call.state == CallState::IncomingRinging) && now - call.started > 45000)
                 FinishCall(call.outgoing ? "no answer" : "missed", call.outgoing);
+            GroupCallTick();
         }
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();
@@ -2790,6 +2819,7 @@ bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
     switch (type) {
         case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
         case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: case Msg::GroupInfo: break;
+        case Msg::CallInvite: case Msg::CallEnd: break;  // (group calls; a call with one person needs a connection)
         default: return true;  // nothing else travels by mail
     }
     {
@@ -3402,6 +3432,7 @@ bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {
 
 uint64_t Engine::StartCall(const std::string& peerOrKey, const std::string& media) {
     auto lk = Lock();
+    if (IsGroupKey(peerOrKey)) return StartGroupCall(peerOrKey, media);
     std::string peer = Resolve(peerOrKey);
     // a person: ring every connected device of theirs that can take this call; the first to answer gets it
     std::vector<std::string> ring;
@@ -3428,6 +3459,10 @@ uint64_t Engine::StartCall(const std::string& peerOrKey, const std::string& medi
 void Engine::AcceptCall() {
     auto lk = Lock();
     if (call.state != CallState::IncomingRinging) return;
+    if (!call.group.empty()) {
+        AcceptGroupCall();
+        return;
+    }
     auto c = ReadyConn(call.peer);
     if (!c) {
         FinishCall("connection lost", false);
@@ -3457,6 +3492,10 @@ void Engine::EndCall(const std::string& reason) {
 void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
     // called with the engine lock held
     if (call.state == CallState::None) return;
+    if (!call.group.empty()) {
+        FinishGroupCall(reason);
+        return;
+    }
     CallInfo c = call;
     if (notifyPeer) {
         QueueToPeer(c.peer, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
@@ -3515,8 +3554,14 @@ bool Engine::SendMedia(const void* data, size_t len) {
     if (!id || len < 1 || len > (8u << 20)) return false;  // 4K keyframes can be several hundred KB
     bool video = ((const uint8_t*)data)[0] == 2;
     if (!video && len > 4000) return false;
+    if (groupCall_.load()) return SendGroupMedia(id, (const uint8_t*)data, len);
     auto c = CallConn();
     if (!c) return false;
+    return QueueMediaTo(c, id, (const uint8_t*)data, len);
+}
+
+bool Engine::QueueMediaTo(const std::shared_ptr<Connection>& c, uint64_t id, const uint8_t* data, size_t len) {
+    bool video = data[0] == 2;
     std::string payload(8 + len, '\0');
     PutU64((uint8_t*)payload.data(), id);
     memcpy(&payload[8], data, len);
@@ -3551,6 +3596,7 @@ bool Engine::SendMedia(const void* data, size_t len) {
 
 size_t Engine::MediaQueuedBytes() {
     if (!activeCallId_.load()) return 0;
+    if (groupCall_.load()) return GroupQueuedBytes();
     std::shared_ptr<Connection> c;
     {
         std::lock_guard<std::mutex> l(mediaMtx_);

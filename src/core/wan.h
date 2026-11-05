@@ -12,6 +12,9 @@
 //   'K' KCP segment            (client <-> client)
 //   'X' u32 conv: session closed
 //   'Y' KCP segment through the server (relay)
+//   'H' group call through the server: [hub u32][to mask u32][fragment] up, [hub u32][from u8][fragment] down.
+//       Fragments: [msg u16][index u8][count u8][total length u32][data]; indices >= count are XOR parity over
+//       groups of 8 fragments (one lost fragment per group is recovered). Messages are sealed by the engine.
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -77,6 +80,13 @@ public:
     // the account this device belongs to (registered with the server, which then lists the account's online devices)
     void SetAccount(const std::string& acc, const std::string& cert);
 
+    // ---- group calls through the server ("hub", see the 'H' packets above)
+    void HubJoin(const std::string& hubId);  // 32 hex characters; "" leaves
+    bool HubSend(uint32_t toMask, const std::string& msg);  // any thread; up to ~200 KB per message
+    std::function<void(int from, const std::string& msg)> onHub;                               // network thread
+    std::function<void(int you, const std::vector<std::string>& memberIds)> onHubMembers;      // index -> device id
+    std::function<void(const std::string& error)> onHubError;
+
 private:
     void Loop();
     void SetStatus(const std::string& s);
@@ -99,6 +109,24 @@ private:
     bool nameChanged_ = false;
     OnPeers onPeers_;
     OnSocket onSocket_;
+    // hub
+    std::mutex hm_;
+    std::string hubId_, hubLeave_;
+    uint32_t hubHandle_ = 0;
+    int64_t hubJoinAt_ = 0;
+    uint16_t hubMsg_ = 0;
+    SocketHandle udp_ = kInvalidSocket;
+    uint32_t hubIp_ = 0;    // server address (network byte order), for sending from other threads
+    uint16_t hubPort_ = 0;
+    struct Reasm {
+        int count = 0;
+        uint32_t total = 0;
+        std::vector<std::string> frags;  // data, then parity
+        int64_t t = 0;
+        bool done = false;
+    };
+    std::map<uint32_t, Reasm> reasm_;  // (from << 16 | msg) -> fragments (network thread)
+    void HubInput(const uint8_t* d, size_t n);
 };
 
 }  // namespace ls

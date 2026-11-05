@@ -75,6 +75,31 @@ struct Leveler {
     }
 };
 
+// What arrives from one other person: jitter buffer, decoder, statistics.
+struct Stream {
+    OpusDecoder* dec = nullptr;
+    std::map<uint16_t, std::vector<uint8_t>> jitter;  // seq -> packet (opus payload)
+    bool playing = false;       // playout started
+    uint16_t nextSeq = 0;
+    int targetFrames = 3;       // playout delay target (adaptive, 60 ms start)
+    std::deque<int16_t> out;    // decoded samples waiting for the speaker
+    int packetsIn = 0;
+    // loss/jitter statistics (rolling)
+    int recvWindow = 0, lostWindow = 0;
+    float lossPct = 0;
+    double jitterMs = 0;
+    int64_t lastArrivalUs = 0;
+    uint16_t lastArrivalSeq = 0;
+    int underruns = 0;
+    int64_t lastPacketUs = 0;
+    Stream() = default;
+    Stream(const Stream&) = delete;
+    Stream& operator=(const Stream&) = delete;
+    ~Stream() {
+        if (dec) opus_decoder_destroy(dec);
+    }
+};
+
 struct Voice {
     // ---- shared
     std::mutex m;  // everything below except where noted
@@ -95,24 +120,10 @@ struct Voice {
     int packetsOut = 0;
     int64_t bytesOut = 0;
 
-    // ---- receive side
-    OpusDecoder* dec = nullptr;
-    std::map<uint16_t, std::vector<uint8_t>> jitter;  // seq -> packet (opus payload)
-    bool playing = false;       // playout started
-    uint16_t nextSeq = 0;
-    int targetFrames = 3;       // playout delay target (adaptive, 60 ms start)
-    std::deque<int16_t> out;    // decoded samples waiting for the speaker
+    // ---- receive side: one stream per person talking (group calls: several, mixed for the speaker)
+    std::map<int, Stream> streams;
     float spkLevel = 0;
     int farHold = 0;  // capture frames left during which the far end counts as talking
-    int packetsIn = 0;
-    // loss/jitter statistics (rolling)
-    int recvWindow = 0, lostWindow = 0;
-    float lossPct = 0;
-    double jitterMs = 0;
-    int64_t lastArrivalUs = 0;
-    uint32_t lastArrivalTs = 0;
-    uint16_t lastArrivalSeq = 0;
-    int underruns = 0;
 };
 
 Voice g;
@@ -152,11 +163,10 @@ void ApplySettingsLocked() {
 
 void FreeLocked() {
     if (g.enc) opus_encoder_destroy(g.enc);
-    if (g.dec) opus_decoder_destroy(g.dec);
+    g.streams.clear();
     if (g.echo) speex_echo_state_destroy(g.echo);
     if (g.pre) speex_preprocess_state_destroy(g.pre);
     g.enc = nullptr;
-    g.dec = nullptr;
     g.echo = nullptr;
     g.pre = nullptr;
 }
@@ -174,8 +184,6 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     opus_encoder_ctl(g.enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
     opus_encoder_ctl(g.enc, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));  // up to 20 kHz: natural voices
     opus_encoder_ctl(g.enc, OPUS_SET_COMPLEXITY(9));
-    g.dec = opus_decoder_create(kRate, 1, &err);
-    if (err != OPUS_OK) { Log("opus decoder failed"); FreeLocked(); return -1; }
     g.echo = speex_echo_state_init(kFrame, kEchoTail);
     int rate = kRate;
     speex_echo_ctl(g.echo, SPEEX_ECHO_SET_SAMPLING_RATE, &rate);
@@ -185,18 +193,10 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     g.seqOut = 0;
     g.leveler.Reset();
     g.tsOut = 0;
-    g.jitter.clear();
-    g.out.clear();
-    g.playing = false;
-    g.targetFrames = 3;
-    g.packetsIn = g.packetsOut = 0;
+    g.streams.clear();
+    g.packetsOut = 0;
     g.bytesOut = 0;
-    g.recvWindow = g.lostWindow = 0;
-    g.lossPct = 0;
-    g.jitterMs = 0;
-    g.lastArrivalUs = 0;
     g.farHold = 0;
-    g.underruns = 0;
     g.running = true;
     Log("voice started (Opus 16 kHz, speexdsp AEC/NS)");
     return 0;
@@ -206,8 +206,6 @@ void Stop() {
     std::lock_guard<std::mutex> l(g.m);
     g.running = false;
     FreeLocked();
-    g.jitter.clear();
-    g.out.clear();
 }
 
 // ---------------------------------------------------------------- send
@@ -255,93 +253,133 @@ void Capture(const int16_t* pcm, int samples) {
 }
 
 // ---------------------------------------------------------------- receive
-void Receive(const uint8_t* data, size_t len) {
+void ReceiveFrom(int stream, const uint8_t* data, size_t len) {
     if (len < 8 || data[0] != 1) return;
     uint16_t seq = (uint16_t)(data[1] | data[2] << 8);
-    uint32_t ts = (uint32_t)data[3] | (uint32_t)data[4] << 8 | (uint32_t)data[5] << 16 | (uint32_t)data[6] << 24;
     std::lock_guard<std::mutex> l(g.m);
     if (!g.running) return;
-    g.packetsIn++;
+    auto it = g.streams.find(stream);
+    if (it == g.streams.end()) {
+        if (g.streams.size() >= 32) return;
+        Stream& ns = g.streams[stream];
+        int err = 0;
+        ns.dec = opus_decoder_create(kRate, 1, &err);
+        if (err != OPUS_OK) {
+            g.streams.erase(stream);
+            Log("opus decoder failed");
+            return;
+        }
+        it = g.streams.find(stream);
+    }
+    Stream& st = it->second;
+    st.packetsIn++;
     // RFC 3550 style inter-arrival jitter
     int64_t now = NowUs();
-    if (g.lastArrivalUs) {
+    st.lastPacketUs = now;
+    if (st.lastArrivalUs) {
         // from sequence numbers (20 ms each), so peers with other sample rates (older versions: 16 kHz) count right
-        double d = (double)(now - g.lastArrivalUs) / 1000.0 - (double)(int16_t)(seq - g.lastArrivalSeq) * 20.0;
-        g.jitterMs += (std::fabs(d) - g.jitterMs) / 16.0;
+        double d = (double)(now - st.lastArrivalUs) / 1000.0 - (double)(int16_t)(seq - st.lastArrivalSeq) * 20.0;
+        st.jitterMs += (std::fabs(d) - st.jitterMs) / 16.0;
     }
-    g.lastArrivalUs = now;
-    g.lastArrivalTs = ts;
-    g.lastArrivalSeq = seq;
-    if (g.playing && (int16_t)(seq - g.nextSeq) < 0) return;  // too late, already concealed
-    if (g.jitter.size() > 100) g.jitter.erase(g.jitter.begin());
-    g.jitter[seq].assign(data + 7, data + len);
-    if (!g.playing && (int)g.jitter.size() >= g.targetFrames) {
-        g.playing = true;
-        g.nextSeq = g.jitter.begin()->first;
+    st.lastArrivalUs = now;
+    st.lastArrivalSeq = seq;
+    if (st.playing && (int16_t)(seq - st.nextSeq) < 0) return;  // too late, already concealed
+    if (st.jitter.size() > 100) st.jitter.erase(st.jitter.begin());
+    st.jitter[seq].assign(data + 7, data + len);
+    if (!st.playing && (int)st.jitter.size() >= st.targetFrames) {
+        st.playing = true;
+        st.nextSeq = st.jitter.begin()->first;
     }
 }
 
-// Decodes the next 20 ms into g.out (lock held).
-void DecodeNextLocked() {
+void Receive(const uint8_t* data, size_t len) { ReceiveFrom(0, data, len); }
+
+void EndStream(int stream) {
+    std::lock_guard<std::mutex> l(g.m);
+    g.streams.erase(stream);
+}
+
+// Decodes the next 20 ms of a stream into its out buffer (lock held).
+void DecodeNextLocked(Stream& st) {
     int16_t pcm[kFrame * 6];
     int n = 0;
-    auto it = g.jitter.find(g.nextSeq);
-    g.recvWindow++;
-    if (it != g.jitter.end()) {
-        n = opus_decode(g.dec, it->second.data(), (opus_int32)it->second.size(), pcm, kFrame * 6, 0);
-        g.jitter.erase(it);
+    auto it = st.jitter.find(st.nextSeq);
+    st.recvWindow++;
+    if (it != st.jitter.end()) {
+        n = opus_decode(st.dec, it->second.data(), (opus_int32)it->second.size(), pcm, kFrame * 6, 0);
+        st.jitter.erase(it);
     } else {
-        g.lostWindow++;
-        auto nx = g.jitter.find((uint16_t)(g.nextSeq + 1));
-        if (nx != g.jitter.end())  // recover the lost frame from the next packet's forward error correction
-            n = opus_decode(g.dec, nx->second.data(), (opus_int32)nx->second.size(), pcm, kFrame, 1);
+        st.lostWindow++;
+        auto nx = st.jitter.find((uint16_t)(st.nextSeq + 1));
+        if (nx != st.jitter.end())  // recover the lost frame from the next packet's forward error correction
+            n = opus_decode(st.dec, nx->second.data(), (opus_int32)nx->second.size(), pcm, kFrame, 1);
         else
-            n = opus_decode(g.dec, nullptr, 0, pcm, kFrame, 0);  // packet loss concealment
+            n = opus_decode(st.dec, nullptr, 0, pcm, kFrame, 0);  // packet loss concealment
     }
-    g.nextSeq++;
-    if (n > 0) g.out.insert(g.out.end(), pcm, pcm + n);
-    if (g.recvWindow >= 100) {  // every ~2 s
-        g.lossPct = 100.0f * (float)g.lostWindow / (float)g.recvWindow;
-        g.recvWindow = g.lostWindow = 0;
+    st.nextSeq++;
+    if (n > 0) st.out.insert(st.out.end(), pcm, pcm + n);
+    if (st.recvWindow >= 100) {  // every ~2 s
+        st.lossPct = 100.0f * (float)st.lostWindow / (float)st.recvWindow;
+        st.recvWindow = st.lostWindow = 0;
         // adapt playout delay to jitter (20 ms frames), 40..300 ms
-        int want = std::clamp((int)std::ceil((g.jitterMs * 2.0 + 20.0) / 20.0) + (g.lossPct > 5 ? 1 : 0), 2, 15);
-        g.targetFrames = want;
+        int want = std::clamp((int)std::ceil((st.jitterMs * 2.0 + 20.0) / 20.0) + (st.lossPct > 5 ? 1 : 0), 2, 15);
+        st.targetFrames = want;
     }
+}
+
+// Fills `samples` of one stream (silence where nothing arrived).
+void PullLocked(Stream& st, int16_t* outBuf, int samples) {
+    if (st.playing) {
+        // keep latency bounded: if far too much is buffered (e.g. after a stall), skip ahead
+        int buffered = (int)st.jitter.size();
+        if (buffered > st.targetFrames + 8) {
+            while ((int)st.jitter.size() > st.targetFrames) st.jitter.erase(st.jitter.begin());
+            st.nextSeq = st.jitter.begin()->first;
+        }
+        while ((int)st.out.size() < samples) {
+            if (st.jitter.empty()) {
+                // nothing at all arrived: conceal a little, then fall silent and re-buffer
+                if (++st.underruns > 10) {
+                    st.playing = false;
+                    st.underruns = 0;
+                    break;
+                }
+            } else {
+                st.underruns = 0;
+            }
+            DecodeNextLocked(st);
+        }
+    }
+    int have = std::min<int>(samples, (int)st.out.size());
+    for (int i = 0; i < have; i++) {
+        outBuf[i] = st.out.front();
+        st.out.pop_front();
+    }
+    if (have < samples) memset(outBuf + have, 0, (size_t)(samples - have) * sizeof(int16_t));
 }
 
 void Playback(int16_t* outBuf, int samples) {
     std::lock_guard<std::mutex> l(g.m);
-    if (!g.running) {
+    if (!g.running || g.streams.empty()) {
         memset(outBuf, 0, (size_t)samples * sizeof(int16_t));
-        return;
-    }
-    if (g.playing) {
-        // keep latency bounded: if far too much is buffered (e.g. after a stall), skip ahead
-        int buffered = (int)g.jitter.size();
-        if (buffered > g.targetFrames + 8) {
-            while ((int)g.jitter.size() > g.targetFrames) g.jitter.erase(g.jitter.begin());
-            g.nextSeq = g.jitter.begin()->first;
+    } else if (g.streams.size() == 1) {
+        PullLocked(g.streams.begin()->second, outBuf, samples);
+    } else {
+        // several people: add them up, with a soft limiter instead of clipping when they talk at once
+        static std::vector<int16_t> one;
+        static std::vector<float> mix;
+        one.resize((size_t)samples);
+        mix.assign((size_t)samples, 0.0f);
+        for (auto& [id, st] : g.streams) {
+            PullLocked(st, one.data(), samples);
+            for (int i = 0; i < samples; i++) mix[(size_t)i] += one[(size_t)i] / 32768.0f;
         }
-        while ((int)g.out.size() < samples) {
-            if (g.jitter.empty()) {
-                // nothing at all arrived: conceal a little, then fall silent and re-buffer
-                if (++g.underruns > 10) {
-                    g.playing = false;
-                    g.underruns = 0;
-                    break;
-                }
-            } else {
-                g.underruns = 0;
-            }
-            DecodeNextLocked();
+        for (int i = 0; i < samples; i++) {
+            float x = mix[(size_t)i], a = std::fabs(x);
+            if (a > 0.7f) x = std::copysign(0.7f + 0.3f * std::tanh((a - 0.7f) / 0.3f), x);
+            outBuf[i] = (int16_t)std::lround(std::clamp(x, -1.0f, 1.0f) * 32767.0f);
         }
     }
-    int have = std::min<int>(samples, (int)g.out.size());
-    for (int i = 0; i < have; i++) {
-        outBuf[i] = g.out.front();
-        g.out.pop_front();
-    }
-    if (have < samples) memset(outBuf + have, 0, (size_t)(samples - have) * sizeof(int16_t));
     g.spkLevel = g.spkLevel * 0.7f + Level(outBuf, samples) * 0.3f;
     // feed what goes to the speaker to the echo canceller, in exact 20 ms frames
     if (g.settings.echo_cancel && g.echo) {
@@ -376,11 +414,14 @@ void GetStats(LsmStats* o) {
     memset(o, 0, sizeof(*o));
     o->mic_level = g.micLevel;
     o->speaker_level = g.spkLevel;
-    o->loss_percent = g.lossPct;
-    o->jitter_ms = (int)g.jitterMs;
-    o->buffered_ms = (int)(g.jitter.size() * 20 + g.out.size() * 1000 / kRate);
+    // several people: the worst link counts
+    for (auto& [id, st] : g.streams) {
+        o->loss_percent = std::max(o->loss_percent, st.lossPct);
+        o->jitter_ms = std::max(o->jitter_ms, (int)st.jitterMs);
+        o->buffered_ms = std::max(o->buffered_ms, (int)(st.jitter.size() * 20 + st.out.size() * 1000 / kRate));
+        o->packets_in += st.packetsIn;
+    }
     o->bitrate_kbps = g.settings.bitrate / 1000;
-    o->packets_in = g.packetsIn;
     o->packets_out = g.packetsOut;
 }
 
@@ -579,9 +620,9 @@ double RecStop(int keep) {
 }
 
 const LsmModule kModule = {
-    LSM_API_VERSION, "LunaShare Voice", "1.3", "voice",
+    LSM_API_VERSION, "LunaShare Voice", "1.4", "voice",
     Start, Stop, Capture, Playback, Receive, SetMute, SetSettings, GetStats,
-    RecStart, RecPush, RecLevel, RecStop, RecStartStream, ResetEcho,
+    RecStart, RecPush, RecLevel, RecStop, RecStartStream, ResetEcho, ReceiveFrom, EndStream,
 };
 
 }  // namespace

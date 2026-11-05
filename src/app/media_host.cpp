@@ -543,13 +543,16 @@ void MediaHost::RestartCamera() {
 void MediaHost::StartVideo() {
     if (!vmod_ || videoRunning_ || !eng_) return;
     std::string peer;
+    bool group;
     {
         auto lk = eng_->Lock();
         peer = eng_->call.peer;
+        group = !eng_->call.group.empty();
     }
-    if (!eng_->PeerHasCap(peer, "video")) return;
+    if (!group && !eng_->PeerHasCap(peer, "video")) return;
     Settings s = eng_->GetSettings();
-    LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
+    LsvSettings vs = Preset(group ? std::min(s.callVideoRes, 2) : s.callVideoRes, group ? std::min(s.callVideoFps, 30) : s.callVideoFps,
+                            s.callVideoAdaptive);  // group calls: at most 720p / 30 fps (sent to several people)
     vs.codec_pref = s.callVideoH264Only ? 1 : 0;
     if (!StartVideoModule(&vs)) return;
     videoRunning_ = true;
@@ -654,7 +657,13 @@ LsvStats MediaHost::VideoStats() {
 void MediaHost::ApplyVideoQuality() {
     if (!vmod_ || !videoRunning_ || !eng_) return;
     Settings s = eng_->GetSettings();
-    LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
+    bool group;
+    {
+        auto lk = eng_->Lock();
+        group = !eng_->call.group.empty();
+    }
+    LsvSettings vs = Preset(group ? std::min(s.callVideoRes, 2) : s.callVideoRes, group ? std::min(s.callVideoFps, 30) : s.callVideoFps,
+                            s.callVideoAdaptive);
     vs.codec_pref = s.callVideoH264Only ? 1 : 0;
     vmod_->set_settings(&vs);
 }
@@ -680,13 +689,18 @@ void MediaHost::Attach(Engine* e) {
     e->localCaps = Caps();
     if (vmod_) e->localCaps.push_back("video");
     const LsmModule* m = mod_;
-    e->onMedia = [this, m](uint64_t, const uint8_t* d, size_t n) {
+    e->onMedia = [this, m](uint64_t, int stream, const uint8_t* d, size_t n) {
         if (mode_ != Mode::Call || n < 1) return;
         if (d[0] == 2) {
             if (videoRunning_ && vmod_) vmod_->receive(d, n);
+        } else if (stream && m->receive_from) {
+            m->receive_from(stream, d, n);  // group call: one stream per person, mixed by the module
         } else {
             m->receive(d, n);
         }
+    };
+    e->onMediaStreamEnd = [m](int stream) {
+        if (m->end_stream) m->end_stream(stream);
     };
 }
 
