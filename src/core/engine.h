@@ -85,6 +85,7 @@ struct CallInfo {
     int64_t started = 0;   // ringing began (steady ms)
     int64_t answered = 0;  // became active (steady ms)
     std::string media = "voice";
+    std::vector<std::string> invited;  // outgoing, ringing: every device of the person that was called
 };
 struct Event {
     EventType type;
@@ -206,6 +207,9 @@ public:
     void SetHotspotInfo(const HotspotInfo& h);
 
     std::vector<Event> PopEvents();
+    // Called for every event as it happens, on the thread that caused it, with the engine lock held (keep it
+    // short; may call PeerName etc.). The app uses it for system notifications while its UI is in the background.
+    std::function<void(const Event&)> onEvent;
 
     std::string configDir;  // empty = platform default (set before Start(); tests use separate dirs)
 

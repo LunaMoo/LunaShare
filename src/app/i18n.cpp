@@ -148,6 +148,11 @@ std::string TF(const char* fmt, ...) {
 // i18n-keys: "server not responding", "server not responding (check address, port and firewall)", "connecting to server", "invalid server address", "off", "starting",
 // i18n-keys: "Hashing", "Waiting for accept", "Incoming", "Queued", "Transferring", "Paused", "Waiting for device", "Verifying", "Done", "Failed", "Declined", "Cancelled",
 // i18n-keys: "Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music"
+// i18n-keys: "Speaker", "could not open the picture", "could not encode the picture", "not a JPEG picture or too large", "could not save the picture",
+// i18n-keys: "This device was removed from your account and now has an account of its own.", "the words don't match (a typo or a word missing?)",
+// i18n-keys: "use a password of at least 6 characters", "could not write the file", "not a LunaShare account backup", "wrong password (or the file is damaged)",
+// i18n-keys: "the backup is damaged", "the account key is not valid", "the account's device list is not valid", "This device was linked to another account.",
+// i18n-keys: "Call answered on another device"
 // Sentences the core writes (in English, also into the chat history). "%s" parts are copied over.
 static const char* const kPatterns[] = {
     "End-to-end encrypted. Safety number: %s - compare it on both devices to make sure nobody is in between.",

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bg_ready">Ready for messages and calls</string>
+    <string name="bg_stopped">LunaShare was closed - open it again to get messages and calls</string>
+    <string name="bg_fgs_reason">Keeps the connection to your own LunaShare server so messages and calls arrive while the app is in the background</string>
+</resources>

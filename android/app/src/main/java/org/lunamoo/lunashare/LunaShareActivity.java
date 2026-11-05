@@ -62,6 +62,8 @@ public class LunaShareActivity extends SDLActivity {
     static native int nativeAdoptBluetooth(String addr, boolean initiator);
     static native void nativeOnHotspot(boolean active, String ssid, String pass, String error);
     static native void nativeOnError(String message);
+    static native void nativeOnIntent(String action, String key);  // a notification was tapped (or "decline")
+    static Context appCtx;
 
     @Override
     protected String[] getLibraries() {
@@ -71,10 +73,54 @@ public class LunaShareActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         self = this;
+        appCtx = getApplicationContext();
         super.onCreate(savedInstanceState);
+        handleIntent(getIntent());
     }
 
-    static Context ctx() { return self.getApplicationContext(); }
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    /** Notifications open the app with an action: open a chat, show the ringing call, answer it. */
+    void handleIntent(Intent intent) {
+        if (intent == null || intent.getAction() == null) return;
+        String a = intent.getAction();
+        if (!a.startsWith("org.lunamoo.lunashare.")) return;
+        if (a.equals(Notify.ACTION_CALL) || a.equals(Notify.ACTION_ANSWER)) showOverLockScreen(true);
+        if (a.equals(Notify.ACTION_ANSWER)) Notify.cancelCallNotification();
+        String key = intent.getStringExtra("key");
+        try {
+            nativeOnIntent(a, key == null ? "" : key);
+        } catch (Throwable ignored) {}  // (native library not loaded yet: the app simply starts)
+        intent.setAction(null);
+    }
+
+    /** During an incoming call: show the app over the lock screen and turn the screen on. */
+    static void showOverLockScreen(final boolean on) {
+        ui(() -> {
+            LunaShareActivity a = self;
+            if (a == null) return;
+            if (Build.VERSION.SDK_INT >= 27) {
+                a.setShowWhenLocked(on);
+                a.setTurnScreenOn(on);
+            } else if (on) {
+                a.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+            } else {
+                a.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+            }
+        });
+    }
+
+    /** Back on the home screen: keep running in the background instead of closing (like other messengers). */
+    public static void moveToBack() { ui(() -> { if (self != null) self.moveTaskToBack(true); }); }
+
+    static Context appContext() { return appCtx != null ? appCtx : self.getApplicationContext(); }
+
+    static Context ctx() { return appContext(); }
 
     static void ui(Runnable r) { new Handler(Looper.getMainLooper()).post(r); }
 

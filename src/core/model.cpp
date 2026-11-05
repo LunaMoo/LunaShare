@@ -56,7 +56,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"btChannel", s.btChannel}, {"wanEnabled", s.wanEnabled}, {"wanServer", s.wanServer}, {"wanRoom", s.wanRoom},
         {"wanPassword", s.wanPassword}, {"wanNatPmp", s.wanNatPmp}, {"wanLocalPort", s.wanLocalPort},
         {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
-        {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"keepHistory", s.keepHistory},
+        {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"backgroundRun", s.backgroundRun}, {"closeToTray", s.closeToTray}, {"keepHistory", s.keepHistory},
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
@@ -106,6 +106,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "speedLimitKBs", s.speedLimitKBs);
     Get(j, "chunkKB", s.chunkKB);
     Get(j, "maxParallel", s.maxParallel);
+    Get(j, "backgroundRun", s.backgroundRun);
+    Get(j, "closeToTray", s.closeToTray);
     Get(j, "notifySound", s.notifySound);
     Get(j, "keepHistory", s.keepHistory);
     int layout = (int)s.layout;

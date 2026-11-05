@@ -904,6 +904,42 @@ int main() {
             auto l = P->Lock();
             CHECK(P->chats[P->ChatKey(idQ)].messages.back().text == "Call declined", "declined logged: %s", P->chats[P->ChatKey(idQ)].messages.back().text.c_str());
         }
+        // a person with two devices: both ring, the first to answer takes the call, the other stops
+        {
+            auto Q2 = MakeEngine("quinn-tablet", 48225, false, false, false, false, "", "", {"voice"});
+            std::string idQ2 = Q2->settings.deviceId;
+            Q2->ConnectAddress("127.0.0.1", Q->boundPort);
+            CHECK(WaitFor([&] { return Q->IsConnected(idQ2); }, 5000), "second device connected");
+            CHECK(Q->LinkDevice(idQ2), "link");
+            CHECK(WaitFor([&] { for (auto& e : Q2->PopEvents()) if (e.type == EventType::LinkRequest) return true; return false; }, 3000), "link asked");
+            Q2->AnswerLink(idQ, true);
+            CHECK(WaitFor([&] { return Q2->MyAccount() == Q->MyAccount(); }, 3000), "linked");
+            Q2->ConnectAddress("127.0.0.1", P->boundPort);
+            CHECK(WaitFor([&] { auto l = P->Lock(); return P->IsConnected(idQ2) && P->ChatKey(idQ2) == P->ChatKey(idQ) && P->IsConnected(idQ); }, 8000),
+                  "caller sees one person with two devices");
+            std::string person = "@" + Q->MyAccount();
+            std::atomic<int> rings{0};
+            Q2->onEvent = [&](const Event& e) { if (e.type == EventType::CallIncoming) rings++; };
+            P->StartCall(person);
+            CHECK(WaitFor([&] {
+                auto l1 = Q->Lock();
+                auto l2 = Q2->Lock();
+                return Q->call.state == CallState::IncomingRinging && Q2->call.state == CallState::IncomingRinging;
+            }, 3000), "both devices ring");
+            CHECK(rings == 1, "event hook sees the call (%d)", rings.load());
+            Q2->AcceptCall();
+            CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active && P->call.peer == idQ2; }, 3000), "answered on the tablet");
+            CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::None; }, 3000), "the phone stops ringing");
+            P->EndCall();
+            CHECK(WaitFor([&] { auto l = Q2->Lock(); return Q2->call.state == CallState::None; }, 3000), "hung up");
+            // a decline on one device ends it everywhere
+            P->StartCall(person);
+            CHECK(WaitFor([&] { auto l1 = Q->Lock(); auto l2 = Q2->Lock(); return Q->call.state == CallState::IncomingRinging && Q2->call.state == CallState::IncomingRinging; }, 3000), "ringing both");
+            Q->EndCall();
+            CHECK(WaitFor([&] { auto l1 = P->Lock(); auto l2 = Q2->Lock(); return P->call.state == CallState::None && Q2->call.state == CallState::None; }, 3000), "declined everywhere");
+            Q2->onEvent = nullptr;
+            Q2->Stop();
+        }
         // connection loss ends an active call
         P->StartCall(idQ);
         CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging; }, 3000), "ringing 3");

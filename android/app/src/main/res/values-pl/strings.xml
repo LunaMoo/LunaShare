@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bg_ready">Gotowe na wiadomości i rozmowy</string>
+    <string name="bg_stopped">LunaShare zostało zamknięte - otwórz je ponownie, aby dostawać wiadomości i rozmowy</string>
+    <string name="bg_fgs_reason">Utrzymuje połączenie z Twoim serwerem LunaShare, aby wiadomości i rozmowy docierały, gdy aplikacja działa w tle</string>
+</resources>

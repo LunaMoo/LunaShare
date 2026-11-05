@@ -4,6 +4,8 @@
 #include <string>
 
 #include "engine.h"
+#include "i18n.h"
+#include "notify.h"
 
 #if defined(__ANDROID__)
 #include <SDL.h>
@@ -17,6 +19,20 @@ using namespace ls;
 
 static ls::Engine* g_engine = nullptr;
 static jclass g_cls = nullptr;
+static jclass g_notify = nullptr;  // org.lunamoo.lunashare.Notify (looked up once: other threads can't FindClass app classes)
+
+// static void method of Notify with string / bool arguments; s = signature
+static void NotifyV(const char* name, const char* sig, ...) {
+    if (!g_notify) return;
+    JNIEnv* env = Env();
+    jmethodID m = env->GetStaticMethodID(g_notify, name, sig);
+    if (!m) { env->ExceptionClear(); return; }
+    va_list ap;
+    va_start(ap, sig);
+    env->CallStaticVoidMethodV(g_notify, m, ap);
+    va_end(ap);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
 
 static JNIEnv* Env() { return (JNIEnv*)SDL_AndroidGetJNIEnv(); }
 
@@ -175,8 +191,53 @@ void AndroidBridgeInit(ls::Engine* engine) {
         env->DeleteLocalRef(c);
         return g;
     };
+    // notifications + background service
+    jclass nc = env->FindClass("org/lunamoo/lunashare/Notify");
+    if (nc) {
+        g_notify = (jclass)env->NewGlobalRef(nc);
+        env->DeleteLocalRef(nc);
+    } else {
+        env->ExceptionClear();
+    }
+    NotifyV("setNativeRunning", "(Z)V", (jboolean) true);
+    auto str = [](JNIEnv* e, const std::string& s) { return e->NewStringUTF(s.c_str()); };
+    b.notifyMessage = [str](const std::string& key, const std::string& title, const std::string& text, const std::string& av) {
+        JNIEnv* e = Env();
+        jstring a = str(e, key), t = str(e, title), x = str(e, text), v = str(e, av);
+        NotifyV("message", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", a, t, x, v);
+        e->DeleteLocalRef(a); e->DeleteLocalRef(t); e->DeleteLocalRef(x); e->DeleteLocalRef(v);
+    };
+    b.clearChatNotification = [str](const std::string& key) {
+        JNIEnv* e = Env();
+        jstring a = str(e, key);
+        NotifyV("clearChat", "(Ljava/lang/String;)V", a);
+        e->DeleteLocalRef(a);
+    };
+    b.notifyCall = [str](const std::string& key, const std::string& title, bool video, const std::string& av) {
+        JNIEnv* e = Env();
+        jstring a = str(e, key), t = str(e, title), v = str(e, av), an = str(e, T("Answer")), de = str(e, T("Decline")),
+                sub = str(e, video ? T("is video calling you") : T("is calling you"));
+        NotifyV("call", "(Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", a, t,
+                (jboolean)video, v, an, de, sub);
+        e->DeleteLocalRef(a); e->DeleteLocalRef(t); e->DeleteLocalRef(v); e->DeleteLocalRef(an); e->DeleteLocalRef(de); e->DeleteLocalRef(sub);
+    };
+    b.cancelCallNotification = [] { NotifyV("cancelCall", "()V"); };
+    b.backgroundService = [](bool on) { NotifyV("background", "(Z)V", (jboolean)on); };
+    b.batteryRestricted = []() -> bool {
+        if (!g_notify) return false;
+        JNIEnv* e = Env();
+        jmethodID m = e->GetStaticMethodID(g_notify, "batteryRestricted", "()Z");
+        if (!m) { e->ExceptionClear(); return false; }
+        jboolean r = e->CallStaticBooleanMethod(g_notify, m);
+        if (e->ExceptionCheck()) { e->ExceptionClear(); return false; }
+        return r;
+    };
+    b.requestBatteryExemption = [] { NotifyV("requestBatteryExemption", "()V"); };
+    b.moveToBack = [] { CallV("moveToBack", "()V"); };
     CallV("requestPermissions", "()V");
 }
+
+void AndroidBridgeShutdown() { NotifyV("setNativeRunning", "(Z)V", (jboolean) false); }
 
 extern "C" {
 
@@ -201,6 +262,18 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnHots
     g_engine->SetHotspotInfo(h);
 }
 
+// a notification was tapped ("open" a chat, "answer" / show a call) or "decline" pressed
+JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnIntent(JNIEnv* env, jclass, jstring jaction, jstring jkey) {
+    std::string a = JStr(env, jaction), key = JStr(env, jkey);
+    size_t dot = a.rfind('.');
+    std::string what = dot == std::string::npos ? a : a.substr(dot + 1);  // OPEN / ANSWER / DECLINE / CALL
+    if (what == "DECLINE") {
+        if (g_engine) g_engine->EndCall("declined");
+        return;
+    }
+    notify::Push({what == "ANSWER" ? "answer" : what == "CALL" ? "call" : "open", key});
+}
+
 JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnError(JNIEnv* env, jclass, jstring msg) {
     __android_log_print(ANDROID_LOG_WARN, "LunaShare", "%s", JStr(env, msg).c_str());
     if (!g_engine) return;
@@ -218,6 +291,7 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnErro
 #else
 
 void AndroidBridgeInit(ls::Engine*) {}
+void AndroidBridgeShutdown() {}
 std::string AndroidDeviceName() { return {}; }
 
 #endif

@@ -34,6 +34,15 @@ struct HostBridge {
     std::function<void(const std::string& path)> openFolder;
     std::function<void()> requestPermissions;
     std::function<void(bool inCall)> callAudioMode;   // Android: MODE_IN_COMMUNICATION (earpiece routing, system AEC)
+    // system notifications (Android) and running in the background
+    std::function<void(const std::string& key, const std::string& title, const std::string& text, const std::string& avatar)> notifyMessage;
+    std::function<void(const std::string& key)> clearChatNotification;
+    std::function<void(const std::string& key, const std::string& title, bool video, const std::string& avatar)> notifyCall;
+    std::function<void()> cancelCallNotification;
+    std::function<void(bool on)> backgroundService;   // Android foreground service (keeps the process connected)
+    std::function<bool()> batteryRestricted;          // Android: battery optimisation may cut the network
+    std::function<void()> requestBatteryExemption;
+    std::function<void()> moveToBack;                 // Android: back on the home screen -> background, don't close
     // Android call audio routes: "current id\n" + lines "id\tkind\tname" (kind: earpiece/speaker/bluetooth/wired/usb)
     std::function<std::string()> callRoutes;
     std::function<void(int id)> setCallRoute;

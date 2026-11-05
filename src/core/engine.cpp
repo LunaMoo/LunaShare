@@ -305,6 +305,7 @@ std::vector<std::shared_ptr<Transfer>> Engine::BatchTransfers(uint64_t batch) {
 
 void Engine::Emit(Event e) {
     auto lk = Lock();
+    if (onEvent) onEvent(e);
     events_.push_back(std::move(e));
     if (events_.size() > 500) events_.erase(events_.begin());
 }
@@ -1940,7 +1941,13 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::CallAccept: {
             uint64_t id = j.value("call", (uint64_t)0);
-            if (call.id != id || call.state != CallState::OutgoingRinging || call.peer != c->peerId) break;
+            bool invited = call.peer == c->peerId || std::find(call.invited.begin(), call.invited.end(), c->peerId) != call.invited.end();
+            if (call.id != id || call.state != CallState::OutgoingRinging || !invited) break;
+            // answered here: the person's other devices stop ringing
+            for (auto& d : call.invited)
+                if (d != c->peerId) QueueToPeer(d, Msg::CallEnd, {{"call", id}, {"reason", "answered elsewhere"}});
+            call.peer = c->peerId;
+            call.invited.clear();
             call.state = CallState::Active;
             call.answered = SteadyMs();
             {
@@ -1955,8 +1962,23 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::CallEnd: {
             uint64_t id = j.value("call", (uint64_t)0);
-            if (call.id != id || call.peer != c->peerId) break;
-            FinishCall(j.value("reason", "hangup"), false);
+            if (call.id != id) break;
+            std::string reason = j.value("reason", "hangup");
+            auto& inv = call.invited;
+            if (call.state == CallState::OutgoingRinging && std::find(inv.begin(), inv.end(), c->peerId) != inv.end()) {
+                // one of several devices: "busy" / "no voice module" there just leaves the others ringing; a decline
+                // ends the call everywhere
+                inv.erase(std::remove(inv.begin(), inv.end(), c->peerId), inv.end());
+                if (reason != "declined" && !inv.empty()) {
+                    if (call.peer == c->peerId) call.peer = inv[0];
+                    break;
+                }
+                call.peer = c->peerId;
+                FinishCall(reason, true);  // (tells the remaining ones)
+                break;
+            }
+            if (call.peer != c->peerId) break;
+            FinishCall(reason, false);
             break;
         }
         case Msg::WifiCreds:
@@ -3162,7 +3184,14 @@ bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {
 
 uint64_t Engine::StartCall(const std::string& peerOrKey, const std::string& media) {
     auto lk = Lock();
-    std::string peer = Resolve(peerOrKey);  // (ringing all of a person's devices comes with the push channel)
+    std::string peer = Resolve(peerOrKey);
+    // a person: ring every connected device of theirs that can take this call; the first to answer gets it
+    std::vector<std::string> ring;
+    if (IsContactKey(peerOrKey))
+        for (auto& d : DevicesOf(peerOrKey))
+            if (PeerHasCap(d, CapForMedia(media))) ring.push_back(d);
+    if (ring.empty()) ring.push_back(peer);
+    else if (std::find(ring.begin(), ring.end(), peer) == ring.end()) peer = ring[0];
     if (call.state != CallState::None || !PeerHasCap(peer, CapForMedia(media)) ||
         std::find(localCaps.begin(), localCaps.end(), CapForMedia(media)) == localCaps.end())
         return 0;
@@ -3173,7 +3202,8 @@ uint64_t Engine::StartCall(const std::string& peerOrKey, const std::string& medi
     call.state = CallState::OutgoingRinging;
     call.started = SteadyMs();
     call.media = media;
-    QueueToPeer(peer, Msg::CallInvite, {{"call", call.id}, {"media", media}});
+    call.invited = ring;
+    for (auto& d : ring) QueueToPeer(d, Msg::CallInvite, {{"call", call.id}, {"media", media}});
     return call.id;
 }
 
@@ -3210,7 +3240,11 @@ void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
     // called with the engine lock held
     if (call.state == CallState::None) return;
     CallInfo c = call;
-    if (notifyPeer) QueueToPeer(c.peer, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
+    if (notifyPeer) {
+        QueueToPeer(c.peer, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
+        for (auto& d : c.invited)
+            if (d != c.peer) QueueToPeer(d, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
+    }
     activeCallId_ = 0;
     {
         std::lock_guard<std::mutex> l(mediaMtx_);
@@ -3232,7 +3266,7 @@ void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
              : reason == "unsupported" ? "Call failed - the other device has no voice module" : reason == "no answer" ? "No answer"
              : "Call cancelled";
     } else {
-        text = reason == "declined" ? "Declined call" : "Missed call";
+        text = reason == "declined" ? "Declined call" : reason == "answered elsewhere" ? "Call answered on another device" : "Missed call";
     }
     AddSystemMessage(c.peer, text);
     Emit({EventType::CallEnded, c.peer, text, c.id, reason});

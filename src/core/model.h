@@ -70,6 +70,8 @@ struct Settings {
     int chunkKB = 256;
     int maxParallel = 2;           // concurrently streaming files per device
     bool notifySound = true;
+    bool backgroundRun = true;     // phones: stay connected in the background (notifications for messages and calls)
+    bool closeToTray = false;      // computers: closing the window keeps LunaShare running (tray icon on Windows)
     bool keepHistory = true;
 
     UiLayout layout = UiLayout::Auto;

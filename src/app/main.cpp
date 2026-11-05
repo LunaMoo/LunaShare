@@ -1,5 +1,7 @@
 // LunaShare - file sharing chat for LAN, phone hotspots and Bluetooth.
 // SDL2 + OpenGL3/GLES3 + Dear ImGui.
+#include "notify.h"
+#include "tray.h"
 #include <algorithm>
 #include <SDL.h>
 
@@ -28,6 +30,7 @@
 #endif
 
 void AndroidBridgeInit(ls::Engine* engine);  // android_bridge.cpp (no-op elsewhere)
+void AndroidBridgeShutdown();
 std::string AndroidDeviceName();
 
 static void LoadFonts() {
@@ -255,7 +258,25 @@ int main(int argc, char** argv) {
         }
     }
 #endif
+    notify::Attach(&engine);  // system notifications while in the background
+    if (tray::Available()) notify::SetTrayHook([](const std::string& t, const std::string& x) { tray::Balloon(t, x); });
+    if (ls::Bridge().backgroundService && engine.GetSettings().backgroundRun) ls::Bridge().backgroundService(true);
     App app(engine);
+    bool hiddenToTray = false;
+    // closing the window: quit, or (setting) keep running - in the tray on Windows, minimised elsewhere
+    auto closeRequested = [&]() -> bool {
+        if (!ls::IsMobilePlatform() && engine.GetSettings().closeToTray) {
+            if (tray::Available() && tray::Show("LunaShare")) {
+                SDL_HideWindow(window);
+                hiddenToTray = true;
+            } else {
+                SDL_MinimizeWindow(window);
+            }
+            notify::SetBackground(true);
+            return false;
+        }
+        return app.RequestQuit();
+    };
 
     int styleKey = -1;
     std::string lastTitle;
@@ -271,10 +292,15 @@ int main(int argc, char** argv) {
             if (ev.type != SDL_DROPFILE) ImGui_ImplSDL2_ProcessEvent(&ev);
             switch (ev.type) {
                 case SDL_QUIT:
-                    if (app.RequestQuit()) running = false;
+                    if (ls::IsMobilePlatform() ? app.RequestQuit() : (!hiddenToTray && closeRequested())) running = false;
                     break;
                 case SDL_WINDOWEVENT:
-                    if (ev.window.event == SDL_WINDOWEVENT_CLOSE && ev.window.windowID == SDL_GetWindowID(window) && app.RequestQuit()) running = false;
+                    if (ev.window.event == SDL_WINDOWEVENT_CLOSE && ev.window.windowID == SDL_GetWindowID(window) && !hiddenToTray && closeRequested())
+                        running = false;
+                    if (ev.window.event == SDL_WINDOWEVENT_MINIMIZED || ev.window.event == SDL_WINDOWEVENT_HIDDEN) notify::SetBackground(true);
+                    if (ev.window.event == SDL_WINDOWEVENT_RESTORED || ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
+                        (ev.window.event == SDL_WINDOWEVENT_SHOWN && !hiddenToTray))
+                        notify::SetBackground(false);
                     break;
                 case SDL_DROPBEGIN: drops.clear(); break;
                 case SDL_DROPFILE:
@@ -298,7 +324,13 @@ int main(int argc, char** argv) {
                     break;
                 }
                 case SDL_APP_WILLENTERBACKGROUND:
-                    break;  // engine keeps running while the OS allows it
+                case SDL_APP_DIDENTERBACKGROUND:
+                    notify::SetBackground(true);  // engine keeps running (background service); notifications from now on
+                    break;
+                case SDL_APP_WILLENTERFOREGROUND:
+                case SDL_APP_DIDENTERFOREGROUND:
+                    notify::SetBackground(false);
+                    break;
                 default: break;
             }
             if (ev.type == SDL_MOUSEMOTION || ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEWHEEL || ev.type == SDL_KEYDOWN ||
@@ -311,7 +343,15 @@ int main(int argc, char** argv) {
             drops.clear();
         }
         if (app.quitConfirmed) running = false;
-        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+        if (tray::TakeQuit()) running = false;
+        if (tray::TakeShow() || (hiddenToTray && notify::Peek())) {
+            SDL_ShowWindow(window);
+            SDL_RestoreWindow(window);
+            SDL_RaiseWindow(window);
+            hiddenToTray = false;
+            notify::SetBackground(false);
+        }
+        if (SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) {
             SDL_Delay(50);
             continue;
         }
@@ -420,6 +460,10 @@ int main(int argc, char** argv) {
 
     }
 
+    tray::Hide();
+    if (ls::Bridge().backgroundService) ls::Bridge().backgroundService(false);
+    AndroidBridgeShutdown();
+    engine.onEvent = nullptr;
     Player().Shutdown();
     Media().Shutdown();
     engine.Stop();

@@ -10,6 +10,7 @@
 #include "crypto.h"
 #include "hash.h"
 #include "avatar.h"
+#include "notify.h"
 #include "image_cache.h"
 #include "media_host.h"
 #include "player_host.h"
@@ -82,6 +83,22 @@ bool App::IsMobileLayout() {
 void App::Frame() {
     auto lk = eng.Lock();
     PullEvents();
+    // taps on notifications
+    for (notify::Action a; notify::Pop(a);) {
+        if (a.what == "open" && !a.key.empty()) {
+            SelectPeer(a.key);
+            if (IsMobileLayout()) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+            else { tab = Tab::Chat; tabForce = true; }
+        } else if (a.what == "call" && eng.call.state == CallState::IncomingRinging) {
+            openIncomingCall = true;
+        } else if (a.what == "answer" && eng.call.state == CallState::IncomingRinging) {
+            Media().WantCameraAtStart(false);
+            eng.AcceptCall();
+            SelectPeer(eng.call.peer);
+            if (IsMobileLayout()) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+            else { tab = Tab::Chat; tabForce = true; }
+        }
+    }
     ui::Metrics& m = ui::M();
     m.mobile = IsMobileLayout();
     m.rowH = ImGui::GetFrameHeight() * (m.mobile ? 1.9f : 1.0f);
@@ -388,6 +405,7 @@ void App::SelectPeer(const std::string& peer) {
         lastSelIndex = -1;
     }
     selectedPeer = eng.IsContactKey(peer) ? peer : eng.ChatKey(peer);  // a device's messages are in its person's chat
+    notify::ClearChat(selectedPeer);
     eng.MarkRead(selectedPeer);
     scrollToBottom = true;
     if (!eng.IsConnected(selectedPeer)) eng.ConnectPeer(selectedPeer);
@@ -741,6 +759,9 @@ void App::DrawMobile() {
         ImGui::SameLine();
     } else if (ImGui::IsKeyPressed(ImGuiKey_AppBack) && screen != MScreen::Home) {
         screen = MScreen::Home;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_AppBack) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+               Bridge().moveToBack) {
+        Bridge().moveToBack();  // like other messengers: back on the home screen keeps LunaShare running in the background
     }
     const char* title = "LunaShare";
     std::string peerTitle;
@@ -2407,6 +2428,35 @@ void App::DrawSettings() {
         ImGui::TextDisabled(T("Status: %s"), TDynamic(eng.WanStatus()).c_str());
         std::string mp = eng.WanMappedEndpoint();
         if (!mp.empty()) ImGui::TextDisabled(T("Reachable through the router at %s"), mp.c_str());
+    }
+
+    // running in the background: phones keep a connection (foreground service), computers can close to the tray
+    if (IsMobilePlatform()) {
+        if (ImGui::Checkbox(T("Keep running in the background"), &edit.backgroundRun)) {
+            changed = true;
+            if (Bridge().backgroundService) Bridge().backgroundService(edit.backgroundRun);
+        }
+        ui::HelpMarker(T("Messages and calls arrive while LunaShare is in the background (a small notification shows that it is connected). Uses a little battery."));
+        static double lastCheck = -10;
+        static bool restricted = false;
+        if (ImGui::GetTime() - lastCheck > 2) {
+            lastCheck = ImGui::GetTime();
+            restricted = Bridge().batteryRestricted && Bridge().batteryRestricted();
+        }
+        if (edit.backgroundRun && restricted) {
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1), "%s", T("Battery optimisation may cut the connection while the screen is off."));
+            ImGui::PopTextWrapPos();
+            if (ImGui::Button(T("Allow running in the background..."), ImVec2(mobile ? -1 : 0, h)) && Bridge().requestBatteryExemption)
+                Bridge().requestBatteryExemption();
+        }
+    } else {
+        changed |= ImGui::Checkbox(T("Keep running when the window is closed"), &edit.closeToTray);
+#if defined(_WIN32)
+        ui::HelpMarker(T("Closing the window keeps LunaShare connected for messages and calls (in the tray next to the clock). Quit it from the tray icon."));
+#else
+        ui::HelpMarker(T("Closing the window only minimises it, so LunaShare stays connected for messages and calls."));
+#endif
     }
 
     ImGui::SeparatorText(T("Received files"));
