@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Library: Shared folders.** Put files into your *Shared* folder and your contacts can browse and download them
+  (*Library* tab). A file is downloaded from every contact that has it at the same time, piece by piece, each piece
+  checked by its hash; what you download is offered on to others, like a torrent within your contacts. See
+  docs/LIBRARY.md.
+- **Clearer call buttons:** a real phone receiver icon, words under the call buttons on phones, green call buttons,
+  "Answer" for incoming calls.
+
 ## 1.1.1
 
 - **One Android app:** "LunaShare" now always includes voice and video calls (the separate "LunaShare + Calls" app is

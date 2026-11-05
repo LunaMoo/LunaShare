@@ -32,8 +32,8 @@ public:
     int styleGeneration = 0;
 
 private:
-    enum class Tab { Chat, Transfers, History, Devices, Nearby, Settings };
-    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices };
+    enum class Tab { Chat, Transfers, History, Library, Devices, Nearby, Settings };
+    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library };
 
     struct Toast {
         ls::EventType type;
@@ -72,6 +72,8 @@ private:
     void DrawDeviceDetails(const std::string& peer);
     void DrawNearby();
     void DrawSettings();
+    void DrawLibrary();  // ui_library.cpp
+    std::string librarySearch;
     void DrawProfilePicture(float h);
 
     // popups / overlays

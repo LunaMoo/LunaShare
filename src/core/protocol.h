@@ -54,6 +54,17 @@ enum class Msg : uint8_t {
     CallAccept = 51,  // {call}
     CallEnd = 52,     // {call, reason}  (hangup / declined / busy / no answer / unsupported)
     Media = 53,       // binary: [u64 LE call id][codec payload, interpreted by the media module]
+    // shared library: the files in each contact's Shared folder, downloaded piece by piece from everyone who has them
+    LibGet = 60,      // {}  send me the list of your Shared folder
+    LibList = 61,     // {files[{id, rel, size, mtime}], off}  (id: content id, hex SHA-256 of the piece hashes + size)
+    LibChanged = 62,  // {}  my Shared folder changed
+    PieceHave = 63,   // {ids[]}  which of these do you have?
+    PieceHaveReply = 64,  // {have[{id, full, bits (base64 bitmap, partial downloads)}]}
+    PieceMapGet = 65, // {id}
+    PieceMap = 66,    // {id, size, ps (piece size), h (base64: 32-byte SHA-256 per piece)}
+    PieceGet = 67,    // {id, idx}
+    PieceData = 68,   // binary: [32-byte content id][u32 LE piece index][data]
+    PieceNo = 69,     // {id, idx}  can't send that piece (don't have it / not sharing now)
     Bye = 99,
 };
 

@@ -33,6 +33,20 @@ int main(int argc, char** argv) {
     if (videoCall) e.localCaps.push_back("video");
 #endif
     e.Start();
+    if (getenv("DEMO_SHARE")) {  // a few files in its Shared folder (screenshots of the library)
+        const char* names[] = {"Holiday 2026/beach.jpg", "Holiday 2026/mountains.jpg", "Holiday 2026/video.mp4", "Recipes/pierogi.pdf", "music/song.ogg"};
+        int64_t sizes[] = {3400000, 2900000, 48000000, 420000, 5100000};
+        for (int i = 0; i < 5; i++) {
+            std::string p = JoinPath(e.SharedDir(), names[i]);
+            MakeDirs(DirName(p));
+            if (FILE* f = fopen(p.c_str(), "wb")) {
+                std::vector<char> buf(1 << 16, (char)i);
+                for (int64_t left = sizes[i]; left > 0; left -= (int64_t)buf.size()) fwrite(buf.data(), 1, (size_t)std::min<int64_t>(left, (int64_t)buf.size()), f);
+                fclose(f);
+            }
+        }
+        e.RescanShared();
+    }
     if (const char* av = getenv("DEMO_AVATAR")) {  // a profile picture (JPEG file) for screenshots
         std::string jpeg;
         if (FILE* f = fopen(av, "rb")) {

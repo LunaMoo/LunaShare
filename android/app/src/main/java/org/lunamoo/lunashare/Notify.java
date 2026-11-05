@@ -183,4 +183,14 @@ public final class Notify {
     }
 
     public static void setNativeRunning(boolean on) { nativeRunning = on; }
+
+    /** On mobile data (or another metered network): the Shared folder isn't offered then, unless allowed. */
+    public static boolean isMetered() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) ctx().getSystemService(Context.CONNECTIVITY_SERVICE);
+            return cm != null && cm.isActiveNetworkMetered();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 }

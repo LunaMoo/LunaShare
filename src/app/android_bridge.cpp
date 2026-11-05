@@ -235,6 +235,15 @@ void AndroidBridgeInit(ls::Engine* engine) {
     };
     b.requestBatteryExemption = [] { NotifyV("requestBatteryExemption", "()V"); };
     b.moveToBack = [] { CallV("moveToBack", "()V"); };
+    b.isMetered = []() -> bool {
+        if (!g_notify) return false;
+        JNIEnv* e = Env();
+        jmethodID m = e->GetStaticMethodID(g_notify, "isMetered", "()Z");
+        if (!m) { e->ExceptionClear(); return false; }
+        jboolean r = e->CallStaticBooleanMethod(g_notify, m);
+        if (e->ExceptionCheck()) { e->ExceptionClear(); return false; }
+        return r;
+    };
     CallV("requestPermissions", "()V");
 }
 

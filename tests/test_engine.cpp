@@ -501,6 +501,74 @@ int main() {
         A4->Stop();
     }
 
+    // ------------------------------------------------------------ shared library
+    printf("[shared library: one file from several contacts at once]\n");
+    {
+        auto L1 = MakeEngine("lib-anna", 48160, false, false), L2 = MakeEngine("lib-bart", 48162, false, false);
+        auto L3 = MakeEngine("lib-cleo", 48164, false, false), L4 = MakeEngine("lib-stranger", 48166, false, false);
+        std::string i1 = L1->settings.deviceId, i2 = L2->settings.deviceId, i3 = L3->settings.deviceId;
+        const int64_t BIG = 20 << 20;
+        std::string big = JoinPath(L1->SharedDir(), "films/holiday.bin");
+        WriteRandomFile(big, BIG, 77);
+        WriteRandomFile(JoinPath(L2->SharedDir(), "holiday copy.bin"), BIG, 77);  // the same content elsewhere
+        WriteRandomFile(JoinPath(L1->SharedDir(), "notes.txt"), 1000, 5);
+        std::string want = Sha256File(big);
+        L1->RescanShared();
+        L2->RescanShared();
+        auto libSize = [](Engine& e) { auto l = e.Lock(); return e.myLibrary.size(); };
+        CHECK(WaitFor([&] { return libSize(*L1) == 2 && libSize(*L2) == 1; }, 15000), "Shared folders indexed (%zu, %zu)", libSize(*L1), libSize(*L2));
+        L3->ConnectAddress("127.0.0.1", L1->boundPort);
+        L3->ConnectAddress("127.0.0.1", L2->boundPort);
+        L4->ConnectAddress("127.0.0.1", L1->boundPort);
+        CHECK(WaitFor([&] { return L3->IsConnected(i1) && L3->IsConnected(i2) && L4->IsConnected(i1); }, 5000), "connected");
+        // contacts: we've exchanged messages; the stranger hasn't
+        L3->SendChat(i1, "hi Anna");
+        L3->SendChat(i2, "hi Bart");
+        CHECK(WaitFor([&] { auto l1 = L1->Lock(); auto l2 = L2->Lock(); return L1->IsContact(i3) && L2->IsContact(i3); }, 3000), "now contacts");
+        L3->RefreshLibrary(i1);
+        L3->RefreshLibrary(i2);
+        L4->RefreshLibrary(i1);
+        CHECK(WaitFor([&] { auto l = L3->Lock(); return L3->peerLibraries[i1].files.size() == 2 && L3->peerLibraries[i2].files.size() == 1; }, 5000),
+              "contacts see the lists");
+        CHECK(WaitFor([&] { auto l = L4->Lock(); return L4->peerLibraries[i1].fetched && L4->peerLibraries[i1].off && L4->peerLibraries[i1].files.empty(); }, 5000),
+              "a stranger sees nothing");
+        LibFile f;
+        {
+            auto l = L3->Lock();
+            for (auto& x : L3->peerLibraries[i1].files)
+                if (x.rel == "films/holiday.bin") f = x;
+            CHECK(!f.id.empty() && L3->peerLibraries[i2].files[0].id == f.id, "the same content has the same id on both");
+        }
+        for (auto* e : {L1.get(), L2.get()}) {  // each source alone is slow: together they're twice as fast
+            Settings s = e->GetSettings();
+            s.speedLimitKBs = 4096;
+            e->ApplySettings(s);
+        }
+        int64_t t0 = SteadyMs();
+        CHECK(L3->DownloadShared(f), "download started");
+        auto state = [&] { auto l = L3->Lock(); auto it = L3->swarm.find(f.id); return it == L3->swarm.end() ? -1 : (int)it->second->state; };
+        CHECK(WaitFor([&] { return state() == SwarmDownload::Done; }, 30000), "downloaded (state %d)", state());
+        double secs = (double)(SteadyMs() - t0) / 1000.0;
+        int64_t b1 = 0, b2 = 0;
+        std::string got;
+        {
+            auto l = L3->Lock();
+            auto& d = *L3->swarm[f.id];
+            b1 = d.sources.count(i1) ? d.sources[i1].bytes : 0;
+            b2 = d.sources.count(i2) ? d.sources[i2].bytes : 0;
+            got = d.finalPath;
+        }
+        printf("  20 MB in %.1f s: %.1f MB from one, %.1f MB from the other (each limited to 4 MB/s)\n", secs, b1 / 1048576.0, b2 / 1048576.0);
+        CHECK(b1 > BIG / 5 && b2 > BIG / 5, "both sources sent pieces");
+        CHECK(secs < 4.5, "faster than one source alone could (%.1f s)", secs);
+        CHECK(Sha256File(got) == want, "file verified");
+        CHECK(got.find("films") != std::string::npos && L3->HaveShared(f.id), "kept in my Shared folder (and offered on)");
+        L4->Stop();
+        L3->Stop();
+        L2->Stop();
+        L1->Stop();
+    }
+
     // ------------------------------------------------------------ pause / resume
     printf("[pause/resume]\n");
     const int64_t SZ = 24 << 20;

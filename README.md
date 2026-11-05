@@ -30,6 +30,10 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   *delivered* / *read*, you can claim a **username** so others can find you, and phones stay connected in the
   **background** with notifications and a ringing call screen.
 
+**Library (Shared folders)** (see [docs/LIBRARY.md](docs/LIBRARY.md))
+- Files in your *Shared* folder can be browsed and downloaded by your contacts. A download comes from every contact
+  that has the file at once (piece by piece, each piece verified), and you then share it on.
+
 **Chat**
 - Text chat per person. Messages queue while the other side is offline and show delivered/queued state.
 - Selecting and copying: click to select, Ctrl/Shift+click for several, Ctrl+C copies them (with timestamps when several are selected). Double-click or *Select text…* opens a view where you can select part of a message. On phones, long-press enters selection mode.

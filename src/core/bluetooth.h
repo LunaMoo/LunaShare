@@ -43,6 +43,7 @@ struct HostBridge {
     std::function<bool()> batteryRestricted;          // Android: battery optimisation may cut the network
     std::function<void()> requestBatteryExemption;
     std::function<void()> moveToBack;                 // Android: back on the home screen -> background, don't close
+    std::function<bool()> isMetered;                  // on mobile data (or another metered network)
     // Android call audio routes: "current id\n" + lines "id\tkind\tname" (kind: earpiece/speaker/bluetooth/wired/usb)
     std::function<std::string()> callRoutes;
     std::function<void(int id)> setCallRoute;

@@ -123,6 +123,12 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->PathArcTo(P(0, 0.85f), h * 0.7f, 3.4f, 6.0f, 16);
             dl->PathFillConvex(col);
             break;
+        case Icon::Library:  // books on a shelf
+            dl->AddRectFilled(P(-0.75f, -0.55f), P(-0.4f, 0.65f), col, h * 0.06f);
+            dl->AddRectFilled(P(-0.3f, -0.75f), P(0.05f, 0.65f), col, h * 0.06f);
+            dl->AddQuadFilled(P(0.2f, -0.5f), P(0.5f, -0.6f), P(0.8f, 0.55f), P(0.5f, 0.65f), col);
+            dl->AddLine(P(-0.85f, 0.8f), P(0.85f, 0.8f), col, t);
+            break;
         case Icon::History:
             dl->AddCircle(c, h * 0.75f, col, 24, t);
             dl->AddLine(c, P(0, -0.5f), col, t);

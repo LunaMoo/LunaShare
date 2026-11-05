@@ -116,6 +116,7 @@ bool Engine::Start() {
     discoveryThread_ = std::thread([this] { DiscoveryLoop(); });
     maintThread_ = std::thread([this] { MaintenanceLoop(); });
     hashThread_ = std::thread([this] { HashLoop(); });
+    libThread_ = std::thread([this] { LibraryLoop(); });
     return listener_ != kInvalidSocket;
 }
 
@@ -144,6 +145,7 @@ void Engine::Stop() {
     if (discoveryThread_.joinable()) discoveryThread_.join();
     if (maintThread_.joinable()) maintThread_.join();
     if (hashThread_.joinable()) hashThread_.join();
+    if (libThread_.joinable()) libThread_.join();
     for (int i = 0; i < 100 && liveThreads_ > 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(50));
     CloseSocket(listener_);
     listener_ = kInvalidSocket;
@@ -190,6 +192,7 @@ void Engine::Load() {
         if (j.contains("files") && j["files"].is_array())
             for (auto& h : j["files"]) history.push_back(HistoryFromJson(h));
     }
+    if (LoadJsonFile(JoinPath(dir, "swarm.json"), j)) LoadSwarm(j);
     if (LoadJsonFile(JoinPath(dir, "transfers.json"), j) && j.is_array()) {
         for (auto& tj : j) {
             auto t = std::make_shared<Transfer>();
@@ -247,6 +250,7 @@ void Engine::Save() {
     SaveJsonFile(JoinPath(dir, "settings.json"), js);
     SaveJsonFile(JoinPath(dir, "history.json"), jh);
     SaveJsonFile(JoinPath(dir, "transfers.json"), jt);
+    SaveJsonFile(JoinPath(dir, "swarm.json"), SwarmJson());
 }
 
 // ============================================================================ helpers
@@ -1220,6 +1224,10 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
         c->lastRecv = SteadyMs();
         c->bytesIn += (int64_t)f.payload.size() + 5;
         if (!c->ready && f.type != Msg::Hello) break;
+        if (f.type == Msg::PieceData) {
+            HandlePieceData(c, f);
+            continue;
+        }
         if (f.type == Msg::FileData) {
             HandleData(c, f);
             continue;
@@ -1240,12 +1248,14 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
 
 void Engine::WriterLoop(std::shared_ptr<Connection> c) {
     std::vector<uint8_t> buf;
+    bool pieceTurn = false;
     while (!c->closed) {
         std::pair<Msg, std::string> msg;
-        bool haveCtrl = false, haveData = false;
+        bool haveCtrl = false, haveData = false, havePiece = false;
         {
             std::unique_lock<std::mutex> l(c->qm);
-            c->qcv.wait_for(l, std::chrono::milliseconds(200), [&] { return c->closed || !c->ctrl.empty() || !c->sending.empty(); });
+            c->qcv.wait_for(l, std::chrono::milliseconds(200),
+                            [&] { return c->closed || !c->ctrl.empty() || !c->sending.empty() || !c->pieces.empty(); });
             if (c->closed) break;
             if (!c->ctrl.empty()) {
                 msg = std::move(c->ctrl.front());
@@ -1253,11 +1263,25 @@ void Engine::WriterLoop(std::shared_ptr<Connection> c) {
                 haveCtrl = true;
             } else {
                 haveData = !c->sending.empty();
+                havePiece = !c->pieces.empty();
             }
         }
         if (haveCtrl) {
             if (!c->sec->Send(c->sock, msg.first, msg.second)) break;
             c->bytesOut += (int64_t)msg.second.size() + 5;
+            continue;
+        }
+        // shared-library pieces take turns with ordinary transfers
+        if (havePiece && (!haveData || (pieceTurn = !pieceTurn))) {
+            int64_t pw = 0;
+            if (ProducePiece(c, buf, pw)) {
+                if (!c->sec->Send(c->sock, Msg::PieceData, buf.data(), buf.size())) break;
+                c->bytesOut += (int64_t)buf.size() + 5;
+                totalUp += (int64_t)buf.size() - 36;
+            } else if (pw > 0 && !haveData) {
+                std::unique_lock<std::mutex> l(c->qm);
+                c->qcv.wait_for(l, std::chrono::milliseconds(std::min<int64_t>(pw, 50)), [&] { return c->closed || !c->ctrl.empty(); });
+            }
             continue;
         }
         if (!haveData) continue;
@@ -2043,6 +2067,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             FinishCall(reason, false);
             break;
         }
+        case Msg::LibGet: case Msg::LibList: case Msg::LibChanged: case Msg::PieceHave: case Msg::PieceHaveReply:
+        case Msg::PieceMapGet: case Msg::PieceMap: case Msg::PieceGet: case Msg::PieceNo:
+            HandleLibrary(c, f.type, j);
+            break;
         case Msg::WifiCreds:
             Emit({EventType::WifiCreds, c->peerId, "Wi-Fi hotspot offered", 0, j.value("ssid", ""), j.value("pass", "")});
             break;
@@ -2110,6 +2138,10 @@ void Engine::HandleData(const std::shared_ptr<Connection>& c, const Frame& f) {
 void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
+    if (IsContact(peer)) {  // their Shared folder (and a new source for running downloads)
+        Queue(c, Msg::LibGet, json::object());
+        for (auto& [id, d] : swarm) d->lastHave = 0;
+    }
     // messages waiting for this device: in its person's conversation, or (my own device) in any conversation
     for (auto& [key, cv] : chats)
         for (auto& m : cv.messages)
@@ -2483,6 +2515,7 @@ void Engine::MaintenanceLoop() {
         std::vector<std::pair<std::string, uint16_t>> reconnect;
         {
             auto lk = Lock();
+            SwarmTick();  // shared-library downloads: ask for pieces
             if (now - lastMailScan_ > 20000) {  // messages for offline devices: into the server mailbox
                 lastMailScan_ = now;
                 MailPending();

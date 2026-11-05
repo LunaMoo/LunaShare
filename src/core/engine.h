@@ -51,6 +51,11 @@ struct Connection {
     std::condition_variable qcv;
     std::deque<std::pair<Msg, std::string>> ctrl;
     std::vector<uint64_t> sending;  // outgoing tids being streamed
+    struct PieceOut {
+        std::string id;  // content id (hex)
+        uint32_t idx = 0;
+    };
+    std::deque<PieceOut> pieces;    // shared-library pieces this peer asked for
     size_t rr = 0;
 };
 
@@ -77,6 +82,42 @@ enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
 std::string CapForMedia(const std::string& media);  // capability a call type needs ("webcam" -> "video")
+// ---- shared library (Shared folders of my contacts, multi-source downloads)
+constexpr int64_t kPieceSize = 1 << 20;
+struct LibFile {
+    std::string id, rel;     // content id (hex), path inside the Shared folder ('/' separated)
+    int64_t size = 0, mtime = 0;
+};
+struct PeerLibrary {
+    std::vector<LibFile> files;
+    int64_t fetched = 0;     // wall ms, 0 = never
+    bool off = false;        // they don't share (or not with us)
+    bool pending = false;
+};
+struct SwarmSource {
+    bool full = false;
+    std::vector<uint8_t> bits;          // partial source: which pieces it has
+    std::map<uint32_t, int64_t> inflight;  // piece -> requested at (steady ms)
+    int64_t bytes = 0;                  // received from this source
+    int bad = 0;                        // pieces that failed the hash check
+    int64_t asked = 0;
+};
+struct SwarmDownload {
+    std::string id, rel;
+    int64_t size = 0, pieceSize = kPieceSize;
+    std::string hashes;                 // 32 bytes per piece (empty until a source sent the piece map)
+    std::vector<uint8_t> have;          // one byte per piece (1 = verified + written)
+    int64_t done = 0;
+    std::string partPath, finalPath;
+    enum State { Searching, Running, Paused, Done, Failed } state = Searching;
+    std::string error;
+    std::map<std::string, SwarmSource> sources;  // device -> what it has
+    int64_t lastHave = 0, lastMapAsk = 0, created = 0;
+    double speed = 0;
+    int64_t speedBytes = 0, speedTs = 0;
+    uint32_t Pieces() const { return (uint32_t)((size + pieceSize - 1) / pieceSize); }
+};
+
 struct CallInfo {
     uint64_t id = 0;
     std::string peer;
@@ -205,6 +246,21 @@ public:
     void SendWifiCreds(const std::string& peer, const std::string& ssid, const std::string& pass);
 
     // ---- calls (signalling only; audio/video are handled by an optional media module in the app)
+    // ---- shared library. My Shared folder is offered to my contacts (own devices, trusted ones, people I've exchanged
+    // messages or files with); I can browse theirs and download files from every contact that has them at once.
+    std::string SharedDir();
+    bool IsContact(const std::string& device);
+    void RefreshLibrary(const std::string& peerOrKey);          // ask for a contact's list (all their devices)
+    void RescanShared();                                        // look at my Shared folder now
+    bool DownloadShared(const LibFile& f);                      // start (or resume) a download
+    void PauseShared(const std::string& id, bool pause);
+    void CancelShared(const std::string& id);
+    bool HaveShared(const std::string& id);                     // in my Shared folder already
+    std::vector<LibFile> myLibrary;                             // (under Lock())
+    int libHashing = 0;                                         // files waiting to be hashed
+    std::map<std::string, PeerLibrary> peerLibraries;           // device -> its list
+    std::map<std::string, std::shared_ptr<SwarmDownload>> swarm;  // content id -> download
+
     std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
     bool PeerHasCap(const std::string& peer, const std::string& cap);
     uint64_t StartCall(const std::string& peer, const std::string& media = "voice");
@@ -254,9 +310,27 @@ public:
     bool IsConnected(const std::string& peer) { return (bool)ReadyConn(peer); }
     std::string PeerName(const std::string& peer);
     std::vector<std::shared_ptr<Transfer>> BatchTransfers(uint64_t batch);
+    std::string ConfigPath();  // this engine's config folder
 
 private:
     void ListenLoop();
+    void LibraryLoop();
+    void HandleLibrary(const std::shared_ptr<Connection>& c, Msg type, const json& j);  // under Lock()
+    void HandlePieceData(const std::shared_ptr<Connection>& c, const Frame& f);
+    void SwarmTick();  // under Lock(), from the maintenance loop
+    bool ProducePiece(const std::shared_ptr<Connection>& c, std::vector<uint8_t>& buf, int64_t& wait);
+    void FinishSwarm(const std::shared_ptr<SwarmDownload>& d);
+    void LoadSwarm(const json& j);
+    json SwarmJson();
+    bool ShareAllowedNow();
+    struct LibEntry {
+        LibFile f;
+        std::string hashes;  // 32 bytes per piece
+    };
+    std::map<std::string, LibEntry> libIndex_;  // content id -> entry (guarded by mtx)
+    std::atomic<bool> libRescan_{true};
+    std::thread libThread_;
+    bool ThrottleTake(size_t& chunk, int64_t& wait);
     void DiscoveryLoop();
     void MaintenanceLoop();
     void HashLoop();

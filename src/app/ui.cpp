@@ -133,6 +133,7 @@ void App::Frame() {
         if (a == "devices") { tab = Tab::Devices; screen = MScreen::Devices; }
         if (a == "nearby") { tab = Tab::Nearby; screen = MScreen::Nearby; }
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
+        if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
         autoSel = nullptr;
@@ -685,6 +686,7 @@ void App::DrawDesktop() {
         item(T("Chat"), Tab::Chat);
         item(tl.c_str(), Tab::Transfers);
         item(T("History"), Tab::History);
+        item(T("Library"), Tab::Library);
         item(T("Devices"), Tab::Devices);
         item(T("Connect"), Tab::Nearby);
         item(T("Settings"), Tab::Settings);
@@ -707,6 +709,7 @@ void App::DrawDesktop() {
             break;
         case Tab::Transfers: DrawTransfers(); break;
         case Tab::History: DrawHistory(); break;
+        case Tab::Library: DrawLibrary(); break;
         case Tab::Devices: DrawDevices(); break;
         case Tab::Nearby: DrawNearby(); break;
         case Tab::Settings: DrawSettings(); break;
@@ -777,6 +780,7 @@ void App::DrawMobile() {
         case MScreen::Chat: peerTitle = eng.PeerName(selectedPeer); title = peerTitle.c_str(); break;
         case MScreen::Transfers: title = T("Transfers"); break;
         case MScreen::History: title = T("Shared files"); break;
+        case MScreen::Library: title = T("Library"); break;
         case MScreen::Nearby: title = T("Connect"); break;
         case MScreen::Settings: title = T("Settings"); break;
         case MScreen::Devices: title = T("Device"); break;
@@ -846,6 +850,7 @@ void App::DrawMobile() {
         case MScreen::Chat: DrawChat(selectedPeer); break;
         case MScreen::Transfers: DrawTransfers(); break;
         case MScreen::History: DrawHistory(); break;
+        case MScreen::Library: DrawLibrary(); break;
         case MScreen::Nearby: DrawNearby(); break;
         case MScreen::Settings: DrawSettings(); break;
         case MScreen::Devices:
@@ -883,11 +888,12 @@ void App::DrawMobileNav() {
     ImGui::Separator();
     struct Item { const char* label; Icon icon; MScreen s; };
     Item items[] = {{T("Devices"), Icon::Users, MScreen::Home}, {T("Transfers"), Icon::Transfers, MScreen::Transfers},
-                    {T("Files"), Icon::History, MScreen::History}, {T("Connect"), Icon::Link, MScreen::Nearby},
-                    {T("Settings"), Icon::Gear, MScreen::Settings}};
-    float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 4) / 5.0f;
+                    {T("Files"), Icon::History, MScreen::History}, {T("Library"), Icon::Library, MScreen::Library},
+                    {T("Connect"), Icon::Link, MScreen::Nearby}, {T("Settings"), Icon::Gear, MScreen::Settings}};
+    const int kItems = 6;
+    float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * (kItems - 1)) / (float)kItems;
     float h = ui::M().rowH * 1.25f;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < kItems; i++) {
         if (i) ImGui::SameLine();
         bool active = screen == items[i].s;
         ImGui::PushID(i);
@@ -903,7 +909,12 @@ void App::DrawMobileNav() {
         ui::DrawIcon(dl, items[i].icon, ImVec2(cx, mn.y + h * 0.36f), h * 0.36f, ImGui::GetColorU32(ImGuiCol_Text));
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.8f);
         ImVec2 ts = ImGui::CalcTextSize(items[i].label);
-        dl->AddText(ImVec2(cx - ts.x * 0.5f, mx.y - ts.y - h * 0.08f), ImGui::GetColorU32(ImGuiCol_Text), items[i].label);
+        float fs = ImGui::GetFontSize();
+        if (ts.x > w * 0.96f) {  // (six items on a narrow phone: smaller labels)
+            fs *= w * 0.96f / ts.x;
+            ts = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, items[i].label);
+        }
+        dl->AddText(ImGui::GetFont(), fs, ImVec2(cx - ts.x * 0.5f, mx.y - ts.y - h * 0.08f), ImGui::GetColorU32(ImGuiCol_Text), items[i].label);
         ImGui::PopFont();
         if (items[i].s == MScreen::Transfers) {
             int active = 0;
