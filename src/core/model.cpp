@@ -205,6 +205,9 @@ json ToJson(const ChatMessage& m) {
     if (!m.reactionSent) j["reactPending"] = true;
     if (!m.theirReaction.empty()) j["theirReact"] = m.theirReaction;
     if (!m.pendingTo.empty()) j["pend"] = m.pendingTo;
+    if (!m.mailedTo.empty()) j["mailed"] = m.mailedTo;
+    if (m.read) j["read"] = true;
+    if (!m.readSent) j["readPending"] = true;
     return j;
 }
 
@@ -226,6 +229,11 @@ ChatMessage MessageFromJson(const json& j) {
     Get(j, "reactPending", pending);
     m.reactionSent = !pending;
     Get(j, "pend", m.pendingTo);
+    Get(j, "mailed", m.mailedTo);
+    Get(j, "read", m.read);
+    bool rp = false;
+    Get(j, "readPending", rp);
+    m.readSent = !rp;
     return m;
 }
 

@@ -16,6 +16,13 @@ OPNsense router.
   (`--no-relay`, or the OPNsense checkbox) and on each device. If the server goes down, direct connections keep working.
 - Stored per device, in memory only: ID, display name, platform, public key, public and LAN addresses. Entries
   expire 60 s after the device goes away.
+- **Offline messages:** a text message for a device that isn't reachable waits in the server's mailbox until that
+  device comes online (also delivered/read receipts). Each one is sealed for the receiving device's key: the server
+  sees neither the text nor who sent it, only which device key it is for, when, and its size. Only members of the room
+  can leave messages, only the owner of the key can take them out (it signs a challenge), and they are deleted once
+  delivered, or after 10 days. Limits: 10 MB per receiving device, 1 GB in total (`--mailbox-days`, `--mailbox-mb`,
+  `--mailbox-total-mb`, `--no-mailbox`). With `-d DIR` they survive server restarts (the OPNsense plugin uses
+  `/var/db/lunashare`). Files are never stored; they wait until both devices are online.
 
 ## Server on OPNsense
 
@@ -35,7 +42,7 @@ Uninstall: `sh install.sh uninstall`.
 
 ## Server anywhere else
 
-The same program runs on Linux/macOS/Windows: `lunashare-rendezvous -p 47830` (see `--help`). For Linux there's a
+The same program runs on Linux/macOS/Windows: `lunashare-rendezvous -p 47830 -d /var/lib/lunashare` (see `--help`). For Linux there's a
 systemd unit in `server/lunashare-rendezvous.service`. Open UDP 47830 in front of it.
 
 ## In LunaShare (each device)

@@ -46,6 +46,26 @@
         <help>Bandwidth limit per relayed connection and direction. 0 = unlimited.</help>
     </field>
     <field>
+        <id>general.mailbox</id>
+        <label>Keep messages for offline devices</label>
+        <type>checkbox</type>
+        <help>Text messages for a device that is not reachable wait here until it comes online (end-to-end encrypted: the server can't read them or see who sent them). Stored in /var/db/lunashare.</help>
+    </field>
+    <field>
+        <id>general.mailboxdays</id>
+        <label>Keep offline messages (days)</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Messages nobody picked up are deleted after this many days.</help>
+    </field>
+    <field>
+        <id>general.mailboxmb</id>
+        <label>Offline messages per device (MB)</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Storage limit per receiving device.</help>
+    </field>
+    <field>
         <id>general.maxdevices</id>
         <label>Maximum devices</label>
         <type>text</type>

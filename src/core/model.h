@@ -137,6 +137,9 @@ struct ChatMessage {
     std::string myReaction, theirReaction;  // emoji (UTF-8), empty = none
     bool reactionSent = true;               // false until the other device confirmed myReaction
     std::vector<std::string> pendingTo;     // devices that still have to get this message (contact's + my other ones)
+    std::vector<std::string> mailedTo;      // ... of those, the ones it was left for in the server mailbox
+    bool read = false;                      // outgoing: the other person has seen it
+    bool readSent = true;                   // incoming: false until we told the sender it was seen
 };
 
 struct Conversation {
@@ -144,6 +147,7 @@ struct Conversation {
     std::vector<ChatMessage> messages;
     int unread = 0;
     std::vector<std::string> pendingDeletes;  // "delete for everyone" not yet confirmed by the other device
+    bool readPending = false;                 // incoming messages whose read receipt wasn't sent yet
 };
 
 enum class TState : int {

@@ -52,6 +52,14 @@ bool PhraseToSeed(const std::string& phrase, std::string& seedHex, std::string* 
 std::string PasswordEncrypt(const std::string& plain, const std::string& password);
 bool PasswordDecrypt(const std::string& blob, const std::string& password, std::string& plain);
 
+// Offline messages (server mailbox), envelope v1: sealed to one device's identity key.
+//   [u8 1][32 ephemeral X25519 public][24 nonce][16 MAC][ciphertext]
+//   key = BLAKE2b-256("LunaShare seal v1" | X25519(eph, recipient) | eph_pub | recipient_x25519)
+// The identity (EdDSA) keys are converted to X25519. Only the recipient can open it; who sent it is inside.
+// (A version 2 with prekeys - forward secrecy for stored messages - can come later; see docs/ACCOUNTS.md.)
+std::string SealTo(const std::string& recipientPubHex, const std::string& plain);
+bool OpenSealed(const Identity& me, const std::string& sealed, std::string& plain);
+
 std::string Base64Encode(const std::string& bin);
 bool Base64Decode(const std::string& text, std::string& out);
 

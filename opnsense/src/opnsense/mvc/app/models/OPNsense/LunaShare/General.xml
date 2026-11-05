@@ -33,6 +33,22 @@
             <MaximumValue>10000000</MaximumValue>
             <Required>Y</Required>
         </relaylimit>
+        <mailbox type="BooleanField">
+            <Default>1</Default>
+            <Required>Y</Required>
+        </mailbox>
+        <mailboxdays type="IntegerField">
+            <Default>10</Default>
+            <MinimumValue>1</MinimumValue>
+            <MaximumValue>365</MaximumValue>
+            <Required>Y</Required>
+        </mailboxdays>
+        <mailboxmb type="IntegerField">
+            <Default>10</Default>
+            <MinimumValue>1</MinimumValue>
+            <MaximumValue>1000</MaximumValue>
+            <Required>Y</Required>
+        </mailboxmb>
         <maxdevices type="IntegerField">
             <Default>200</Default>
             <MinimumValue>1</MinimumValue>

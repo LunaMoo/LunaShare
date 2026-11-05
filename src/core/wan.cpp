@@ -144,6 +144,13 @@ void WanTransport::Connect(const std::string& peerId) {
     if (std::find(connectQueue_.begin(), connectQueue_.end(), peerId) == connectQueue_.end()) connectQueue_.push_back(peerId);
 }
 
+void WanTransport::MailPut(const std::string& toPub, const std::string& id, const std::string& dataB64) {
+    std::lock_guard<std::mutex> l(m_);
+    for (auto& m : mailOut_)
+        if (m.id == id) return;
+    if (mailOut_.size() < 2000) mailOut_.push_back({toPub, id, dataB64, 0, 0});
+}
+
 void WanTransport::UpdateName(const std::string& name) {
     std::lock_guard<std::mutex> l(m_);
     if (cfg_.name != name) {
@@ -295,6 +302,19 @@ void WanTransport::Loop() {
         }
         send(server, 'R', j.dump());
     };
+    std::string mailNonce;
+    int mailWaiting = 0;
+    int64_t mailFetchAt = -100000;
+    auto fetchMail = [&] {
+        if (!serverOk || mailNonce.empty() || !signMail) return;
+        mailFetchAt = SteadyMs();
+        std::string room;
+        {
+            std::lock_guard<std::mutex> l(m_);
+            room = cfg_.roomHash;
+        }
+        send(server, 'R', json{{"t", "mget"}, {"sig", signMail(room + "\n" + mailNonce)}}.dump());
+    };
     auto closeSession = [&](uint32_t conv, bool notify) {
         auto it = sessions.find(conv);
         if (it == sessions.end()) return;
@@ -358,6 +378,25 @@ void WanTransport::Loop() {
         if (now - lastReg > 15000 || renamed) {
             registerNow();
             lastReg = now;
+        }
+        if (serverOk && lastReply && now - lastReply > 50000) registered_ = false;
+        // offline messages: leave queued envelopes (each retried until the server confirms), and take out mine
+        if (serverOk && registered_) {
+            std::vector<MailOut> due;
+            {
+                std::lock_guard<std::mutex> l(m_);
+                for (auto it = mailOut_.begin(); it != mailOut_.end();) {
+                    if (it->tries >= 8) { it = mailOut_.erase(it); continue; }
+                    if (now >= it->next && due.size() < 8) {  // (a few per round: the server limits packets per second)
+                        it->tries++;
+                        it->next = now + 3000;
+                        due.push_back(*it);
+                    }
+                    ++it;
+                }
+            }
+            for (auto& m : due) send(server, 'R', json{{"t", "mput"}, {"to", m.to}, {"id", m.id}, {"d", m.data}}.dump());
+            if (mailWaiting > 0 && now - mailFetchAt > 10000) fetchMail();
         }
         if (cfg_.natpmp && now >= natNext) {
             if (now - natGwRefresh > 300000) {
@@ -462,7 +501,28 @@ void WanTransport::Loop() {
                 json j = json::parse(std::string(buf.data() + 1, (size_t)n - 1), nullptr, false);
                 if (j.is_discarded()) continue;
                 lastReply = now;
+                registered_ = true;
                 std::string t = j.value("t", "");
+                if (j.contains("mnonce")) {  // (in "peers" and "mail")
+                    mailNonce = j.value("mnonce", "");
+                    mailWaiting = j.value(t == "peers" ? "mail" : "n", 0);
+                    if (mailWaiting > 0 && now - mailFetchAt > 1000) fetchMail();
+                }
+                if (t == "mitem") {
+                    std::string id = j.value("id", ""), d = j.value("d", "");
+                    bool took = !id.empty() && onMail && onMail(id, d);
+                    if (took || id.empty() || !onMail) send(server, 'R', json{{"t", "mack"}, {"ids", json::array({id})}}.dump());
+                    continue;
+                }
+                if (t == "mok" || t == "mfull") {
+                    std::string id = j.value("id", "");
+                    {
+                        std::lock_guard<std::mutex> l(m_);
+                        mailOut_.erase(std::remove_if(mailOut_.begin(), mailOut_.end(), [&](const MailOut& m) { return m.id == id; }), mailOut_.end());
+                    }
+                    if (onMailSent) onMailSent(id, t == "mok");
+                    continue;
+                }
                 if (t == "peers") {
                     {
                         std::lock_guard<std::mutex> l(m_);

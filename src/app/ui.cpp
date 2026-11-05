@@ -908,6 +908,7 @@ void App::DrawChat(const std::string& peer) {
     if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
                                       conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
     else if (eng.IsOnline(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
+    else if (eng.WanStatus().rfind("connected", 0) == 0) ImGui::TextDisabled("%s", T("offline - messages wait on your server, files are queued"));
     else ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
     if (d && !d->pendingKey.empty()) {
         ImGui::SameLine();
@@ -1257,7 +1258,7 @@ void App::DrawMessages(const std::string& peer) {
         return;
     }
     Conversation& cv = it->second;
-    cv.unread = 0;
+    if (cv.unread || cv.readPending) eng.MarkRead(peer);  // (sends read receipts)
     if (lastMsgPeer != peer || lastMsgCount != cv.messages.size()) {
         bool atBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 40;
         if (atBottom || lastMsgPeer != peer) scrollToBottom = true;
@@ -1338,7 +1339,8 @@ void App::DrawMessages(const std::string& peer) {
             int bigEmoji = Emoji().EmojiOnly(m.text);  // only 1-3 emoji: show them big
             float textSize = ImGui::GetFontSize() * (bigEmoji == 1 ? 2.6f : bigEmoji ? 2.0f : 1.0f);
             ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(textSize, FLT_MAX, wrap, shown.c_str());
-            std::string meta = FormatTime(m.ts, false) + (m.outgoing ? std::string("  ") + (m.delivered ? T("delivered") : T("queued")) : std::string());
+            const char* state = m.read ? T("read") : m.delivered ? T("delivered") : !m.mailedTo.empty() ? T("waiting on the server") : T("queued");
+            std::string meta = FormatTime(m.ts, false) + (m.outgoing ? std::string("  ") + state : std::string());
             ImVec2 ms = ImGui::CalcTextSize(meta.c_str());
             float smallScale = 0.8f;
             float bw = std::max(ts.x, ms.x * smallScale) + pad * 2;
@@ -1384,7 +1386,8 @@ void App::DrawMessages(const std::string& peer) {
             if (hovered && !sel) bg = ImGui::GetColorU32(m.outgoing ? ImGuiCol_ButtonActive : ImGuiCol_FrameBgHovered, m.outgoing ? 0.7f : 1.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), bg, pad);
             dl->AddText(ImGui::GetFont(), textSize, ImVec2(p0.x + pad, p0.y + pad * 0.7f), ImGui::GetColorU32(ImGuiCol_Text), shown.c_str(), nullptr, wrap);
-            ImU32 metaCol = m.outgoing && !m.delivered ? ui::ColWarn() : ui::ColMuted();
+            ImU32 metaCol = m.outgoing && !m.delivered && m.mailedTo.empty() ? ui::ColWarn()
+                          : m.outgoing && m.read ? IM_COL32(90, 170, 255, 255) : ui::ColMuted();
             dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale,
                         ImVec2(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + ts.y + pad * 0.2f), metaCol, meta.c_str());
             ReactHoverButton(m, p0, ImVec2(p0.x + bw, p0.y + bh));

@@ -32,6 +32,7 @@ command_args="-r -S -T lunashare -P ${pidfile} /usr/local/bin/lunashare-rendezvo
 lunashare_rendezvous_prestart()
 {
     install -d -o "${lunashare_rendezvous_user}" -m 0755 "${piddir}"
+    install -d -o "${lunashare_rendezvous_user}" -m 0700 /var/db/lunashare  # offline messages (sealed)
 }
 
 run_rc_command "$1"

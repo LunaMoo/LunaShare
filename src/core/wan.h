@@ -63,6 +63,15 @@ public:
     std::string MappedEndpoint();  // NAT-PMP mapping, if the router granted one
     int Sessions() const { return sessions_.load(); }
 
+    // ---- offline messages (server mailbox). Envelopes are base64 text, sealed by the engine.
+    // Leaves an envelope for the device with public key `toPub` (retried until the server confirms).
+    void MailPut(const std::string& toPub, const std::string& id, const std::string& dataB64);
+    bool Registered() const { return registered_.load(); }  // the server answers (mail can be left)
+    std::function<std::string(const std::string& challenge)> signMail;  // identity signature (context "mailbox")
+    // An envelope from my mailbox (network thread). Return true when it was taken (it is then deleted on the server).
+    std::function<bool(const std::string& id, const std::string& dataB64)> onMail;
+    std::function<void(const std::string& id, bool stored)> onMailSent;  // stored=false: the mailbox is full
+
 private:
     void Loop();
     void SetStatus(const std::string& s);
@@ -72,6 +81,13 @@ private:
     std::mutex m_;
     Config cfg_;
     std::string status_, publicEp_, mappedEp_;
+    std::atomic<bool> registered_{false};
+    struct MailOut {
+        std::string to, id, data;
+        int tries = 0;
+        int64_t next = 0;
+    };
+    std::vector<MailOut> mailOut_;
     std::vector<std::string> connectQueue_;
     bool nameChanged_ = false;
     OnPeers onPeers_;

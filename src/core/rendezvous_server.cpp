@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "crypto.h"
+#include "model.h"
 #include "net.h"
 #include "platform.h"
 
@@ -38,6 +40,13 @@ struct Device {
     std::vector<std::string> extra;  // router mappings / forwarded port, already "ip:port"
     bool relayOk = true;             // the device allows its connections to be relayed
     int64_t lastSeen = 0;
+    std::string mnonce;              // challenge the device signs to open its mailbox
+    bool mailAuthed = false;         // proved it owns `pub` (may take out / delete its mail)
+};
+
+struct MailItem {
+    std::string id, data;  // data: base64 of the sealed envelope
+    int64_t ts = 0;        // wall clock ms, for expiry
 };
 
 // a relayed connection: 'Y' packets from one side go to the other
@@ -196,6 +205,11 @@ size_t RendezvousServer::RoomCount() {
     return rooms_;
 }
 
+size_t RendezvousServer::MailCount() {
+    std::lock_guard<std::mutex> l(m_);
+    return mail_;
+}
+
 void RendezvousServer::Loop() {
     sock_t s = (sock_t)sock_;
     std::map<std::string, std::map<std::string, Device>> rooms;  // room -> id -> device
@@ -222,13 +236,65 @@ void RendezvousServer::Loop() {
         for (auto& [id, d] : rooms[room])
             if (id != except) sendTo(d.ep, d.via, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}});
     };
+    // ---- mailboxes: "room/recipient key" -> sealed envelopes
+    std::map<std::string, std::vector<MailItem>> boxes;
+    size_t mailBytes = 0;
+    bool mailDirty = false;
+    std::string mailFile = opt_.dataDir.empty() ? std::string() : JoinPath(opt_.dataDir, "mailbox.json");
+    auto boxBytes = [](const std::vector<MailItem>& v) {
+        size_t b = 0;
+        for (auto& m : v) b += m.data.size();
+        return b;
+    };
+    if (opt_.mailbox && !mailFile.empty()) {
+        json mj;
+        if (!LoadJsonFile(mailFile, mj) || !mj.is_object()) mj = json::object();
+        json bj = mj.value("boxes", json::object());  // (kept alive for items())
+        if (bj.is_object())
+            for (auto& [key, arr] : bj.items())
+                for (auto& it : arr) {
+                    MailItem m{it.value("id", ""), it.value("d", ""), it.value("ts", (int64_t)0)};
+                    if (m.id.empty() || m.data.empty()) continue;
+                    boxes[key].push_back(m);
+                    mailBytes += m.data.size();
+                }
+        if (!boxes.empty()) log("mailbox: loaded " + std::to_string(boxes.size()) + " mailbox(es)");
+    }
+    auto saveMail = [&] {
+        if (!mailDirty || mailFile.empty()) return;
+        json bj = json::object();
+        for (auto& [key, v] : boxes) {
+            json arr = json::array();
+            for (auto& m : v) arr.push_back({{"id", m.id}, {"d", m.data}, {"ts", m.ts}});
+            bj[key] = arr;
+        }
+        MakeDirs(opt_.dataDir);
+        SaveJsonFile(mailFile, json{{"v", 1}, {"boxes", bj}});
+        mailDirty = false;
+    };
     auto counts = [&] {
-        size_t n = 0;
+        size_t n = 0, mails = 0;
         for (auto& [r, m] : rooms) n += m.size();
+        for (auto& [k, v] : boxes) mails += v.size();
         std::lock_guard<std::mutex> l(m_);
         devices_ = n;
         rooms_ = rooms.size();
+        mail_ = mails;
         return n;
+    };
+    auto mailCount = [&](const std::string& room, const std::string& pub) {
+        auto it = boxes.find(room + "/" + pub);
+        return it == boxes.end() ? 0 : (int)it->second.size();
+    };
+    // the registered device a packet comes from (and its room)
+    auto findSender = [&](const sockaddr_in& f, std::string* roomOut) -> Device* {
+        for (auto& [room, r] : rooms)
+            for (auto& [id, d] : r)
+                if (d.ep.sin_addr.s_addr == f.sin_addr.s_addr && d.ep.sin_port == f.sin_port) {
+                    if (roomOut) *roomOut = room;
+                    return &d;
+                }
+        return nullptr;
     };
 
     while (running_) {
@@ -251,6 +317,23 @@ void RendezvousServer::Loop() {
                 else ++rit;
             }
             if (limits.size() > 10000) limits.clear();
+            if (opt_.mailbox) {
+                int64_t wall = NowMs(), maxAge = (int64_t)opt_.mailboxDays * 86400000;
+                for (auto bit = boxes.begin(); bit != boxes.end();) {
+                    auto& v = bit->second;
+                    size_t before = v.size();
+                    v.erase(std::remove_if(v.begin(), v.end(), [&](const MailItem& m) {
+                                if (wall - m.ts <= maxAge) return false;
+                                mailBytes -= m.data.size();
+                                return true;
+                            }),
+                            v.end());
+                    if (v.size() != before) mailDirty = true;
+                    if (v.empty()) bit = boxes.erase(bit);
+                    else ++bit;
+                }
+                saveMail();
+            }
             for (auto it = relays.begin(); it != relays.end();) {
                 if (now - it->second.lastSeen > 90000) {
                     log("relay " + std::to_string(it->first) + " closed (" + std::to_string(it->second.bytes / 1024) + " KB)");
@@ -340,13 +423,24 @@ void RendezvousServer::Loop() {
             }
             d.relayOk = j.value("relay", true);
             d.lastSeen = now;
+            if (d.mnonce.empty() || moved) {
+                char nn[33];
+                snprintf(nn, sizeof(nn), "%016llx%016llx", (unsigned long long)rng(), (unsigned long long)rng());
+                d.mnonce = nn;
+                d.mailAuthed = false;
+            }
             // a device whose address changed (NAT rebinding) keeps its relayed connections
             if (moved)
                 for (auto& [conv, rl] : relays) {
                     if (rl.room == room && rl.idA == id) rl.a = from, rl.viaA = via;
                     if (rl.room == room && rl.idB == id) rl.b = from, rl.viaB = via;
                 }
-            sendJson(from, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}});
+            json reply = {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}};
+            if (opt_.mailbox) {
+                reply["mail"] = mailCount(room, d.pub);
+                reply["mnonce"] = d.mnonce;
+            }
+            sendJson(from, reply);
             if (isNew) counts();
             if (isNew || moved) {
                 log(std::string(isNew ? "joined " : "moved ") + d.name + " (" + id.substr(0, 8) + ") from " + Ep(from) + " room " + room.substr(0, 8));
@@ -403,6 +497,73 @@ void RendezvousServer::Loop() {
                 log("relaying " + me->name + " <-> " + other.name);
                 break;
             }
+        } else if (t == "mput" && opt_.mailbox) {
+            // a room member leaves a sealed message for a device (identified by its public key)
+            std::string room, to = j.value("to", ""), id = Clip(j.value("id", ""), 64), data = j.value("d", "");
+            Device* me = findSender(from, &room);
+            if (!me || !IsHex64(to) || id.empty() || data.empty() || data.size() > 7000) continue;
+            std::string key = room + "/" + to;
+            auto& v = boxes[key];
+            bool dup = false;
+            for (auto& m : v) dup |= m.id == id;
+            if (!dup) {
+                if (boxBytes(v) + data.size() > (size_t)opt_.mailboxMB * 1048576 || v.size() >= 20000 ||
+                    mailBytes + data.size() > (size_t)opt_.mailboxTotalMB * 1048576) {
+                    sendJson(from, {{"t", "mfull"}, {"id", id}});
+                    if (v.empty()) boxes.erase(key);
+                    continue;
+                }
+                v.push_back({id, data, NowMs()});
+                mailBytes += data.size();
+                mailDirty = true;
+                // the recipient is online right now: tell it
+                for (auto& [did, d] : rooms[room])
+                    if (d.pub == to) sendTo(d.ep, d.via, {{"t", "mail"}, {"n", (int)v.size()}, {"mnonce", d.mnonce}});
+            }
+            sendJson(from, {{"t", "mok"}, {"id", id}});
+        } else if (t == "mget" && opt_.mailbox) {
+            // the owner of a key takes out its mail: it signs the challenge it got when registering
+            std::string room;
+            Device* me = findSender(from, &room);
+            if (!me || me->pub.empty() || me->mnonce.empty()) continue;
+            if (!me->mailAuthed) {
+                if (!VerifyData(me->pub, "mailbox", room + "\n" + me->mnonce, j.value("sig", ""))) {
+                    sendJson(from, {{"t", "error"}, {"msg", "mailbox: invalid signature"}});
+                    continue;
+                }
+                me->mailAuthed = true;
+            }
+            auto it = boxes.find(room + "/" + me->pub);
+            int sent = 0;
+            if (it != boxes.end())
+                for (auto& m : it->second) {
+                    if (sent >= 8) break;  // the rest after the device confirmed these
+                    sendJson(from, {{"t", "mitem"}, {"id", m.id}, {"d", m.data}, {"ts", m.ts}});
+                    sent++;
+                }
+            sendJson(from, {{"t", "mail"}, {"n", mailCount(room, me->pub)}, {"mnonce", me->mnonce}});
+        } else if (t == "mack" && opt_.mailbox) {
+            // delivered: the owner deletes these
+            std::string room;
+            Device* me = findSender(from, &room);
+            if (!me || !me->mailAuthed) continue;
+            auto it = boxes.find(room + "/" + me->pub);
+            if (it == boxes.end()) continue;
+            auto ids = j.value("ids", json::array());
+            auto& v = it->second;
+            v.erase(std::remove_if(v.begin(), v.end(), [&](const MailItem& m) {
+                        for (auto& x : ids)
+                            if (x.is_string() && x.get<std::string>() == m.id) {
+                                mailBytes -= m.data.size();
+                                mailDirty = true;
+                                return true;
+                            }
+                        return false;
+                    }),
+                    v.end());
+            int left = (int)v.size();
+            if (v.empty()) boxes.erase(it);
+            sendJson(from, {{"t", "mail"}, {"n", left}, {"mnonce", me->mnonce}});
         } else if (t == "bye") {
             std::string room = j.value("room", ""), id = j.value("id", "");
             auto rit = rooms.find(room);
@@ -417,6 +578,7 @@ void RendezvousServer::Loop() {
             }
         }
     }
+    saveMail();
 }
 
 }  // namespace ls

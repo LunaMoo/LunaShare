@@ -38,6 +38,7 @@ enum class Msg : uint8_t {
     ChatSyncAck = 31, // {mid}
     LinkOffer = 32,   // {}  "join my account" (the user picked this device); both show the connection's Code()
     LinkAnswer = 33,  // {accept}
+    ChatRead = 36,    // {mids[], chat}  "seen": to the sender's devices (and to my own, which then clear their badge)
     LinkGrant = 34,   // {secret, account{...AccountData}, name, avh, img, pv, devices[], accounts[], chats{}}
     FileOffer = 20,   // {tid, name, rel, size, sha256, mtime, batch, batchCount, mid}
     FileAccept = 21,  // {tid, offset}  (also used to resume: receiver tells sender where to continue)

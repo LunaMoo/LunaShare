@@ -42,6 +42,7 @@ struct Connection {
     std::atomic<bool> closed{false};
     std::vector<std::string> caps;  // optional features the peer has (e.g. "voice"), from its Hello
     std::atomic<bool> callPriority{false};  // a call runs over this connection: keep file data small
+    bool mailbox = false;  // not a real connection: frames from / to the server mailbox (device offline)
     int64_t lastChunkMs = 0;
     std::atomic<int> alive{2};  // reader + writer; the last one to exit closes the socket
     std::unique_ptr<SecureChannel> sec;
@@ -256,7 +257,12 @@ private:
     void HandleAccount(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
     void SignAccountDevices();
     void MergeChats(const std::string& device);  // after a device joined an account: its chat moves to the person's
-    void QueueChatTo(const std::string& device, const std::string& key, const ChatMessage& m);
+    void QueueChatTo(const std::string& device, const std::string& key, ChatMessage& m);
+    // ---- offline messages through the server mailbox
+    bool MailTo(const std::string& device, Msg type, const json& j);  // seal + leave for an offline device
+    bool HandleMail(const std::string& id, const std::string& dataB64);  // (WAN thread)
+    void MailPending();  // leave pending messages for devices that are offline (periodically)
+    int64_t lastMailScan_ = 0;
     std::string accountCert_;  // account's signature over this device
     std::map<std::string, int64_t> linkOffered_, linkAsked_, linkJoining_;  // device -> when (steady ms)
     void HandleLinkGrant(const std::shared_ptr<Connection>& c, const json& j);

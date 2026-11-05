@@ -1,3 +1,4 @@
+#include <algorithm>
 // lunashare-rendezvous: optional server that lets LunaShare devices find each other over the internet.
 // Introductions pass through it; chat and files go directly between the devices (end-to-end encrypted), or through
 // it as an encrypted relay when two devices can't reach each other directly.
@@ -24,6 +25,11 @@ static void Usage() {
         "      --max-devices N    limit registered devices (default 5000)\n"
         "      --no-relay         never relay connections (devices that can't connect directly then can't connect)\n"
         "      --relay-limit KBPS bandwidth limit per relayed connection and direction (default: unlimited)\n"
+        "  -d, --data DIR         keep offline messages in DIR (survive restarts; default: memory only)\n"
+        "      --no-mailbox       don't keep messages for devices that are offline\n"
+        "      --mailbox-days N   keep offline messages at most N days (default 10)\n"
+        "      --mailbox-mb N     limit per receiving device in MB (default 10)\n"
+        "      --mailbox-total-mb N   limit for all offline messages together (default 1024)\n"
         "  -q, --quiet            no log output\n"
         "      --hash-room NAME PASSWORD   print the hash of a room (for the --rooms file) and exit\n");
 }
@@ -40,6 +46,11 @@ int main(int argc, char** argv) {
         else if (a == "--no-relay") o.relay = false;
         else if (a == "--relay-limit") o.relayKbps = atoi(next().c_str());
         else if (a == "-q" || a == "--quiet") quiet = true;
+        else if (a == "-d" || a == "--data") o.dataDir = next();
+        else if (a == "--no-mailbox") o.mailbox = false;
+        else if (a == "--mailbox-days") o.mailboxDays = std::max(1, atoi(next().c_str()));
+        else if (a == "--mailbox-mb") o.mailboxMB = std::max(1, atoi(next().c_str()));
+        else if (a == "--mailbox-total-mb") o.mailboxTotalMB = std::max(1, atoi(next().c_str()));
         else if (a == "--hash-room" && i + 2 < argc) {
             printf("%s\n", ls::RoomHash(argv[i + 1], argv[i + 2]).c_str());
             return 0;
@@ -84,7 +95,10 @@ int main(int argc, char** argv) {
     }
     if (o.log)
         o.log("listening on udp " + o.bind + ":" + std::to_string(o.port) +
-              (o.allowedRooms.empty() ? " (any room)" : " (" + std::to_string(o.allowedRooms.size()) + " allowed rooms)"));
+              (o.allowedRooms.empty() ? " (any room)" : " (" + std::to_string(o.allowedRooms.size()) + " allowed rooms)") +
+              (o.mailbox ? ", offline messages " + std::to_string(o.mailboxDays) + " days / " + std::to_string(o.mailboxMB) + " MB per device" +
+                               (o.dataDir.empty() ? " (in memory)" : " in " + o.dataDir)
+                         : ", no offline messages"));
     while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
     srv.Stop();
     if (o.log) o.log("stopped");

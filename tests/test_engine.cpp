@@ -172,6 +172,21 @@ static void TestCrypto() {
     CHECK(re.LoadSeed(ia.seedHex) && re.PubHex() == ia.PubHex(), "identity reload");
 }
 
+static void TestSeal() {
+    printf("[sealed messages]\n");
+    Identity a, b;
+    a.Generate();
+    b.Generate();
+    std::string msg = u8"wiadomość dla Ciebie, nawet offline";
+    std::string box = SealTo(b.PubHex(), msg), out;
+    CHECK(box.size() == msg.size() + 73, "envelope size");
+    CHECK(OpenSealed(b, box, out) && out == msg, "recipient opens it");
+    CHECK(!OpenSealed(a, box, out), "nobody else can");
+    box[80] ^= 1;
+    CHECK(!OpenSealed(b, box, out), "tampering is detected");
+    CHECK(SealTo(b.PubHex(), msg) != SealTo(b.PubHex(), msg), "fresh keys every time");
+}
+
 static void TestMdnsPackets() {
     printf("[mdns packets]\n");
     using namespace mdns;
@@ -236,6 +251,7 @@ int main() {
     TestHash();
     TestCrypto();
     TestMdnsPackets();
+    TestSeal();
     printf("root: %s\n", Root().c_str());
 
     auto A = MakeEngine("alice", 48110, false, true);
@@ -780,6 +796,52 @@ int main() {
 #else
         unsetenv("LUNASHARE_TEST_NO_DIRECT");
 #endif
+        // offline messages: left in the server mailbox, kept across a server restart, acknowledged and read by mail
+        printf("[offline messages (server mailbox)]\n");
+        {
+            RendezvousServer ms;
+            RendezvousServer::Options mo;
+            mo.bind = "127.0.0.1";
+            mo.port = 48192;
+            mo.dataDir = JoinPath(Root(), "mailserver");
+            CHECK(ms.Start(mo, &err), "mailbox server");
+            auto M1 = MakeEngine("mira", 48176, true, false, false, false, "127.0.0.1:48192", "mailroom");
+            auto M2 = MakeEngine("milo", 48178, true, false, false, false, "127.0.0.1:48192", "mailroom");
+            std::string idM1 = M1->settings.deviceId, idM2 = M2->settings.deviceId;
+            std::string k1 = "@" + M1->MyAccount(), k2 = "@" + M2->MyAccount();
+            CHECK(WaitFor([&] { return M1->IsConnected(idM2) && M2->IsConnected(idM1); }, 15000), "met once");
+            M2->Stop();
+            CHECK(WaitFor([&] { return !M1->IsConnected(idM2); }, 5000), "milo went away");
+            M1->SendChat(k2, u8"zostawione na serwerze - left in the mailbox");
+            CHECK(WaitFor([&] { return ms.MailCount() == 1; }, 25000), "sealed message waits on the server (%d)", (int)ms.MailCount());
+            M1->Stop();
+            ms.Stop();
+            CHECK(ms.Start(mo, &err), "server restarted");
+            CHECK(WaitFor([&] { return ms.MailCount() == 1; }, 7000), "mailbox kept on disk (%d)", (int)ms.MailCount());
+            M2 = MakeEngine("milo", 48178, true, false, false, false, "127.0.0.1:48192", "mailroom");
+            auto got = [&](Engine& e, const std::string& key, const std::string& text, bool out) -> ChatMessage* {
+                auto it = e.chats.find(key);
+                if (it == e.chats.end()) return nullptr;
+                for (auto& m : it->second.messages)
+                    if (m.text == text && m.outgoing == out) return &m;
+                return nullptr;
+            };
+            CHECK(WaitFor([&] { auto l = M2->Lock(); return got(*M2, k1, u8"zostawione na serwerze - left in the mailbox", false) != nullptr; }, 10000),
+                  "delivered from the mailbox while the sender is offline");
+            M2->MarkRead(k1);
+            CHECK(WaitFor([&] { return ms.MailCount() >= 2; }, 25000), "delivery + read receipts wait for the sender (%d)", (int)ms.MailCount());
+            M2->Stop();
+            M1 = MakeEngine("mira", 48176, true, false, false, false, "127.0.0.1:48192", "mailroom");
+            CHECK(WaitFor([&] {
+                auto l = M1->Lock();
+                ChatMessage* m = got(*M1, k2, u8"zostawione na serwerze - left in the mailbox", true);
+                return m && m->delivered && m->read;
+            }, 15000), "sender sees delivered + read");
+            CHECK(WaitFor([&] { return ms.MailCount() == 0; }, 10000), "mailboxes emptied (%d)", (int)ms.MailCount());
+            M1->Stop();
+            ms.Stop();
+        }
+
         // allow-list: a server that only accepts another room rejects us
         RendezvousServer locked;
         RendezvousServer::Options lo;

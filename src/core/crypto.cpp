@@ -337,6 +337,58 @@ bool PasswordDecrypt(const std::string& blob, const std::string& password, std::
     return r == 0;
 }
 
+static void SealKey(const uint8_t shared[32], const uint8_t eph[32], const uint8_t rcpt[32], uint8_t key[32]) {
+    static const char ctx[] = "LunaShare seal v1";
+    uint8_t buf[sizeof(ctx) + 96];
+    memcpy(buf, ctx, sizeof(ctx));
+    memcpy(buf + sizeof(ctx), shared, 32);
+    memcpy(buf + sizeof(ctx) + 32, eph, 32);
+    memcpy(buf + sizeof(ctx) + 64, rcpt, 32);
+    crypto_blake2b(key, 32, buf, sizeof(buf));
+    crypto_wipe(buf, sizeof(buf));
+}
+
+std::string SealTo(const std::string& recipientPubHex, const std::string& plain) {
+    uint8_t edpk[32], rcpt[32], esk[32], epk[32], shared[32], key[32], nonce[24], mac[16];
+    if (!FromHex(recipientPubHex, edpk, 32)) return {};
+    crypto_eddsa_to_x25519(rcpt, edpk);
+    SecureRandom(esk, 32);
+    crypto_x25519_public_key(epk, esk);
+    crypto_x25519(shared, esk, rcpt);
+    SealKey(shared, epk, rcpt, key);
+    SecureRandom(nonce, 24);
+    std::string ct(plain.size(), '\0');
+    crypto_aead_lock((uint8_t*)&ct[0], mac, key, nonce, epk, 32, (const uint8_t*)plain.data(), plain.size());
+    crypto_wipe(esk, 32);
+    crypto_wipe(shared, 32);
+    crypto_wipe(key, 32);
+    std::string out(1, '\x01');
+    out.append((const char*)epk, 32);
+    out.append((const char*)nonce, 24);
+    out.append((const char*)mac, 16);
+    return out + ct;
+}
+
+bool OpenSealed(const Identity& me, const std::string& sealed, std::string& plain) {
+    if (sealed.size() < 73 || sealed[0] != 1) return false;
+    const uint8_t* p = (const uint8_t*)sealed.data();
+    // the X25519 private key that belongs to the EdDSA key: BLAKE2b-512(seed)[0..31] (Monocypher's EdDSA hash)
+    uint8_t h[64], xsk[32], xpk[32], shared[32], key[32];
+    crypto_blake2b(h, 64, me.sk, 32);
+    memcpy(xsk, h, 32);
+    crypto_eddsa_to_x25519(xpk, me.pk);
+    crypto_x25519(shared, xsk, p + 1);
+    SealKey(shared, p + 1, xpk, key);
+    plain.assign(sealed.size() - 73, '\0');
+    int r = crypto_aead_unlock((uint8_t*)&plain[0], p + 57, key, p + 33, p + 1, 32, p + 73, sealed.size() - 73);
+    crypto_wipe(h, 64);
+    crypto_wipe(xsk, 32);
+    crypto_wipe(shared, 32);
+    crypto_wipe(key, 32);
+    if (r != 0) plain.clear();
+    return r == 0;
+}
+
 static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 std::string Base64Encode(const std::string& bin) {

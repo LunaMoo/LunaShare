@@ -7,7 +7,9 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/lunashare-rendezvous -p 47830
+ExecStart=/usr/local/bin/lunashare-rendezvous -p 47830 -d ${STATE_DIRECTORY}
+# offline messages (sealed) are kept in /var/lib/lunashare-rendezvous
+StateDirectory=lunashare-rendezvous
 DynamicUser=yes
 Restart=on-failure
 NoNewPrivileges=yes

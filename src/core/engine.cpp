@@ -87,6 +87,9 @@ bool Engine::Start() {
         std::vector<std::string> ids;
         for (auto& [id, d] : devices) ids.push_back(id);
         for (auto& id : ids) MergeChats(id);
+        for (auto& [k, cv] : chats)
+            for (auto& m : cv.messages)
+                if (!m.outgoing && !m.readSent) cv.readPending = true;
         if (settings.displayName.empty()) {
             settings.displayName = UserName() + "@" + HostName();
             MarkDirty();
@@ -1013,6 +1016,11 @@ void Engine::SetFinal(const std::shared_ptr<Transfer>& t, TState st, const std::
 }
 
 void Engine::Queue(const std::shared_ptr<Connection>& c, Msg m, const json& j) {
+    if (c && c->mailbox) {  // answering something that came from the mailbox: directly if we can, else by mail
+        if (auto rc = ReadyConn(c->peerId)) Queue(rc, m, j);
+        else MailTo(c->peerId, m, j);
+        return;
+    }
     if (!c || c->closed) return;
     {
         std::lock_guard<std::mutex> l(c->qm);
@@ -1483,13 +1491,20 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             if (!dup && !mid.empty()) {
                 ChatMessage m;
                 m.mid = mid;
-                m.ts = NowMs();
+                m.ts = c->mailbox ? std::min(NowMs(), j.value("ts", NowMs())) : NowMs();  // (from the mailbox: when it was sent)
                 m.text = j.value("text", "");
                 m.delivered = true;
+                m.readSent = false;
                 m.pendingTo = MyOtherDevices();  // my other devices get it too, in case the sender didn't know them
                 cv.messages.push_back(m);
+                if (c->mailbox) std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
                 cv.unread++;
-                for (auto& d : m.pendingTo) QueueChatTo(d, key, m);
+                cv.readPending = true;
+                for (auto& msg : cv.messages)
+                    if (msg.mid == mid && !msg.outgoing) {
+                        for (auto& d : std::vector<std::string>(msg.pendingTo)) QueueChatTo(d, key, msg);
+                        break;
+                    }
                 Emit({EventType::ChatReceived, key, m.text});
                 MarkDirty();
             }
@@ -1518,11 +1533,38 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
                 if (!out) {
                     cv.unread++;
+                    cv.readPending = true;
+                    for (auto& x : cv.messages)
+                        if (x.mid == mid) x.readSent = false;
                     Emit({EventType::ChatReceived, key, m.text});
                 }
                 MarkDirty();
             }
             Queue(c, Msg::ChatSyncAck, {{"mid", mid}});
+            break;
+        }
+        case Msg::ChatRead: {
+            // "seen": from the person's device (my messages were read), or from my own device (I read them there)
+            auto dv = devices.find(c->peerId);
+            bool mine = dv != devices.end() && dv->second.accountPub == MyAccount();
+            std::string key = mine ? j.value("chat", "") : ChatKey(c->peerId);
+            auto it = chats.find(key);
+            if (it == chats.end()) break;
+            std::set<std::string> mids;
+            for (auto& x : j.value("mids", json::array()))
+                if (x.is_string()) mids.insert(x.get<std::string>());
+            for (auto& m : it->second.messages) {
+                if (!mids.count(m.mid)) continue;
+                if (!mine && m.outgoing && !m.read) {
+                    m.read = true;
+                    m.delivered = true;
+                    MarkDirty();
+                } else if (mine && !m.outgoing && !m.readSent) {
+                    m.readSent = true;
+                    MarkDirty();
+                }
+            }
+            if (mine) it->second.unread = 0;
             break;
         }
         case Msg::ChatSyncAck: {
@@ -2276,6 +2318,8 @@ void Engine::StartWan() {
     }
     wan_.Stop();
     if (!on) return;
+    wan_.signMail = [this](const std::string& challenge) { return SignData(identity_, "mailbox", challenge); };
+    wan_.onMail = [this](const std::string& id, const std::string& d) { return HandleMail(id, d); };
     wan_.Start(
         cfg,
         [this](const std::vector<WanPeer>& peers) {
@@ -2350,6 +2394,10 @@ void Engine::MaintenanceLoop() {
         std::vector<std::pair<std::string, uint16_t>> reconnect;
         {
             auto lk = Lock();
+            if (now - lastMailScan_ > 20000) {  // messages for offline devices: into the server mailbox
+                lastMailScan_ = now;
+                MailPending();
+            }
             for (auto& [id, t] : transfers) {
                 if (t->state != TState::Active) { t->speed = 0; continue; }
                 int64_t dt = now - t->lastTick;
@@ -2448,17 +2496,106 @@ void Engine::SendChat(const std::string& peerArg, const std::string& text) {
     Conversation& cv = chats[peer];
     cv.peer = peer;
     cv.messages.push_back(m);
-    for (auto& d : m.pendingTo) QueueChatTo(d, peer, m);
+    ChatMessage& sm = cv.messages.back();
+    for (auto& d : std::vector<std::string>(sm.pendingTo)) QueueChatTo(d, peer, sm);
     MarkDirty();
 }
 
-void Engine::QueueChatTo(const std::string& device, const std::string& key, const ChatMessage& m) {
-    auto c = ReadyConn(device);
-    if (!c) return;
+void Engine::QueueChatTo(const std::string& device, const std::string& key, ChatMessage& m) {
     auto d = devices.find(device);
     bool mine = d != devices.end() && d->second.accountPub == MyAccount();
-    if (mine) Queue(c, Msg::ChatSync, {{"chat", key}, {"mid", m.mid}, {"ts", m.ts}, {"text", m.text}, {"out", m.outgoing}});
-    else if (m.outgoing) Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
+    if (!mine && !m.outgoing) return;
+    Msg type = mine ? Msg::ChatSync : Msg::Chat;
+    json j = mine ? json{{"chat", key}, {"mid", m.mid}, {"ts", m.ts}, {"text", m.text}, {"out", m.outgoing}}
+                  : json{{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}};
+    if (auto c = ReadyConn(device)) {
+        Queue(c, type, j);
+        return;
+    }
+    // not reachable now: leave it in the server mailbox (once), if the message isn't too old
+    if (std::find(m.mailedTo.begin(), m.mailedTo.end(), device) != m.mailedTo.end()) return;
+    if (NowMs() - m.ts > 9LL * 86400000) return;
+    if (MailTo(device, type, j)) {
+        m.mailedTo.push_back(device);
+        MarkDirty();
+    }
+}
+
+// ---- offline messages
+
+// Seals a frame for one device and leaves it in the server mailbox. Inside: who sends it (device key + account
+// certificate) and a signature over the frame bound to the recipient, so it can't be forged or redirected.
+bool Engine::MailTo(const std::string& device, Msg type, const json& j) {
+    if (!wan_.Running() || !wan_.Registered()) return false;
+    auto d = devices.find(device);
+    if (d == devices.end() || d->second.pubKey.size() != 64 || d->second.blocked) return false;
+    json inner = {{"from", settings.deviceId}, {"fpub", identity_.PubHex()}, {"acc", MyAccount()}, {"acs", accountCert_},
+                  {"to", device}, {"t", (int)type}, {"j", j}, {"ts", NowMs()}};
+    std::string m = inner.dump(-1, ' ', false, json::error_handler_t::replace);
+    std::string plain = json{{"m", m}, {"sig", SignData(identity_, "mail", d->second.pubKey + "\n" + m)}}.dump();
+    std::string sealed = SealTo(d->second.pubKey, plain);
+    if (sealed.empty() || sealed.size() > 5000) return false;  // (longer texts wait for a direct connection)
+    wan_.MailPut(d->second.pubKey, Sha256Hex(sealed.data(), sealed.size()).substr(0, 32), Base64Encode(sealed));
+    return true;
+}
+
+bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
+    (void)id;
+    std::string sealed, plain;
+    if (!Base64Decode(dataB64, sealed) || !OpenSealed(identity_, sealed, plain)) return true;  // not for us / damaged
+    json outer = json::parse(plain, nullptr, false);
+    if (!outer.is_object()) return true;
+    std::string m = outer.value("m", ""), sig = outer.value("sig", "");
+    json inner = json::parse(m, nullptr, false);
+    if (!inner.is_object()) return true;
+    std::string from = inner.value("from", ""), fpub = inner.value("fpub", ""), acc = inner.value("acc", ""), acs = inner.value("acs", "");
+    if (from.empty() || from == settings.deviceId || inner.value("to", "") != settings.deviceId) return true;
+    if (!VerifyData(fpub, "mail", identity_.PubHex() + "\n" + m, sig)) return true;
+    Msg type = (Msg)inner.value("t", 0);
+    switch (type) {
+        case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
+        case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: break;
+        default: return true;  // nothing else travels by mail
+    }
+    {
+        auto lk = Lock();
+        auto dv = devices.find(from);
+        bool certOk = !acc.empty() && VerifyData(acc, "device", from + "\n" + fpub, acs);
+        if (dv != devices.end() && !dv->second.pubKey.empty()) {
+            if (dv->second.pubKey != fpub || dv->second.blocked) return true;  // not the device we know
+            if (certOk && dv->second.accountPub.empty()) {
+                dv->second.accountPub = acc;
+                MergeChats(from);
+            }
+        } else {
+            // a device we never met: accepted only as a new device of someone we know (or one of mine)
+            bool knownPerson = certOk && (acc == MyAccount() || !DevicesOf("@" + acc).empty());
+            if (!knownPerson) return true;
+            KnownDevice& nd = Device(from);
+            nd.pubKey = fpub;
+            nd.accountPub = acc;
+            nd.name = acc == MyAccount() ? settings.displayName : PeerName("@" + acc);
+        }
+    }
+    auto c = std::make_shared<Connection>();
+    c->peerId = from;
+    c->ready = true;
+    c->mailbox = true;
+    c->transport = Transport::Internet;
+    Frame f;
+    f.type = type;
+    std::string payload = inner.value("j", json::object()).dump();
+    f.payload.assign(payload.begin(), payload.end());
+    HandleFrame(c, f);
+    return true;
+}
+
+void Engine::MailPending() {
+    if (!wan_.Running() || !wan_.Registered()) return;
+    for (auto& [key, cv] : chats)
+        for (auto& m : cv.messages)
+            for (auto& d : std::vector<std::string>(m.pendingTo))
+                if (!ReadyConn(d) && std::find(m.mailedTo.begin(), m.mailedTo.end(), d) == m.mailedTo.end()) QueueChatTo(d, key, m);
 }
 
 uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::string>& paths) {
@@ -2834,7 +2971,26 @@ void Engine::MarkRead(const std::string& peerArg) {
     auto lk = Lock();
     const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
     auto it = chats.find(peer);
-    if (it != chats.end()) it->second.unread = 0;
+    if (it == chats.end()) return;
+    Conversation& cv = it->second;
+    cv.unread = 0;
+    if (!cv.readPending) return;
+    cv.readPending = false;
+    // read receipts: to the person's devices, and to my own so they clear the conversation too
+    json mids = json::array();
+    for (auto& m : cv.messages)
+        if (!m.outgoing && m.kind == MsgKind::Text && !m.readSent) {
+            m.readSent = true;
+            mids.push_back(m.mid);
+        }
+    if (mids.empty()) return;
+    std::vector<std::string> to = DevicesOf(peer);
+    for (auto& d : MyOtherDevices()) to.push_back(d);
+    for (auto& d : to) {
+        json j = {{"mids", mids}, {"chat", peer}};
+        if (!QueueToPeer(d, Msg::ChatRead, j)) MailTo(d, Msg::ChatRead, j);
+    }
+    MarkDirty();
 }
 
 void Engine::RemoveHistory(size_t index) {

@@ -29,6 +29,12 @@ public:
         bool relay = true;                   // relay for devices that can't connect directly
         int relayKbps = 0;                   // per relayed connection and direction, 0 = unlimited
         size_t maxRelays = 64;
+        // offline messages: sealed envelopes kept for devices that are away (the server can't read them)
+        bool mailbox = true;
+        int mailboxDays = 10;                // kept at most this long
+        int mailboxMB = 10;                  // per recipient device
+        int mailboxTotalMB = 1024;           // all mailboxes together
+        std::string dataDir;                 // where mailboxes are saved (empty = kept in memory only)
         std::function<void(const std::string&)> log;
     };
     ~RendezvousServer() { Stop(); }
@@ -36,6 +42,7 @@ public:
     void Stop();
     size_t DeviceCount();
     size_t RoomCount();
+    size_t MailCount();  // envelopes waiting in all mailboxes
 
 private:
     void Loop();
@@ -44,7 +51,7 @@ private:
     std::thread thread_;
     intptr_t sock_ = -1;
     std::mutex m_;
-    size_t devices_ = 0, rooms_ = 0;
+    size_t devices_ = 0, rooms_ = 0, mail_ = 0;
 };
 
 }  // namespace ls
