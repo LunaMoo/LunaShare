@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.4
+
+- **Japanese and other scripts on Android:** characters that none of the app's fonts has (Japanese audio and
+  subtitle track names, for example) are now drawn with the phone's own text renderer, which can use every
+  system font. Before, they showed as boxes on phones whose CJK font couldn't be read.
+
 ## 1.2.3
 
 - **Full screen without HDR (Windows):** if movies in full screen get too bright or washed out (Windows Auto HDR or

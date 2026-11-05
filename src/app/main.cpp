@@ -29,7 +29,8 @@
 #include <TargetConditionals.h>
 #endif
 
-void AndroidBridgeInit(ls::Engine* engine);  // android_bridge.cpp (no-op elsewhere)
+void AndroidBridgeInit(ls::Engine* engine);
+void AndroidAddSystemTextFont(ImFontAtlas* atlas);  // android_bridge.cpp: characters our fonts lack  // android_bridge.cpp (no-op elsewhere)
 void AndroidBridgeShutdown();
 std::string AndroidDeviceName();
 
@@ -358,6 +359,7 @@ int main(int argc, char** argv) {
     AndroidBridgeInit(&engine);
     Emoji().Load();          // optional colour emoji module (needs the Android bridge for the system font)
     Emoji().AddToFont(io.Fonts);
+    AndroidAddSystemTextFont(io.Fonts);  // last: only characters no other font has
     Emoji().InstallClipboardHook();
     Player().Load();         // optional player module (audio/video files in chat)
     Media().Load();          // optional calls module; must happen before Start() so the capability is announced

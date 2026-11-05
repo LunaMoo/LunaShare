@@ -50,6 +50,53 @@ import java.util.UUID;
  * the multicast lock for LAN discovery, permissions, and opening files with other apps.
  */
 public class LunaShareActivity extends SDLActivity {
+    // ---- system text fallback: characters none of the app's fonts have (e.g. Japanese track names)
+    private static final android.graphics.Paint textPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+    private static float textScale = 0;
+
+    public static boolean canDrawText(String s) {
+        try {
+            return android.os.Build.VERSION.SDK_INT < 23 || textPaint.hasGlyph(s);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** {w, h, left, top (from the baseline), advance*64, alpha...}; size is ImGui's pixel height (ascent - descent). */
+    public static int[] renderText(String s, float size) {
+        try {
+            if (textScale == 0) {
+                textPaint.setTextSize(100);
+                android.graphics.Paint.FontMetrics fm = textPaint.getFontMetrics();
+                float hgt = fm.descent - fm.ascent;
+                textScale = hgt > 1 ? 100f / hgt : 0.85f;
+            }
+            textPaint.setTextSize(size * textScale);
+            textPaint.setColor(0xFFFFFFFF);
+            android.graphics.Rect b = new android.graphics.Rect();
+            textPaint.getTextBounds(s, 0, s.length(), b);
+            float adv = textPaint.measureText(s);
+            int w = b.isEmpty() ? 0 : b.width() + 2, h = b.isEmpty() ? 0 : b.height() + 2;
+            int[] out = new int[5 + w * h];
+            out[0] = w;
+            out[1] = h;
+            out[2] = b.left - 1;
+            out[3] = b.top - 1;
+            out[4] = Math.round(adv * 64);
+            if (w > 0) {
+                android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                new android.graphics.Canvas(bmp).drawText(s, 1 - b.left, 1 - b.top, textPaint);
+                int[] px = new int[w * h];
+                bmp.getPixels(px, 0, w, 0, 0, w, h);
+                bmp.recycle();
+                for (int k = 0; k < w * h; k++) out[5 + k] = px[k] >>> 24;
+            }
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     static final UUID SERVICE_UUID = UUID.fromString("6c756e61-7368-6172-6500-000000000001");
     static LunaShareActivity self;
 

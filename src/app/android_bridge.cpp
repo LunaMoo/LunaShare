@@ -4,6 +4,7 @@
 #include <string>
 
 #include "engine.h"
+#include "imgui.h"
 #include "i18n.h"
 #include "notify.h"
 
@@ -14,6 +15,12 @@
 #include <jni.h>
 #include <cstdarg>
 #include <unistd.h>
+#include <unordered_map>
+#include <vector>
+
+#include <cstring>
+
+#include "imgui_internal.h"
 
 using namespace ls;
 
@@ -299,8 +306,132 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnErro
 
 }  // extern "C"
 
+// ---------------------------------------------------------------- system text fallback
+// Merged after every font: characters none of our fonts has (Japanese on phones whose CJK font stb_truetype
+// can't read, rare scripts, ...) are drawn by Android's own text renderer, which has every system font.
+namespace {
+std::unordered_map<uint32_t, bool> g_canDraw;
+
+jstring JChar(JNIEnv* env, uint32_t c) {
+    jchar w[2];
+    int n = 1;
+    if (c >= 0x10000) {
+        c -= 0x10000;
+        w[0] = (jchar)(0xD800 + (c >> 10));
+        w[1] = (jchar)(0xDC00 + (c & 0x3FF));
+        n = 2;
+    } else {
+        w[0] = (jchar)c;
+    }
+    return env->NewString(w, n);
+}
+
+bool CanDraw(uint32_t c) {
+    auto it = g_canDraw.find(c);
+    if (it != g_canDraw.end()) return it->second;
+    bool ok = false;
+    JNIEnv* env = Env();
+    jmethodID m = g_cls ? M("canDrawText", "(Ljava/lang/String;)Z") : nullptr;
+    if (m) {
+        jstring s = JChar(env, c);
+        ok = env->CallStaticBooleanMethod(g_cls, m, s);
+        env->DeleteLocalRef(s);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        ok = false;
+    }
+    g_canDraw[c] = ok;
+    return ok;
+}
+
+// {w, h, left, top, advance*64, alpha...}
+bool RenderChar(uint32_t c, float px, std::vector<int>& out) {
+    JNIEnv* env = Env();
+    static jmethodID m = nullptr;
+    if (!m && g_cls) m = M("renderText", "(Ljava/lang/String;F)[I");
+    if (!m) {
+        env->ExceptionClear();
+        return false;
+    }
+    jstring s = JChar(env, c);
+    auto arr = (jintArray)env->CallStaticObjectMethod(g_cls, m, s, (jfloat)px);
+    env->DeleteLocalRef(s);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    if (!arr) return false;
+    jsize n = env->GetArrayLength(arr);
+    out.resize((size_t)n);
+    if (n > 0) env->GetIntArrayRegion(arr, 0, n, out.data());
+    env->DeleteLocalRef(arr);
+    return n >= 5 && (size_t)n == 5 + (size_t)out[0] * (size_t)out[1];
+}
+
+struct SystemTextLoader {
+    static int GlyphIndex(ImFontAtlas*, ImFontConfig*, ImWchar ch) {
+        uint32_t c = (uint32_t)ch;
+        if (c < 0x80 || c >= 0xF0000 || (c >= 0xD800 && c < 0xE000)) return 0;  // ASCII; emoji module / surrogates
+        return CanDraw(c) ? (int)c : 0;
+    }
+    static bool Contains(ImFontAtlas*, ImFontConfig*, int g) { return g > 0; }
+    static bool LoadGlyph(ImFontAtlas* atlas, ImFontConfig* src, ImFontBaked* baked, void*, int g, ImFontGlyph* out, float* advOnly) {
+        float density = src->RasterizerDensity * baked->RasterizerDensity;
+        if (density <= 0) density = 1;
+        std::vector<int> r;
+        if (!RenderChar((uint32_t)g, baked->Size * density, r)) return false;
+        float adv = r[4] / 64.0f / density;
+        if (advOnly) {
+            *advOnly = adv;
+            return true;
+        }
+        out->AdvanceX = adv;
+        int w = r[0], h = r[1];
+        if (w <= 0 || h <= 0) return true;  // blank (a space of some kind)
+        ImFontAtlasRectId id = ImFontAtlasPackAddRect(atlas, w, h);
+        if (id == ImFontAtlasRectId_Invalid) return false;
+        ImTextureRect* rect = ImFontAtlasPackGetRect(atlas, id);
+        std::vector<unsigned char> alpha((size_t)w * h);
+        for (size_t i = 0; i < alpha.size(); i++) alpha[i] = (unsigned char)r[5 + i];
+        float s = 1.0f / density, x0 = r[2] * s, y0 = r[3] * s + IM_ROUND(baked->Ascent);
+        out->X0 = x0;
+        out->Y0 = y0;
+        out->X1 = x0 + w * s;
+        out->Y1 = y0 + h * s;
+        out->Visible = true;
+        out->Colored = false;  // white + alpha: tinted with the text colour like any other glyph
+        out->PackId = id;
+        ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, src, out, rect, alpha.data(), ImTextureFormat_Alpha8, w);
+        return true;
+    }
+    static const ImFontLoader* Get() {
+        static ImFontLoader l;
+        if (!l.Name) {
+            l.Name = "Android system text";
+            l.FontSrcInit = [](ImFontAtlas*, ImFontConfig*) { return true; };
+            l.FontSrcGetGlyphIndexFromCodepoint = GlyphIndex;
+            l.FontSrcContainsGlyph = Contains;
+            l.FontBakedInit = [](ImFontAtlas*, ImFontConfig*, ImFontBaked*, void*) { return true; };
+            l.FontBakedLoadGlyph = LoadGlyph;
+        }
+        return &l;
+    }
+};
+}  // namespace
+
+void AndroidAddSystemTextFont(ImFontAtlas* atlas) {
+    if (!g_cls || atlas->Fonts.Size == 0) return;
+    ImFontConfig cfg;
+    cfg.MergeMode = true;
+    cfg.FontLoader = SystemTextLoader::Get();
+    strncpy(cfg.Name, "System text", sizeof(cfg.Name) - 1);
+    atlas->AddFont(&cfg);
+}
+
 #else
 
+void AndroidAddSystemTextFont(ImFontAtlas*) {}
 void AndroidBridgeInit(ls::Engine*) {}
 void AndroidBridgeShutdown() {}
 std::string AndroidDeviceName() { return {}; }
