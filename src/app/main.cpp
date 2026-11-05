@@ -331,7 +331,7 @@ int main(int argc, char** argv) {
             SDL_GetWindowPosition(window, &before.x, &before.y);
             SDL_GetWindowSize(window, &before.w, &before.h);
             SDL_Rect r{};
-            if (SDL_GetDisplayBounds(std::max(0, SDL_GetWindowDisplayIndex(window)), &r) != 0) return;
+            if (SDL_GetDisplayBounds(SDL_GetWindowDisplayIndex(window) > 0 ? SDL_GetWindowDisplayIndex(window) : 0, &r) != 0) return;
             SDL_SetWindowBordered(window, SDL_FALSE);
             SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
             SDL_SetWindowPosition(window, r.x, r.y);

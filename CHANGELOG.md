@@ -6,6 +6,7 @@
   the graphics driver's HDR for games, e.g. NVIDIA RTX HDR), turn on *Full screen without HDR* in the ☰ menu of the
   movie screen: full screen is then a borderless window that leaves one row of pixels uncovered, so it isn't
   taken for a game.
+- **No macOS download for now:** only chat and files worked there; it can still be built from source.
 
 ## 1.2.2
 

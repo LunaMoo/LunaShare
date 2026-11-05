@@ -102,8 +102,8 @@ jobs:
             name: windows-x64
           - os: ubuntu-24.04
             name: linux-x64
-          - os: macos-15
-            name: macos-arm64
+          # macOS (macos-15 / macos-arm64) is left out for now: only chat and files work there, and it was the
+          # slowest build. Add it back here and in the zip list below to build it again.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -272,7 +272,7 @@ jobs:
             b=$(basename "$a" .apk)
             if [ -n "$tag" ]; then cp "$a" "out/LunaShare$suffix-${b#app-}.apk"; else cp "$a" out/; fi
           done
-          for d in windows-x64 linux-x64 macos-arm64; do (cd art/LunaShare-$d && zip -qry ../../out/LunaShare$suffix-$d.zip .); done
+          for d in windows-x64 linux-x64; do (cd art/LunaShare-$d && zip -qry ../../out/LunaShare$suffix-$d.zip .); done
           ls -l out
           if [ -n "$tag" ]; then
             # notes: this version's section of CHANGELOG.md
@@ -289,7 +289,7 @@ jobs:
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true || true
           gh release edit latest -R "$GITHUB_REPOSITORY" --notes "Automatic build of main ($git_sha)."
           gh release upload latest out/* -R "$GITHUB_REPOSITORY" --clobber
-          for old in app-calls-release.apk app-lite-release.apk; do gh release delete-asset latest "$old" -R "$GITHUB_REPOSITORY" -y 2>/dev/null || true; done
+          for old in app-calls-release.apk app-lite-release.apk LunaShare-macos-arm64.zip; do gh release delete-asset latest "$old" -R "$GITHUB_REPOSITORY" -y 2>/dev/null || true; done
           # a version that has no release yet: publish it from this commit
           ver=$(sed -n 's/^project(LunaShare VERSION \([0-9.]*\).*/\1/p' src/CMakeLists.txt)
           if [ -n "$ver" ] && ! gh release view "v$ver" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

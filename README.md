@@ -1,6 +1,6 @@
 # LunaShare
 
-A chat app built around file sharing. It is written in C++ with [Dear ImGui](https://github.com/ocornut/imgui) on SDL2 and runs on Windows, Linux, macOS and Android, with an iOS port planned.
+A chat app built around file sharing. It is written in C++ with [Dear ImGui](https://github.com/ocornut/imgui) on SDL2 and runs on Windows, Linux and Android (macOS builds from source, with chat and files only), with an iOS port planned.
 Devices on the same network find each other automatically. Transfers can be paused and resumed at any time, and every file is
 SHA-256 hashed before sending and again after receiving, so you know it arrived intact.
 
