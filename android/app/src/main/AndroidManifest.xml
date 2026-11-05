@@ -60,7 +60,7 @@
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="@string/bg_fgs_reason" />
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the connection to the user's own LunaShare server so messages and calls arrive while the app is in the background" />
         </service>
         <receiver android:name="org.lunamoo.lunashare.CallActionReceiver" android:exported="false" />
 
