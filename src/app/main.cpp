@@ -309,7 +309,36 @@ int main(int argc, char** argv) {
     SDL_GL_MakeCurrent(window, gl);
     SDL_GL_SetSwapInterval(1);
     if (!ls::IsMobilePlatform())
-        ls::Bridge().setFullscreen = [window](bool on) { SDL_SetWindowFullscreen(window, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0); };
+        ls::Bridge().setFullscreen = [window](bool on, bool borderless) {
+            static bool inBorderless = false, wasMaximized = false;
+            static SDL_Rect before{};
+            if (inBorderless) {  // back from the borderless kind
+                SDL_SetWindowAlwaysOnTop(window, SDL_FALSE);
+                SDL_SetWindowBordered(window, SDL_TRUE);
+                SDL_SetWindowPosition(window, before.x, before.y);
+                SDL_SetWindowSize(window, before.w, before.h);
+                if (wasMaximized) SDL_MaximizeWindow(window);
+                inBorderless = false;
+            }
+            if (!on || !borderless) {
+                SDL_SetWindowFullscreen(window, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                return;
+            }
+            // the whole screen but its last row of pixels, on top of the taskbar
+            SDL_SetWindowFullscreen(window, 0);
+            wasMaximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+            if (wasMaximized) SDL_RestoreWindow(window);
+            SDL_GetWindowPosition(window, &before.x, &before.y);
+            SDL_GetWindowSize(window, &before.w, &before.h);
+            SDL_Rect r{};
+            if (SDL_GetDisplayBounds(std::max(0, SDL_GetWindowDisplayIndex(window)), &r) != 0) return;
+            SDL_SetWindowBordered(window, SDL_FALSE);
+            SDL_SetWindowAlwaysOnTop(window, SDL_TRUE);
+            SDL_SetWindowPosition(window, r.x, r.y);
+            SDL_SetWindowSize(window, r.w, r.h - 1);
+            SDL_RaiseWindow(window);
+            inBorderless = true;
+        };
     ls::Bridge().keepAwake = [](bool on) { on ? SDL_DisableScreenSaver() : SDL_EnableScreenSaver(); };
     if (!glf::Load()) printf("warning: some OpenGL functions are missing\n");
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);

@@ -751,3 +751,5 @@
 {"Sound %d", "Dźwięk %d"},
 {"Subtitles %d", "Napisy %d"},
 {"Host's subtitles (%s)", "Napisy udostępniającego (%s)"},
+{"Full screen without HDR (borderless window)", "Pełny ekran bez HDR (okno bez ramki)"},
+{"If the picture gets too bright or washed out in full screen (Auto HDR / RTX HDR):\nthe window then leaves one row of pixels at the bottom uncovered, so it isn't taken for a game.", "Jeśli na pełnym ekranie obraz robi się zbyt jasny lub wyblakły (Auto HDR / RTX HDR):\nokno zostawia wtedy jeden rząd pikseli na dole odkryty, żeby nie zostało uznane za grę."},

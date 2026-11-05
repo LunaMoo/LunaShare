@@ -38,7 +38,7 @@ void App::WatchSync() {
         if (ui::M().mobile && Bridge().movieMode) Bridge().movieMode(movie);
         if (!movie && watchFullscreen && Bridge().setFullscreen) {
             watchFullscreen = false;
-            Bridge().setFullscreen(false);
+            Bridge().setFullscreen(false, false);
         }
         watchActive = SteadyMs();
     }
@@ -269,6 +269,20 @@ void App::WatchTracksPopup() {
         }
         ImGui::EndDisabled();
     }
+#ifdef _WIN32
+    {  // full screen that Windows / the graphics driver don't treat as a game (their HDR for games stays off)
+        ImGui::Separator();
+        bool b = eng.settings.fullscreenBorderless;
+        if (ImGui::Checkbox(T("Full screen without HDR (borderless window)"), &b)) {
+            Settings st = eng.GetSettings();
+            st.fullscreenBorderless = b;
+            eng.ApplySettings(st);
+            if (watchFullscreen && Bridge().setFullscreen) Bridge().setFullscreen(true, b);
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("If the picture gets too bright or washed out in full screen (Auto HDR / RTX HDR):\nthe window then leaves one row of pixels at the bottom uncovered, so it isn't taken for a game."));
+    }
+#endif
     if (!mobile) {
         ImGui::Separator();
         if (ImGui::Selectable(T("Subtitles from a file..."), false, 0, ImVec2(0, h))) {
@@ -407,7 +421,7 @@ void App::DrawWatch() {
     bool fullscreenKey = !mobile && (ImGui::IsKeyPressed(ImGuiKey_F, false) || dbl);
     if (fullscreenKey && Bridge().setFullscreen) {
         watchFullscreen = !watchFullscreen;
-        Bridge().setFullscreen(watchFullscreen);
+        Bridge().setFullscreen(watchFullscreen, eng.settings.fullscreenBorderless);
     }
 
     double dur = open ? Player().Duration() : 0;
@@ -478,7 +492,7 @@ void App::DrawWatch() {
             ImGui::SameLine();
             if (ui::IconButton("wfull", Icon::Expand, watchFullscreen ? T("Leave full screen (F)") : T("Full screen (F)"), bh)) {
                 watchFullscreen = !watchFullscreen;
-                Bridge().setFullscreen(watchFullscreen);
+                Bridge().setFullscreen(watchFullscreen, eng.settings.fullscreenBorderless);
             }
         }
         if (inCall) {  // talking while watching: mute / hang up right here
@@ -499,7 +513,7 @@ void App::DrawWatch() {
     if (tapped && mobile) watchActive = 0;  // phones: a tap on the picture hides the controls again
     if (ImGui::IsKeyPressed(ImGuiKey_Escape) && watchFullscreen && Bridge().setFullscreen) {
         watchFullscreen = false;
-        Bridge().setFullscreen(false);
+        Bridge().setFullscreen(false, false);
     } else if (ImGui::IsKeyPressed(ImGuiKey_AppBack) || (ImGui::IsKeyPressed(ImGuiKey_Escape) && !popupOpen)) {
         watchShown = false;
     }
