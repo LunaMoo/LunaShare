@@ -624,6 +624,7 @@ bool Engine::AdoptAccount(const json& p, const std::string& fromDevice, bool req
     }
     SignAccountDevices();
     accountCert_ = SignData(account_, "device", settings.deviceId + "\n" + identity_.PubHex());
+    wan_.SetAccount(MyAccount(), accountCert_);
     // the person's profile: name and picture
     std::string name = p.value("name", ""), avh = p.value("avh", ""), img;
     if (!name.empty()) settings.displayName = name;
@@ -714,6 +715,7 @@ void Engine::LeaveAccount() {
     settings.accountBackedUp = false;
     SignAccountDevices();
     accountCert_ = SignData(account_, "device", settings.deviceId + "\n" + identity_.PubHex());
+    wan_.SetAccount(MyAccount(), accountCert_);
     MarkDirty();
     Emit({EventType::LinkDone, "", "This device was removed from your account and now has an account of its own."});
     std::vector<std::shared_ptr<Connection>> cs = conns;
@@ -741,6 +743,66 @@ void Engine::RemoveMyDevice(const std::string& device) {
     if (it != devices.end() && it->second.accountPub == MyAccount()) it->second.accountPub.clear();
     PushAccount();
     MarkDirty();
+}
+
+// ---- usernames
+
+void Engine::ClaimUsername(const std::string& nameIn) {
+    auto lk = Lock();
+    std::string name = nameIn;
+    for (auto& ch : name) ch = (char)tolower((unsigned char)ch);
+    std::string room = RoomHash(settings.wanRoom, settings.wanPassword);
+    usernameError.clear();
+    usernamePending = true;
+    json j = name.empty() ? json{{"t", "urel"}, {"sig", SignData(account_, "username", room + "\nrelease")}}
+                          : json{{"t", "uclaim"}, {"name", name}, {"sig", SignData(account_, "username", room + "\n" + name)}};
+    wan_.SendServer(j.dump());
+}
+
+void Engine::LookupUsername(const std::string& name) {
+    auto lk = Lock();
+    lookup = UserLookup();
+    lookup.name = name;
+    lookup.pending = true;
+    wan_.SendServer(json{{"t", "ulook"}, {"name", name}}.dump());
+}
+
+void Engine::ConnectLookedUp() {
+    auto lk = Lock();
+    for (auto& [id, n] : lookup.devices) {
+        if (id == settings.deviceId || IsConnected(id)) continue;
+        lastWanConnect_[id] = SteadyMs();
+        wan_.Connect(id);
+    }
+}
+
+void Engine::HandleServerReply(const std::string& text) {
+    json j = json::parse(text, nullptr, false);
+    if (!j.is_object()) return;
+    auto lk = Lock();
+    std::string t = j.value("t", ""), name = j.value("name", "");
+    if (t == "uname") {
+        myUsername = name;
+    } else if (t == "uok") {
+        myUsername = name;
+        usernamePending = false;
+    } else if (t == "uerr") {
+        if (lookup.pending && name == lookup.name) {
+            lookup.pending = false;
+            lookup.error = j.value("msg", "error");
+        } else {
+            usernamePending = false;
+            usernameError = j.value("msg", "error");
+        }
+    } else if (t == "uinfo") {
+        lookup.pending = false;
+        lookup.name = name;
+        lookup.acc = j.value("acc", "");
+        lookup.devices.clear();
+        for (auto& d : j.value("devs", json::array()))
+            if (d.is_object()) lookup.devices.push_back({d.value("id", ""), d.value("name", "")});
+        if (lookup.acc == MyAccount()) lookup.error = "that is you";
+    }
 }
 
 // ---- recovery
@@ -2341,6 +2403,11 @@ void Engine::StartWan() {
     wan_.Stop();
     if (!on) return;
     wan_.signMail = [this](const std::string& challenge) { return SignData(identity_, "mailbox", challenge); };
+    wan_.onServerReply = [this](const std::string& text) { HandleServerReply(text); };
+    {
+        auto lk = Lock();
+        wan_.SetAccount(MyAccount(), accountCert_);
+    }
     wan_.onMail = [this](const std::string& id, const std::string& d) { return HandleMail(id, d); };
     wan_.Start(
         cfg,

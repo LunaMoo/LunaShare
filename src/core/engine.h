@@ -165,6 +165,19 @@ public:
     void MarkBackedUp();
     // Takes one of my other devices off my account (it gets an account of its own when it hears about it).
     void RemoveMyDevice(const std::string& device);
+
+    // ---- usernames on the internet server (per room). Results arrive in the fields below (read under Lock()).
+    void ClaimUsername(const std::string& name);  // "" releases mine
+    void LookupUsername(const std::string& name);
+    void ConnectLookedUp();                       // connect to the devices LookupUsername found
+    std::string myUsername;                       // as the server knows it ("" = none)
+    std::string usernameError;                    // last claim error ("taken", "invalid name", ...)
+    bool usernamePending = false;
+    struct UserLookup {
+        std::string name, acc, error;
+        std::vector<std::pair<std::string, std::string>> devices;  // id, name
+        bool pending = false;
+    } lookup;
     // ---- profile picture. jpeg: an already cropped / scaled JPEG (the app makes one, <= kMaxAvatarBytes);
     // empty removes the picture. Sent to every connected device and to others when they connect.
     static constexpr size_t kMaxAvatarBytes = 96 * 1024;
@@ -274,6 +287,7 @@ private:
     bool AdoptAccount(const json& payload, const std::string& fromDevice, bool requireSelf, std::string* err);
     void LeaveAccount();  // removed from my account by another device: start a fresh one
     void PushAccount();   // send my device list to every connected device
+    void HandleServerReply(const std::string& text);
     void MergeChatInto(const std::string& fromKey, const std::string& toKey);
     void HandleProfile(const std::shared_ptr<Connection>& c, const json& j);  // under Lock()
     std::string DataDir();

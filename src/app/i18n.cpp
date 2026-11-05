@@ -152,7 +152,7 @@ std::string TF(const char* fmt, ...) {
 // i18n-keys: "This device was removed from your account and now has an account of its own.", "the words don't match (a typo or a word missing?)",
 // i18n-keys: "use a password of at least 6 characters", "could not write the file", "not a LunaShare account backup", "wrong password (or the file is damaged)",
 // i18n-keys: "the backup is damaged", "the account key is not valid", "the account's device list is not valid", "This device was linked to another account.",
-// i18n-keys: "Call answered on another device"
+// i18n-keys: "Call answered on another device", "this device has no account", "invalid signature", "server full"
 // Sentences the core writes (in English, also into the chat history). "%s" parts are copied over.
 static const char* const kPatterns[] = {
     "End-to-end encrypted. Safety number: %s - compare it on both devices to make sure nobody is in between.",

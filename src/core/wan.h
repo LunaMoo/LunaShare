@@ -71,6 +71,11 @@ public:
     // An envelope from my mailbox (network thread). Return true when it was taken (it is then deleted on the server).
     std::function<bool(const std::string& id, const std::string& dataB64)> onMail;
     std::function<void(const std::string& id, bool stored)> onMailSent;  // stored=false: the mailbox is full
+    // ---- other requests to the server (usernames): JSON text; replies whose "t" starts with 'u' come back here
+    void SendServer(const std::string& jsonText);
+    std::function<void(const std::string& jsonText)> onServerReply;
+    // the account this device belongs to (registered with the server, which then lists the account's online devices)
+    void SetAccount(const std::string& acc, const std::string& cert);
 
 private:
     void Loop();
@@ -88,6 +93,8 @@ private:
         int64_t next = 0;
     };
     std::vector<MailOut> mailOut_;
+    std::vector<std::string> serverOut_;
+    std::string acc_, accCert_;
     std::vector<std::string> connectQueue_;
     bool nameChanged_ = false;
     OnPeers onPeers_;

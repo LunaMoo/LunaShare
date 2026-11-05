@@ -769,6 +769,28 @@ int main() {
         auto tg = GetT(*G, tw);
         CHECK(tg && Sha256File(tg->localPath) == shaw, "internet transfer verified");
         printf("  24 MB over KCP/UDP loopback: %.2f s\n", (double)(SteadyMs() - t0) / 1000.0);
+        printf("[usernames on the server]\n");
+        {
+            F->ClaimUsername("Frank.F");
+            CHECK(WaitFor([&] { auto l = F->Lock(); return F->myUsername == "frank.f" && !F->usernamePending; }, 5000), "claimed (%s)", F->usernameError.c_str());
+            G->ClaimUsername("frank.f");
+            CHECK(WaitFor([&] { auto l = G->Lock(); return G->usernameError == "taken"; }, 5000), "someone else's name is taken (%s)", G->usernameError.c_str());
+            G->LookupUsername("FRANK.F");
+            CHECK(WaitFor([&] {
+                auto l = G->Lock();
+                if (G->lookup.pending || G->lookup.acc != F->MyAccount()) return false;
+                for (auto& d : G->lookup.devices) if (d.first == idF) return true;
+                return false;
+            }, 5000), "lookup finds the account and its devices (%s)", G->lookup.error.c_str());
+            F->ClaimUsername("no spaces!");
+            CHECK(WaitFor([&] { auto l = F->Lock(); return F->usernameError == "invalid name"; }, 5000), "invalid name refused");
+            F->ClaimUsername("");
+            CHECK(WaitFor([&] { auto l = F->Lock(); return F->myUsername.empty() && !F->usernamePending; }, 5000), "released");
+            G->LookupUsername("frank.f");
+            CHECK(WaitFor([&] { auto l = G->Lock(); return !G->lookup.pending && G->lookup.error == "not found"; }, 5000), "gone after release");
+            G->ClaimUsername("frank.f");
+            CHECK(WaitFor([&] { auto l = G->Lock(); return G->myUsername == "frank.f"; }, 5000), "free again");
+        }
         // relay: when no direct path works, the server carries the (encrypted) packets
 #ifdef _WIN32
         _putenv_s("LUNASHARE_TEST_NO_DIRECT", "1");

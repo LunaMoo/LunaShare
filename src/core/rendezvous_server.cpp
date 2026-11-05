@@ -40,6 +40,7 @@ struct Device {
     std::vector<std::string> extra;  // router mappings / forwarded port, already "ip:port"
     bool relayOk = true;             // the device allows its connections to be relayed
     int64_t lastSeen = 0;
+    std::string acc;                 // its account (verified certificate), for usernames
     std::string mnonce;              // challenge the device signs to open its mailbox
     bool mailAuthed = false;         // proved it owns `pub` (may take out / delete its mail)
 };
@@ -282,6 +283,44 @@ void RendezvousServer::Loop() {
         mail_ = mails;
         return n;
     };
+    // ---- usernames: room -> name -> account key (first come; only that account can change or release it)
+    std::map<std::string, std::map<std::string, std::string>> names;
+    bool namesDirty = false;
+    std::string namesFile = opt_.dataDir.empty() ? std::string() : JoinPath(opt_.dataDir, "usernames.json");
+    if (!namesFile.empty()) {
+        json nj;
+        if (LoadJsonFile(namesFile, nj) && nj.is_object()) {
+            json rj = nj.value("rooms", json::object());
+            if (rj.is_object())
+                for (auto& [room, m] : rj.items())
+                    if (m.is_object())
+                        for (auto& [n, a] : m.items())
+                            if (a.is_string()) names[room][n] = a.get<std::string>();
+        }
+    }
+    auto saveNames = [&] {
+        if (!namesDirty || namesFile.empty()) return;
+        json rj = json::object();
+        for (auto& [room, m] : names) rj[room] = m;
+        MakeDirs(opt_.dataDir);
+        SaveJsonFile(namesFile, json{{"v", 1}, {"rooms", rj}});
+        namesDirty = false;
+    };
+    auto nameOf = [&](const std::string& room, const std::string& acc) -> std::string {
+        if (acc.empty()) return {};
+        auto it = names.find(room);
+        if (it == names.end()) return {};
+        for (auto& [n, a] : it->second)
+            if (a == acc) return n;
+        return {};
+    };
+    auto validName = [](std::string& n) {
+        for (auto& ch : n) ch = (char)tolower((unsigned char)ch);
+        if (n.size() < 3 || n.size() > 32 || !isalnum((unsigned char)n[0])) return false;
+        for (char ch : n)
+            if (!isalnum((unsigned char)ch) && ch != '.' && ch != '_' && ch != '-') return false;
+        return true;
+    };
     auto mailCount = [&](const std::string& room, const std::string& pub) {
         auto it = boxes.find(room + "/" + pub);
         return it == boxes.end() ? 0 : (int)it->second.size();
@@ -423,6 +462,10 @@ void RendezvousServer::Loop() {
             }
             d.relayOk = j.value("relay", true);
             d.lastSeen = now;
+            {
+                std::string acc = Clip(j.value("acc", ""), 64), acs = Clip(j.value("acs", ""), 128);
+                d.acc = !acc.empty() && IsHex64(d.pub) && VerifyData(acc, "device", id + "\n" + d.pub, acs) ? acc : std::string();
+            }
             if (d.mnonce.empty() || moved) {
                 char nn[33];
                 snprintf(nn, sizeof(nn), "%016llx%016llx", (unsigned long long)rng(), (unsigned long long)rng());
@@ -436,6 +479,7 @@ void RendezvousServer::Loop() {
                     if (rl.room == room && rl.idB == id) rl.b = from, rl.viaB = via;
                 }
             json reply = {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}};
+            if (!d.acc.empty()) reply["uname"] = nameOf(room, d.acc);
             if (opt_.mailbox) {
                 reply["mail"] = mailCount(room, d.pub);
                 reply["mnonce"] = d.mnonce;
@@ -564,6 +608,59 @@ void RendezvousServer::Loop() {
             int left = (int)v.size();
             if (v.empty()) boxes.erase(it);
             sendJson(from, {{"t", "mail"}, {"n", left}, {"mnonce", me->mnonce}});
+        } else if (t == "uclaim" || t == "urel") {
+            // claim / release my account's username in this room (signed with the account key)
+            std::string room, name = Clip(j.value("name", ""), 40);
+            Device* me = findSender(from, &room);
+            if (!me) continue;
+            if (me->acc.empty()) {
+                sendJson(from, {{"t", "uerr"}, {"name", name}, {"msg", "this device has no account"}});
+                continue;
+            }
+            std::string what = t == "uclaim" ? name : std::string("release");
+            if (t == "uclaim" && !validName(name)) {
+                sendJson(from, {{"t", "uerr"}, {"name", name}, {"msg", "invalid name"}});
+                continue;
+            }
+            if (!VerifyData(me->acc, "username", room + "\n" + (t == "uclaim" ? name : what), j.value("sig", ""))) {
+                sendJson(from, {{"t", "uerr"}, {"name", name}, {"msg", "invalid signature"}});
+                continue;
+            }
+            auto& m = names[room];
+            if (t == "uclaim") {
+                auto it = m.find(name);
+                if (it != m.end() && it->second != me->acc) {
+                    sendJson(from, {{"t", "uerr"}, {"name", name}, {"msg", "taken"}});
+                    continue;
+                }
+                if (m.size() >= 20000 && it == m.end()) {
+                    sendJson(from, {{"t", "uerr"}, {"name", name}, {"msg", "server full"}});
+                    continue;
+                }
+            }
+            for (auto it = m.begin(); it != m.end();) it = it->second == me->acc ? m.erase(it) : std::next(it);  // one name per account
+            if (t == "uclaim") m[name] = me->acc;
+            if (m.empty()) names.erase(room);
+            namesDirty = true;
+            saveNames();
+            log(t == "uclaim" ? "username " + name + " claimed" : "username released");
+            sendJson(from, {{"t", "uok"}, {"name", t == "uclaim" ? name : std::string()}});
+        } else if (t == "ulook") {
+            // who is this username: its account and the account's devices online in the room
+            std::string room, name = Clip(j.value("name", ""), 40);
+            Device* me = findSender(from, &room);
+            if (!me) continue;
+            for (auto& ch : name) ch = (char)tolower((unsigned char)ch);
+            auto rit = names.find(room);
+            auto it = rit == names.end() ? std::map<std::string, std::string>::iterator() : rit->second.find(name);
+            if (rit == names.end() || it == rit->second.end()) {
+                sendJson(from, {{"t", "uerr"}, {"name", name}, {"msg", "not found"}});
+                continue;
+            }
+            json devs = json::array();
+            for (auto& [id, d] : rooms[room])
+                if (d.acc == it->second) devs.push_back({{"id", d.id}, {"name", d.name}, {"pf", d.pf}, {"pub", d.pub}});
+            sendJson(from, {{"t", "uinfo"}, {"name", name}, {"acc", it->second}, {"devs", devs}});
         } else if (t == "bye") {
             std::string room = j.value("room", ""), id = j.value("id", "");
             auto rit = rooms.find(room);

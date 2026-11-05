@@ -144,6 +144,18 @@ void WanTransport::Connect(const std::string& peerId) {
     if (std::find(connectQueue_.begin(), connectQueue_.end(), peerId) == connectQueue_.end()) connectQueue_.push_back(peerId);
 }
 
+void WanTransport::SendServer(const std::string& jsonText) {
+    std::lock_guard<std::mutex> l(m_);
+    if (serverOut_.size() < 64) serverOut_.push_back(jsonText);
+}
+
+void WanTransport::SetAccount(const std::string& acc, const std::string& cert) {
+    std::lock_guard<std::mutex> l(m_);
+    acc_ = acc;
+    accCert_ = cert;
+    nameChanged_ = true;  // register again
+}
+
 void WanTransport::MailPut(const std::string& toPub, const std::string& id, const std::string& dataB64) {
     std::lock_guard<std::mutex> l(m_);
     for (auto& m : mailOut_)
@@ -298,6 +310,10 @@ void WanTransport::Loop() {
             std::lock_guard<std::mutex> l(m_);
             j = {{"t", "reg"}, {"v", 1}, {"room", cfg_.roomHash}, {"id", cfg_.id}, {"name", cfg_.name}, {"pf", cfg_.platform},
                  {"pub", cfg_.pub}, {"local", locals}, {"extra", extra}, {"fwd", cfg_.forwardedPort}, {"relay", cfg_.relay}};
+            if (!acc_.empty()) {
+                j["acc"] = acc_;
+                j["acs"] = accCert_;
+            }
             nameChanged_ = false;
         }
         send(server, 'R', j.dump());
@@ -396,6 +412,12 @@ void WanTransport::Loop() {
                 }
             }
             for (auto& m : due) send(server, 'R', json{{"t", "mput"}, {"to", m.to}, {"id", m.id}, {"d", m.data}}.dump());
+            std::vector<std::string> out;
+            {
+                std::lock_guard<std::mutex> l(m_);
+                out.swap(serverOut_);
+            }
+            for (auto& o : out) send(server, 'R', o);
             if (mailWaiting > 0 && now - mailFetchAt > 10000) fetchMail();
         }
         if (cfg_.natpmp && now >= natNext) {
@@ -514,6 +536,10 @@ void WanTransport::Loop() {
                     if (took || id.empty() || !onMail) send(server, 'R', json{{"t", "mack"}, {"ids", json::array({id})}}.dump());
                     continue;
                 }
+                if (!t.empty() && t[0] == 'u') {  // usernames
+                    if (onServerReply) onServerReply(j.dump());
+                    continue;
+                }
                 if (t == "mok" || t == "mfull") {
                     std::string id = j.value("id", "");
                     {
@@ -529,6 +555,7 @@ void WanTransport::Loop() {
                         publicEp_ = j.value("you", "");
                     }
                     SetStatus("connected - " + std::to_string(j.value("peers", json::array()).size()) + " other device(s) in the room");
+                    if (j.contains("uname") && onServerReply) onServerReply(json{{"t", "uname"}, {"name", j.value("uname", "")}}.dump());
                     std::vector<WanPeer> peers;
                     for (auto& pj : j.value("peers", json::array())) {
                         WanPeer p;

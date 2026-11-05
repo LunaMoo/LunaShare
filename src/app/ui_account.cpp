@@ -19,6 +19,8 @@ static void CenterNext(float wFrac) {
 }
 
 void App::DrawAccountSettings(float fieldW, float h) {
+    bool mobile = ui::M().mobile;
+    float bw = mobile ? -1 : 0;
     ImGui::SeparatorText(T("Your account"));
     ImGui::PushTextWrapPos(0);
     ImGui::TextDisabled("%s", T("Your account belongs to you, not to a server. Link your phone and computer to it: messages then reach all "
@@ -58,8 +60,6 @@ void App::DrawAccountSettings(float fieldW, float h) {
                            "%s", T("Make a backup: if you lose all your devices, only the recovery phrase or a backup file can bring your account back."));
         ImGui::PopTextWrapPos();
     }
-    bool mobile = ui::M().mobile;
-    float bw = mobile ? -1 : 0;
     if (ImGui::Button(T("Recovery phrase..."), ImVec2(bw, h))) {
         phraseShown = eng.RecoveryPhrase();
         openPhrase = true;
@@ -76,6 +76,27 @@ void App::DrawAccountSettings(float fieldW, float h) {
         openRestore = true;
     }
     ImGui::TextDisabled(T("Account fingerprint: %s"), KeyFingerprint(eng.MyAccount()).c_str());
+    // username on the internet server: others can find you by it
+    if (eng.settings.wanEnabled && !eng.settings.wanServer.empty()) {
+        ImGui::TextUnformatted(T("Username on your server (others can find you by it):"));
+        if (usernameBuf.empty() && !ImGui::IsAnyItemActive() && !eng.myUsername.empty()) usernameBuf = eng.myUsername;
+        ImGui::SetNextItemWidth(fieldW > 0 ? fieldW * 0.6f : -1);
+        bool enter = ImGui::InputTextWithHint("##uname", T("username"), &usernameBuf, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (!mobile) ImGui::SameLine();
+        bool same = usernameBuf == eng.myUsername;
+        ImGui::BeginDisabled(same || usernameBuf.empty() || eng.usernamePending);
+        if (ImGui::Button(T("Save##uname"), ImVec2(bw, h)) || (enter && !same && !usernameBuf.empty())) eng.ClaimUsername(usernameBuf);
+        ImGui::EndDisabled();
+        if (!eng.myUsername.empty()) {
+            if (!mobile) ImGui::SameLine();
+            if (ImGui::Button(T("Remove##uname"), ImVec2(bw, h))) {
+                eng.ClaimUsername("");
+                usernameBuf.clear();
+            }
+        }
+        if (!eng.myUsername.empty()) ImGui::TextDisabled(T("You are @%s on this server."), eng.myUsername.c_str());
+        if (!eng.usernameError.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", UsernameError(eng.usernameError).c_str());
+    }
 }
 
 void App::DrawAccountPopups() {

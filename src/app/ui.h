@@ -157,6 +157,8 @@ private:
     std::string phraseShown, restoreBuf, backupPass, backupPass2, backupPath, accountError;
     bool backupSaving = false;            // password popup: saving (true) or opening (false) a backup
     std::string removeDeviceAsk;
+    std::string usernameBuf, findUserBuf, findUserAcc;  // usernames: claim field, search field, person to open once connected
+    static std::string UsernameError(const std::string& e);
     bool openRemoveDevice = false;
     // profile picture: round picture (or coloured circle with the initial) of a device; peer "" = this device
     void DrawAvatar(ImDrawList* dl, ImVec2 center, float diameter, const std::string& peer, const std::string& name);

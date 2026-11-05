@@ -83,6 +83,13 @@ bool App::IsMobileLayout() {
 void App::Frame() {
     auto lk = eng.Lock();
     PullEvents();
+    // found by username: open their chat as soon as the connection is there
+    if (!findUserAcc.empty() && eng.IsConnected("@" + findUserAcc)) {
+        SelectPeer("@" + findUserAcc);
+        if (IsMobileLayout()) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+        else { tab = Tab::Chat; tabForce = true; }
+        findUserAcc.clear();
+    }
     // taps on notifications
     for (notify::Action a; notify::Pop(a);) {
         if (a.what == "open" && !a.key.empty()) {
@@ -2250,6 +2257,14 @@ void App::DrawDeviceDetails(const std::string& peer) {
 
 // ============================================================================ connect / nearby
 
+std::string App::UsernameError(const std::string& e) {
+    if (e == "taken") return T("That username is already taken on this server.");
+    if (e == "invalid name") return T("3 to 32 characters: letters, digits, dot, dash or underscore, starting with a letter or digit.");
+    if (e == "not found") return T("Nobody uses this username on your server.");
+    if (e == "that is you") return T("That's your own username.");
+    return TDynamic(e);
+}
+
 void App::DrawNearby() {
     bool mobile = ui::M().mobile;
     if (mobile) ui::TouchScroll();
@@ -2285,6 +2300,40 @@ void App::DrawNearby() {
     }
 
     // ---- manual
+    // ---- find someone by username (internet server)
+    if (eng.settings.wanEnabled && !eng.settings.wanServer.empty()) {
+        ImGui::SeparatorText(T("Find someone by username"));
+        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 14);
+        bool enter = ImGui::InputTextWithHint("##finduser", T("username"), &findUserBuf, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (!mobile) ImGui::SameLine();
+        if ((ImGui::Button(T("Find"), ImVec2(mobile ? -1 : 0, h)) || enter) && !findUserBuf.empty()) eng.LookupUsername(findUserBuf);
+        const auto& lu = eng.lookup;
+        if (lu.pending) {
+            ImGui::TextDisabled("%s", T("Searching..."));
+        } else if (!lu.error.empty()) {
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColWarn()), "%s", UsernameError(lu.error).c_str());
+        } else if (!lu.acc.empty()) {
+            std::string key = "@" + lu.acc;
+            ImGui::Text("@%s", lu.name.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled(lu.devices.empty() ? T("- not online right now") : T("- %d device(s) online"), (int)lu.devices.size());
+            bool connected = eng.IsConnected(key);
+            if (connected) {
+                if (ImGui::Button(T("Open chat"), ImVec2(mobile ? -1 : 0, h))) {
+                    SelectPeer(key);
+                    if (mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+                    else { tab = Tab::Chat; tabForce = true; }
+                }
+            } else if (!lu.devices.empty() && ImGui::Button(T("Connect"), ImVec2(mobile ? -1 : 0, h))) {
+                eng.ConnectLookedUp();
+                findUserAcc = lu.acc;
+            }
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextDisabled("%s", T("After connecting, compare the safety number with them (device details) to be sure it's really them."));
+            ImGui::PopTextWrapPos();
+        }
+    }
+
     ImGui::SeparatorText(T("Connect by address"));
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 14);
     ImGui::InputTextWithHint("##host", "192.168.1.20", &manualHost, mobile ? 0 : ImGuiInputTextFlags_None);

@@ -26,6 +26,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   your devices, what you write on one appears on the others, and your contacts see one person instead of several devices.
 - A **profile picture** (crop it in a round preview) is shared with, and cached by, everyone you connect to.
 - Keep your account safe with the **24-word recovery phrase** or a password-protected **backup file**.
+- With an internet server: **offline messages** wait on it (sealed, the server can't read them), messages show
+  *delivered* / *read*, you can claim a **username** so others can find you, and phones stay connected in the
+  **background** with notifications and a ringing call screen.
 
 **Chat**
 - Text chat per person. Messages queue while the other side is offline and show delivered/queued state.

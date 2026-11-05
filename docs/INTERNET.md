@@ -23,6 +23,10 @@ OPNsense router.
   delivered, or after 10 days. Limits: 10 MB per receiving device, 1 GB in total (`--mailbox-days`, `--mailbox-mb`,
   `--mailbox-total-mb`, `--no-mailbox`). With `-d DIR` they survive server restarts (the OPNsense plugin uses
   `/var/db/lunashare`). Files are never stored; they wait until both devices are online.
+- **Usernames:** a person can claim a username in the room (signed with their account key; first come, only that
+  account can change or release it). Others in the room can look it up and get the account key and its online
+  devices, then connect as usual - the safety number still tells whether it is really them. For this, each device
+  tells the server which account it belongs to (with the account's signature).
 
 ## Server on OPNsense
 

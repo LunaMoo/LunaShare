@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.0 - people, accounts and messages that wait
+
+Update all your devices and your server (the OPNsense plugin too). Devices with 1.0.x still talk to 1.1.0, as
+separate devices without accounts.
+
+- **Profile pictures:** choose and crop a picture in *Settings → Profile*; everyone you connect to gets it and keeps a
+  copy. Shown in the chat list, the chat header and when they call.
+- **Accounts:** every device now has an account - a key that belongs to you, no sign-up. Link your phone and computer
+  (*Settings → Your account → Link another device…*, both show the same 6-digit code): messages to you reach all your
+  devices, what you write on one appears on the others, and your contacts see one person. Calls ring all of the
+  person's devices; the first to answer takes the call.
+- **Recovery:** a 24-word recovery phrase and password-protected backup files bring your account back on a new device.
+- **Offline messages:** when someone isn't reachable, text messages wait on your server (up to 10 days, 10 MB per
+  device), sealed so the server can read neither the text nor who sent it. Messages show *waiting on the server*,
+  *delivered* and *read*.
+- **Background:** on phones LunaShare stays connected in the background (a small notification) and shows notifications
+  for messages and calls, with a full-screen ringing call screen (Answer / Decline). Back on the home screen keeps it
+  running. On computers it can keep running when the window is closed (in the tray on Windows).
+- **Usernames:** claim a username on your server (*Settings → Your account*) so others can find you
+  (*Connect → Find someone by username*).
+- Server: offline mailboxes and usernames are kept in `-d DIR` (OPNsense: `/var/db/lunashare`); new options
+  `--mailbox-days`, `--mailbox-mb`, `--mailbox-total-mb`, `--no-mailbox`.
+
 ## 1.0.3
 
 - **Call settings during calls:** the settings button (sliders) is now in every call, voice or video. It opens one panel
