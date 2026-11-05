@@ -89,6 +89,8 @@ private:
     int64_t watchLastSeek = 0;
     float watchDrag = -1;
     int64_t watchActive = 0;  // last time someone touched / moved the mouse (controls hide a few seconds later)
+    int64_t watchShownSince = 0;
+    bool watchCtlShown = false, watchTapHides = false;
     bool watchFullscreen = false, watchMovie = false, watchAwake = false, watchDevSub = false;
     std::set<std::string> watchSubsAdded;
     bool watchSubFollow = true;       // viewer: subtitles as the host has them (until picking others)

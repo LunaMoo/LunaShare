@@ -15,16 +15,18 @@ jobs:
         id: cache
         with:
           path: ffwin
-          key: ffmpeg-n7.1-win64-player-v3
+          key: ffmpeg-n7.1-win64-player-v4
       - name: Build FFmpeg (mingw-w64 cross)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update && sudo apt-get install -y mingw-w64 nasm
+          sudo apt-get update && sudo apt-get install -y mingw-w64 nasm libz-mingw-w64-dev
+          # zlib linked in (MKV subtitle tracks are usually zlib-compressed): no zlib1.dll to ship
+          sudo rm -f /usr/x86_64-w64-mingw32/lib/libz.dll.a
           git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
           mkdir ffbuild && cd ffbuild
           ../ffsrc/configure --prefix=$GITHUB_WORKSPACE/ffwin --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
             --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale \
-            --disable-avfilter --disable-network --disable-autodetect --enable-w32threads --enable-d3d11va \
+            --disable-avfilter --disable-network --disable-autodetect --enable-zlib --enable-w32threads --enable-d3d11va \
             --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt \
             --enable-decoder=h264,hevc,av1,vp8,vp9,mpeg4,aac,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp2,mp2float,aac_latm,wmav2,wmapro,pcm_s16be,pcm_dvd,pcm_bluray,mpeg2video,mpeg1video,vc1,wmv3,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
             --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac,ac3,dca,mlp,mpegvideo,vc1,aac_latm,dvdsub,dvbsub \
@@ -46,11 +48,11 @@ jobs:
         id: cache
         with:
           path: fflin
-          key: ffmpeg-n7.1-linux-x264-dav1d-gpu-v3
+          key: ffmpeg-n7.1-linux-x264-dav1d-gpu-v4
       - name: Build x264, dav1d and FFmpeg
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update && sudo apt-get install -y nasm meson ninja-build patchelf libdrm-dev
+          sudo apt-get update && sudo apt-get install -y nasm meson ninja-build patchelf libdrm-dev zlib1g-dev
           W=$GITHUB_WORKSPACE
           # NVIDIA NVENC/NVDEC: headers only, FFmpeg loads the driver's libraries when they exist
           git clone --depth 1 --branch n12.2.72.0 https://github.com/FFmpeg/nv-codec-headers.git nvh
@@ -69,7 +71,7 @@ jobs:
           mkdir ffbuild && cd ffbuild
           PKG_CONFIG_PATH=$W/deps/lib/pkgconfig ../ffsrc/configure --prefix=$W/fflin \
             --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter \
-            --disable-postproc --disable-network --disable-autodetect --enable-gpl --enable-libx264 --enable-libdav1d --enable-pthreads \
+            --disable-postproc --disable-network --disable-autodetect --enable-zlib --enable-gpl --enable-libx264 --enable-libdav1d --enable-pthreads \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-vaapi \
             --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt \
             --enable-decoder=h264,hevc,av1,libdav1d,vp8,vp9,mpeg4,mjpeg,aac,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp2,mp2float,aac_latm,wmav2,wmapro,pcm_s16be,pcm_dvd,pcm_bluray,mpeg2video,mpeg1video,vc1,wmv3,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \

@@ -350,19 +350,26 @@ void App::DrawWatch() {
 
     // ---- show the controls on any movement / touch / key; hide them a few seconds later while it plays
     bool popupOpen = ImGui::IsPopupOpen("##watchtracks");
-    if (io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1) || io.InputQueueCharacters.Size ||
+    // were the controls already showing when the finger came down? (a touch moves the pointer in one frame and
+    // clicks in the next: the move must not count as "visible" for the tap that follows)
+    bool wereShown = now - watchActive < 3000 && now - watchShownSince > 350;
+    if (ImGui::IsMouseClicked(0)) watchTapHides = wereShown;
+    bool moved = !mobile && (io.MouseDelta.x != 0 || io.MouseDelta.y != 0);  // (phones: only touches count)
+    if (moved || ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1) || io.InputQueueCharacters.Size ||
         ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_RightArrow) || popupOpen ||
         watchDrag >= 0 || !w.playing || w.hold)
         watchActive = now;
     bool controls = now - watchActive < 3000;
-    bool tapToShow = !controls && ImGui::IsMouseClicked(0);  // (a tap on a hidden screen only brings the controls back)
+    if (controls && !watchCtlShown) watchShownSince = now;
+    watchCtlShown = controls;
+    bool tapToShow = !watchTapHides;  // (a tap on a hidden screen only brings the controls back)
     if (!controls && !mobile) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
 
     // ---- the picture
     ImGui::SetCursorScreenPos(a);
     ImGui::SetNextItemAllowOverlap();  // (the controls lie on top of it and take their own clicks)
     ImGui::InvisibleButton("##screen", ImVec2(b.x - a.x, b.y - a.y));
-    bool tapped = ImGui::IsItemClicked() && controls && !tapToShow;
+    bool tapped = ImGui::IsItemClicked() && controls && !tapToShow && wereShown;
     bool dbl = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
     std::string cur = w.host.empty() ? w.path : "watch:" + std::to_string(w.sid);
     bool open = Player().IsCurrent(cur);
