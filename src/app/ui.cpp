@@ -3406,6 +3406,12 @@ void App::DrawCameraPanel() {
         edit.callVideoAdaptive = s.callVideoAdaptive;
         Media().ApplyVideoQuality();
     }
+    if (ImGui::Checkbox(T("My picture in full quality"), &s.callFullPreview)) {
+        eng.ApplySettings(s);
+        edit.callFullPreview = s.callFullPreview;
+        Media().RestartCamera();  // the self-view size is chosen when the camera starts
+        camCtlTime = -1;
+    }
     ImGui::Separator();
     if (camCtl.empty()) ImGui::TextDisabled("%s", T("This camera has no adjustable settings."));
     if (LsvControl* z = find(LSV_CTL_ZOOM)) {
@@ -3638,6 +3644,9 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker(T("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call."));
         changed |= ImGui::Checkbox(T("Lower video quality automatically when the connection is slow"), &edit.callVideoAdaptive);
+        changed |= ImGui::Checkbox(T("Show my own picture in full quality"), &edit.callFullPreview);
+        ui::HelpMarker(T("Your self-view (in calls and when recording a video message) in the camera's full size and frame rate, like "
+                       "the recording, instead of a lighter preview. Uses a bit more battery."));
         ui::HelpMarker(T("Keeps the picture smooth: less bitrate first, then a lower frame rate and a smaller picture while the "
                        "connection is slow, back up when it recovers."));
         changed |= ImGui::Checkbox(T("Use only H.264 (if HEVC/AV1 video shows problems)"), &edit.callVideoH264Only);

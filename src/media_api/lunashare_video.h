@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define LSV_API_VERSION 3
+#define LSV_API_VERSION 4
 
 #if defined(_WIN32)
 #define LSV_EXPORT __declspec(dllexport)
@@ -130,6 +130,9 @@ typedef struct LsvModule {
     int (*vcam_enable)(int on, char* msg, int msg_len);
     /* the picture to show in it (normally the video received from the other device); any thread */
     void (*vcam_push)(const LsvImage* img);
+    /* --- since version 4: self-view in the camera's full size and frame rate (1) instead of a light preview (0).
+     * Takes effect when the camera (re)starts. --- */
+    void (*set_full_preview)(int on);
 } LsvModule;
 
 typedef const LsvModule* (*LsvGetModuleFn)(void);

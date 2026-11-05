@@ -526,6 +526,20 @@ std::string MediaHost::VcamStatus() {
     return vcamStatus_;
 }
 
+// (every start of the video module: the self-view setting is read when the camera starts)
+bool MediaHost::StartVideoModule(const LsvSettings* vs) {
+    if (vmod_->api_version >= 4 && vmod_->set_full_preview) vmod_->set_full_preview(eng_ && eng_->GetSettings().callFullPreview ? 1 : 0);
+    return vmod_->start(vs) != 0;
+}
+
+void MediaHost::RestartCamera() {
+    if (!vmod_ || !camOn_) return;
+    if (vmod_->api_version >= 4 && vmod_->set_full_preview) vmod_->set_full_preview(eng_ && eng_->GetSettings().callFullPreview ? 1 : 0);
+    vmod_->set_camera_on(0);
+    if (!camId_.empty()) vmod_->select_camera(camId_.c_str());
+    if (!vmod_->set_camera_on(1)) camOn_ = false;
+}
+
 void MediaHost::StartVideo() {
     if (!vmod_ || videoRunning_ || !eng_) return;
     std::string peer;
@@ -537,7 +551,7 @@ void MediaHost::StartVideo() {
     Settings s = eng_->GetSettings();
     LsvSettings vs = Preset(s.callVideoRes, s.callVideoFps, s.callVideoAdaptive);
     vs.codec_pref = s.callVideoH264Only ? 1 : 0;
-    if (!vmod_->start(&vs)) return;
+    if (!StartVideoModule(&vs)) return;
     videoRunning_ = true;
     remoteCam_ = false;
     if (!s.callCamera.empty()) {
@@ -1019,7 +1033,7 @@ bool MediaHost::OpenVideoMessage(const std::string& path) {
     Settings cs = eng_ ? eng_->GetSettings() : Settings();
     LsvSettings vs = Preset(cs.callVideoRes, cs.callVideoFps, false);
     vs.codec_pref = 1;
-    if (!vmod_->start(&vs)) return false;
+    if (!StartVideoModule(&vs)) return false;
     vmsgPath_ = path;
     vmsgStarted_ = false;
     vmsgRec_ = false;

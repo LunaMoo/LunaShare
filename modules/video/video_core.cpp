@@ -178,7 +178,7 @@ public:
 
     void OnLocalImage(const LsvImage& img) override {
         int64_t now = NowMs();
-        if (now - lastLocalImage < 40) return;  // the preview doesn't need more than ~25 fps
+        if (!FullPreview() && now - lastLocalImage < 40) return;  // the light preview doesn't need more than ~25 fps
         lastLocalImage = now;
         if (hostSet && host.image) host.image(host.user, LSV_LOCAL, &img);
     }
@@ -707,11 +707,13 @@ void ApiVcamPush(const LsvImage* img) {
     if (c.backend && img) c.backend->VcamPush(*img);
 }
 
+void ApiSetFullPreview(int on) { FullPreview() = on != 0; }
+
 const LsvModule kModule = {
     LSV_API_VERSION, "LunaShare video", "1.1",
     ApiInit, ApiStart, ApiStop, ApiReceive, ApiCameraOn, ApiListCameras, ApiSelectCamera,
     ApiSetSettings, ApiGetControls, ApiSetControl, ApiStats,
-    ApiVcamAvailable, ApiVcamEnable, ApiVcamPush,
+    ApiVcamAvailable, ApiVcamEnable, ApiVcamPush, ApiSetFullPreview,
 };
 
 }  // namespace

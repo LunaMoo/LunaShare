@@ -136,6 +136,8 @@ public:
     bool StartCamera(const std::string& id, const LsvSettings& s, int codec, std::string* err) override {
         Env e;
         if (!e || !g_cls) { if (err) *err = "no Java VM"; return false; }
+        if (jmethodID fp = e->GetStaticMethodID(g_cls, "setFullPreview", "(Z)V")) e->CallStaticVoidMethod(g_cls, fp, (jboolean)FullPreview().load());
+        Clear(e.env);
         jmethodID m = M(e.env, "startCamera", "(Ljava/lang/String;IIIII)Z");
         if (!m) { Clear(e.env); if (err) *err = "VideoEngine.startCamera missing"; return false; }
         jstring js = e->NewStringUTF(id.c_str());

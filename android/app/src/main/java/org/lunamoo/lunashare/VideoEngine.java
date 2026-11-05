@@ -111,6 +111,9 @@ public final class VideoEngine {
     private static byte[] config;  // SPS/PPS
     private static ByteBuffer keyBuf;
     private static long lastPreview;
+    private static volatile boolean fullPreview;  // self-view in the camera's full size and frame rate
+
+    public static void setFullPreview(boolean on) { fullPreview = on; }
 
     // control state
     private static float zoom = 1f, evComp = 0f, iso = 400f, shutterMs = 10f, focus = 0f;
@@ -238,13 +241,14 @@ public final class VideoEngine {
 
             // the self-view only needs a small picture; ~15 fps of it is plenty (not possible in high-speed sessions)
             if (!highSpeed) {
-            Size ps = pick(map.getOutputSizes(ImageFormat.YUV_420_888), 320, 320 * height / Math.max(1, width));
+            Size ps = fullPreview ? pick(map.getOutputSizes(ImageFormat.YUV_420_888), width, height)
+                                  : pick(map.getOutputSizes(ImageFormat.YUV_420_888), 320, 320 * height / Math.max(1, width));
             preview = ImageReader.newInstance(ps.getWidth(), ps.getHeight(), ImageFormat.YUV_420_888, 2);
             preview.setOnImageAvailableListener(r -> {
                 Image img = r.acquireLatestImage();
                 if (img == null) return;
                 long now = System.currentTimeMillis();
-                if (now - lastPreview >= 66) {
+                if (fullPreview || now - lastPreview >= 66) {
                     lastPreview = now;
                     sendImage(0, img, rotation(), front);
                 }

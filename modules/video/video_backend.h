@@ -2,6 +2,7 @@
 // The portable core (video_core.cpp) does packets, keyframe recovery and bitrate adaptation on top of it.
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,6 +33,12 @@ public:
     virtual void OnCameraError(const std::string& msg) = 0;
     virtual void Log(const std::string& msg) = 0;
 };
+
+// self-view in full camera quality (set_full_preview); read by the core and the backends
+inline std::atomic<bool>& FullPreview() {
+    static std::atomic<bool> v{false};
+    return v;
+}
 
 class Backend {
 public:

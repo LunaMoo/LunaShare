@@ -91,6 +91,7 @@ struct Settings {
     int callVideoRes = 1;          // 0 360p 1 540p 2 720p 3 1080p 4 1440p 5 4K 6 8K
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
+    bool callFullPreview = false;  // self-view in the camera's full size and frame rate (calls, video messages)
     std::string callCamera;        // preferred camera id (empty: front camera)
     bool virtualCamera = false;
     bool callVideoH264Only = false; // troubleshooting: never use HEVC/AV1    // Windows 11: offer received video as "LunaShare Camera" to other apps      // dB added to the microphone before processing (quiet PC mics)

@@ -58,6 +58,8 @@ public:
     LsvStats VideoStats();
     void ApplyVideoQuality();                              // after the quality setting changed
     static LsvSettings Preset(int res, int fps, bool adaptive);
+    bool StartVideoModule(const LsvSettings* vs);
+    void RestartCamera();  // e.g. after the self-view setting changed
     static constexpr int kResCount = 7;
     static const char* ResName(int r);       // "720p (1280x720)" ...
     static const int* FpsList(int* n);       // 15, 24, 30, 60, 120
