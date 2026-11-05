@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 - watching movies together, fixed
 
 - **Voices in 5.1 movies:** surround sound is mixed down to stereo properly - before, only the front left and right
   channels were played, so the music came through but the dialogue (in the centre channel) didn't.
