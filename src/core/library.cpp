@@ -516,6 +516,8 @@ void Engine::HandlePieceData(const std::shared_ptr<Connection>& c, const Frame& 
     bool good = len == want && memcmp(got, expect.data(), 32) == 0;
     bool written = false;
     if (good) {
+        // (two sources' threads must not both create the file: the second "w+b" would wipe the first one's piece)
+        std::lock_guard<std::mutex> io(d->io);
         if (!FileExists(d->partPath)) MakeDirs(DirName(d->partPath));  // (the folder may have been deleted meanwhile)
         FILE* fp = OpenFile(d->partPath, FileExists(d->partPath) ? "r+b" : "w+b");
         written = fp && FileSeek(fp, off) && fwrite(data, 1, len, fp) == len;

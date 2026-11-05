@@ -157,6 +157,7 @@ struct SwarmDownload {
     std::vector<uint8_t> have;          // one byte per piece (1 = verified + written)
     int64_t done = 0;
     std::string partPath, finalPath;
+    std::mutex io;  // pieces from several sources arrive on several threads: one writer at a time
     enum State { Searching, Running, Paused, Done, Failed } state = Searching;
     std::string error;
     std::map<std::string, SwarmSource> sources;  // device -> what it has
