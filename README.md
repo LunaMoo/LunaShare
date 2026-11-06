@@ -1,8 +1,13 @@
 # LunaShare
 
-A chat app built around file sharing. It is written in C++ with [Dear ImGui](https://github.com/ocornut/imgui) on SDL2 and runs on Windows, Linux and Android (macOS builds from source, with chat and files only), with an iOS port planned.
-Devices on the same network find each other automatically. Transfers can be paused and resumed at any time, and every file is
-SHA-256 hashed before sending and again after receiving, so you know it arrived intact.
+A chat app built around file sharing, with voice and video calls, groups and watching movies together. It is written in
+C++ with [Dear ImGui](https://github.com/ocornut/imgui) on SDL2 and runs on **Android**, **Windows** and **Linux**.
+Devices on the same network find each other automatically; over the internet they meet through a small server you run
+yourself. Transfers can be paused and resumed at any time, and every file is SHA-256 hashed before sending and again
+after receiving, so you know it arrived intact.
+
+**Download:** [Releases](https://github.com/LunaMoo/LunaShare/releases) - the Android APK, a Windows and a Linux zip
+(the app with its optional `modules/` folder and the rendezvous server) and the OPNsense plugin.
 
 | Desktop | Phone |
 |---|---|
@@ -39,6 +44,8 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 **Watch together** (see [docs/WATCH.md](docs/WATCH.md))
 - Stream a movie from your device to a person or a group and watch it in sync: pausing or jumping affects everyone,
   and everyone waits for whoever is still loading. Original quality, nothing to send in advance.
+- Pick the sound track and subtitles (from the movie, from files next to it, or any file you choose); the host's
+  subtitles are offered to everyone. Full screen with controls that hide by themselves; phones turn to landscape.
 
 **Library (Shared folders)** (see [docs/LIBRARY.md](docs/LIBRARY.md))
 - Files in your *Shared* folder can be browsed and downloaded by your contacts. A download comes from every contact
@@ -73,9 +80,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 
 **Connectivity**
 - **LAN, no setup:** two discovery methods running side by side, then a TCP connection (port 47820, falls back to the next free one):
-  - **Bonjour / mDNS** (`_lunashare._tcp`, RFC 6762/6763). It uses the system Bonjour API on macOS/iOS and a built-in responder/browser on
-    Windows, Linux and Android that shares port 5353 with the OS. Works on most routers, and is the method iPhones/iPads will use.
-  - **UDP broadcast + multicast beacons** (port 47821). Fast, and works on networks that filter mDNS. Not available on iOS.
+  - **Bonjour / mDNS** (`_lunashare._tcp`, RFC 6762/6763), with a built-in responder/browser that shares port 5353 with
+    the OS (the system Bonjour API on Apple systems). Works on most routers.
+  - **UDP broadcast + multicast beacons** (port 47821). Fast, and works on networks that filter mDNS.
 
   Both can be switched on or off in Settings. Known devices are reconnected automatically when they still have work pending.
 - **Phone-to-phone with no Wi-Fi:** one phone starts a hotspot (Android LocalOnlyHotspot) and shows a Wi-Fi QR code the other phone can scan
@@ -84,10 +91,14 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - **Bluetooth RFCOMM:** Windows (Winsock + SDP), Linux (BlueZ, fixed channel), Android (Java bridge). Good for chat, small files, and handing over hotspot logins.
 - Manual connect by `ip[:port]`.
 - **Over the internet (optional):** run the small **rendezvous server**. There's a ready-made **OPNsense plugin**, or it runs on
-  any Linux/Windows/macOS box. Devices with the same room name and password find each other through it and then connect
+  any Linux or Windows machine. Devices with the same room name and password find each other through it and then connect
   **directly peer-to-peer** (UDP hole punching + KCP, helped by UPnP / NAT-PMP port mappings). When no direct path
   exists (a router you can't configure, carrier-grade NAT on both sides), the server relays the still end-to-end
-  encrypted packets. Only your name and the server need to be set; everything else is under *Settings → Advanced*.
+  encrypted packets. Only the server address needs to be set; everything else is under *Settings → Advanced*.
+- **Invites (private contacts):** instead of sharing your room, invite people with a code (*Settings → Invites*, or click
+  your own name above the device list; on phones the button on the main screen). Each of them reaches only you - or
+  the others in the same *invite room* - and never learns about the rest. They don't see the server's address, and
+  the server remembers them (even after a reinstall) until its admin releases them.
   See [docs/INTERNET.md](docs/INTERNET.md).
 
 **Languages**
@@ -104,14 +115,15 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - Each pair of people has a **safety number** (30 digits from the two account keys, identical on both screens). Compare it once and mark them as *verified*; their other devices are vouched for by their account.
 - Bluetooth links and hotspot logins sent over them are encrypted the same way. Only the discovery beacons (name, ID, port) are plain.
 
-**Audio and video files in chat (optional player module)**
+**Audio and video files (optional player module)**
 - Videos you send or receive show a thumbnail with their length. Tapping one plays it in the full-screen viewer, where you can swipe
   between pictures and videos and use play/pause and a seek bar. Audio files (mp3, m4a/aac, ogg/opus, flac, wav) play right in the chat bubble.
-- Supported formats: mp4/mov, mkv/webm, ogg, mp3, flac, wav and avi. Video codecs: H.264, HEVC, AV1, VP9, VP8 and MPEG-4. Audio: AAC, MP3, Opus, Vorbis, FLAC, ALAC and PCM.
-  Phone videos are shown upright using their rotation tag.
-- **Windows:** `lunashare_player.dll` plus the shared trimmed FFmpeg in `modules/` (about 8 MB together with the video module's files).
-  Video is decoded on the graphics card where possible.
-- **Android:** the phone's own hardware decoders, so it adds almost nothing to the app.
+- Containers: mp4/mov, mkv/webm, ogg, avi, mpeg-ts, mp3, flac, wav. Video: H.264, HEVC, AV1, VP9, VP8, MPEG-4, MPEG-2, VC-1.
+  Sound: AAC, MP3, Opus, Vorbis, FLAC, ALAC, PCM, and the movie formats AC-3, E-AC-3, DTS and TrueHD; 5.1 and 7.1 are
+  mixed down to stereo with the dialogue kept. Several sound tracks and subtitles (SRT, ASS, WebVTT, MP4 text, and the
+  picture subtitles of Blu-ray / DVD rips) can be chosen. Phone videos are shown upright using their rotation tag.
+- **Windows:** `lunashare_player.dll` plus a trimmed FFmpeg in `modules/`; video is decoded on the graphics card where possible.
+- **Android:** the phone's hardware decoders for video, and a small built-in FFmpeg for sound tracks and subtitles.
 - **Linux:** `liblunashare_player.so` with the same FFmpeg as the Linux video module, in `modules/`.
 
 ![Video in chat](docs/player.png)
@@ -127,8 +139,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   for 👍 ❤️ 😂 😮 😢 🙏 or **+** for any emoji. Each side has one reaction per message; picking it again or clicking your
   pill under the bubble removes it, and clicking the other person's pill reacts the same. Reactions reach a device that
   is offline once it is back, and you get a notification when someone reacts while you're in another chat.
-- The module (`lunashare_emoji`) is tiny, because it ships no font. It is in both Android APKs; without it emoji
-  show as before.
+- The module (`lunashare_emoji`) is tiny, because it ships no font. Without it, emoji show as plain characters.
+- On Android, characters none of the app's fonts has (Japanese track names, for example) are drawn with the phone's own
+  fonts.
 
 **Voice messages (needs the voice module)**
 - With nothing typed, the Send button becomes **Voice**. Tap it to record: the bar shows a timer and a level meter, with
@@ -142,8 +155,9 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   recording starts, like a camera app.
 
 **Voice calls (optional module)**
-- Calls live in a separate plug-in, `lunashare_media` (`lunashare_media.dll` / `liblunashare_media.so` / `.dylib`), which is loaded at
+- Calls live in a separate plug-in, `lunashare_media` (`lunashare_media.dll` / `liblunashare_media.so`), which is loaded at
   startup only if it's present. Without it LunaShare is the plain chat + file app, and the call button doesn't appear. Delete the file to remove calls.
+- One-to-one and group calls (see **Groups** above).
 - The call button sits in the chat header. It's only shown when **both** devices have the module, since each device announces its capabilities.
 - Calls go peer-to-peer over the same encrypted connection as chat (LAN, hotspot, internet/KCP, and in principle Bluetooth, though there it can be choppy).
 - Audio: Opus (48 kHz fullband, 16–128 kbit/s, default 48, in-band FEC), an adaptive jitter buffer with loss concealment, and SpeexDSP for echo cancellation, noise suppression and auto gain.
@@ -153,7 +167,7 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 - *Settings → Calls*: choose input and output devices, turn echo cancellation, noise suppression and auto gain on or off, set quality, and run a microphone test.
 - Android ships as one APK with everything (`org.lunamoo.lunashare`). Microphone and camera are asked for only the first
   time you call or record; build with `-DLUNASHARE_BUILD_VOICE=OFF -DLUNASHARE_BUILD_VIDEO=OFF` for a version without them.
-- The module has a small, versioned C ABI (`src/media_api/lunashare_media.h`), so a video module can be added later the same way.
+- Every module has a small, versioned C ABI in `src/media_api/`.
 
 ![Voice call](docs/voice-call.png)
 
@@ -178,13 +192,10 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
   If a camera or encoder can't do a combination, the closest one it can do is sent, and the call stats show the actual numbers.
   On Android, 120 fps uses the camera's high-speed mode, which has no self-view stream; the other side still gets the full rate.
   Colour conversion, rotation and mirroring run on the GPU. On Windows, received video is decoded by the graphics card.
-  8K (7680x4320) is offered as well. H.264 at 8K is beyond most decoders, so if the receiving device can't decode
-  a size, it automatically asks the sender for 4K (or 1080p) instead. With *Lower quality when the connection is slow* on (the default), smoothness comes
-  first: the bitrate follows what the link actually carries (measured four times a second, cut as soon as about 120 ms of
-  video is waiting - the receiving device reports ten times a second how far it got, so delay that builds up anywhere
-  on the way counts, not only in this app - and raised slowly), a receiving device whose decoder falls behind makes the
-  sender step down right away, and if the link stays too slow for the picture size, the camera steps down - 60 to
-  30 fps first, then 1080p, 720p, 540p, 360p, then fewer frames - and steps back up once the link has kept up for a while.
+  8K is offered as well; a receiving device that can't decode a size asks the sender for a smaller one.
+  With *Lower quality when the connection is slow* on (the default), smoothness comes first: the bitrate follows what
+  the link actually carries, and if it stays too slow the camera steps down (fewer frames first, then smaller sizes)
+  and back up once the link keeps up.
   Voice always goes ahead of video.
 - **Camera panel (during a call):**
   - Phones: zoom (including the ultra-wide lens, e.g. 0.6x, where the phone has one), switching between cameras, exposure
@@ -214,7 +225,10 @@ SHA-256 hashed before sending and again after receiving, so you know it arrived 
 ![Camera panel](docs/video-camera-panel.png)
 
 **Settings**
-- Download folder, auto-accept rules, discovery, port, speed limit, chunk size, parallel files, Bluetooth, theme (dark/light/classic), UI scale.
+- The top of the settings has what most people need: invites, profile, account, the server, the download folder and the
+  look. Everything technical (discovery, ports, speed limit, chunk size, parallel files, Bluetooth, rooms...) is under *Advanced*.
+- **Windows:** can keep running in the tray when the window is closed. **Android:** can keep running in the background
+  (with notifications and a ringing call screen).
 - Layout: *automatic*, *desktop*, or *phone*. Phones get a vertical UI with large buttons, a bottom navigation bar, drag-to-scroll with inertia, and long-press menus.
   A narrow, tall desktop window switches to the phone layout automatically.
 - **Export/import** settings to a JSON file. The export includes known devices and their custom names. Chat and file history are optional, and so is the device identity (only for restoring the same device).
@@ -231,21 +245,22 @@ cmake --build build --config Release
 
 - **Windows:** Visual Studio 2022 or MinGW/llvm-mingw. The result is a single `LunaShare.exe`.
 - **Linux:** needs X11/Wayland and GL development packages for SDL (see `.github/workflows/build.yml`).
-- **macOS:** builds `LunaShare.app`.
+- **macOS:** builds `LunaShare.app` (chat and files; not maintained and not built by CI).
 - **Android:** open `android/` in Android Studio, or run `gradle assembleRelease` in `android/`. The Gradle build fetches SDL's Java glue
-  and builds the native code through the same top-level `CMakeLists.txt`. Needs NDK 27 and minSdk 24.
+  and builds the native code through the same top-level `CMakeLists.txt`. Needs NDK 27; Android 7 (API 24) or newer.
+  The sound/subtitle FFmpeg for the player is built per ABI into `ffandroid/` (see the workflow); without it the player
+  plays video and the usual sound formats only.
   On Android 11+ the app asks for *All files access* so it can send any file and save to `Download/LunaShare`.
-  There are two flavors: `gradle assembleLiteRelease` (without calls) and `gradle assembleCallsRelease` (with the voice and video modules,
-  plus the microphone and camera permissions).
 - Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only),
   `-DLUNASHARE_BUILD_VOICE=OFF` (skip the voice module, along with Opus and SpeexDSP), `-DLUNASHARE_BUILD_VIDEO=OFF` (skip the video module),
   `-DLUNASHARE_VIDEO_TEST_MODULE=ON` (development: a video module with a test-pattern camera on systems without a real backend).
-- The voice module builds next to the executable. To ship it, put it next to `LunaShare.exe` or in a `modules/` folder (Windows/Linux),
-  or in `LunaShare.app/Contents/MacOS` (macOS). The video module goes in the same place. `./build/lunashare_voice_tests` checks the audio pipeline
+- The modules (voice, video, player, emoji) build next to the executable. To ship them, put them next to `LunaShare.exe`
+  or in a `modules/` folder, together with the FFmpeg libraries for the player and video modules. `./build/lunashare_voice_tests` checks the audio pipeline
   (packet loss, jitter, echo cancellation), and `./build/lunashare_video_tests` checks the video core (keyframe recovery after loss, bitrate adaptation on a slow link).
 - Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`.
 
-The GitHub Actions workflow builds Windows, Linux, macOS and the Android APK on every push and uploads them as artifacts.
+The GitHub Actions workflow builds Windows, Linux, the Android APK and the OPNsense plugin (FreeBSD) on every push and
+uploads them as artifacts.
 Every push to `main` updates the *latest* pre-release. When a new version (the `VERSION` in `CMakeLists.txt`) first reaches
 `main`, a release `vX.Y.Z` is published with that version's notes from [CHANGELOG.md](CHANGELOG.md).
 
@@ -254,34 +269,38 @@ Command line: `--portable` (keeps settings in `LunaShareData` next to the execut
 ## Layout
 
 ```
-src/core/      engine (no UI dependencies)
-  engine.*       connections, discovery, chat, resumable transfers, persistence
-  protocol.*     framing: [u32 len][u8 type][payload]  (JSON control frames, binary data frames)
-  hash.*         SHA-256, CRC-32
-  crypto.*       handshake, frame encryption, identity keys, safety numbers
-  mdns.*         Bonjour/mDNS service discovery (dns_sd on Apple, built-in elsewhere)
-  wan.*          internet transport: rendezvous client, hole punching, NAT-PMP, relay fallback, KCP sessions
-  upnp.*         UPnP IGD port mapping
-  rendezvous_server.*  the optional rendezvous server (also used by the tests)
-server/        lunashare-rendezvous daemon + systemd unit
-opnsense/      OPNsense plugin (Services > LunaShare rendezvous) + install.sh
-  bluetooth.*    RFCOMM per platform + HostBridge hooks for Android
-  model.*        settings / devices / messages / transfers / history + JSON
-  platform.*     paths, MACs, interfaces, UTF-8 file I/O
-src/media_api/ lunashare_media.h - the C ABI between the app and media modules
-modules/voice/ voice module: Opus + SpeexDSP + jitter buffer (built as lunashare_media)
-modules/vcam/  Windows 11 virtual camera media source (lunashare_vcam.dll, loaded by the camera Frame Server)
-modules/video/ video module (lunashare_video): video_core.cpp (packets, keyframes, bitrate), video_win.cpp (Media Foundation),
-               video_android.cpp + android/app/src/calls/java/.../VideoEngine.java (Camera2 + MediaCodec), video_fake.cpp (tests)
-src/app/       SDL2 + Dear ImGui front end
-  media_host.*   loads the media module, audio devices, ring tones, call state
-  ui.cpp         desktop & phone layouts, chat, transfers, history, devices, connect, settings
-  ui_viewer.cpp  thumbnails + full-screen picture viewer
-  image_cache.*  async stb_image decoding, EXIF orientation, GL texture cache
-  file_browser.* built-in file picker (works the same on phones)
-  android_bridge.cpp  JNI glue to android/…/LunaShareActivity.java
-tests/         engine tests (pause/resume, receiver restart, corruption detection, folders, export/import,
-               encryption, key pinning, mDNS packets + live mDNS-only discovery)
+src/core/        engine (no UI dependencies)
+  engine.*         connections, discovery, chat, resumable transfers, persistence
+  groups.cpp       group chats          group_calls.cpp  group voice/video calls (direct or through the server)
+  watch.cpp        watch together       library.cpp      shared folders, multi-source downloads
+  protocol.*       framing: [u32 len][u8 type][payload]  (JSON control frames, binary data frames)
+  crypto.*         handshake, frame encryption, identity and account keys, safety numbers
+  hash.*           SHA-256, CRC-32
+  mdns.*           Bonjour/mDNS service discovery
+  wan.*            internet transport: rendezvous client, hole punching, NAT-PMP, relay, KCP sessions, invites
+  upnp.*           UPnP IGD port mapping
+  rendezvous_server.*  the rendezvous server (also used by the tests)
+  bluetooth.*      RFCOMM per platform + HostBridge hooks for Android
+  model.*          settings / devices / messages / transfers / history + JSON
+  platform.*       paths, MACs, interfaces, UTF-8 file I/O
+src/app/         SDL2 + Dear ImGui front end
+  ui.cpp           desktop & phone layouts, chat, transfers, history, devices, connect, settings, invites
+  ui_groups.cpp, ui_watch.cpp, ui_library.cpp, ui_account.cpp, ui_viewer.cpp (pictures + full-screen viewer)
+  media_host.*, player_host.*, emoji_host.*   load the optional modules
+  image_cache.*    async image decoding, EXIF orientation, GL texture cache
+  file_browser.*   built-in file picker (works the same on phones)
+  i18n.cpp, lang/  translations
+  android_bridge.cpp  JNI glue to android/.../LunaShareActivity.java
+src/media_api/   the C ABIs between the app and the modules
+modules/voice/   voice (lunashare_media): Opus + SpeexDSP + jitter buffer + mixing
+modules/video/   video (lunashare_video): Media Foundation (Windows), V4L2 + FFmpeg (Linux), Camera2 + MediaCodec (Android)
+modules/vcam/    Windows 11 virtual camera (lunashare_vcam.dll, loaded by the camera Frame Server)
+modules/player/  player (lunashare_player): FFmpeg (Windows/Linux), MediaCodec + FFmpeg (Android); subtitles
+modules/emoji/   colour emoji from the system's emoji font
+server/          lunashare-rendezvous daemon + systemd unit
+opnsense/        OPNsense plugin (Services > LunaShare rendezvous) + install.sh
+android/         Gradle project
+tests/           engine, voice, video and player tests
 ```
 
 ## Protocol notes
@@ -297,25 +316,24 @@ tests/         engine tests (pause/resume, receiver restart, corruption detectio
 
 ## Status / known limitations
 
-- The Android project is complete but hasn't been built or run on a device yet. Expect small fixes on the first build.
-- No iOS project yet. The core and UI compile for iOS in principle, but iOS can't create hotspots and has no RFCOMM (would need MultipeerConnectivity).
-- Bluetooth on macOS isn't implemented. Linux Bluetooth uses a fixed RFCOMM channel (no SDP record), so Windows/Android→Linux connections
-  need the same channel.
+- **Android** and **Windows** are what LunaShare is mostly used and tested on: chat, files, calls, groups, watching
+  together and the internet server with invites. **Linux** builds and passes the same automated tests, but has seen
+  less use on real hardware; the webcam (V4L2) and virtual camera (v4l2loopback) code hasn't met many real cameras yet.
+- **macOS** compiles from source with chat and files only (no calls, player or Bluetooth) and isn't built by CI.
+  There is no iOS version.
+- Linux Bluetooth uses a fixed RFCOMM channel (no SDP record), so Windows/Android→Linux connections need the same channel.
 - The identity secret is stored in `settings.json` in the user's config folder, with the same protection as an SSH key. A settings export only includes it
   when you choose *include identity*.
-- Protocol v2 (encrypted) can't talk to builds from before encryption was added.
-- Voice calls are tested in code (signalling, packet loss/jitter, echo cancellation) but not yet with real microphones and speakers on every platform.
-  Calls are one-to-one. Video calls are tested in code (packets, loss recovery, bitrate adaptation, and the full pipeline on a test-pattern camera),
-  and Windows and Android have been used on real devices. The Linux camera code (V4L2, v4l2loopback) hasn't met real webcams yet;
-  its encoder and decoder have been tested end to end. There's no video on macOS yet.
+- The rendezvous server and the app should be updated together; an older server lacks newer features (invites,
+  group calls through the server), and the app says so in the settings.
 
 ## License
-
-On Linux the bundled FFmpeg is built with x264 and is therefore GPL-2.0-or-later (compatible with LunaShare's GPL-3.0);
-dav1d is BSD-2-Clause, libva is MIT. Their license files are in `modules/`. FFmpeg on Windows is the LGPL build.
-
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
 QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
 and in the voice module Opus (BSD-3-Clause) and SpeexDSP (BSD-3-Clause).
+
+FFmpeg: the Windows and Android builds use LGPL builds; on Linux the bundled FFmpeg includes x264 and is therefore
+GPL-2.0-or-later (compatible with LunaShare's GPL-3.0); dav1d is BSD-2-Clause, libva is MIT. Their license files are
+in `modules/`.
