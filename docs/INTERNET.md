@@ -82,6 +82,11 @@ for the same account's devices); it still sees the room and connects automatical
 Offline messages to a private contact go to a mailbox only that device can open. *Remove* deletes a code: that person
 can no longer find you through the server.
 
+On a device that joined with an invite, the app doesn't show the server's address, rooms or usernames and can't make
+invite codes to it; that device gets a room of its own, so it sees no one on the server but you. (This is hiding, not
+secrecy: the device has to know the address to connect, so a determined person can still find it, e.g. by
+decoding the invite code or watching their network traffic.)
+
 Things that still connect people: putting them in the same group, and being on the same local network (they then find
 each other there like any devices). Private contacts need an up-to-date server (1.2.5 or later); the settings show a
 warning when it is older.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.6
+
+- **Invite-joined devices don't see your server:** when someone joins with your invite code, the app doesn't show the
+  server's address, rooms, usernames or username search, and they can't make invite codes to it. They get a room
+  nobody else uses, so they see no one on the server but you. "Use my own server instead" drops the invite.
+
 ## 1.2.5
 
 - **Private contacts:** invite people with a code (*Settings → Internet → Private contacts*) instead of sharing your

@@ -77,7 +77,7 @@ void App::DrawAccountSettings(float fieldW, float h) {
     }
     ImGui::TextDisabled(T("Account fingerprint: %s"), KeyFingerprint(eng.MyAccount()).c_str());
     // username on the internet server: others can find you by it
-    if (eng.settings.wanEnabled && !eng.settings.wanServer.empty()) {
+    if (eng.settings.wanEnabled && !eng.settings.wanServer.empty() && !eng.settings.wanFromInvite) {
         ImGui::TextUnformatted(T("Username on your server (others can find you by it):"));
         if (usernameBuf.empty() && !ImGui::IsAnyItemActive() && !eng.myUsername.empty()) usernameBuf = eng.myUsername;
         ImGui::SetNextItemWidth(fieldW > 0 ? fieldW * 0.6f : -1);

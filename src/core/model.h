@@ -76,6 +76,7 @@ struct Settings {
     int wanLocalPort = 0;          // fixed local UDP port (0 = automatic)
     bool wanHidden = false;        // private mode: not listed in the room (only my account, links and those I contact)
     std::vector<WanLink> wanLinks; // private contacts (invite codes)
+    bool wanFromInvite = false;    // the server came with someone's invite: its address, rooms and usernames stay hidden
     int wanForwardedPort = 0;      // external port forwarded to wanLocalPort on the router            // Linux RFCOMM channel (Windows/Android use SDP with the service UUID)
     int64_t speedLimitKBs = 0;     // 0 = unlimited (total upload)
     int chunkKB = 256;

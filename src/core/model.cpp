@@ -70,6 +70,7 @@ json ToJson(const Settings& s, bool withIdentity) {
     j["accountRemoved"] = s.accountRemoved;
     j["accountBackedUp"] = s.accountBackedUp;
     j["wanHidden"] = s.wanHidden;
+    j["wanFromInvite"] = s.wanFromInvite;
     json wl = json::array();
     for (auto& l : s.wanLinks) wl.push_back({{"k", l.secret}, {"n", l.label}, {"ts", l.created}});
     j["wanLinks"] = wl;
@@ -108,6 +109,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "wanLocalPort", s.wanLocalPort);
     Get(j, "wanForwardedPort", s.wanForwardedPort);
     Get(j, "wanHidden", s.wanHidden);
+    Get(j, "wanFromInvite", s.wanFromInvite);
     if (j.contains("wanLinks") && j["wanLinks"].is_array()) {
         s.wanLinks.clear();
         for (auto& l : j["wanLinks"]) {

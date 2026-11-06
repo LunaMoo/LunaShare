@@ -321,7 +321,7 @@ void WanTransport::Loop() {
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_DGRAM;
         if (getaddrinfo(host.c_str(), nullptr, &hints, &res) != 0 || !res) {
-            SetStatus("cannot resolve " + host);
+            SetStatus("cannot resolve the server address");
             serverOk = false;
             return;
         }
