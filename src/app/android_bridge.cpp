@@ -7,6 +7,7 @@
 #include "imgui.h"
 #include "i18n.h"
 #include "notify.h"
+#include "platform.h"
 
 #if defined(__ANDROID__)
 #include <SDL.h>
