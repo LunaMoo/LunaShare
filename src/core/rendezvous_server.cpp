@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <random>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -43,6 +44,14 @@ struct Device {
     std::string acc;                 // its account (verified certificate), for usernames
     std::string mnonce;              // challenge the device signs to open its mailbox
     bool mailAuthed = false;         // proved it owns `pub` (may take out / delete its mail)
+    bool hidden = false;             // not listed in its room (except to devices of its own account)
+    std::vector<std::string> links;  // private link tokens: devices sharing one meet across rooms
+    bool SharesLink(const Device& o) const {
+        for (auto& a : links)
+            for (auto& b : o.links)
+                if (a == b) return true;
+        return false;
+    }
 };
 
 struct MailItem {
@@ -258,18 +267,64 @@ void RendezvousServer::Loop() {
         SendFrom(s, "R" + j.dump(-1, ' ', false, json::error_handler_t::replace), to, src);
     };
     auto sendJson = [&](const sockaddr_in& to, const json& j) { sendTo(to, via, j); };
+    auto peerJson = [](const Device& d) {
+        return json{{"id", d.id}, {"name", d.name}, {"pf", d.pf}, {"pub", d.pub}, {"ep", Ep(d.pubEp)}, {"local", d.locals}, {"extra", d.extra}};
+    };
+    // what a device sees: its room (without hidden devices of other accounts) and every device it shares a link with
     auto peersOf = [&](const std::string& room, const std::string& self) {
         json arr = json::array();
-        for (auto& [id, d] : rooms[room]) {
-            if (id == self) continue;
-            arr.push_back({{"id", d.id}, {"name", d.name}, {"pf", d.pf}, {"pub", d.pub}, {"ep", Ep(d.pubEp)}, {"local", d.locals}, {"extra", d.extra}});
+        auto& r = rooms[room];
+        auto me = r.find(self);
+        const Device* m = me == r.end() ? nullptr : &me->second;
+        std::set<std::string> seen{self};
+        for (auto& [id, d] : r) {
+            if (id == self || (d.hidden && !(m && !m->acc.empty() && m->acc == d.acc))) continue;
+            arr.push_back(peerJson(d));
+            seen.insert(id);
         }
+        if (m && !m->links.empty())
+            for (auto& [rn, rr] : rooms)
+                for (auto& [id, d] : rr)
+                    if (!seen.count(id) && m->SharesLink(d)) {
+                        json p = peerJson(d);
+                        p["link"] = true;
+                        arr.push_back(p);
+                        seen.insert(id);
+                    }
         return arr;
     };
-    auto pushRoom = [&](const std::string& room, const std::string& except) {
-        for (auto& [id, d] : rooms[room])
-            if (id != except) sendTo(d.ep, d.via, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}});
+    auto pushOne = [&](const std::string& room, Device& d) {
+        sendTo(d.ep, d.via, {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, d.id)}, {"lk", true}});
     };
+    // a device came, moved or went: tell the others in its room and those it shares a link with
+    auto pushAround = [&](const std::string& room, const std::string& except, const std::vector<std::string>& links) {
+        for (auto& [id, d] : rooms[room])
+            if (id != except) pushOne(room, d);
+        if (links.empty()) return;
+        Device probe;
+        probe.links = links;
+        for (auto& [rn, rr] : rooms) {
+            if (rn == room) continue;
+            for (auto& [id, d] : rr)
+                if (id != except && probe.SharesLink(d)) pushOne(rn, d);
+        }
+    };
+    auto pushRoom = [&](const std::string& room, const std::string& except) { pushAround(room, except, {}); };
+    // the device `to` that `me` may be introduced to: one in its room, or one it shares a link with
+    auto findTarget = [&](const std::string& room, const Device& me, const std::string& to) -> Device* {
+        auto& r = rooms[room];
+        auto it = r.find(to);
+        if (it != r.end()) return &it->second;
+        if (me.links.empty()) return nullptr;
+        for (auto& [rn, rr] : rooms) {
+            auto x = rr.find(to);
+            if (x != rr.end() && me.SharesLink(x->second)) return &x->second;
+        }
+        return nullptr;
+    };
+    // link token -> device keys seen with it (wall ms): mail for a linked device that is offline goes to its
+    // own mailbox ("L/" + key), which it reads whatever room it is in
+    std::map<std::string, std::map<std::string, int64_t>> linkPubs;
     // ---- mailboxes: "room/recipient key" -> sealed envelopes
     std::map<std::string, std::vector<MailItem>> boxes;
     size_t mailBytes = 0;
@@ -292,6 +347,12 @@ void RendezvousServer::Loop() {
                     boxes[key].push_back(m);
                     mailBytes += m.data.size();
                 }
+        json lj = mj.value("links", json::object());
+        if (lj.is_object())
+            for (auto& [tok, m] : lj.items())
+                if (m.is_object())
+                    for (auto& [pub, ts] : m.items())
+                        if (ts.is_number_integer()) linkPubs[tok][pub] = ts.get<int64_t>();
         if (!boxes.empty()) log("mailbox: loaded " + std::to_string(boxes.size()) + " mailbox(es)");
     }
     auto saveMail = [&] {
@@ -302,8 +363,10 @@ void RendezvousServer::Loop() {
             for (auto& m : v) arr.push_back({{"id", m.id}, {"d", m.data}, {"ts", m.ts}});
             bj[key] = arr;
         }
+        json lj = json::object();
+        for (auto& [tok, m] : linkPubs) lj[tok] = m;
         MakeDirs(opt_.dataDir);
-        SaveJsonFile(mailFile, json{{"v", 1}, {"boxes", bj}});
+        SaveJsonFile(mailFile, json{{"v", 1}, {"boxes", bj}, {"links", lj}});
         mailDirty = false;
     };
     auto counts = [&] {
@@ -355,8 +418,12 @@ void RendezvousServer::Loop() {
         return true;
     };
     auto mailCount = [&](const std::string& room, const std::string& pub) {
-        auto it = boxes.find(room + "/" + pub);
-        return it == boxes.end() ? 0 : (int)it->second.size();
+        int n = 0;
+        for (auto& key : {room + "/" + pub, "L/" + pub}) {
+            auto it = boxes.find(key);
+            if (it != boxes.end()) n += (int)it->second.size();
+        }
+        return n;
     };
     // the registered device a packet comes from (and its room)
     auto findSender = [&](const sockaddr_in& f, std::string* roomOut) -> Device* {
@@ -378,7 +445,10 @@ void RendezvousServer::Loop() {
                 for (auto it = rit->second.begin(); it != rit->second.end();) {
                     if (now - it->second.lastSeen > 60000) {
                         log("expired " + it->second.name + " (" + it->first.substr(0, 8) + ")");
+                        std::vector<std::string> links = it->second.links;
+                        std::string gone = it->first;
                         it = rit->second.erase(it);
+                        if (!links.empty()) pushAround(rit->first, gone, links);  // (its room is told below)
                         changed = true;
                     } else {
                         ++it;
@@ -403,6 +473,11 @@ void RendezvousServer::Loop() {
                     if (v.size() != before) mailDirty = true;
                     if (v.empty()) bit = boxes.erase(bit);
                     else ++bit;
+                }
+                for (auto lit = linkPubs.begin(); lit != linkPubs.end();) {
+                    for (auto p = lit->second.begin(); p != lit->second.end();)
+                        p = wall - p->second > maxAge ? (mailDirty = true, lit->second.erase(p)) : std::next(p);
+                    lit = lit->second.empty() ? linkPubs.erase(lit) : std::next(lit);
                 }
                 saveMail();
             }
@@ -539,6 +614,19 @@ void RendezvousServer::Loop() {
                 d.extra.push_back(std::string(ip) + ":" + std::to_string(fwd));
             }
             d.relayOk = j.value("relay", true);
+            bool wasHidden = d.hidden;
+            std::vector<std::string> oldLinks = d.links;
+            d.hidden = j.value("hidden", false);
+            d.links.clear();
+            for (auto& l : j.value("links", json::array()))
+                if (l.is_string() && IsHex64(l.get<std::string>()) && d.links.size() < 500) d.links.push_back(l.get<std::string>());
+            bool linksChanged = d.links != oldLinks || d.hidden != wasHidden;
+            if (opt_.mailbox && IsHex64(d.pub))
+                for (auto& l : d.links) {
+                    auto& ts = linkPubs[l][d.pub];
+                    if (NowMs() - ts > 3600000) mailDirty = true;  // (saved with the mailbox now and then)
+                    ts = NowMs();
+                }
             d.lastSeen = now;
             {
                 std::string acc = Clip(j.value("acc", ""), 64), acs = Clip(j.value("acs", ""), 128);
@@ -553,10 +641,10 @@ void RendezvousServer::Loop() {
             // a device whose address changed (NAT rebinding) keeps its relayed connections
             if (moved)
                 for (auto& [conv, rl] : relays) {
-                    if (rl.room == room && rl.idA == id) rl.a = from, rl.viaA = via;
-                    if (rl.room == room && rl.idB == id) rl.b = from, rl.viaB = via;
+                    if (rl.idA == id) rl.a = from, rl.viaA = via;
+                    if (rl.idB == id) rl.b = from, rl.viaB = via;
                 }
-            json reply = {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}};
+            json reply = {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}, {"lk", true}};
             if (!d.acc.empty()) reply["uname"] = nameOf(room, d.acc);
             if (opt_.mailbox) {
                 reply["mail"] = mailCount(room, d.pub);
@@ -564,9 +652,12 @@ void RendezvousServer::Loop() {
             }
             sendJson(from, reply);
             if (isNew) counts();
-            if (isNew || moved) {
-                log(std::string(isNew ? "joined " : "moved ") + d.name + " (" + id.substr(0, 8) + ") from " + Ep(from) + " room " + room.substr(0, 8));
-                pushRoom(room, id);
+            if (isNew || moved || linksChanged) {
+                if (isNew || moved)
+                    log(std::string(isNew ? "joined " : "moved ") + d.name + " (" + id.substr(0, 8) + ") from " + Ep(from) + " room " + room.substr(0, 8));
+                std::vector<std::string> all = d.links;
+                all.insert(all.end(), oldLinks.begin(), oldLinks.end());  // (a removed link: the other side forgets me)
+                pushAround(room, id, all);
             }
         } else if (t == "connect") {
             // find the requester by its source endpoint, then the target in the same room
@@ -576,9 +667,9 @@ void RendezvousServer::Loop() {
                 for (auto& [id, d] : r)
                     if (d.ep.sin_addr.s_addr == from.sin_addr.s_addr && d.ep.sin_port == from.sin_port) me = &d;
                 if (!me) continue;
-                auto it = r.find(to);
-                if (it == r.end()) break;
-                Device& other = it->second;
+                Device* target = findTarget(room, *me, to);
+                if (!target) break;
+                Device& other = *target;
                 char nonce[33];
                 snprintf(nonce, sizeof(nonce), "%016llx%016llx", (unsigned long long)rng(), (unsigned long long)rng());
                 sendTo(me->ep, me->via, {{"t", "punch"}, {"nonce", nonce}, {"initiator", true},
@@ -598,9 +689,9 @@ void RendezvousServer::Loop() {
                 for (auto& [id, d] : r)
                     if (d.ep.sin_addr.s_addr == from.sin_addr.s_addr && d.ep.sin_port == from.sin_port) me = &d;
                 if (!me) continue;
-                auto it = r.find(to);
-                if (it == r.end()) break;
-                Device& other = it->second;
+                Device* target = findTarget(room, *me, to);
+                if (!target) break;
+                Device& other = *target;
                 if (!opt_.relay || !me->relayOk || !other.relayOk || (relays.size() >= opt_.maxRelays && !relays.count(conv))) {
                     sendTo(me->ep, me->via, {{"t", "error"}, {"msg", !opt_.relay ? "this server doesn't relay connections" : !other.relayOk ? "the other device doesn't allow relayed connections" : "relay busy"}});
                     break;
@@ -684,6 +775,13 @@ void RendezvousServer::Loop() {
             Device* me = findSender(from, &room);
             if (!me || !IsHex64(to) || id.empty() || data.empty() || data.size() > 7000) continue;
             std::string key = room + "/" + to;
+            bool inRoom = false;
+            for (auto& [did, d] : rooms[room]) inRoom |= d.pub == to;
+            if (!inRoom)
+                for (auto& l : me->links) {
+                    auto lit = linkPubs.find(l);
+                    if (lit != linkPubs.end() && lit->second.count(to)) key = "L/" + to;  // a linked device
+                }
             auto& v = boxes[key];
             bool dup = false;
             for (auto& m : v) dup |= m.id == id;
@@ -698,8 +796,10 @@ void RendezvousServer::Loop() {
                 mailBytes += data.size();
                 mailDirty = true;
                 // the recipient is online right now: tell it
-                for (auto& [did, d] : rooms[room])
-                    if (d.pub == to) sendTo(d.ep, d.via, {{"t", "mail"}, {"n", (int)v.size()}, {"mnonce", d.mnonce}});
+                for (auto& [rn, rr] : rooms)
+                    if (rn == room || key[0] == 'L')
+                        for (auto& [did, d] : rr)
+                            if (d.pub == to) sendTo(d.ep, d.via, {{"t", "mail"}, {"n", mailCount(rn, to)}, {"mnonce", d.mnonce}});
             }
             sendJson(from, {{"t", "mok"}, {"id", id}});
         } else if (t == "mget" && opt_.mailbox) {
@@ -714,37 +814,40 @@ void RendezvousServer::Loop() {
                 }
                 me->mailAuthed = true;
             }
-            auto it = boxes.find(room + "/" + me->pub);
             int sent = 0;
-            if (it != boxes.end())
-                for (auto& m : it->second) {
-                    if (sent >= 8) break;  // the rest after the device confirmed these
-                    sendJson(from, {{"t", "mitem"}, {"id", m.id}, {"d", m.data}, {"ts", m.ts}});
-                    sent++;
-                }
+            for (auto& key : {room + "/" + me->pub, "L/" + me->pub}) {
+                auto it = boxes.find(key);
+                if (it != boxes.end())
+                    for (auto& m : it->second) {
+                        if (sent >= 8) break;  // the rest after the device confirmed these
+                        sendJson(from, {{"t", "mitem"}, {"id", m.id}, {"d", m.data}, {"ts", m.ts}});
+                        sent++;
+                    }
+            }
             sendJson(from, {{"t", "mail"}, {"n", mailCount(room, me->pub)}, {"mnonce", me->mnonce}});
         } else if (t == "mack" && opt_.mailbox) {
             // delivered: the owner deletes these
             std::string room;
             Device* me = findSender(from, &room);
             if (!me || !me->mailAuthed) continue;
-            auto it = boxes.find(room + "/" + me->pub);
-            if (it == boxes.end()) continue;
             auto ids = j.value("ids", json::array());
-            auto& v = it->second;
-            v.erase(std::remove_if(v.begin(), v.end(), [&](const MailItem& m) {
-                        for (auto& x : ids)
-                            if (x.is_string() && x.get<std::string>() == m.id) {
-                                mailBytes -= m.data.size();
-                                mailDirty = true;
-                                return true;
-                            }
-                        return false;
-                    }),
-                    v.end());
-            int left = (int)v.size();
-            if (v.empty()) boxes.erase(it);
-            sendJson(from, {{"t", "mail"}, {"n", left}, {"mnonce", me->mnonce}});
+            for (auto& key : {room + "/" + me->pub, "L/" + me->pub}) {
+                auto it = boxes.find(key);
+                if (it == boxes.end()) continue;
+                auto& v = it->second;
+                v.erase(std::remove_if(v.begin(), v.end(), [&](const MailItem& m) {
+                            for (auto& x : ids)
+                                if (x.is_string() && x.get<std::string>() == m.id) {
+                                    mailBytes -= m.data.size();
+                                    mailDirty = true;
+                                    return true;
+                                }
+                            return false;
+                        }),
+                        v.end());
+                if (v.empty()) boxes.erase(it);
+            }
+            sendJson(from, {{"t", "mail"}, {"n", mailCount(room, me->pub)}, {"mnonce", me->mnonce}});
         } else if (t == "uclaim" || t == "urel") {
             // claim / release my account's username in this room (signed with the account key)
             std::string room, name = Clip(j.value("name", ""), 40);
@@ -805,8 +908,9 @@ void RendezvousServer::Loop() {
             auto it = rit->second.find(id);
             if (it != rit->second.end() && it->second.ep.sin_addr.s_addr == from.sin_addr.s_addr && it->second.ep.sin_port == from.sin_port) {
                 log("left " + it->second.name);
+                std::vector<std::string> links = it->second.links;
                 rit->second.erase(it);
-                pushRoom(room, "");
+                pushAround(room, id, links);
                 if (rit->second.empty()) rooms.erase(rit);
                 counts();
             }

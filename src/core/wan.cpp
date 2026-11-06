@@ -39,6 +39,33 @@ namespace ls {
 using json = nlohmann::json;
 using sock_t = decltype(socket(0, 0, 0));
 
+std::string LinkToken(const std::string& secretHex) { return RoomHash("\x01link", secretHex); }
+
+std::string MakeInviteCode(const std::string& server, const std::string& secretHex, const std::string& name) {
+    std::string b = Base64Encode(json{{"s", server}, {"k", secretHex}, {"n", name}}.dump());
+    for (auto& c : b) c = c == '+' ? '-' : c == '/' ? '_' : c;
+    while (!b.empty() && b.back() == '=') b.pop_back();
+    return "LSI1-" + b;
+}
+
+bool ParseInviteCode(const std::string& codeIn, std::string& server, std::string& secretHex, std::string& name) {
+    std::string code;
+    for (char c : codeIn)
+        if (!isspace((unsigned char)c)) code += c;
+    if (code.rfind("LSI1-", 0) != 0) return false;
+    std::string b = code.substr(5), raw;
+    for (auto& c : b) c = c == '-' ? '+' : c == '_' ? '/' : c;
+    while (b.size() % 4) b += '=';
+    if (!Base64Decode(b, raw)) return false;
+    json j = json::parse(raw, nullptr, false);
+    if (!j.is_object()) return false;
+    server = j.value("s", "");
+    secretHex = j.value("k", "");
+    name = j.value("n", "");
+    uint8_t tmp[32];
+    return !server.empty() && secretHex.size() == 64 && FromHex(secretHex, tmp, 32);
+}
+
 std::string RoomHash(const std::string& room, const std::string& password) {
     std::string msg = "LunaShare room v1\n" + room + "\n" + password;
     uint8_t h[32];
@@ -318,6 +345,8 @@ void WanTransport::Loop() {
             std::lock_guard<std::mutex> l(m_);
             j = {{"t", "reg"}, {"v", 1}, {"room", cfg_.roomHash}, {"id", cfg_.id}, {"name", cfg_.name}, {"pf", cfg_.platform},
                  {"pub", cfg_.pub}, {"local", locals}, {"extra", extra}, {"fwd", cfg_.forwardedPort}, {"relay", cfg_.relay}};
+            if (cfg_.hidden) j["hidden"] = true;
+            if (!cfg_.links.empty()) j["links"] = cfg_.links;
             if (!acc_.empty()) {
                 j["acc"] = acc_;
                 j["acs"] = accCert_;
@@ -591,6 +620,7 @@ void WanTransport::Loop() {
                         std::lock_guard<std::mutex> l(m_);
                         publicEp_ = j.value("you", "");
                     }
+                    serverLinks_ = j.value("lk", false);
                     SetStatus("connected - " + std::to_string(j.value("peers", json::array()).size()) + " other device(s) in the room");
                     if (j.contains("uname") && onServerReply) onServerReply(json{{"t", "uname"}, {"name", j.value("uname", "")}}.dump());
                     std::vector<WanPeer> peers;
@@ -605,6 +635,7 @@ void WanTransport::Loop() {
                             if (l.is_string()) p.localEps.push_back(l.get<std::string>());
                         for (auto& l : pj.value("extra", json::array()))
                             if (l.is_string()) p.extraEps.push_back(l.get<std::string>());
+                        p.viaLink = pj.value("link", false);
                         if (!p.id.empty()) peers.push_back(p);
                     }
                     if (onPeers_) onPeers_(peers);

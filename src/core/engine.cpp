@@ -2591,6 +2591,8 @@ void Engine::StartWan() {
         cfg.relay = settings.wanRelay;
         cfg.localPort = (uint16_t)std::clamp(settings.wanLocalPort, 0, 65535);
         cfg.forwardedPort = (uint16_t)std::clamp(settings.wanForwardedPort, 0, 65535);
+        cfg.hidden = settings.wanHidden;
+        for (auto& l : settings.wanLinks) cfg.links.push_back(LinkToken(l.secret));
         for (auto& [id, p] : online) p.lastWan = 0;
     }
     wan_.Stop();
@@ -2621,6 +2623,8 @@ void Engine::StartWan() {
                     p.lastWan = now;
                     auto d = devices.find(wp.id);
                     bool blocked = d != devices.end() && d->second.blocked;
+                    // private mode: don't make myself known to strangers in the room (only known devices and links)
+                    if (settings.wanHidden && !wp.viaLink && (d == devices.end() || d->second.viaGroup)) blocked = true;
                     // Same rule as on the LAN: the device with the smaller id dials, unless we owe it something.
                     if (!blocked && !p.OnLan() && !IsConnected(wp.id) && settings.autoConnect && settings.deviceId < wp.id &&
                         now - lastWanConnect_[wp.id] > 20000) {
@@ -3334,7 +3338,8 @@ void Engine::ApplySettings(const Settings& s) {
     if (running_ && (settings.discovery != old.discovery || settings.mdns != old.mdns || settings.displayName != old.displayName)) restartMdns_ = true;
     if (running_ && (settings.wanEnabled != old.wanEnabled || settings.wanServer != old.wanServer || settings.wanRoom != old.wanRoom ||
                      settings.wanPassword != old.wanPassword || settings.wanNatPmp != old.wanNatPmp || settings.wanRelay != old.wanRelay ||
-                     settings.wanLocalPort != old.wanLocalPort || settings.wanForwardedPort != old.wanForwardedPort))
+                     settings.wanLocalPort != old.wanLocalPort || settings.wanForwardedPort != old.wanForwardedPort ||
+                     settings.wanHidden != old.wanHidden || !(settings.wanLinks == old.wanLinks)))
         restartWan_ = true;
     else if (running_ && settings.displayName != old.displayName)
         wan_.UpdateName(settings.displayName);

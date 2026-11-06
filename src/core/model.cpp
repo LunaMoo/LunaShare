@@ -69,6 +69,10 @@ json ToJson(const Settings& s, bool withIdentity) {
     j["accountDevices"] = ad;
     j["accountRemoved"] = s.accountRemoved;
     j["accountBackedUp"] = s.accountBackedUp;
+    j["wanHidden"] = s.wanHidden;
+    json wl = json::array();
+    for (auto& l : s.wanLinks) wl.push_back({{"k", l.secret}, {"n", l.label}, {"ts", l.created}});
+    j["wanLinks"] = wl;
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
         j["identitySecret"] = s.identitySecret;
@@ -103,6 +107,17 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "wanNatPmp", s.wanNatPmp);
     Get(j, "wanLocalPort", s.wanLocalPort);
     Get(j, "wanForwardedPort", s.wanForwardedPort);
+    Get(j, "wanHidden", s.wanHidden);
+    if (j.contains("wanLinks") && j["wanLinks"].is_array()) {
+        s.wanLinks.clear();
+        for (auto& l : j["wanLinks"]) {
+            WanLink w;
+            Get(l, "k", w.secret);
+            Get(l, "n", w.label);
+            Get(l, "ts", w.created);
+            if (w.secret.size() == 64) s.wanLinks.push_back(w);
+        }
+    }
     Get(j, "speedLimitKBs", s.speedLimitKBs);
     Get(j, "chunkKB", s.chunkKB);
     Get(j, "maxParallel", s.maxParallel);

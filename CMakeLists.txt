@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LunaShare VERSION 1.2.4 LANGUAGES C CXX)
+project(LunaShare VERSION 1.2.5 LANGUAGES C CXX)
 add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)

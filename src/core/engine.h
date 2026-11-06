@@ -395,6 +395,8 @@ public:
     void RefreshDiscovery() { mdns_.QueryNow(); }
     std::string WanStatus() { return wan_.Running() ? wan_.Status() : std::string("off"); }
     std::string WanPublicEndpoint() { return wan_.PublicEndpoint(); }
+    // the server answered and doesn't know private links (too old)
+    bool WanServerLacksLinks() { return wan_.Running() && wan_.Registered() && !wan_.ServerHasLinks(); }
     std::string WanMappedEndpoint() { return wan_.MappedEndpoint(); }
     std::atomic<int64_t> totalUp{0}, totalDown{0};
 

@@ -21,6 +21,15 @@ struct AccountDevice {
     bool operator==(const AccountDevice& o) const { return id == o.id && pub == o.pub; }
 };
 
+// A private contact link (invite code): the two devices meet on the server through a token only they know,
+// without being listed in any room - people I invite this way can't find each other (see docs/INTERNET.md).
+struct WanLink {
+    std::string secret;  // 32 random bytes, hex (the token sent to the server is a hash of it)
+    std::string label;   // who it is for / from
+    int64_t created = 0;
+    bool operator==(const WanLink& o) const { return secret == o.secret && label == o.label && created == o.created; }
+};
+
 // What we know about someone else's account (from their signed device list).
 struct AccountInfo {
     std::string pub;
@@ -65,6 +74,8 @@ struct Settings {
     std::string wanPassword;
     bool wanNatPmp = true;         // ask the router for a port mapping (NAT-PMP)
     int wanLocalPort = 0;          // fixed local UDP port (0 = automatic)
+    bool wanHidden = false;        // private mode: not listed in the room (only my account, links and those I contact)
+    std::vector<WanLink> wanLinks; // private contacts (invite codes)
     int wanForwardedPort = 0;      // external port forwarded to wanLocalPort on the router            // Linux RFCOMM channel (Windows/Android use SDP with the service UUID)
     int64_t speedLimitKBs = 0;     // 0 = unlimited (total upload)
     int chunkKB = 256;

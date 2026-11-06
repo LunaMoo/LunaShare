@@ -36,9 +36,14 @@ struct WanPeer {
     std::string publicEp;              // "ip:port" as seen by the server
     std::vector<std::string> localEps; // LAN endpoints (useful when both sit behind the same NAT)
     std::vector<std::string> extraEps; // router mappings (NAT-PMP) / manually forwarded ports
+    bool viaLink = false;              // met through a private link (not in my room)
 };
 
 std::string RoomHash(const std::string& room, const std::string& password);
+std::string LinkToken(const std::string& secretHex);  // what the server sees of a private link
+// Invite codes for private links: "LSI1-" + base64 of {"s": server, "k": secret, "n": inviter's name}
+std::string MakeInviteCode(const std::string& server, const std::string& secretHex, const std::string& name);
+bool ParseInviteCode(const std::string& code, std::string& server, std::string& secretHex, std::string& name);
 bool ParseEndpoint(const std::string& s, std::string& host, uint16_t& port);
 
 class WanTransport {
@@ -51,6 +56,8 @@ public:
         uint16_t forwardedPort = 0;  // external port forwarded to localPort on the router (0 = none)
         bool natpmp = true;       // ask the router for a mapping (NAT-PMP / PCP, and UPnP IGD)
         bool relay = true;        // allow the server to relay when a direct connection fails
+        bool hidden = false;      // not listed in the room, except to my account's devices
+        std::vector<std::string> links;  // private link tokens (LinkToken)
     };
     using OnPeers = std::function<void(const std::vector<WanPeer>&)>;
     using OnSocket = std::function<void(SocketHandle s, const std::string& peerId, const std::string& addr, bool initiator)>;
@@ -63,6 +70,8 @@ public:
     void UpdateName(const std::string& name);
     std::string Status();
     std::string PublicEndpoint();
+    // the server knows private links (an older server ignores them: links then don't work, hidden devices are listed)
+    bool ServerHasLinks() const { return serverLinks_.load(); }
     std::string MappedEndpoint();  // NAT-PMP mapping, if the router granted one
     int Sessions() const { return sessions_.load(); }
 
@@ -97,6 +106,7 @@ private:
     Config cfg_;
     std::string status_, publicEp_, mappedEp_;
     std::atomic<bool> registered_{false};
+    std::atomic<bool> serverLinks_{false};
     struct MailOut {
         std::string to, id, data;
         int tries = 0;

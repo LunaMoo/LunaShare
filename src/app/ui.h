@@ -127,6 +127,7 @@ private:
     std::vector<LsvControl> camCtl;
     double camCtlTime = -1;
     void DrawCallSettings(float fieldW, float h, bool& changed);
+    void DrawPrivateContacts(float fieldW, float h, bool& changed);
     void AudioCallControls(float fieldW, float h, bool& changed);
     // picture viewer (ui_viewer.cpp)
     void OpenViewer(const std::string& peer, const std::string& path, bool all);

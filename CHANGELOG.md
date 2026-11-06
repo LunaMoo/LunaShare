@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.5
+
+- **Private contacts:** invite people with a code (*Settings → Internet → Private contacts*) instead of sharing your
+  room. Each of them can reach you through the server, but people you invite separately never see each other.
+  **Private mode** keeps your device out of the room's list. Needs the updated server (see docs/INTERNET.md).
+
 ## 1.2.4
 
 - **Japanese and other scripts on Android:** characters that none of the app's fonts has (Japanese audio and

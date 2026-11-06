@@ -2742,6 +2742,7 @@ void App::DrawSettings() {
             if (ImGui::Button(T("Copy room hash (for the server's allow-list)"), ImVec2(0, h)))
                 ImGui::SetClipboardText(RoomHash(eng.settings.wanRoom, eng.settings.wanPassword).c_str());
         }
+        DrawPrivateContacts(fieldW, h, changed);
 
         ImGui::SeparatorText(T("Bluetooth"));
         changed |= ImGui::Checkbox(T("Accept Bluetooth connections##s"), &edit.bluetooth);
@@ -3768,6 +3769,109 @@ void App::AudioCallControls(float fieldW, float h, bool& changed) {
     if (ImGui::SliderInt("##micboost", &edit.callMicBoost, 0, 24, T("Microphone boost: +%d dB"))) editDirty = true;
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
     ui::HelpMarker(T("Makes a quiet microphone louder. Use the microphone test to check: normal speech should fill about two thirds of the bar."));
+}
+
+// Private contacts: invite codes that let one person reach me through the server without a shared room, so the
+// people I invite this way never see each other (docs/INTERNET.md).
+void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
+    static std::string forWhom, code, msg;
+    static bool msgErr = false;
+    ImGui::SeparatorText(T("Private contacts"));
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled("%s", T("Invite people with a code instead of sharing the room: each of them can reach you through the "
+                                "server, but they aren't in a room together, so they can't find each other."));
+    ImGui::PopTextWrapPos();
+    changed |= ImGui::Checkbox(T("Private mode: don't list me in the room"), &edit.wanHidden);
+    ui::HelpMarker(T("Others in the room don't see this device. You still see them and can contact them; your own devices, "
+                   "and people with one of your invite codes, still find you. Turned on by itself when you join with "
+                   "someone's invite code."));
+    if (eng.WanServerLacksLinks())
+        ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", T("The server is too old for private contacts: update it."));
+
+    int remove = -1;
+    for (int i = 0; i < (int)edit.wanLinks.size(); i++) {
+        auto& l = edit.wanLinks[(size_t)i];
+        ImGui::PushID(i);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(l.label.empty() ? T("(no name)") : l.label.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", FormatTime(l.created, true).substr(0, 10).c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Copy code"))) {
+            ImGui::SetClipboardText(MakeInviteCode(edit.wanServer, l.secret, edit.displayName).c_str());
+            msg = T("Invite code copied.");
+            msgErr = false;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Remove"))) remove = i;
+        ImGui::PopID();
+    }
+    if (remove >= 0) {
+        edit.wanLinks.erase(edit.wanLinks.begin() + remove);
+        changed = true;
+    }
+
+    ImGui::SetNextItemWidth(fieldW * 0.6f);
+    ImGui::InputTextWithHint("##inviteFor", T("for whom (only you see it)"), &forWhom);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(edit.wanServer.empty());
+    if (ImGui::Button(T("Create invite code"), ImVec2(0, h))) {
+        uint8_t k[32];
+        SecureRandom(k, sizeof(k));
+        WanLink l;
+        l.secret = ToHex(k, sizeof(k));
+        l.label = forWhom;
+        l.created = NowMs();
+        edit.wanLinks.push_back(l);
+        ImGui::SetClipboardText(MakeInviteCode(edit.wanServer, l.secret, edit.displayName).c_str());
+        msg = T("Invite code copied. Send it to that person only - anyone with the code can reach you.");
+        msgErr = false;
+        forWhom.clear();
+        changed = true;
+    }
+    ImGui::EndDisabled();
+    if (edit.wanServer.empty()) ImGui::TextDisabled("%s", T("Set the server above first."));
+
+    ImGui::SetNextItemWidth(fieldW * 0.6f);
+    ImGui::InputTextWithHint("##inviteCode", T("invite code you got (LSI1-...)"), &code);
+    ImGui::SameLine();
+    if (ImGui::Button(T("Use code"), ImVec2(0, h))) {
+        std::string server, secret, name;
+        if (!ParseInviteCode(code, server, secret, name)) {
+            msg = T("That isn't a valid invite code.");
+            msgErr = true;
+        } else if (edit.wanEnabled && !edit.wanServer.empty() && edit.wanServer != server) {
+            msg = TF("The code is for the server %s, but you use %s.", server.c_str(), edit.wanServer.c_str());
+            msgErr = true;
+        } else {
+            bool have = false;
+            for (auto& l : edit.wanLinks) have |= l.secret == secret;
+            if (!have) {
+                if (!edit.wanEnabled || edit.wanServer.empty()) {
+                    // joined only for this: stay out of the server's shared room
+                    edit.wanServer = server;
+                    edit.wanEnabled = true;
+                    edit.wanHidden = true;
+                }
+                WanLink l;
+                l.secret = secret;
+                l.label = name;
+                l.created = NowMs();
+                edit.wanLinks.push_back(l);
+                changed = true;
+            }
+            msg = name.empty() ? std::string(T("Added. You'll see each other in the device list when you're both online."))
+                               : TF("Added %s. You'll see each other in the device list when you're both online.", name.c_str());
+            msgErr = false;
+            code.clear();
+        }
+    }
+    if (!msg.empty()) {
+        ImGui::PushTextWrapPos(0);
+        if (msgErr) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", msg.c_str());
+        else ImGui::TextDisabled("%s", msg.c_str());
+        ImGui::PopTextWrapPos();
+    }
 }
 
 void App::DrawCallSettings(float fieldW, float h, bool& changed) {

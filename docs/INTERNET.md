@@ -63,6 +63,29 @@ Devices in the room show up in the device list as *online (internet)* and connec
 *Connect to found devices automatically* is on), or when you open the chat. The chat header shows *via Internet*.
 If a device is also on the same LAN, the LAN connection is preferred.
 
+## Private contacts (people who mustn't find each other)
+
+Everyone in a room sees everyone else in it. To stay in touch with people who must never learn about each other,
+invite them with a code instead of giving them the room:
+
+1. *Settings → Internet → Private contacts*: type who it is for (only you see that) and press **Create invite code**.
+   The code is copied; send it to that one person. Make a new code for each person.
+2. They paste it under *invite code you got* and press **Use code**. If they hadn't set up the internet yet, this
+   also sets the server and turns on **private mode** for them.
+3. When both of you are online you see each other in the device list and connect as usual (the safety number still
+   tells whether it is really them).
+
+How it works: both devices send the server a hash of the code's secret. The server introduces devices that share one,
+whatever room they are in, and never lists them to anyone else. Two people with different codes from you share
+nothing, so the server never puts them in touch. **Private mode** keeps a device out of its room's list (except
+for the same account's devices); it still sees the room and connects automatically only to devices it already knows.
+Offline messages to a private contact go to a mailbox only that device can open. *Remove* deletes a code: that person
+can no longer find you through the server.
+
+Things that still connect people: putting them in the same group, and being on the same local network (they then find
+each other there like any devices). Private contacts need an up-to-date server (1.2.5 or later); the settings show a
+warning when it is older.
+
 ## When the direct connection fails
 
 Hole punching works with most home routers and many mobile networks. It fails when **both** sides are behind NATs that
