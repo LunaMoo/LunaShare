@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.10
+
+- **Invites are easy to find:** the *Invites* section (use a code you got, invite someone) is now the first thing in
+  the settings instead of under *Advanced*, and it also opens by clicking your own name at the top of the device list
+  (phones: *Invite someone / use an invite code* on the main screen). *Private mode* stays under *Advanced*.
+- The "cannot resolve the server address" status is translated again.
+
 ## 1.2.9
 
 - Phones: the *Create invite code* and *Use code* buttons go under their fields on narrow screens instead of past the

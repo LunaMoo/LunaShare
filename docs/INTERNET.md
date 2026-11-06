@@ -68,7 +68,7 @@ If a device is also on the same LAN, the LAN connection is preferred.
 Everyone in a room sees everyone else in it. To stay in touch with people who must never learn about each other,
 invite them with a code instead of giving them the room:
 
-1. *Settings → Internet → Private contacts*: type who it is for (only you see that) and press **Create invite code**.
+1. *Settings → Invites* (also: click your own name at the top of the device list; on phones *Invite someone / use an invite code* on the main screen): type who it is for (only you see that) and press **Create invite code**.
    The code is copied; send it to that one person. Make a new code for each person.
 2. They paste it under *invite code you got* and press **Use code**. If they hadn't set up the internet yet, this
    also sets the server and turns on **private mode** for them.

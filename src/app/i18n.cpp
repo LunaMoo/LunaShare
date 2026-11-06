@@ -174,7 +174,7 @@ static const char* const kPatterns[] = {
     "Outgoing call - %s",
     "Incoming call - %s",
     "connected - %s other device(s) in the room",
-    "cannot resolve %s",
+    "cannot resolve the server address",
     "UDP port %s is busy, using a random one",
     "server: %s",
     "You added %s.",
