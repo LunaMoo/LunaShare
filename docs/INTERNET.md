@@ -75,7 +75,13 @@ invite them with a code instead of giving them the room:
 3. When both of you are online you see each other in the device list and connect as usual (the safety number still
    tells whether it is really them).
 
-How it works: both devices send the server a hash of the code's secret. The server introduces devices that share one,
+**Invite rooms:** when creating a code, pick a room (or *New room...* and give it a name - the people you invite see
+it). Everyone invited into the same room sees the others in their device list, and you; people without a room or in
+a different room still see only you. *Delete room* keeps everyone as your private contact, they just stop seeing each
+other. Removing one person's code takes them out of the room too.
+
+How it works: both devices send the server a hash of the code's secret. Your device also tells the server which of
+its codes belong to which room (as hashes, with the room's name so the server's admin can see it). The server introduces devices that share one,
 whatever room they are in, and never lists them to anyone else. Two people with different codes from you share
 nothing, so the server never puts them in touch. **Private mode** keeps a device out of its room's list (except
 for the same account's devices); it still sees the room and connects automatically only to devices it already knows.
@@ -91,11 +97,18 @@ decoding the invite code or watching their network traffic.)
 too), in `invited.json` in its data directory. Such a device stays limited even if the person later removes the
 invite and enters the server's address by hand: it sees and reaches only the people whose invites it used and its own
 account's devices, is never listed in any room, can't use usernames, and codes it makes for this server don't work.
+The list shows each device's name, who invited it (their name and device key) and the invite room, if any.
 To treat someone like everyone else, release them: on OPNsense under *Services → LunaShare rendezvous → People who
 joined with an invite code*; elsewhere with `lunashare-rendezvous -d DIR --list-invited` and
 `lunashare-rendezvous -d DIR --release KEY` (`--restrict KEY` limits them again). A running server applies the change
-within a few seconds. (Someone who installs the app afresh gets a new device key and isn't recognised, unless they
-restore their account.)
+within a few seconds; releasing one releases the whole account and every install on that computer or phone.
+
+Devices also send the server a fingerprint of the computer or phone itself: a hash of the system's own id (Windows
+MachineGuid, Linux machine-id, macOS hardware UUID, Android ANDROID_ID) together with the server's address, so
+different servers can't match devices with each other. A new install, a new account or a new device key on a
+remembered computer or phone is therefore limited too (and listed, so the admin sees it). What resets it: reinstalling
+the operating system or a phone's factory reset. A modified copy of the app could also send a different fingerprint:
+it keeps honest installs in line, it can't stop someone determined.
 
 Things that still connect people: putting them in the same group, and being on the same local network (they then find
 each other there like any devices). Private contacts need an up-to-date server (1.2.5 or later); the settings show a

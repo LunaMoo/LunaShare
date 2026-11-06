@@ -1,6 +1,7 @@
 #include "platform.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +30,9 @@
 #include <pwd.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <uuid/uuid.h>
+#endif
 #if defined(__linux__) || defined(__ANDROID__)
 #include <linux/if_packet.h>
 #endif
@@ -132,6 +136,53 @@ std::string HostName() {
 
 std::string UserName() {
     static const std::string v = UserNameImpl();
+    return v;
+}
+
+static std::mutex g_midMutex;
+static std::string g_mid;
+static bool g_midSet = false;
+
+void SetMachineId(const std::string& id) {
+    std::lock_guard<std::mutex> l(g_midMutex);
+    g_mid = id;
+    g_midSet = true;
+}
+
+std::string MachineId() {
+    std::lock_guard<std::mutex> l(g_midMutex);
+    if (g_midSet) return g_mid;
+    std::string v;
+#ifdef _WIN32
+#ifndef RRF_SUBKEY_WOW6464KEY
+#define RRF_SUBKEY_WOW6464KEY 0x00010000
+#endif
+    char buf[128];
+    DWORD n = sizeof(buf);
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", "MachineGuid", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+                     nullptr, buf, &n) == ERROR_SUCCESS)
+        v = buf;
+#elif defined(__APPLE__)
+    uuid_t u;
+    timespec wait = {1, 0};
+    if (gethostuuid(u, &wait) == 0) {
+        char s[40];
+        uuid_unparse(u, s);
+        v = s;
+    }
+#elif !defined(__ANDROID__)
+    for (const char* p : {"/etc/machine-id", "/var/lib/dbus/machine-id"}) {
+        if (FILE* f = fopen(p, "r")) {
+            char s[128] = {0};
+            if (fgets(s, sizeof(s), f)) v = s;
+            fclose(f);
+        }
+        while (!v.empty() && isspace((unsigned char)v.back())) v.pop_back();
+        if (!v.empty()) break;
+    }
+#endif
+    g_mid = v;
+    g_midSet = true;
     return v;
 }
 

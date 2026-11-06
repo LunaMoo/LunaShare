@@ -28,7 +28,10 @@ struct WanLink {
     std::string label;   // who it is for / from
     int64_t created = 0;
     bool mine = true;    // I made the code (false: someone else's invite I used)
-    bool operator==(const WanLink& o) const { return secret == o.secret && label == o.label && created == o.created && mine == o.mine; }
+    std::string room;    // my codes: the invite room it belongs to (its id); someone else's: the room's name
+    bool operator==(const WanLink& o) const {
+        return secret == o.secret && label == o.label && created == o.created && mine == o.mine && room == o.room;
+    }
 };
 
 // What we know about someone else's account (from their signed device list).
@@ -77,6 +80,7 @@ struct Settings {
     int wanLocalPort = 0;          // fixed local UDP port (0 = automatic)
     bool wanHidden = false;        // private mode: not listed in the room (only my account, links and those I contact)
     std::vector<WanLink> wanLinks; // private contacts (invite codes)
+    std::vector<WanLink> wanInviteRooms; // my invite rooms (secret = id, label = name): people invited into one see each other
     bool wanFromInvite = false;    // the server came with someone's invite: its address, rooms and usernames stay hidden
     int wanForwardedPort = 0;      // external port forwarded to wanLocalPort on the router            // Linux RFCOMM channel (Windows/Android use SDP with the service UUID)
     int64_t speedLimitKBs = 0;     // 0 = unlimited (total upload)

@@ -72,8 +72,11 @@ json ToJson(const Settings& s, bool withIdentity) {
     j["wanHidden"] = s.wanHidden;
     j["wanFromInvite"] = s.wanFromInvite;
     json wl = json::array();
-    for (auto& l : s.wanLinks) wl.push_back({{"k", l.secret}, {"n", l.label}, {"ts", l.created}, {"m", l.mine}});
+    for (auto& l : s.wanLinks) wl.push_back({{"k", l.secret}, {"n", l.label}, {"ts", l.created}, {"m", l.mine}, {"r", l.room}});
     j["wanLinks"] = wl;
+    json wr = json::array();
+    for (auto& r : s.wanInviteRooms) wr.push_back({{"k", r.secret}, {"n", r.label}, {"ts", r.created}});
+    j["wanInviteRooms"] = wr;
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
         j["identitySecret"] = s.identitySecret;
@@ -119,7 +122,18 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
             Get(l, "ts", w.created);
             w.mine = !s.wanFromInvite;  // (1.2.5/1.2.6 didn't say)
             Get(l, "m", w.mine);
+            Get(l, "r", w.room);
             if (w.secret.size() == 64) s.wanLinks.push_back(w);
+        }
+    }
+    if (j.contains("wanInviteRooms") && j["wanInviteRooms"].is_array()) {
+        s.wanInviteRooms.clear();
+        for (auto& l : j["wanInviteRooms"]) {
+            WanLink w;
+            Get(l, "k", w.secret);
+            Get(l, "n", w.label);
+            Get(l, "ts", w.created);
+            if (w.secret.size() == 64) s.wanInviteRooms.push_back(w);
         }
     }
     Get(j, "speedLimitKBs", s.speedLimitKBs);

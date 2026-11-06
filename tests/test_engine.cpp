@@ -248,6 +248,7 @@ static void TestMdnsPackets() {
 }
 
 int main() {
+    SetMachineId("");  // engines on one test computer would all look like the same device to the server
     setvbuf(stdout, nullptr, _IONBF, 0);
     TestHash();
     TestCrypto();
@@ -1079,10 +1080,12 @@ int main() {
             auto B = MakeEngine("bea", 48183, true, false, false, false, srvAddr, "pub");
             std::string idL = L->settings.deviceId, idA = A->settings.deviceId, idB = B->settings.deviceId;
             std::string kA(64, 'a'), kB(64, 'b');
-            std::string code = MakeInviteCode(srvAddr, kA, "lina"), s1, k1, n1;
-            CHECK(ParseInviteCode(" " + code.substr(0, 10) + "\n" + code.substr(10), s1, k1, n1) && s1 == srvAddr && k1 == kA && n1 == "lina",
+            std::string code = MakeInviteCode({srvAddr, kA, "lina", "Family"});
+            InviteInfo ii;
+            CHECK(ParseInviteCode(" " + code.substr(0, 10) + "\n" + code.substr(10), ii) && ii.server == srvAddr && ii.secret == kA &&
+                      ii.name == "lina" && ii.room == "Family",
                   "invite code round trip");
-            CHECK(!ParseInviteCode("LSI1-xyz", s1, k1, n1), "bad invite code refused");
+            CHECK(!ParseInviteCode("LSI1-xyz", ii), "bad invite code refused");
             auto setLinks = [](Engine& e, bool hidden, std::vector<std::string> keys, bool mine, const std::string& room) {
                 auto lk = e.Lock();
                 Settings s = e.settings;
@@ -1101,6 +1104,10 @@ int main() {
             };
             setLinks(*L, false, {kA, kB}, true, "lroom");
             std::this_thread::sleep_for(std::chrono::milliseconds(500));  // (the inviter registers its codes first)
+            {
+                auto lk = A->Lock();
+                A->machineId = "adams-phone";
+            }
             setLinks(*A, true, {kA}, false, "pub");
             setLinks(*B, true, {kB}, false, "pub");
             auto sees = [](Engine& e, const std::string& id) {
@@ -1122,12 +1129,71 @@ int main() {
             }, 10000), "connection through a link");
             L->SendChat(idA, "private hello");
             CHECK(WaitFor([&] { auto l = A->Lock(); return !A->chats[A->ChatKey(idL)].messages.empty(); }, 5000), "chat through a link");
+            // an invite room: D and E, invited into "Family", see each other (and L), but not A
+            {
+                std::string kD(64, 'd'), kE(64, 'e'), roomId(64, 'f');
+                {
+                    auto lk = L->Lock();
+                    Settings s = L->settings;
+                    WanLink r;
+                    r.secret = roomId;
+                    r.label = "Family";
+                    s.wanInviteRooms = {r};
+                    for (auto& k : {kD, kE}) {
+                        WanLink w;
+                        w.secret = k;
+                        w.room = roomId;
+                        s.wanLinks.push_back(w);
+                    }
+                    L->ApplySettings(s);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                auto D = MakeEngine("dora", 48187, true, false, false, false, srvAddr, "d-own");
+                auto E = MakeEngine("emil", 48188, true, false, false, false, srvAddr, "e-own");
+                std::string idD = D->settings.deviceId, idE = E->settings.deviceId;
+                setLinks(*D, true, {kD}, false, "d-own");
+                setLinks(*E, true, {kE}, false, "e-own");
+                CHECK(WaitFor([&] { return sees(*D, idE) && sees(*E, idD) && sees(*D, idL) && sees(*L, idE); }, 8000),
+                      "people in one invite room see each other");
+                CHECK(!sees(*D, idA) && !sees(*A, idD) && !sees(*D, idB), "...but not people outside it");
+                json ij;
+                bool roomShown = false;
+                if (LoadJsonFile(JoinPath(po.dataDir, "invited.json"), ij))
+                    for (auto& [pub, v] : ij["devices"].items())
+                        if (v.value("id", "") == idD) roomShown = v.value("room", "") == "Family" && v.value("by", "") == "lina" && v.value("byKey", "").size() == 64;
+                CHECK(roomShown, "the server lists who invited them and into which room (%s)", ij.dump().c_str());
+                D->Stop();
+                E->Stop();
+            }
             // A drops the invite and enters the server by hand, in C's room, not hidden: the server still remembers A
             setLinks(*A, false, {}, true, "pub");
             std::this_thread::sleep_for(std::chrono::milliseconds(2500));
             CHECK(!sees(*A, idC) && !sees(*C, idA), "remembered as invited after entering the server by hand");
+            // a fresh install with a new account on the same phone: still limited
+            auto A2 = std::make_unique<Engine>();
+            {
+                std::string cfg2 = JoinPath(Root(), "adam2/config");
+                MakeDirs(cfg2);
+                Settings s2;
+                s2.displayName = "adam again";
+                s2.downloadDir = JoinPath(Root(), "adam2/downloads");
+                s2.tcpPort = 48186;
+                s2.autoConnect = true;
+                s2.wanEnabled = true;
+                s2.wanServer = srvAddr;
+                s2.wanRoom = "pub";
+                s2.wanPassword = "secret pub";
+                SaveJsonFile(JoinPath(cfg2, "settings.json"), json{{"settings", ToJson(s2, false)}, {"devices", json::array()}});
+                A2->configDir = cfg2;
+                A2->machineId = "adams-phone";
+                A2->Start();
+            }
+            std::string idA2 = A2->settings.deviceId;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+            CHECK(!sees(*A2, idC) && !sees(*C, idA2), "a new install on the same phone is still limited");
+            A2->Stop();
             json inv;
-            CHECK(LoadJsonFile(JoinPath(po.dataDir, "invited.json"), inv) && inv["devices"].size() == 2, "invited devices saved (%s)",
+            CHECK(LoadJsonFile(JoinPath(po.dataDir, "invited.json"), inv) && inv["devices"].size() == 5, "invited devices saved (%s)",
                   inv.dump().c_str());
             // the admin releases A: an ordinary device again
             std::string pubA;

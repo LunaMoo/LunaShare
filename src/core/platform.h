@@ -12,6 +12,9 @@ bool IsMobilePlatform();
 
 std::string HostName();
 std::string UserName();
+// a stable id of this computer / phone (survives reinstalling the app; empty if unknown). Android: set by the bridge.
+std::string MachineId();
+void SetMachineId(const std::string& id);
 
 // Directory for settings/history (created if missing). Can be overridden (tests, portable mode).
 std::string ConfigDir();

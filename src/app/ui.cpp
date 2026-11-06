@@ -2684,6 +2684,8 @@ void App::DrawSettings() {
 
     ImGui::Spacing();
     // everything below works automatically: hidden until asked for
+    static bool advEnv = getenv("LUNASHARE_ADVANCED") != nullptr;  // dev: start with Advanced open (screenshots)
+    if (advEnv) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
     if (ImGui::CollapsingHeader(T("Advanced"), ImGuiTreeNodeFlags_None)) {
         ImGui::SeparatorText(T("Receiving"));
         changed |= ImGui::Checkbox(T("Automatically accept files from trusted devices"), &edit.autoAcceptTrusted);
@@ -3798,12 +3800,26 @@ void App::AudioCallControls(float fieldW, float h, bool& changed) {
 // Private contacts: invite codes that let one person reach me through the server without a shared room, so the
 // people I invite this way never see each other (docs/INTERNET.md).
 void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
-    static std::string forWhom, code, msg;
+    static std::string forWhom, code, msg, newRoom;
+    static int roomSel = 0;  // 0: no room, 1..n: an invite room, n+1: a new one
     static bool msgErr = false;
+    auto roomName = [&](const std::string& id) -> std::string {
+        for (auto& r : edit.wanInviteRooms)
+            if (r.secret == id) return r.label;
+        return {};
+    };
+    auto codeFor = [&](const WanLink& l) {
+        InviteInfo i;
+        i.server = edit.wanServer;
+        i.secret = l.secret;
+        i.name = edit.displayName;
+        i.room = roomName(l.room);
+        return MakeInviteCode(i);
+    };
     ImGui::SeparatorText(T("Private contacts"));
     ImGui::PushTextWrapPos(0);
     ImGui::TextDisabled("%s", T("Invite people with a code instead of sharing the room: each of them can reach you through the "
-                                "server, but they aren't in a room together, so they can't find each other."));
+                                "server, and they only see each other if you invite them into the same invite room."));
     ImGui::PopTextWrapPos();
     if (!edit.wanFromInvite) {
         changed |= ImGui::Checkbox(T("Private mode: don't list me in the room"), &edit.wanHidden);
@@ -3820,11 +3836,16 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
         ImGui::PushID(i);
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(l.label.empty() ? T("(no name)") : l.label.c_str());
+        std::string rn = l.mine ? roomName(l.room) : l.room;
+        if (!rn.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.55f, 0.75f, 1, 1), "[%s]", rn.c_str());
+        }
         ImGui::SameLine();
         ImGui::TextDisabled("%s", FormatTime(l.created, true).substr(0, 10).c_str());
         ImGui::SameLine();
         if (!invited && ImGui::SmallButton(T("Copy code"))) {
-            ImGui::SetClipboardText(MakeInviteCode(edit.wanServer, l.secret, edit.displayName).c_str());
+            ImGui::SetClipboardText(codeFor(l).c_str());
             msg = T("Invite code copied.");
             msgErr = false;
         }
@@ -3844,19 +3865,74 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
     }
 
     if (!invited) {
+    // invite rooms: everyone invited into the same room sees each other (and you); without a room, only you
+    if (!edit.wanInviteRooms.empty()) {
+        ImGui::TextDisabled("%s", T("Invite rooms (people in one see each other):"));
+        int del = -1;
+        for (int i = 0; i < (int)edit.wanInviteRooms.size(); i++) {
+            auto& r = edit.wanInviteRooms[(size_t)i];
+            int n = 0;
+            for (auto& l : edit.wanLinks) n += l.mine && l.room == r.secret;
+            ImGui::PushID(1000 + i);
+            ImGui::AlignTextToFramePadding();
+            ImGui::BulletText("%s", r.label.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled(n == 1 ? T("1 person") : T("%d people"), n);
+            ImGui::SameLine();
+            if (ImGui::SmallButton(T("Delete room"))) del = i;
+            ImGui::SetItemTooltip("%s", T("Its people stay your private contacts, but no longer see each other."));
+            ImGui::PopID();
+        }
+        if (del >= 0) {
+            for (auto& l : edit.wanLinks)
+                if (l.mine && l.room == edit.wanInviteRooms[(size_t)del].secret) l.room.clear();
+            edit.wanInviteRooms.erase(edit.wanInviteRooms.begin() + del);
+            roomSel = 0;
+            changed = true;
+        }
+    }
+    int nRooms = (int)edit.wanInviteRooms.size();
+    if (roomSel > nRooms + 1) roomSel = 0;
+    std::string cur = roomSel == 0 ? T("No room (only you)") : roomSel <= nRooms ? edit.wanInviteRooms[(size_t)roomSel - 1].label : T("New room...");
+    ImGui::SetNextItemWidth(fieldW * 0.6f);
+    if (ImGui::BeginCombo("##inviteRoom", cur.c_str())) {
+        if (ImGui::Selectable(T("No room (only you)"), roomSel == 0)) roomSel = 0;
+        for (int i = 0; i < nRooms; i++)
+            if (ImGui::Selectable((edit.wanInviteRooms[(size_t)i].label + "##r" + std::to_string(i)).c_str(), roomSel == i + 1)) roomSel = i + 1;
+        if (ImGui::Selectable(T("New room..."), roomSel == nRooms + 1)) roomSel = nRooms + 1;
+        ImGui::EndCombo();
+    }
+    ui::HelpMarker(T("People you invite into the same room see each other in their device list (and you). People "
+                   "without a room, or in another room, see only you."));
+    if (roomSel == nRooms + 1) {
+        ImGui::SetNextItemWidth(fieldW * 0.6f);
+        ImGui::InputTextWithHint("##newRoom", T("room name (they see it)"), &newRoom);
+    }
     ImGui::SetNextItemWidth(fieldW * 0.6f);
     ImGui::InputTextWithHint("##inviteFor", T("for whom (only you see it)"), &forWhom);
     ImGui::SameLine();
-    ImGui::BeginDisabled(edit.wanServer.empty());
+    bool needName = roomSel == nRooms + 1 && newRoom.empty();
+    ImGui::BeginDisabled(edit.wanServer.empty() || needName);
     if (ImGui::Button(T("Create invite code"), ImVec2(0, h))) {
         uint8_t k[32];
-        SecureRandom(k, sizeof(k));
         WanLink l;
+        if (roomSel == nRooms + 1) {
+            SecureRandom(k, sizeof(k));
+            WanLink r;
+            r.secret = ToHex(k, sizeof(k));
+            r.label = newRoom;
+            r.created = NowMs();
+            edit.wanInviteRooms.push_back(r);
+            roomSel = (int)edit.wanInviteRooms.size();  // the next invite goes to the same room
+            newRoom.clear();
+        }
+        if (roomSel > 0) l.room = edit.wanInviteRooms[(size_t)roomSel - 1].secret;
+        SecureRandom(k, sizeof(k));
         l.secret = ToHex(k, sizeof(k));
         l.label = forWhom;
         l.created = NowMs();
         edit.wanLinks.push_back(l);
-        ImGui::SetClipboardText(MakeInviteCode(edit.wanServer, l.secret, edit.displayName).c_str());
+        ImGui::SetClipboardText(codeFor(l).c_str());
         msg = T("Invite code copied. Send it to that person only - anyone with the code can reach you.");
         msgErr = false;
         forWhom.clear();
@@ -3870,8 +3946,10 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
     ImGui::InputTextWithHint("##inviteCode", T("invite code you got (LSI1-...)"), &code);
     ImGui::SameLine();
     if (ImGui::Button(T("Use code"), ImVec2(0, h))) {
-        std::string server, secret, name;
-        if (!ParseInviteCode(code, server, secret, name)) {
+        InviteInfo ii;
+        bool parsed = ParseInviteCode(code, ii);
+        std::string server = ii.server, secret = ii.secret, name = ii.name;
+        if (!parsed) {
             msg = T("That isn't a valid invite code.");
             msgErr = true;
         } else if (edit.wanEnabled && !edit.wanServer.empty() && edit.wanServer != server) {
@@ -3898,6 +3976,7 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
                 l.label = name;
                 l.created = NowMs();
                 l.mine = false;
+                l.room = ii.room;  // (its name, shown next to the inviter)
                 edit.wanLinks.push_back(l);
                 changed = true;
             }

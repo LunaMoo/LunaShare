@@ -2592,9 +2592,17 @@ void Engine::StartWan() {
         cfg.localPort = (uint16_t)std::clamp(settings.wanLocalPort, 0, 65535);
         cfg.forwardedPort = (uint16_t)std::clamp(settings.wanForwardedPort, 0, 65535);
         cfg.hidden = settings.wanHidden;
+        // per server, so servers can't match devices with each other
+        if (std::string mid = machineId.empty() ? MachineId() : machineId; !mid.empty()) cfg.hw = RoomHash("\x02hw\n" + settings.wanServer, mid);
         for (auto& l : settings.wanLinks) {
             cfg.links.push_back(LinkToken(l.secret));
             if (!l.mine) cfg.inv.push_back(cfg.links.back());
+        }
+        for (auto& r : settings.wanInviteRooms) {
+            std::vector<std::string> toks;
+            for (auto& l : settings.wanLinks)
+                if (l.mine && l.room == r.secret) toks.push_back(LinkToken(l.secret));
+            if (!toks.empty()) cfg.groups.push_back({LinkToken(r.secret), r.label, toks});
         }
         for (auto& [id, p] : online) p.lastWan = 0;
     }
@@ -3342,7 +3350,8 @@ void Engine::ApplySettings(const Settings& s) {
     if (running_ && (settings.wanEnabled != old.wanEnabled || settings.wanServer != old.wanServer || settings.wanRoom != old.wanRoom ||
                      settings.wanPassword != old.wanPassword || settings.wanNatPmp != old.wanNatPmp || settings.wanRelay != old.wanRelay ||
                      settings.wanLocalPort != old.wanLocalPort || settings.wanForwardedPort != old.wanForwardedPort ||
-                     settings.wanHidden != old.wanHidden || !(settings.wanLinks == old.wanLinks)))
+                     settings.wanHidden != old.wanHidden || !(settings.wanLinks == old.wanLinks) ||
+                     !(settings.wanInviteRooms == old.wanInviteRooms)))
         restartWan_ = true;
     else if (running_ && settings.displayName != old.displayName)
         wan_.UpdateName(settings.displayName);

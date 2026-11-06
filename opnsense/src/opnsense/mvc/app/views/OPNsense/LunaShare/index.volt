@@ -14,7 +14,7 @@
                 const body = $('#invited_rows').empty();
                 const rows = (data && data.rows) ? data.rows : [];
                 if (!rows.length) {
-                    body.append('<tr><td colspan="6">{{ lang._('No one has joined with an invite code yet.') }}</td></tr>');
+                    body.append('<tr><td colspan="7">{{ lang._('No one has joined with an invite code yet.') }}</td></tr>');
                     return;
                 }
                 rows.sort(function (a, b) { return (b.last || 0) - (a.last || 0); });
@@ -24,7 +24,8 @@
                         ? '<button class="btn btn-xs btn-default inv-act" data-act="restrict" data-key="' + esc(key) + '">{{ lang._('Limit again') }}</button>'
                         : '<button class="btn btn-xs btn-primary inv-act" data-act="release" data-key="' + esc(key) + '">{{ lang._('Release') }}</button>';
                     body.append('<tr><td>' + esc(r.name) + '<br/><small><code>' + esc(key.substr(0, 16)) + '</code></small></td><td>' +
-                        esc(r.by || '?') + '</td><td>' + (r.released ? '{{ lang._('ordinary') }}' : '<b>{{ lang._('limited') }}</b>') +
+                        esc(r.by || '?') + (r.byKey ? '<br/><small><code>' + esc(String(r.byKey).substr(0, 16)) + '</code></small>' : '') +
+                        '</td><td>' + (r.room ? esc(r.room) : '<small>{{ lang._('none (only the inviter)') }}</small>') + '</td><td>' + (r.released ? '{{ lang._('ordinary') }}' : '<b>{{ lang._('limited') }}</b>') +
                         '</td><td>' + esc(day(r.first)) + '</td><td>' + esc(day(r.last)) + '</td><td>' + btn + '</td></tr>');
                 });
             });
@@ -76,6 +77,7 @@
             <tr>
                 <th>{{ lang._('Device') }}</th>
                 <th>{{ lang._('Invited by') }}</th>
+                <th>{{ lang._('Invite room') }}</th>
                 <th>{{ lang._('Treatment') }}</th>
                 <th>{{ lang._('First seen') }}</th>
                 <th>{{ lang._('Last seen') }}</th>

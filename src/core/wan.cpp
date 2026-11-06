@@ -41,14 +41,16 @@ using sock_t = decltype(socket(0, 0, 0));
 
 std::string LinkToken(const std::string& secretHex) { return RoomHash("\x01link", secretHex); }
 
-std::string MakeInviteCode(const std::string& server, const std::string& secretHex, const std::string& name) {
-    std::string b = Base64Encode(json{{"s", server}, {"k", secretHex}, {"n", name}}.dump());
+std::string MakeInviteCode(const InviteInfo& i) {
+    json j = {{"s", i.server}, {"k", i.secret}, {"n", i.name}};
+    if (!i.room.empty()) j["r"] = i.room;
+    std::string b = Base64Encode(j.dump());
     for (auto& c : b) c = c == '+' ? '-' : c == '/' ? '_' : c;
     while (!b.empty() && b.back() == '=') b.pop_back();
     return "LSI1-" + b;
 }
 
-bool ParseInviteCode(const std::string& codeIn, std::string& server, std::string& secretHex, std::string& name) {
+bool ParseInviteCode(const std::string& codeIn, InviteInfo& i) {
     std::string code;
     for (char c : codeIn)
         if (!isspace((unsigned char)c)) code += c;
@@ -59,11 +61,12 @@ bool ParseInviteCode(const std::string& codeIn, std::string& server, std::string
     if (!Base64Decode(b, raw)) return false;
     json j = json::parse(raw, nullptr, false);
     if (!j.is_object()) return false;
-    server = j.value("s", "");
-    secretHex = j.value("k", "");
-    name = j.value("n", "");
+    i.server = j.value("s", "");
+    i.secret = j.value("k", "");
+    i.name = j.value("n", "");
+    i.room = j.value("r", "");
     uint8_t tmp[32];
-    return !server.empty() && secretHex.size() == 64 && FromHex(secretHex, tmp, 32);
+    return !i.server.empty() && i.secret.size() == 64 && FromHex(i.secret, tmp, 32);
 }
 
 std::string RoomHash(const std::string& room, const std::string& password) {
@@ -348,6 +351,12 @@ void WanTransport::Loop() {
             if (cfg_.hidden) j["hidden"] = true;
             if (!cfg_.links.empty()) j["links"] = cfg_.links;
             if (!cfg_.inv.empty()) j["inv"] = cfg_.inv;
+            if (!cfg_.hw.empty()) j["hw"] = cfg_.hw;
+            if (!cfg_.groups.empty()) {
+                json g = json::array();
+                for (auto& gr : cfg_.groups) g.push_back({{"g", gr.token}, {"n", gr.name}, {"t", gr.links}});
+                j["groups"] = g;
+            }
             if (!acc_.empty()) {
                 j["acc"] = acc_;
                 j["acs"] = accCert_;

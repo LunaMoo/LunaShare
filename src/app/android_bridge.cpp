@@ -107,6 +107,14 @@ void AndroidBridgeInit(ls::Engine* engine) {
     g_cls = (jclass)env->NewGlobalRef(c);
     env->DeleteLocalRef(c);
     CallV("acquireMulticastLock", "()V");
+    if (jmethodID mid = M("machineId", "()Ljava/lang/String;")) {  // (before the engine starts the internet)
+        jstring s = (jstring)env->CallStaticObjectMethod(g_cls, mid);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        else ls::SetMachineId(JStr(env, s));
+        if (s) env->DeleteLocalRef(s);
+    } else {
+        env->ExceptionClear();
+    }
 
     HostBridge& b = Bridge();
     b.btAvailable = [] { return CallZ("btAvailable", "()Z"); };

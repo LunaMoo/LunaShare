@@ -50,6 +50,7 @@ struct Device {
     bool hidden = false;             // not listed in its room (except to devices of its own account)
     std::vector<std::string> links;  // private link tokens: devices sharing one meet across rooms
     bool restricted = false;         // joined with someone's invite (remembered): sees and reaches only its links and account
+    std::string hw;                  // hash of the computer's / phone's id (the same after reinstalling the app)
     bool SharesLink(const Device& o) const {
         for (auto& a : links)
             for (auto& b : o.links)
@@ -271,6 +272,34 @@ void RendezvousServer::Loop() {
         SendFrom(s, "R" + j.dump(-1, ' ', false, json::error_handler_t::replace), to, src);
     };
     auto sendJson = [&](const sockaddr_in& to, const json& j) { sendTo(to, via, j); };
+    // invite rooms: the inviter groups some of its invite codes; everyone holding a code of one group meets the others
+    std::map<std::string, std::map<std::string, std::set<std::string>>> groups;  // inviter key -> group -> tokens
+    std::map<std::string, std::string> tokGroup;                                   // token -> inviter key + "/" + group
+    std::map<std::string, std::string> groupNames;                                 // inviter key + "/" + group -> room name
+    auto rebuildGroups = [&] {
+        tokGroup.clear();
+        for (auto& [owner, gs] : groups)
+            for (auto& [g, toks] : gs)
+                for (auto& t : toks) tokGroup[t] = owner + "/" + g;
+    };
+    // the tokens a device reaches: its own, and all tokens of the invite rooms they belong to
+    auto reach = [&](const std::vector<std::string>& links) {
+        std::set<std::string> r(links.begin(), links.end());
+        for (auto& l : links) {
+            auto it = tokGroup.find(l);
+            if (it == tokGroup.end()) continue;
+            size_t sl = it->second.find('/');
+            auto& toks = groups[it->second.substr(0, sl)][it->second.substr(sl + 1)];
+            r.insert(toks.begin(), toks.end());
+        }
+        return r;
+    };
+    auto relatedR = [](const std::set<std::string>& r, const Device& b) {
+        for (auto& l : b.links)
+            if (r.count(l)) return true;
+        return false;
+    };
+    auto related = [&](const Device& a, const Device& b) { return !a.links.empty() && relatedR(reach(a.links), b); };
     auto peerJson = [](const Device& d) {
         return json{{"id", d.id}, {"name", d.name}, {"pf", d.pf}, {"pub", d.pub}, {"ep", Ep(d.pubEp)}, {"local", d.locals}, {"extra", d.extra}};
     };
@@ -287,10 +316,11 @@ void RendezvousServer::Loop() {
             arr.push_back(peerJson(d));
             seen.insert(id);
         }
-        if (m && !m->links.empty())
+        std::set<std::string> mr = m ? reach(m->links) : std::set<std::string>();
+        if (!mr.empty())
             for (auto& [rn, rr] : rooms)
                 for (auto& [id, d] : rr)
-                    if (!seen.count(id) && m->SharesLink(d)) {
+                    if (!seen.count(id) && relatedR(mr, d)) {
                         json p = peerJson(d);
                         p["link"] = true;
                         arr.push_back(p);
@@ -306,12 +336,11 @@ void RendezvousServer::Loop() {
         for (auto& [id, d] : rooms[room])
             if (id != except) pushOne(room, d);
         if (links.empty()) return;
-        Device probe;
-        probe.links = links;
+        std::set<std::string> pr = reach(links);
         for (auto& [rn, rr] : rooms) {
             if (rn == room) continue;
             for (auto& [id, d] : rr)
-                if (id != except && probe.SharesLink(d)) pushOne(rn, d);
+                if (id != except && relatedR(pr, d)) pushOne(rn, d);
         }
     };
     auto pushRoom = [&](const std::string& room, const std::string& except) { pushAround(room, except, {}); };
@@ -319,7 +348,7 @@ void RendezvousServer::Loop() {
     auto findTarget = [&](const std::string& room, const Device& me, const std::string& to) -> Device* {
         auto ok = [&](const Device& t) {  // invited devices only reach / are reached through links and their account
             if (!me.restricted && !t.restricted) return true;
-            return (!me.acc.empty() && me.acc == t.acc) || me.SharesLink(t);
+            return (!me.acc.empty() && me.acc == t.acc) || related(me, t);
         };
         auto& r = rooms[room];
         auto it = r.find(to);
@@ -327,7 +356,7 @@ void RendezvousServer::Loop() {
         if (me.links.empty()) return nullptr;
         for (auto& [rn, rr] : rooms) {
             auto x = rr.find(to);
-            if (x != rr.end() && me.SharesLink(x->second)) return &x->second;
+            if (x != rr.end() && related(me, x->second)) return &x->second;
         }
         return nullptr;
     };
@@ -429,7 +458,8 @@ void RendezvousServer::Loop() {
     // ---- people who joined with an invite: remembered by device key (and account), so they stay limited to their
     // links even if they later enter the server's address by hand. The admin can release them (invited-cmd file).
     struct Invited {
-        std::string acc, name, id, by;
+        std::string acc, name, id, by, room, hw;  // room: the invite room(s) it was invited into
+        std::string byKey, byAcc;  // the inviter's device key and account (by = its current name)
         int64_t first = 0, last = 0;
         bool released = false;
     };
@@ -450,6 +480,10 @@ void RendezvousServer::Loop() {
                 x.name = v.value("name", "");
                 x.id = v.value("id", "");
                 x.by = v.value("by", "");
+                x.room = v.value("room", "");
+                x.hw = v.value("hw", "");
+                x.byKey = v.value("byKey", "");
+                x.byAcc = v.value("byAcc", "");
                 x.first = v.value("first", (int64_t)0);
                 x.last = v.value("last", (int64_t)0);
                 x.released = v.value("released", false);
@@ -457,25 +491,41 @@ void RendezvousServer::Loop() {
             }
             for (auto& [tok, pub] : oj.items())
                 if (pub.is_string()) owners[tok] = pub.get<std::string>();
+            json gj = ij.value("groups", json::object());
+            for (auto& [owner, gs] : gj.items())
+                if (gs.is_object())
+                    for (auto& [g, toks] : gs.items())
+                        if (toks.is_array())
+                            for (auto& t : toks)
+                                if (t.is_string()) groups[owner][g].insert(t.get<std::string>());
+            json nj = ij.value("groupNames", json::object());
+            for (auto& [k, n] : nj.items())
+                if (n.is_string()) groupNames[k] = n.get<std::string>();
+            rebuildGroups();
         }
     }
     auto saveInvited = [&](bool force) {
         if (!invDirty || invFile.empty() || (!force && NowMs() - invSaved < 60000)) return;
         json dj = json::object();
         for (auto& [pub, x] : invited)
-            dj[pub] = {{"acc", x.acc}, {"name", x.name}, {"id", x.id}, {"by", x.by}, {"first", x.first}, {"last", x.last}, {"released", x.released}};
+            dj[pub] = {{"acc", x.acc}, {"name", x.name}, {"id", x.id}, {"by", x.by}, {"byKey", x.byKey}, {"byAcc", x.byAcc},
+                       {"room", x.room}, {"hw", x.hw}, {"first", x.first}, {"last", x.last}, {"released", x.released}};
         MakeDirs(opt_.dataDir);
-        SaveJsonFile(invFile, json{{"v", 1}, {"devices", dj}, {"owners", owners}});
+        json gj = json::object();
+        for (auto& [owner, gs] : groups)
+            for (auto& [g, toks] : gs) gj[owner][g] = toks;
+        SaveJsonFile(invFile, json{{"v", 1}, {"devices", dj}, {"owners", owners}, {"groups", gj}, {"groupNames", groupNames}});
         invDirty = false;
         invSaved = NowMs();
     };
-    auto isRestricted = [&](const std::string& pub, const std::string& acc) {
+    // an invited device, another device of an invited account, or a new install on an invited computer / phone
+    // (returns the record it matched, for the admin's list)
+    auto restrictedBy = [&](const std::string& pub, const std::string& acc, const std::string& hw) -> const Invited* {
         auto it = invited.find(pub);
-        if (it != invited.end()) return !it->second.released;
-        if (!acc.empty())
-            for (auto& [p, x] : invited)
-                if (x.acc == acc && !x.released) return true;  // another device of an invited account
-        return false;
+        if (it != invited.end()) return it->second.released ? nullptr : &it->second;
+        for (auto& [p, x] : invited)
+            if (!x.released && ((!acc.empty() && x.acc == acc) || (!hw.empty() && x.hw == hw))) return &x;
+        return nullptr;
     };
     // admin commands: lines "release KEY", "restrict KEY", "forget KEY" (KEY: a device key or its first 8+ characters)
     auto runAdmin = [&] {
@@ -494,11 +544,15 @@ void RendezvousServer::Loop() {
         f.close();
         std::remove(cmdFile.c_str());
         for (auto& [c, k] : cmds) {
-            std::set<std::string> accs;
+            std::set<std::string> accs, hws;
             for (auto& [pub, x] : invited)
-                if (pub.compare(0, k.size(), k) == 0 && !x.acc.empty()) accs.insert(x.acc);
+                if (pub.compare(0, k.size(), k) == 0) {
+                    if (!x.acc.empty()) accs.insert(x.acc);
+                    if (!x.hw.empty()) hws.insert(x.hw);
+                }
             for (auto it = invited.begin(); it != invited.end();) {
-                bool hit = it->first.compare(0, k.size(), k) == 0 || accs.count(it->second.acc);  // (the whole account)
+                // (the whole account and every install on that computer / phone)
+                bool hit = it->first.compare(0, k.size(), k) == 0 || accs.count(it->second.acc) || hws.count(it->second.hw);
                 if (hit) log(c + " " + it->second.name + " (" + it->first.substr(0, 8) + ")");
                 if (hit && c == "forget") { it = invited.erase(it); invDirty = true; continue; }
                 if (hit && (c == "release" || c == "restrict")) { it->second.released = c == "release"; invDirty = true; }
@@ -714,20 +768,40 @@ void RendezvousServer::Loop() {
             bool wasHidden = d.hidden, wasRestricted = d.restricted;
             std::vector<std::string> oldLinks = d.links;
             d.hidden = j.value("hidden", false);
+            d.hw = IsHex64(j.value("hw", "")) ? j.value("hw", "") : std::string();
             std::vector<std::string> links, inv;
             for (auto& l : j.value("links", json::array()))
                 if (l.is_string() && IsHex64(l.get<std::string>()) && links.size() < 500) links.push_back(l.get<std::string>());
             for (auto& l : j.value("inv", json::array()))
                 if (l.is_string()) inv.push_back(l.get<std::string>());
             // whose invite is each link: the first device to register a code it made owns it; anyone else is invited
-            bool restricted = IsHex64(d.pub) && isRestricted(d.pub, d.acc);
-            std::string inviter;
+            const Invited* match = IsHex64(d.pub) ? restrictedBy(d.pub, d.acc, d.hw) : nullptr;
+            bool restricted = match != nullptr;
+            std::string inviter, inviteRoom;
             bool created = false;
+            if (match && !invited.count(d.pub)) {
+                // a new device key on a remembered computer / phone or account: listed too, so the admin sees it
+                Invited x;
+                x.first = NowMs();
+                x.by = match->by;
+                x.byKey = match->byKey;
+                x.byAcc = match->byAcc;
+                x.room = match->room;
+                invited[d.pub] = x;
+                created = true;
+                log("remembered " + d.name + " (" + d.pub.substr(0, 8) + ") as invited: same device or account as before");
+            }
             for (auto& l : links) {
                 auto o = owners.find(l);
                 bool received = std::find(inv.begin(), inv.end(), l) != inv.end() || (o != owners.end() && o->second != d.pub);
                 if (received) {
                     if (o != owners.end()) inviter = o->second;
+                    auto tg = tokGroup.find(l);
+                    if (tg != tokGroup.end()) {
+                        auto gn = groupNames.find(tg->second);
+                        if (gn != groupNames.end() && !gn->second.empty())
+                            inviteRoom += (inviteRoom.empty() ? "" : ", ") + gn->second;
+                    }
                     if (IsHex64(d.pub) && !invited.count(d.pub)) {
                         Invited x;
                         x.first = NowMs();
@@ -742,18 +816,38 @@ void RendezvousServer::Loop() {
             }
             if (IsHex64(d.pub) && invited.count(d.pub)) {
                 auto& x = invited[d.pub];
-                if (x.name != d.name || x.acc != d.acc || x.id != id || (!inviter.empty() && x.by.empty())) invDirty = true;
+                if (!inviter.empty() && x.room != inviteRoom) {  // the invite room(s) it is in now
+                    x.room = inviteRoom;
+                    invDirty = true;
+                }
+                if (x.name != d.name || x.acc != d.acc || x.id != id || x.hw != d.hw) invDirty = true;
                 x.name = d.name;
                 if (!d.acc.empty()) x.acc = d.acc;
+                if (!d.hw.empty()) x.hw = d.hw;
                 x.id = id;
-                if (x.by.empty() && !inviter.empty())
+                if (!inviter.empty() && x.byKey != inviter) {  // (first invite, or one from someone else later)
+                    x.byKey = inviter;
+                    invDirty = true;
+                }
+                if (!x.byKey.empty())
                     for (auto& [rn, rr] : rooms)
                         for (auto& [oid, od] : rr)
-                            if (od.pub == inviter) x.by = od.name;
+                            if (od.pub == x.byKey && (x.by != od.name || (!od.acc.empty() && x.byAcc != od.acc))) {
+                                x.by = od.name;
+                                if (!od.acc.empty()) x.byAcc = od.acc;
+                                invDirty = true;
+                            }
                 if (NowMs() - x.last > 3600000) invDirty = true;
                 x.last = NowMs();
                 if (created) saveInvited(true);
             }
+            if (!restricted && IsHex64(d.pub))
+                for (auto& [p, x] : invited)
+                    if (x.byKey == d.pub && (x.by != d.name || (!d.acc.empty() && x.byAcc != d.acc))) {
+                        x.by = d.name;  // the inviter's current name
+                        if (!d.acc.empty()) x.byAcc = d.acc;
+                        invDirty = true;
+                    }
             d.restricted = restricted;
             if (restricted) {
                 // only links to someone else's invite count: no new invites of their own to this server
@@ -766,6 +860,41 @@ void RendezvousServer::Loop() {
             }
             d.links = links;
             bool linksChanged = d.links != oldLinks || d.hidden != wasHidden || d.restricted != wasRestricted;
+            // the inviter's invite rooms: which of its codes belong together (only codes it owns count)
+            std::vector<std::string> groupToks;  // (devices to tell when a room changed)
+            if (IsHex64(d.pub) && !restricted) {
+                std::map<std::string, std::set<std::string>> ng;
+                for (auto& gj : j.value("groups", json::array())) {
+                    if (!gj.is_object() || !IsHex64(gj.value("g", "")) || ng.size() >= 100) continue;
+                    std::string key = d.pub + "/" + gj.value("g", ""), nm = Clip(gj.value("n", ""), 64);
+                    if (groupNames[key] != nm) {
+                        groupNames[key] = nm;
+                        invDirty = true;
+                    }
+                    auto& set = ng[gj.value("g", "")];
+                    for (auto& t : gj.value("t", json::array()))
+                        if (t.is_string() && set.size() < 1000) {
+                            auto o = owners.find(t.get<std::string>());
+                            if (o != owners.end() && o->second == d.pub) set.insert(t.get<std::string>());
+                        }
+                }
+                for (auto it = ng.begin(); it != ng.end();) it = it->second.empty() ? ng.erase(it) : std::next(it);
+                auto old = groups.find(d.pub);
+                bool had = old != groups.end();
+                if ((had && old->second != ng) || (!had && !ng.empty())) {
+                    if (had)
+                        for (auto& [g, toks] : old->second) groupToks.insert(groupToks.end(), toks.begin(), toks.end());
+                    for (auto& [g, toks] : ng) groupToks.insert(groupToks.end(), toks.begin(), toks.end());
+                    if (had)
+                        for (auto& [g, toks] : old->second)
+                            if (!ng.count(g)) groupNames.erase(d.pub + "/" + g);  // a deleted room
+                    if (ng.empty()) groups.erase(d.pub);
+                    else groups[d.pub] = ng;
+                    rebuildGroups();
+                    invDirty = true;
+                    saveInvited(true);
+                }
+            }
             if (opt_.mailbox && IsHex64(d.pub))
                 for (auto& l : d.links) {
                     auto& ts = linkPubs[l][d.pub];
@@ -801,6 +930,7 @@ void RendezvousServer::Loop() {
                 all.insert(all.end(), oldLinks.begin(), oldLinks.end());  // (a removed link: the other side forgets me)
                 pushAround(room, id, all);
             }
+            if (!groupToks.empty()) pushAround(room, "", groupToks);  // a room changed: its members see the new list
         } else if (t == "connect") {
             // find the requester by its source endpoint, then the target in the same room
             std::string to = j.value("to", "");
@@ -926,7 +1056,7 @@ void RendezvousServer::Loop() {
                 inRoom = mine;
             }
             if (!inRoom)
-                for (auto& l : me->links) {
+                for (auto& l : reach(me->links)) {
                     auto lit = linkPubs.find(l);
                     if (lit != linkPubs.end() && lit->second.count(to)) key = "L/" + to;  // a linked device
                 }

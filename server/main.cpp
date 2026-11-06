@@ -70,10 +70,12 @@ static int ListInvited(const std::string& dir, bool asJson) {
             if (ms > 0) strftime(b, sizeof(b), "%Y-%m-%d", localtime(&t));
             return std::string(b);
         };
-        printf("%s  %-10s  %-24s invited by %-20s first %s  last %s\n", e.value("key", "").substr(0, 16).c_str(),
-               e.value("released", false) ? "released" : "limited", e.value("name", "").c_str(),
-               e.value("by", "").empty() ? "?" : e.value("by", "").c_str(), day(e.value("first", (int64_t)0)).c_str(),
-               day(e.value("last", (int64_t)0)).c_str());
+        std::string by = e.value("by", "").empty() ? "?" : e.value("by", "");
+        if (!e.value("byKey", "").empty()) by += " (" + e.value("byKey", "").substr(0, 8) + ")";
+        std::string room = e.value("room", "").empty() ? "-" : e.value("room", "");
+        printf("%s  %-8s  %-22s  invited by %-30s  room %-16s  first %s  last %s\n", e.value("key", "").substr(0, 16).c_str(),
+               e.value("released", false) ? "released" : "limited", e.value("name", "").c_str(), by.c_str(), room.c_str(),
+               day(e.value("first", (int64_t)0)).c_str(), day(e.value("last", (int64_t)0)).c_str());
     }
     return 0;
 }

@@ -54,6 +54,17 @@ public class LunaShareActivity extends SDLActivity {
     private static final android.graphics.Paint textPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
     private static float textScale = 0;
 
+    /** Stable id of this phone for this app (survives reinstalling; changes with a factory reset). */
+    public static String machineId() {
+        try {
+            String id = android.provider.Settings.Secure.getString(getContext().getContentResolver(),
+                    android.provider.Settings.Secure.ANDROID_ID);
+            return id == null || id.equals("9774d56d682e549c") ? "" : id;  // (a value broken old phones share)
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     public static boolean canDrawText(String s) {
         try {
             return android.os.Build.VERSION.SDK_INT < 23 || textPaint.hasGlyph(s);

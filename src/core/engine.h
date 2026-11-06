@@ -338,6 +338,7 @@ public:
     std::map<std::string, std::shared_ptr<SwarmDownload>> swarm;  // content id -> download
 
     std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
+    std::string machineId;               // tests: instead of this computer's id (see MachineId)
     bool PeerHasCap(const std::string& peer, const std::string& cap);
     uint64_t StartCall(const std::string& peer, const std::string& media = "voice");  // peer: a device, person or group
     void SetSpotlight(const std::string& device);

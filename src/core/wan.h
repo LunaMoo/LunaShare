@@ -41,9 +41,12 @@ struct WanPeer {
 
 std::string RoomHash(const std::string& room, const std::string& password);
 std::string LinkToken(const std::string& secretHex);  // what the server sees of a private link
-// Invite codes for private links: "LSI1-" + base64 of {"s": server, "k": secret, "n": inviter's name}
-std::string MakeInviteCode(const std::string& server, const std::string& secretHex, const std::string& name);
-bool ParseInviteCode(const std::string& code, std::string& server, std::string& secretHex, std::string& name);
+// Invite codes for private links: "LSI1-" + base64 of {"s": server, "k": secret, "n": inviter's name, "r": room name}
+struct InviteInfo {
+    std::string server, secret, name, room;
+};
+std::string MakeInviteCode(const InviteInfo& i);
+bool ParseInviteCode(const std::string& code, InviteInfo& i);
 bool ParseEndpoint(const std::string& s, std::string& host, uint16_t& port);
 
 class WanTransport {
@@ -59,6 +62,12 @@ public:
         bool hidden = false;      // not listed in the room, except to my account's devices
         std::vector<std::string> links;  // private link tokens (LinkToken)
         std::vector<std::string> inv;    // ...of those, the ones from someone else's invite (the server remembers me as invited)
+        std::string hw;                  // hash of this computer's / phone's id and the server (same after reinstalling)
+        struct Group {
+            std::string token, name;          // the room (its name is shown to the server's admin)
+            std::vector<std::string> links;   // my codes in it
+        };
+        std::vector<Group> groups;            // my invite rooms
     };
     using OnPeers = std::function<void(const std::vector<WanPeer>&)>;
     using OnSocket = std::function<void(SocketHandle s, const std::string& peerId, const std::string& addr, bool initiator)>;

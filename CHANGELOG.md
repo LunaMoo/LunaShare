@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.8
+
+- **Invited devices stay limited after reinstalling:** devices send the server a per-server fingerprint of the computer
+  or phone (a hash of the system's machine id), so a fresh install or a new account on a remembered device is limited
+  too. Releasing someone releases every install on that device. (Resets with an OS reinstall or factory reset.)
+- **Invite rooms:** when creating an invite code you can put the person into a named room (*No room* / an existing
+  room / *New room...*). Everyone invited into the same room sees each other (and you); people without a room or in
+  another room still see only you. *Delete room* keeps them as your contacts but they stop seeing each other.
+- **The server shows who invited whom and into which room:** the OPNsense list (and `--list-invited`) has the
+  inviter's name and key and the invite room for every remembered device.
+
 ## 1.2.7
 
 - **The server remembers invited people:** a device that joined with an invite code (and its account's other
