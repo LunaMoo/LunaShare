@@ -347,6 +347,7 @@ void WanTransport::Loop() {
                  {"pub", cfg_.pub}, {"local", locals}, {"extra", extra}, {"fwd", cfg_.forwardedPort}, {"relay", cfg_.relay}};
             if (cfg_.hidden) j["hidden"] = true;
             if (!cfg_.links.empty()) j["links"] = cfg_.links;
+            if (!cfg_.inv.empty()) j["inv"] = cfg_.inv;
             if (!acc_.empty()) {
                 j["acc"] = acc_;
                 j["acs"] = accCert_;

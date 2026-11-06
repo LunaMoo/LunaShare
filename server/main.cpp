@@ -9,6 +9,9 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "rendezvous_server.h"
 #include "wan.h"
@@ -31,12 +34,54 @@ static void Usage() {
         "      --mailbox-mb N     limit per receiving device in MB (default 10)\n"
         "      --mailbox-total-mb N   limit for all offline messages together (default 1024)\n"
         "  -q, --quiet            no log output\n"
-        "      --hash-room NAME PASSWORD   print the hash of a room (for the --rooms file) and exit\n");
+        "      --hash-room NAME PASSWORD   print the hash of a room (for the --rooms file) and exit\n\n"
+        "People who joined with an invite code are remembered (in the -d directory) and stay limited to the people who\n"
+        "invited them, even if they later enter the server's address by hand:\n"
+        "      --list-invited [--json]     list them and exit (needs -d)\n"
+        "      --release KEY               treat that device (and its account) like everyone else (needs -d)\n"
+        "      --restrict KEY              limit it again\n"
+        "      --forget KEY                forget it (it is remembered again if it uses an invite)\n"
+        "  KEY is a device key or its first 8+ characters, as --list-invited shows. A running server applies\n"
+        "  the change within a few seconds.\n");
+}
+
+static int ListInvited(const std::string& dir, bool asJson) {
+    std::ifstream f(dir + "/invited.json");
+    nlohmann::json j = nlohmann::json::object();
+    if (f) j = nlohmann::json::parse(f, nullptr, false);
+    nlohmann::json out = nlohmann::json::array();
+    nlohmann::json devs = j.is_object() ? j.value("devices", nlohmann::json::object()) : nlohmann::json::object();
+    if (devs.is_object())
+        for (auto& [pub, v] : devs.items()) {
+            if (!v.is_object()) continue;
+            nlohmann::json e = v;
+            e["key"] = pub;
+            out.push_back(e);
+        }
+    if (asJson) {
+        printf("%s\n", out.dump().c_str());
+        return 0;
+    }
+    if (out.empty()) printf("no one has joined with an invite\n");
+    for (auto& e : out) {
+        auto day = [](int64_t ms) {
+            char b[32] = "-";
+            time_t t = (time_t)(ms / 1000);
+            if (ms > 0) strftime(b, sizeof(b), "%Y-%m-%d", localtime(&t));
+            return std::string(b);
+        };
+        printf("%s  %-10s  %-24s invited by %-20s first %s  last %s\n", e.value("key", "").substr(0, 16).c_str(),
+               e.value("released", false) ? "released" : "limited", e.value("name", "").c_str(),
+               e.value("by", "").empty() ? "?" : e.value("by", "").c_str(), day(e.value("first", (int64_t)0)).c_str(),
+               day(e.value("last", (int64_t)0)).c_str());
+    }
+    return 0;
 }
 
 int main(int argc, char** argv) {
     ls::RendezvousServer::Options o;
-    bool quiet = false;
+    bool quiet = false, listInv = false, asJson = false;
+    std::vector<std::string> adminCmds;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
@@ -51,6 +96,15 @@ int main(int argc, char** argv) {
         else if (a == "--mailbox-days") o.mailboxDays = std::max(1, atoi(next().c_str()));
         else if (a == "--mailbox-mb") o.mailboxMB = std::max(1, atoi(next().c_str()));
         else if (a == "--mailbox-total-mb") o.mailboxTotalMB = std::max(1, atoi(next().c_str()));
+        else if (a == "--list-invited") listInv = true;
+        else if (a == "--json") asJson = true;
+        else if (a == "--release" || a == "--restrict" || a == "--forget") {
+            std::string k = next();
+            bool ok = k.size() >= 8 && k.size() <= 64;
+            for (char c : k) ok &= isxdigit((unsigned char)c) != 0;
+            if (!ok) { fprintf(stderr, "%s needs a device key (8 or more hex characters)\n", a.c_str()); return 1; }
+            adminCmds.push_back(a.substr(2) + " " + k);
+        }
         else if (a == "--hash-room" && i + 2 < argc) {
             printf("%s\n", ls::RoomHash(argv[i + 1], argv[i + 2]).c_str());
             return 0;
@@ -76,6 +130,16 @@ int main(int argc, char** argv) {
             Usage();
             return 1;
         }
+    }
+    if (listInv || !adminCmds.empty()) {
+        if (o.dataDir.empty()) { fprintf(stderr, "give the server's data directory with -d\n"); return 1; }
+        if (!adminCmds.empty()) {
+            std::ofstream f(o.dataDir + "/invited-cmd", std::ios::app);
+            for (auto& c : adminCmds) f << c << "\n";
+            if (!f) { fprintf(stderr, "cannot write to %s\n", o.dataDir.c_str()); return 1; }
+            printf("done - a running server applies it within a few seconds\n");
+        }
+        return listInv ? ListInvited(o.dataDir, asJson) : 0;
     }
     if (!quiet)
         o.log = [](const std::string& m) {

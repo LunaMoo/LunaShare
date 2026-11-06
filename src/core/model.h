@@ -27,7 +27,8 @@ struct WanLink {
     std::string secret;  // 32 random bytes, hex (the token sent to the server is a hash of it)
     std::string label;   // who it is for / from
     int64_t created = 0;
-    bool operator==(const WanLink& o) const { return secret == o.secret && label == o.label && created == o.created; }
+    bool mine = true;    // I made the code (false: someone else's invite I used)
+    bool operator==(const WanLink& o) const { return secret == o.secret && label == o.label && created == o.created && mine == o.mine; }
 };
 
 // What we know about someone else's account (from their signed device list).

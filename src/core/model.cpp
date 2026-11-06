@@ -72,7 +72,7 @@ json ToJson(const Settings& s, bool withIdentity) {
     j["wanHidden"] = s.wanHidden;
     j["wanFromInvite"] = s.wanFromInvite;
     json wl = json::array();
-    for (auto& l : s.wanLinks) wl.push_back({{"k", l.secret}, {"n", l.label}, {"ts", l.created}});
+    for (auto& l : s.wanLinks) wl.push_back({{"k", l.secret}, {"n", l.label}, {"ts", l.created}, {"m", l.mine}});
     j["wanLinks"] = wl;
     if (withIdentity) {
         j["deviceId"] = s.deviceId;
@@ -117,6 +117,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
             Get(l, "k", w.secret);
             Get(l, "n", w.label);
             Get(l, "ts", w.created);
+            w.mine = !s.wanFromInvite;  // (1.2.5/1.2.6 didn't say)
+            Get(l, "m", w.mine);
             if (w.secret.size() == 64) s.wanLinks.push_back(w);
         }
     }

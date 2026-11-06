@@ -3897,6 +3897,7 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
                 l.secret = secret;
                 l.label = name;
                 l.created = NowMs();
+                l.mine = false;
                 edit.wanLinks.push_back(l);
                 changed = true;
             }

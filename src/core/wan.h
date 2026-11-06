@@ -58,6 +58,7 @@ public:
         bool relay = true;        // allow the server to relay when a direct connection fails
         bool hidden = false;      // not listed in the room, except to my account's devices
         std::vector<std::string> links;  // private link tokens (LinkToken)
+        std::vector<std::string> inv;    // ...of those, the ones from someone else's invite (the server remembers me as invited)
     };
     using OnPeers = std::function<void(const std::vector<WanPeer>&)>;
     using OnSocket = std::function<void(SocketHandle s, const std::string& peerId, const std::string& addr, bool initiator)>;

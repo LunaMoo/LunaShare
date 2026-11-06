@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.7
+
+- **The server remembers invited people:** a device that joined with an invite code (and its account's other
+  devices) stays limited to the people who invited it, even if it later enters the server's address by hand: it sees
+  no one else, isn't listed in rooms, can't use usernames and can't invite others to the server. The admin can release
+  someone (OPNsense: a new list with *Release* buttons; elsewhere `--list-invited` / `--release KEY`).
+- The OPNsense plugin now always gives the server a data directory (needed to remember them).
+
 ## 1.2.6
 
 - **Invite-joined devices don't see your server:** when someone joins with your invite code, the app doesn't show the

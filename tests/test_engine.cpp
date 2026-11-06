@@ -6,6 +6,7 @@
 #include <memory>
 #include <random>
 #include <atomic>
+#include <fstream>
 #include <thread>
 
 #include "crypto.h"
@@ -1066,25 +1067,42 @@ int main() {
         {
             // L invites A and B. A and B are hidden in the same room "pub" with C (not hidden):
             // L sees A and B, each of them sees L, but A and B never see each other; C sees neither.
-            auto L = MakeEngine("lina", 48176, true, false, false, false, "127.0.0.1:48190", "lroom");
-            auto A = MakeEngine("adam", 48177, true, false, false, false, "127.0.0.1:48190", "pub");
-            auto B = MakeEngine("bea", 48178, true, false, false, false, "127.0.0.1:48190", "pub");
+            RendezvousServer ps;
+            RendezvousServer::Options po;
+            po.bind = "127.0.0.1";
+            po.port = 48196;
+            po.dataDir = JoinPath(Root(), "privserver");
+            CHECK(ps.Start(po, &err), "server for private links");
+            const std::string srvAddr = "127.0.0.1:48196";
+            auto L = MakeEngine("lina", 48181, true, false, false, false, srvAddr, "lroom");
+            auto A = MakeEngine("adam", 48182, true, false, false, false, srvAddr, "pub");
+            auto B = MakeEngine("bea", 48183, true, false, false, false, srvAddr, "pub");
             std::string idL = L->settings.deviceId, idA = A->settings.deviceId, idB = B->settings.deviceId;
             std::string kA(64, 'a'), kB(64, 'b');
-            std::string code = MakeInviteCode("127.0.0.1:48190", kA, "lina"), s1, k1, n1;
-            CHECK(ParseInviteCode(" " + code.substr(0, 10) + "\n" + code.substr(10), s1, k1, n1) && s1 == "127.0.0.1:48190" && k1 == kA && n1 == "lina",
+            std::string code = MakeInviteCode(srvAddr, kA, "lina"), s1, k1, n1;
+            CHECK(ParseInviteCode(" " + code.substr(0, 10) + "\n" + code.substr(10), s1, k1, n1) && s1 == srvAddr && k1 == kA && n1 == "lina",
                   "invite code round trip");
             CHECK(!ParseInviteCode("LSI1-xyz", s1, k1, n1), "bad invite code refused");
-            auto withLinks = [](Engine& e, bool hidden, std::vector<std::string> keys) {
+            auto setLinks = [](Engine& e, bool hidden, std::vector<std::string> keys, bool mine, const std::string& room) {
                 auto lk = e.Lock();
                 Settings s = e.settings;
                 s.wanHidden = hidden;
-                for (auto& k : keys) s.wanLinks.push_back({k, "x", NowMs()});
+                s.wanLinks.clear();
+                for (auto& k : keys) {
+                    WanLink w;
+                    w.secret = k;
+                    w.label = "x";
+                    w.created = NowMs();
+                    w.mine = mine;
+                    s.wanLinks.push_back(w);
+                }
+                s.wanRoom = room;
                 e.ApplySettings(s);
             };
-            withLinks(*L, false, {kA, kB});
-            withLinks(*A, true, {kA});
-            withLinks(*B, true, {kB});
+            setLinks(*L, false, {kA, kB}, true, "lroom");
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));  // (the inviter registers its codes first)
+            setLinks(*A, true, {kA}, false, "pub");
+            setLinks(*B, true, {kB}, false, "pub");
             auto sees = [](Engine& e, const std::string& id) {
                 auto l = e.Lock();
                 auto it = e.online.find(id);
@@ -1092,22 +1110,36 @@ int main() {
             };
             CHECK(WaitFor([&] { return sees(*L, idA) && sees(*L, idB) && sees(*A, idL) && sees(*B, idL); }, 8000),
                   "linked devices find each other across rooms (L: %s)", L->WanStatus().c_str());
-            auto C = MakeEngine("cyd", 48179, true, false, false, false, "127.0.0.1:48190", "pub");  // (after A and B hid)
+            auto C = MakeEngine("cyd", 48184, true, false, false, false, srvAddr, "pub");  // (after A and B hid)
             std::string idC = C->settings.deviceId;
-            CHECK(WaitFor([&] { return sees(*A, idC) && sees(*B, idC); }, 5000), "hidden devices still see their room");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+            CHECK(!sees(*A, idC) && !sees(*B, idC), "invited devices see no one but their links");
             CHECK(!sees(*A, idB) && !sees(*B, idA), "people invited separately don't see each other");
-            CHECK(!sees(*C, idA) && !sees(*C, idB), "hidden devices aren't listed in the room");
+            CHECK(!sees(*C, idA) && !sees(*C, idB), "invited devices aren't listed in the room");
             CHECK(WaitFor([&] {
                 auto c = L->ReadyConn(idA);
                 return c && c->transport == Transport::Internet && A->IsConnected(idL);
             }, 10000), "connection through a link");
             L->SendChat(idA, "private hello");
             CHECK(WaitFor([&] { auto l = A->Lock(); return !A->chats[A->ChatKey(idL)].messages.empty(); }, 5000), "chat through a link");
+            // A drops the invite and enters the server by hand, in C's room, not hidden: the server still remembers A
+            setLinks(*A, false, {}, true, "pub");
+            std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+            CHECK(!sees(*A, idC) && !sees(*C, idA), "remembered as invited after entering the server by hand");
+            json inv;
+            CHECK(LoadJsonFile(JoinPath(po.dataDir, "invited.json"), inv) && inv["devices"].size() == 2, "invited devices saved (%s)",
+                  inv.dump().c_str());
+            // the admin releases A: an ordinary device again
+            std::string pubA;
+            for (auto& [pub, v] : inv["devices"].items())
+                if (v.value("id", "") == idA) pubA = pub;
+            std::ofstream(JoinPath(po.dataDir, "invited-cmd")) << "release " << pubA.substr(0, 12) << "\n";
+            CHECK(WaitFor([&] { return sees(*A, idC) && sees(*C, idA); }, 25000), "released by the admin");
             L->Stop();
             A->Stop();
             B->Stop();
             C->Stop();
+            ps.Stop();
         }
         // relay: when no direct path works, the server carries the (encrypted) packets
 #ifdef _WIN32

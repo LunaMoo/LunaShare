@@ -87,6 +87,16 @@ invite codes to it; that device gets a room of its own, so it sees no one on the
 secrecy: the device has to know the address to connect, so a determined person can still find it, e.g. by
 decoding the invite code or watching their network traffic.)
 
+**The server remembers who joined with an invite** (by device key, and by account so their other devices count
+too), in `invited.json` in its data directory. Such a device stays limited even if the person later removes the
+invite and enters the server's address by hand: it sees and reaches only the people whose invites it used and its own
+account's devices, is never listed in any room, can't use usernames, and codes it makes for this server don't work.
+To treat someone like everyone else, release them: on OPNsense under *Services → LunaShare rendezvous → People who
+joined with an invite code*; elsewhere with `lunashare-rendezvous -d DIR --list-invited` and
+`lunashare-rendezvous -d DIR --release KEY` (`--restrict KEY` limits them again). A running server applies the change
+within a few seconds. (Someone who installs the app afresh gets a new device key and isn't recognised, unless they
+restore their account.)
+
 Things that still connect people: putting them in the same group, and being on the same local network (they then find
 each other there like any devices). Private contacts need an up-to-date server (1.2.5 or later); the settings show a
 warning when it is older.

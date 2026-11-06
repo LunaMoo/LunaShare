@@ -2592,7 +2592,10 @@ void Engine::StartWan() {
         cfg.localPort = (uint16_t)std::clamp(settings.wanLocalPort, 0, 65535);
         cfg.forwardedPort = (uint16_t)std::clamp(settings.wanForwardedPort, 0, 65535);
         cfg.hidden = settings.wanHidden;
-        for (auto& l : settings.wanLinks) cfg.links.push_back(LinkToken(l.secret));
+        for (auto& l : settings.wanLinks) {
+            cfg.links.push_back(LinkToken(l.secret));
+            if (!l.mine) cfg.inv.push_back(cfg.links.back());
+        }
         for (auto& [id, p] : online) p.lastWan = 0;
     }
     wan_.Stop();
