@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.9
+
+- Phones: the *Create invite code* and *Use code* buttons go under their fields on narrow screens instead of past the
+  right edge, where they couldn't be seen.
+
 ## 1.2.8
 
 - **Invited devices stay limited after reinstalling:** devices send the server a per-server fingerprint of the computer

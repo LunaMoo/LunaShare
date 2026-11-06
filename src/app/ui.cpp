@@ -3910,7 +3910,8 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
     }
     ImGui::SetNextItemWidth(fieldW * 0.6f);
     ImGui::InputTextWithHint("##inviteFor", T("for whom (only you see it)"), &forWhom);
-    ImGui::SameLine();
+    // (narrow phone screens: the button goes under the field instead of off the edge)
+    if (ImGui::GetContentRegionAvail().x - ImGui::GetItemRectSize().x > ImGui::CalcTextSize(T("Create invite code")).x + 40) ImGui::SameLine();
     bool needName = roomSel == nRooms + 1 && newRoom.empty();
     ImGui::BeginDisabled(edit.wanServer.empty() || needName);
     if (ImGui::Button(T("Create invite code"), ImVec2(0, h))) {
@@ -3944,7 +3945,7 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
 
     ImGui::SetNextItemWidth(fieldW * 0.6f);
     ImGui::InputTextWithHint("##inviteCode", T("invite code you got (LSI1-...)"), &code);
-    ImGui::SameLine();
+    if (ImGui::GetContentRegionAvail().x - ImGui::GetItemRectSize().x > ImGui::CalcTextSize(T("Use code")).x + 40) ImGui::SameLine();
     if (ImGui::Button(T("Use code"), ImVec2(0, h))) {
         InviteInfo ii;
         bool parsed = ParseInviteCode(code, ii);
