@@ -801,9 +801,20 @@ int ApiSubtitle(LspPlayer* p, LspSubtitle* out) {
     return p->subSerial;
 }
 
-const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.2", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
+int ApiTags(const char* path, LspTags* out, LspCoverFn cover, void* user) {
+    if (!path || !out) return 0;
+#if defined(LSP_FF_SIDE) || !defined(__ANDROID__)
+    return ReadTags(path, out, cover, user) ? 1 : 0;
+#else
+    (void)cover;
+    (void)user;
+    return 0;
+#endif
+}
+
+const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.3", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
                            ApiSeek, ApiReadAudio, ApiVideoFrame, ApiPosition, ApiState, ApiOpenStream,
-                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle};
+                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags};
 
 }  // namespace
 }  // namespace lsp

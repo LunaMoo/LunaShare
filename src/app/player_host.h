@@ -18,6 +18,7 @@ class PlayerHost {
 public:
     bool Load();
     bool Available() const { return mod_ != nullptr; }
+    const LspModule* Module() const { return mod_; }
     std::string loadInfo;
     void Shutdown();
     void Update();  // UI thread, once per frame

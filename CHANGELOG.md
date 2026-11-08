@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.0
+
+- **Music player** (*Music* tab; *Music player* on a phone's main screen), see docs/MUSIC.md:
+  - a library of your music folders, plus everything you receive; tags and covers read from the files (or
+    `cover.jpg` next to them);
+  - songs, artists, albums, genres, folders and your own playlists; search and sorting;
+  - repeat (the list or one song) and shuffle; a mini player at the bottom of every screen;
+  - plays on in the background: on Android with the media notification, lock screen, headset buttons and pausing
+    for calls; on Windows with the keyboard's media keys;
+  - pauses for movies, calls and voice messages and goes on afterwards;
+  - send songs, selections, whole albums (as a folder) or playlists to people and groups.
+- Android: sound in the background is no longer cut off by the system pausing the app's audio (calls in the
+  background keep their sound too); a movie or chat video pauses when the app goes to the background.
+
 ## 1.4.1
 
 - Loop: the movie no longer stands still for about two seconds when it starts again on the device that plays it

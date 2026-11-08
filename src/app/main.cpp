@@ -18,6 +18,7 @@
 #include "ui_widgets.h"
 #include "media_host.h"
 #include "player_host.h"
+#include "music.h"
 #include "emoji_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
@@ -252,6 +253,8 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait PortraitUpsideDown LandscapeLeft LandscapeRight");
+    // Android: sound goes on in the background (music, calls); a movie or a chat video is paused on its own
+    SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE_PAUSEAUDIO, "0");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
         printf("SDL_Init failed: %s\n", SDL_GetError());
         return 1;
@@ -365,6 +368,20 @@ int main(int argc, char** argv) {
     Media().Load();          // optional calls module; must happen before Start() so the capability is announced
     Media().Attach(&engine);
     engine.Start();
+    // the music player (its own audio device and thread: it plays on in the background)
+    music::Lib().Init(engine.ConfigPath(), Player().Module());
+    music::Play().Init(Player().Module(), &music::Lib());
+    music::Play().LoadState(music::Lib().StatePath());
+    music::Play().onChange = [] {
+        static Uint32 ev = SDL_RegisterEvents(1);
+        SDL_Event e{};
+        e.type = ev;
+        if (ev != (Uint32)-1) SDL_PushEvent(&e);  // (the UI shows it)
+        if (ls::Bridge().musicState) {
+            music::Now n = music::Play().GetNow();
+            ls::Bridge().musicState(n.active, n.playing, n.track.title, n.track.artist, n.track.album, n.track.cover, n.dur, n.pos);
+        }
+    };
 #if defined(__ANDROID__)
     {
         // first start: use the phone's model name instead of "user@android"
@@ -445,6 +462,9 @@ int main(int argc, char** argv) {
                 case SDL_APP_WILLENTERBACKGROUND:
                 case SDL_APP_DIDENTERBACKGROUND:
                     notify::SetBackground(true);  // engine keeps running (background service); notifications from now on
+#if defined(__ANDROID__)
+                    if (Player().Playing()) Player().Pause();  // (a movie / chat video; music plays on)
+#endif
                     break;
                 case SDL_APP_WILLENTERFOREGROUND:
                 case SDL_APP_DIDENTERFOREGROUND:
@@ -585,6 +605,9 @@ int main(int argc, char** argv) {
     AndroidBridgeShutdown();
     engine.onEvent = nullptr;
     engine.LeaveWatch();  // (unblocks a movie still being read from another device)
+    music::Play().onChange = nullptr;
+    music::Play().Shutdown();
+    music::Lib().Shutdown();
     Player().Shutdown();
     Media().Shutdown();
     engine.Stop();

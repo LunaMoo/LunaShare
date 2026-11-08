@@ -49,6 +49,12 @@ after receiving, so you know it arrived intact.
 - Pick the sound track and subtitles (from the movie, from files next to it, or any file you choose); the host's
   subtitles are offered to everyone. Full screen with controls that hide by themselves; phones turn to landscape.
 
+**Music player** (see [docs/MUSIC.md](docs/MUSIC.md))
+- Your music folders and everything you receive, with tags and covers; songs, artists, albums, genres, folders and
+  your own playlists; repeat, shuffle, a mini player everywhere.
+- Plays on in the background (Android: media notification, lock screen, headset buttons; Windows: media keys) and
+  pauses for movies and calls. Send songs or whole albums (as a folder) to people.
+
 **Library (Shared folders)** (see [docs/LIBRARY.md](docs/LIBRARY.md))
 - Files in your *Shared* folder can be browsed and downloaded by your contacts. A download comes from every contact
   that has the file at once (piece by piece, each piece verified), and you then share it on.

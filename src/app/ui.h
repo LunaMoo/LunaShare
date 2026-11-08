@@ -1,5 +1,6 @@
 // LunaShare user interface (Dear ImGui). Desktop: sidebar + tabs. Mobile: vertical screens with big buttons.
 #pragma once
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -8,6 +9,7 @@
 #include "lunashare_video.h"
 #include "file_browser.h"
 #include "imgui.h"
+#include "music.h"
 
 class App {
 public:
@@ -32,8 +34,8 @@ public:
     int styleGeneration = 0;
 
 private:
-    enum class Tab { Chat, Transfers, History, Library, Devices, Nearby, Settings };
-    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library };
+    enum class Tab { Chat, Transfers, History, Library, Music, Devices, Nearby, Settings };
+    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music };
 
     struct Toast {
         ls::EventType type;
@@ -85,6 +87,28 @@ private:
     void DrawWatchBanner(const std::string& peer);
     void OpenWatchPicker(const std::string& peer);
     void OpenMoviePlayer();                 // the movie player: a movie alone (people can be added later)
+    // ---- music (ui_music.cpp)
+    void DrawMusic();
+    void DrawMusicNow(bool big);
+    void DrawMusicMini();
+    void MusicRefresh();
+    const music::Track* MusicTrack(const std::string& path);
+    void MusicTrackList(const std::vector<const music::Track*>& list, const std::string& playlistId, bool showAlbum);
+    void MusicTrackMenu(const std::string& path, const std::string& playlistId, int playlistIndex);
+    void MusicGroupButtons(const std::vector<const music::Track*>& list, const std::string& sendFolder);
+    void MusicSend(const std::vector<std::string>& paths, const std::string& folder);
+    void MusicSendPopup();
+    void MusicPlaylistPopup();
+    std::vector<music::Track> musicTracks;
+    std::map<std::string, int> musicByPath;
+    uint64_t musicVer = 0;
+    int musicView = 0, musicSort = 0;
+    std::string musicSearch, musicGroup, musicSendName, musicNewName;
+    std::set<std::string> musicSel;
+    std::vector<std::pair<std::string, std::string>> musicSendFiles;
+    std::vector<std::string> musicAddPaths;
+    bool musicSendOpen = false, musicAddOpen = false, musicNowShown = false;
+    float musicDrag = -1;
     void DrawWatchResume();                 // "the movie is on" strip outside its chat (movie player, library)
     void WatchAddPopup();                   // host: add a person / group to the movie
     void ToggleLoop();                      // chats: videos and audio start again at the end
@@ -185,7 +209,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

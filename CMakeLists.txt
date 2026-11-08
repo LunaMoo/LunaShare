@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LunaShare VERSION 1.4.1 LANGUAGES C CXX)
+project(LunaShare VERSION 1.5.0 LANGUAGES C CXX)
 add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -332,6 +332,8 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_library.cpp
         src/app/ui_groups.cpp
         src/app/ui_watch.cpp
+        src/app/ui_music.cpp
+        src/app/music.cpp
         src/app/notify.cpp
         src/app/tray.cpp
         src/app/image_cache.cpp

@@ -131,6 +131,14 @@ void App::Frame() {
         if (m.mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
         if (*autoGroup == 'm') OpenGroupMembers(selectedPeer);
     }
+    static const char* devMusic = getenv("LUNASHARE_MUSICPLAY");  // dev: play the library's first song (screenshots)
+    if (devMusic && ImGui::GetFrameCount() > 60 && !music::Play().GetNow().active) {
+        MusicRefresh();
+        std::vector<std::string> p;
+        for (auto& t : musicTracks) p.push_back(t.path);
+        std::sort(p.begin(), p.end());
+        if (!p.empty()) music::Play().PlayList(p, 0);
+    }
     static const char* autoScreen = getenv("LUNASHARE_SCREEN");
     static bool autoScreenDone = false;
     if (autoScreen && !autoScreenDone) {
@@ -142,6 +150,7 @@ void App::Frame() {
         if (a == "nearby") { tab = Tab::Nearby; screen = MScreen::Nearby; }
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
+        if (a == "music" || a == "musicnow") { tab = Tab::Music; screen = MScreen::Music; musicNowShown = a == "musicnow"; }
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
         autoSel = nullptr;
@@ -235,6 +244,16 @@ void App::Frame() {
         if (t->state == TState::Active || t->state == TState::Hashing || t->state == TState::Verifying) busy = true;
     for (auto& [peer, cv] : eng.chats) unread += cv.unread;
     if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing() || eng.watch.sid) busy = true;  // keep the timer / seek bar moving
+    {
+        // music: received files count as music too; it pauses for a movie, a call, a recording or chat audio, and
+        // goes on afterwards
+        music::Lib().SetImplicitFolders({eng.settings.downloadDir});
+        bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
+        music::Play().SetInterrupted(interrupt);
+        music::Now mn = music::Play().GetNow();
+        music::MediaKeys(mn.active);
+        if (mn.playing) busy = true;
+    }
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 
     ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -317,6 +336,7 @@ void App::PullEvents() {
                 wantAttention = true;
                 break;
             case EventType::TransferDone:
+                if (music::Library::IsAudioPath(e.text)) music::Lib().Rescan();  // (received music joins the library)
                 if (eng.ChatKey(e.peer) == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !ui::M().mobile) continue;
                 t.title = T("Transfer complete (verified)");
                 t.text = e.text + (who.empty() ? "" : "  -  " + who);
@@ -718,6 +738,7 @@ void App::DrawDesktop() {
         item(tl.c_str(), Tab::Transfers);
         item(T("History"), Tab::History);
         item(T("Library"), Tab::Library);
+        item(T("Music"), Tab::Music);
         item(T("Devices"), Tab::Devices);
         item(T("Connect"), Tab::Nearby);
         item(T("Settings"), Tab::Settings);
@@ -741,6 +762,7 @@ void App::DrawDesktop() {
         case Tab::Transfers: DrawTransfers(); break;
         case Tab::History: DrawHistory(); break;
         case Tab::Library: DrawLibrary(); break;
+        case Tab::Music: DrawMusic(); break;
         case Tab::Devices: DrawDevices(); break;
         case Tab::Nearby: DrawNearby(); break;
         case Tab::Settings: DrawSettings(); break;
@@ -765,7 +787,8 @@ void App::DrawSidebar() {
     if (eng.watch.sid && (eng.watch.key.empty() || eng.watch.key != selectedPeer)) DrawWatchResume();
     ImGui::Separator();
     auto peers = SortedPeers();
-    float footer = ImGui::GetFrameHeightWithSpacing() * 2.2f;
+    bool mini = music::Play().GetNow().active;
+    float footer = ImGui::GetFrameHeightWithSpacing() * 2.2f + (mini ? ImGui::GetFrameHeight() * 1.9f + ImGui::GetStyle().ItemSpacing.y * 2 : 0);
     ImGui::BeginChild("peers", ImVec2(0, -footer));
     if (peers.empty()) {
         ImGui::PushTextWrapPos(0);
@@ -780,6 +803,7 @@ void App::DrawSidebar() {
         }
     }
     ImGui::EndChild();
+    if (mini) DrawMusicMini();
     ImGui::Separator();
     {
         float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
@@ -824,6 +848,7 @@ void App::DrawMobile() {
         case MScreen::Transfers: title = T("Transfers"); break;
         case MScreen::History: title = T("Shared files"); break;
         case MScreen::Library: title = T("Library"); break;
+        case MScreen::Music: title = T("Music"); break;
         case MScreen::Nearby: title = T("Connect"); break;
         case MScreen::Settings: title = T("Settings"); break;
         case MScreen::Devices: title = T("Device"); break;
@@ -894,13 +919,17 @@ void App::DrawMobile() {
     ImGui::Separator();
 
     float navH = (screen == MScreen::Chat || keyboardInset > 0) ? 0 : rowH * 1.25f + ImGui::GetStyle().ItemSpacing.y;
-    ImGui::BeginChild("mcontent", ImVec2(0, -navH));
+    // the music strip above the navigation (not in a chat - its text box is there - nor on the music screen itself)
+    bool mini = navH > 0 && screen != MScreen::Music && music::Play().GetNow().active;
+    float miniH = mini ? rowH * 0.95f + ImGui::GetStyle().ItemSpacing.y * 2 : 0;
+    ImGui::BeginChild("mcontent", ImVec2(0, -navH - miniH));
     switch (screen) {
         case MScreen::Home: DrawMobileHome(); break;
         case MScreen::Chat: DrawChat(selectedPeer); break;
         case MScreen::Transfers: DrawTransfers(); break;
         case MScreen::History: DrawHistory(); break;
         case MScreen::Library: DrawLibrary(); break;
+        case MScreen::Music: DrawMusic(); break;
         case MScreen::Nearby: DrawNearby(); break;
         case MScreen::Settings: DrawSettings(); break;
         case MScreen::Devices:
@@ -909,6 +938,7 @@ void App::DrawMobile() {
             break;
     }
     ImGui::EndChild();
+    if (mini) DrawMusicMini();
     if (navH > 0) DrawMobileNav();
 }
 
@@ -939,6 +969,11 @@ void App::DrawMobileHome() {
         if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Link)) ImGui::OpenPopup("##invites");
     }
     if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMoviePlayer();
+    if (Player().Available() && ui::BigButton(T("Music player"), Icon::Speaker)) {
+        backStack.push_back(screen);
+        screen = MScreen::Music;
+        musicNowShown = false;
+    }
     DrawWatchResume();
     DrawInvitesPopup();
 }
@@ -2896,6 +2931,9 @@ void App::DrawPopups() {
             }
             case BrowseFor::Watch:
                 if (!selectedPeer.empty() && !res.empty() && eng.StartWatch(selectedPeer, res[0])) watchShown = true;
+                break;
+            case BrowseFor::MusicFolder:
+                if (!res.empty()) music::Lib().AddFolder(res[0]);
                 break;
             case BrowseFor::Movie:
                 if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;

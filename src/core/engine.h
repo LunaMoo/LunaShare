@@ -234,6 +234,8 @@ public:
     void SendChat(const std::string& peer, const std::string& text);
     // Paths may be files or folders. Returns batch id (0 if nothing was queued).
     uint64_t SendPaths(const std::string& peer, const std::vector<std::string>& paths);
+    // files with the relative path each gets at the other side ("Album/01 Song.mp3"): a folder made up on the way
+    uint64_t SendFileList(const std::string& peer, const std::vector<std::pair<std::string, std::string>>& files, const std::string& batchName);
     void Accept(uint64_t tid);
     void AcceptBatch(uint64_t batch);
     void Reject(uint64_t tid);

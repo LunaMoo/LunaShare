@@ -678,6 +678,42 @@ private:
 
 }  // namespace
 
+bool ReadTags(const std::string& path, LspTags* out, LspCoverFn cover, void* user) {
+    if (!LoadFf(nullptr)) return false;
+    AVFormatContext* fmt = nullptr;
+    if (A.open_input(&fmt, path.c_str(), nullptr, nullptr) < 0) return false;
+    A.find_stream_info(fmt, nullptr);
+    memset(out, 0, sizeof(*out));
+    auto get = [&](const char* key, char* dst, size_t n) {
+        const AVDictionaryEntry* e = A.dict_get(fmt->metadata, key, nullptr, 0);  // AV_DICT_MATCH_CASE off: any case
+        for (unsigned i = 0; !e && i < fmt->nb_streams; i++) e = A.dict_get(fmt->streams[i]->metadata, key, nullptr, 0);
+        if (e && e->value && !dst[0]) snprintf(dst, n, "%s", e->value);
+    };
+    get("title", out->title, sizeof(out->title));
+    get("artist", out->artist, sizeof(out->artist));
+    get("album", out->album, sizeof(out->album));
+    get("album_artist", out->album_artist, sizeof(out->album_artist));
+    get("genre", out->genre, sizeof(out->genre));
+    get("date", out->date, sizeof(out->date));
+    char tr[32] = {0}, ds[32] = {0};
+    get("track", tr, sizeof(tr));
+    get("disc", ds, sizeof(ds));
+    out->track = atoi(tr);  // ("3/12" -> 3)
+    out->disc = atoi(ds);
+    if (fmt->duration > 0) out->duration = (double)fmt->duration / AV_TIME_BASE;
+    bool audio = false;
+    for (unsigned i = 0; i < fmt->nb_streams; i++) {
+        AVStream* st = fmt->streams[i];
+        if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) audio = true;
+        if (cover && (st->disposition & AV_DISPOSITION_ATTACHED_PIC) && st->attached_pic.data && st->attached_pic.size > 0) {
+            cover(user, st->attached_pic.data, st->attached_pic.size);
+            cover = nullptr;  // (the first one)
+        }
+    }
+    A.close_input(&fmt);
+    return audio;
+}
+
 #ifdef LSP_FF_SIDE
 // Android: FFmpeg reads sound and subtitles next to the platform's video decoder (player_android.cpp)
 bool InitFf(std::string* err) { return LoadFf(err); }

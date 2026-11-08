@@ -54,5 +54,7 @@ bool InitFf(std::string* err);
 std::unique_ptr<Source> CreateFfSource();  // sound and subtitles only
 #endif
 bool InitBackend(const LspHost* host, std::string* err);
+// music tags + embedded cover through FFmpeg (where it's there: computers, Android with the FFmpeg side)
+bool ReadTags(const std::string& path, LspTags* out, LspCoverFn cover, void* user);
 
 }  // namespace lsp

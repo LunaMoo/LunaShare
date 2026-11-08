@@ -35,6 +35,7 @@
     <!-- running in the background: messages and calls (see BackgroundService) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
@@ -69,6 +70,10 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the connection to the user's own LunaShare server so messages and calls arrive while the app is in the background" />
         </service>
         <receiver android:name="org.lunamoo.lunashare.CallActionReceiver" android:exported="false" />
+        <service
+            android:name="org.lunamoo.lunashare.MusicService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

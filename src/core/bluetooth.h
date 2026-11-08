@@ -40,6 +40,10 @@ struct HostBridge {
     std::function<void(const std::string& key, const std::string& title, bool video, const std::string& avatar)> notifyCall;
     std::function<void()> cancelCallNotification;
     std::function<void(bool on)> backgroundService;   // Android foreground service (keeps the process connected)
+    // the music player's state for the system (Android: media notification, lock screen, headset buttons)
+    std::function<void(bool active, bool playing, const std::string& title, const std::string& artist, const std::string& album,
+                       const std::string& cover, double dur, double pos)>
+        musicState;
     std::function<bool()> batteryRestricted;          // Android: battery optimisation may cut the network
     std::function<void()> requestBatteryExemption;
     std::function<void()> moveToBack;                 // Android: back on the home screen -> background, don't close

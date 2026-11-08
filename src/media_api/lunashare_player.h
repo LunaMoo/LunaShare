@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSP_API_VERSION 3
+#define LSP_API_VERSION 4
 
 #if defined(_WIN32)
 #define LSP_EXPORT __declspec(dllexport)
@@ -80,6 +80,15 @@ typedef struct LspSubtitle {
     float x, y, sw, sh;     /* where the picture goes, as fractions of the video picture */
 } LspSubtitle;
 
+/* since version 4: what a music file says about itself (tags), for the music player's library */
+typedef struct LspTags {
+    char title[256], artist[256], album[256], album_artist[256], genre[128], date[32];
+    int track, disc;     /* 0 = unknown */
+    double duration;     /* seconds */
+} LspTags;
+/* the picture inside the file (album cover), as it is stored: JPEG or PNG bytes */
+typedef void (*LspCoverFn)(void* user, const uint8_t* data, int size);
+
 typedef struct LspModule {
     int api_version;
     const char* name;
@@ -106,6 +115,8 @@ typedef struct LspModule {
     int (*add_subtitles)(LspPlayer* p, const char* path_utf8);  /* .srt / .ass / .ssa / .vtt; returns its track id, -1 = can't read */
     /* UI thread: the subtitle for the current position; returns a number that changes whenever it does */
     int (*subtitle)(LspPlayer* p, LspSubtitle* out);
+    /* --- since version 4: tags and cover of an audio file (any thread); 0 = can't read it */
+    int (*tags)(const char* path_utf8, LspTags* out, LspCoverFn cover, void* user);
 } LspModule;
 
 typedef const LspModule* (*LspGetModuleFn)(void);

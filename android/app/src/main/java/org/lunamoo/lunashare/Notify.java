@@ -20,7 +20,7 @@ import android.provider.Settings;
  * keeps LunaShare connected to the user's server (see BackgroundService). Called from native code (any thread).
  */
 public final class Notify {
-    static final String CH_MESSAGES = "messages", CH_CALLS = "calls2", CH_SERVICE = "background";
+    static final String CH_MESSAGES = "messages", CH_CALLS = "calls2", CH_SERVICE = "background", CH_MUSIC = "music";
     static final String ACTION_OPEN = "org.lunamoo.lunashare.OPEN", ACTION_ANSWER = "org.lunamoo.lunashare.ANSWER",
                         ACTION_DECLINE = "org.lunamoo.lunashare.DECLINE", ACTION_CALL = "org.lunamoo.lunashare.CALL";
     static final int ID_CALL = 2, ID_SERVICE = 1;
@@ -51,6 +51,11 @@ public final class Notify {
         svc.setDescription("Keeps LunaShare connected for messages and calls. You can hide this notification.");
         svc.setShowBadge(false);
         m.createNotificationChannel(svc);
+        NotificationChannel mus = new NotificationChannel(CH_MUSIC, "Music", NotificationManager.IMPORTANCE_LOW);
+        mus.setDescription("The music player: what's playing, with its buttons");
+        mus.setShowBadge(false);
+        mus.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        m.createNotificationChannel(mus);
     }
 
     static Notification.Builder builder(Context c, String channel) {

@@ -2924,12 +2924,20 @@ uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::strin
         else if (FileExists(p)) files.emplace_back(p, BaseName(p));
     }
     if (files.empty()) return 0;
-    uint64_t batch = RandomU64();
     std::string batchName;
     if (paths.size() == 1) batchName = BaseName(paths[0]);
     if (batchName.empty() || files.size() > 1)
         batchName = (paths.size() == 1 ? batchName + " - " : std::string()) + std::to_string(files.size()) + " files";
     if (files.size() == 1) batchName = files[0].second;
+    return SendFileList(peer, files, batchName);
+}
+
+uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pair<std::string, std::string>>& filesIn, const std::string& batchName) {
+    std::vector<std::pair<std::string, std::string>> files;
+    for (auto& f : filesIn)
+        if (FileExists(f.first)) files.push_back(f);
+    if (files.empty()) return 0;
+    uint64_t batch = RandomU64();
     auto lk = Lock();
     std::string key = IsContactKey(peer) ? peer : ChatKey(peer), device = Resolve(peer);
     ChatMessage m;

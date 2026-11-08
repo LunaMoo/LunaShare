@@ -5,6 +5,7 @@
 
 #include "engine.h"
 #include "imgui.h"
+#include "music.h"
 #include "i18n.h"
 #include "notify.h"
 #include "platform.h"
@@ -27,7 +28,8 @@ using namespace ls;
 
 static ls::Engine* g_engine = nullptr;
 static jclass g_cls = nullptr;
-static jclass g_notify = nullptr;  // org.lunamoo.lunashare.Notify (looked up once: other threads can't FindClass app classes)
+static jclass g_notify = nullptr;
+static jclass g_musicSvc = nullptr;  // org.lunamoo.lunashare.MusicService  // org.lunamoo.lunashare.Notify (looked up once: other threads can't FindClass app classes)
 static JNIEnv* Env();
 
 // static void method of Notify with string / bool arguments; s = signature
@@ -240,6 +242,31 @@ void AndroidBridgeInit(ls::Engine* engine) {
     };
     b.cancelCallNotification = [] { NotifyV("cancelCall", "()V"); };
     b.backgroundService = [](bool on) { NotifyV("background", "(Z)V", (jboolean)on); };
+    if (jclass mc = env->FindClass("org/lunamoo/lunashare/MusicService")) {
+        g_musicSvc = (jclass)env->NewGlobalRef(mc);
+        env->DeleteLocalRef(mc);
+    } else {
+        env->ExceptionClear();
+    }
+    b.musicState = [](bool active, bool playing, const std::string& title, const std::string& artist, const std::string& album,
+                      const std::string& cover, double dur, double pos) {
+        if (!g_musicSvc) return;
+        JNIEnv* e = Env();
+        jmethodID m = e->GetStaticMethodID(g_musicSvc, "update",
+                                           "(ZZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JJ)V");
+        if (!m) {
+            e->ExceptionClear();
+            return;
+        }
+        jstring t = e->NewStringUTF(title.c_str()), a = e->NewStringUTF(artist.c_str()), al = e->NewStringUTF(album.c_str()),
+                c = e->NewStringUTF(cover.c_str());
+        e->CallStaticVoidMethod(g_musicSvc, m, (jboolean)active, (jboolean)playing, t, a, al, c, (jlong)(dur * 1000), (jlong)(pos * 1000));
+        if (e->ExceptionCheck()) e->ExceptionClear();
+        e->DeleteLocalRef(t);
+        e->DeleteLocalRef(a);
+        e->DeleteLocalRef(al);
+        e->DeleteLocalRef(c);
+    };
     b.batteryRestricted = []() -> bool {
         if (!g_notify) return false;
         JNIEnv* e = Env();
@@ -299,6 +326,21 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnInte
         return;
     }
     notify::Push({what == "ANSWER" ? "answer" : what == "CALL" ? "call" : "open", key});
+}
+
+// the music notification, lock screen, headset buttons, audio focus (see MusicService.java)
+JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeMusic(JNIEnv*, jclass, jint cmd, jlong arg) {
+    auto& p = music::Play();
+    switch (cmd) {
+        case 1: p.Toggle(); break;
+        case 2: p.Next(); break;
+        case 3: p.Prev(); break;
+        case 4: p.SetPlaying(false); break;
+        case 5: p.SetPlaying(true); break;
+        case 6: p.Stop(); break;
+        case 7: p.Seek((double)arg / 1000.0); break;
+        case 8: p.SetVolume((float)arg / 100.0f); break;
+    }
 }
 
 JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnError(JNIEnv* env, jclass, jstring msg) {
