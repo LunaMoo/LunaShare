@@ -44,6 +44,20 @@ void App::DrawLibrary() {
             ImGui::SameLine();
             ImGui::TextDisabled("%s", T("Play a movie here - you can add people to watch with you afterwards."));
         }
+        if (ui::IconTextButton(T("Music player"), Icon::Speaker, ImVec2(mobile ? -1 : 0, h))) {
+            if (mobile) {
+                backStack.push_back(screen);
+                screen = MScreen::Music;
+                musicNowShown = false;
+            } else {
+                tab = Tab::Music;
+                tabForce = true;
+            }
+        }
+        if (!mobile) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", T("Your music, songs from contacts' Shared folders, listening together."));
+        }
     }
 
     // ---- my Shared folder

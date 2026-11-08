@@ -407,18 +407,6 @@ void App::DrawMusicNow(bool big) {
         if (ImGui::Button(T("Stop"), ImVec2(aw, ah))) music::Play().Stop();
         ImGui::SameLine();
         if (ImGui::Button(T("Sound..."), ImVec2(aw, ah))) musicSoundOpen = true;
-        {  // the remix switch, right here: it changes how the queue plays
-            music::Sound s = music::Play().GetSound();
-            bool on = s.remix;
-            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::Button(on ? T("Remix: on") : T("Remix: off"), ImVec2(aw, ah))) {
-                s.remix = !s.remix;
-                music::Play().SetSound(s);
-                music::Play().SaveState();
-            }
-            if (on) ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Only a part of every song, flowing into a part of the next one"));
-        }
         if (ImGui::Button(T("Listen together..."), ImVec2(-1, ah))) musicListenOpen = true;
         // the queue
         ImGui::SeparatorText(TF("Queue (%d)", n.count).c_str());
