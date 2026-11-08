@@ -161,7 +161,12 @@ void App::Frame() {
     if (autoBrowse && !autoBrowseDone) {
         autoBrowseDone = true;
         browseFor = BrowseFor::SendFiles;
-        browser.Open(FileBrowser::Mode::OpenMulti, T("Send to ..."), autoBrowse);
+        if (getenv("LUNASHARE_BROWSE_DIR")) {  // (the folder picker: adding a music folder)
+            browseFor = BrowseFor::MusicFolder;
+            browser.Open(FileBrowser::Mode::SelectDir, T("Add a music folder"), autoBrowse);
+        } else {
+            browser.Open(FileBrowser::Mode::OpenMulti, T("Send to ..."), autoBrowse);
+        }
         if (const char* n = getenv("LUNASHARE_BROWSE_SELECT")) browser.SelectFirstFiles(atoi(n));
     }
     static const char* autoAnswer = getenv("LUNASHARE_AUTOANSWER");

@@ -40,6 +40,7 @@ private:
     Mode mode_ = Mode::OpenMulti;
     std::string title_, dir_, filter_, error_;
     std::string pathBuf_, nameBuf_, newFolderBuf_;
+    float footerMeasured_ = 0;  // the footer's height last frame (0 = not drawn yet in this mode)
     std::vector<ls::DirEntry> entries_;
     std::set<std::string> selected_;
     int lastClicked_ = -1;

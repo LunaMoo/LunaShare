@@ -62,6 +62,7 @@ static std::vector<std::pair<std::string, std::string>> BuildPlaces() {
 void FileBrowser::Open(Mode mode, const std::string& title, const std::string& startDir, const std::string& defaultName,
                        const std::string& extFilter) {
     mode_ = mode;
+    footerMeasured_ = 0;
     title_ = title;
     filter_ = extFilter;
     nameBuf_ = defaultName;
@@ -448,8 +449,9 @@ bool FileBrowser::Draw() {
         }
     }
 
-    float footerH = (mobile ? ui::M().rowH : ImGui::GetFrameHeight()) * (mode_ == Mode::SaveFile ? 2.4f : 1.3f) +
+    float footerH = (mobile ? ui::M().rowH : ImGui::GetFrameHeight()) * (mode_ == Mode::SaveFile || mode_ == Mode::SelectDir ? 2.4f : 1.3f) +
                     ImGui::GetStyle().ItemSpacing.y * 3 + (mobile && mode_ == Mode::OpenMulti ? ui::M().rowH * 0.9f : 0);
+    if (footerMeasured_ > 0) footerH = footerMeasured_;  // (what the buttons below really took last time: they always fit)
     float placesW = mobile ? 0 : ImGui::GetFontSize() * 11;
 
     if (mobile) {
@@ -478,6 +480,7 @@ bool FileBrowser::Draw() {
     if (!navigateTo.empty()) Navigate(navigateTo);
 
     // ---- footer
+    float footerY0 = ImGui::GetCursorScreenPos().y;
     if (mobile && mode_ == Mode::OpenMulti) {
         float w3 = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
         if (ImGui::Button(T("Select all"), ImVec2(w3, ui::M().rowH * 0.8f)))
@@ -496,11 +499,13 @@ bool FileBrowser::Draw() {
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##name", T("File name"), &nameBuf_);
     }
-    if (mode_ == Mode::SelectDir) {
-        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetContentRegionAvail().x * 0.5f);
+    if (mode_ == Mode::SelectDir) {  // (one line, on a phone too)
+        float cw = ImGui::CalcTextSize(T("Create folder")).x + ImGui::GetStyle().FramePadding.x * 2;
+        ImGui::SetNextItemWidth(mobile ? ImGui::GetContentRegionAvail().x - cw - ImGui::GetStyle().ItemSpacing.x
+                                       : ImGui::GetContentRegionAvail().x * 0.5f);
         ImGui::InputTextWithHint("##newfolder", T("New folder name"), &newFolderBuf_);
-        if (!mobile) ImGui::SameLine();
-        if (ImGui::Button(T("Create folder")) && !newFolderBuf_.empty()) {
+        ImGui::SameLine();
+        if (ImGui::Button(T("Create folder"), ImVec2(cw, 0)) && !newFolderBuf_.empty()) {
             std::string nd = JoinPath(dir_, SanitizeRelativePath(newFolderBuf_));
             if (MakeDirs(nd)) { newFolderBuf_.clear(); Navigate(nd); }
         }
@@ -524,6 +529,7 @@ bool FileBrowser::Draw() {
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button(T("Cancel"), ImVec2(bw, bh)) || (!mobile && ImGui::IsKeyPressed(ImGuiKey_Escape) && !openPreview_)) keepOpen = false;
+    footerMeasured_ = ImGui::GetItemRectMax().y - footerY0 + ImGui::GetStyle().ItemSpacing.y;
     if (ImGui::IsKeyPressed(ImGuiKey_AppBack) && !openPreview_) keepOpen = false;
 
     // ---- big preview (long press / right click on a picture)
