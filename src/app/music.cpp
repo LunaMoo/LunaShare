@@ -456,9 +456,10 @@ void Player::PlayExternal(const Source& s, double pos, bool playing) {
         ext_ = true;
         if (s.id != ex_.id) {
             if (exPending_) exPending_->stop = true;  // (one still being opened: given up)
-            if (exStream_) exStream_->stop = true;    // (the old song stops reading at once)
+            bool blend = s.fade > 0 && p_ && exOpen_ == ex_.id && !pn_;
+            if (!blend && exStream_) exStream_->stop = true;  // (the old song stops reading at once - or plays on, fading out)
             exEnded_ = false;
-            exOpen_ = 0;
+            if (!blend) exOpen_ = 0;
         }
         ex_ = s;
         exPos_ = pos;
@@ -482,8 +483,10 @@ void Player::EndExternal() {
         if (!ext_) return;
         if (exPending_) exPending_->stop = true;
         if (exStream_) exStream_->stop = true;
+        if (exStreamOld_) exStreamOld_->stop = true;
         CloseLocked();
         exStream_.reset();
+        exStreamOld_.reset();
         exPending_.reset();
         ext_ = false;
         ex_ = Source();
@@ -509,25 +512,27 @@ bool Player::ExtCtl(int cmd, double arg) {
 // (m_ held) the song from elsewhere that's open: follow the host's clock, notice its end
 void Player::LoopExternal() {
     if (!p_ || exOpen_ != ex_.id) return;
+    LspPlayer* cur = pn_ ? pn_ : p_;  // (blending: the new song is the one followed)
     int64_t now = (int64_t)SDL_GetTicks64();
     if (ex_.follow) {
         double target = exPos_ + (exPlay_ ? (double)(now - exAt_) / 1000.0 : 0.0);
         bool on = exPlay_ && target >= 0 && !interrupted_ && !exEnded_;
         if (on != playing_) {
+            if (pn_) mod_->set_playing(pn_, on ? 1 : 0);
             mod_->set_playing(p_, on ? 1 : 0);
             playing_ = on;
             if (dev_) SDL_PauseAudioDevice(dev_, on ? 0 : 1);
         }
         if (target >= 0 && (dur_ <= 0 || target < dur_ - 1) && now - exLastSeek_ > 3000) {
-            double cur = mod_->position(p_);
-            if (std::fabs(cur - target) > (exPlay_ ? 2.0 : 0.5)) {  // (more than a moment off: a jump)
-                mod_->seek(p_, target);
+            double at = mod_->position(cur);
+            if (std::fabs(at - target) > (exPlay_ ? 2.0 : 0.5)) {  // (more than a moment off: a jump)
+                mod_->seek(cur, target);
                 exLastSeek_ = now;
                 exEnded_ = false;
             }
         }
     }
-    if (mod_->state(p_) == LSP_ENDED && !exEnded_) {
+    if (mod_->state(cur) == LSP_ENDED && !exEnded_) {
         exEnded_ = true;
         if (!ex_.follow) {
             playing_ = wantPlay_ = false;
@@ -759,8 +764,10 @@ void Player::PlayList(const std::vector<std::string>& paths, int start, bool shu
         std::lock_guard<std::mutex> l(m_);
         if (ext_) {  // (my own music again)
             if (exStream_) exStream_->stop = true;
+            if (exStreamOld_) exStreamOld_->stop = true;
             CloseLocked();
             exStream_.reset();
+            exStreamOld_.reset();
             ext_ = false;
             ex_ = Source();
             exOpen_ = 0;
@@ -905,8 +912,10 @@ void Player::Stop() {
         std::lock_guard<std::mutex> l(m_);
         if (ext_) {
             if (exStream_) exStream_->stop = true;
+            if (exStreamOld_) exStreamOld_->stop = true;
             CloseLocked();
             exStream_.reset();
+            exStreamOld_.reset();
             ext_ = false;
             ex_ = Source();
             exOpen_ = 0;
@@ -997,7 +1006,7 @@ Now Player::GetNow() {
             bool open = p_ && exOpen_ == ex_.id;
             n.loading = !open;
             n.playing = open && playing_;
-            n.pos = open ? mod_->position(p_) : std::max(0.0, exPos_);
+            n.pos = open ? mod_->position(pn_ ? pn_ : p_) : std::max(0.0, exPos_);
             n.dur = open && dur_ > 0 ? dur_ : ex_.track.duration;
             n.index = ex_.index;
             n.count = ex_.count;
@@ -1062,15 +1071,37 @@ void Player::Loop() {
             std::lock_guard<std::mutex> l(m_);
             exOpening_ = false;
             if (exPending_ == st) exPending_.reset();
-            if (ext_ && ex_.id == src.id && q) {
+            bool blend = ext_ && ex_.id == src.id && q && src.fade > 0 && p_ && !pn_;
+            if (blend) {  // the new song comes in while the one that's on fades out (the audio callback mixes them)
+                dur_ = info.duration > 0 ? info.duration : src.track.duration;
+                double target = exPos_ + (exPlay_ ? (double)((int64_t)SDL_GetTicks64() - exAt_) / 1000.0 : 0.0);
+                if (target > 0.5) mod_->seek(q, target);
+                mod_->set_playing(q, playing_ ? 1 : 0);
+                {
+                    std::lock_guard<std::mutex> g(pm_);
+                    pn_ = q;
+                    fadeTotal_ = std::max<int64_t>(1, (int64_t)(src.fade * 48000));
+                    fadePos_ = 0;
+                    fadeDone_ = false;
+                }
+                exStreamOld_ = exStream_;
+                exStream_ = st;
+                exOpen_ = src.id;
+                exEnded_ = false;
+                exLastSeek_ = (int64_t)SDL_GetTicks64();
+                changed = true;
+            } else if (ext_ && ex_.id == src.id && q) {
                 LspPlayer* old;
+                if (pn_) CancelFade();
                 {
                     std::lock_guard<std::mutex> g(pm_);
                     old = p_;
                     p_ = q;
                 }
                 if (exStream_) exStream_->stop = true;
+                if (exStreamOld_) exStreamOld_->stop = true;
                 if (old) mod_->close(old);
+                exStreamOld_.reset();
                 exStream_ = st;
                 exOpen_ = src.id;
                 exEnded_ = false;
@@ -1101,6 +1132,19 @@ void Player::Loop() {
         }
         {
             std::lock_guard<std::mutex> l(m_);
+            if (ext_ && fadeDone_) {  // the blend is over: the new song is the one that's on
+                LspPlayer* old;
+                {
+                    std::lock_guard<std::mutex> g(pm_);
+                    old = p_;
+                    p_ = pn_;
+                    pn_ = nullptr;
+                    fadeDone_ = false;
+                }
+                if (exStreamOld_) exStreamOld_->stop = true;
+                if (old) mod_->close(old);
+                exStreamOld_.reset();
+            }
             if (ext_) LoopExternal();
         }
         {

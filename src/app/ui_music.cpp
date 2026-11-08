@@ -554,6 +554,41 @@ void App::MusicSoundPopup() {
     if (!s.eqOn) ImGui::EndDisabled();
 
     ImGui::SeparatorText(T("Transitions"));
+    if (eng.listen.sid) {  // listening together: the transitions are everyone's
+        ImGui::TextDisabled("%s", T("listening together: for everyone"));
+        ListenInfo& l = eng.listen;
+        int xf = l.crossfade, rl = l.remixLen, rf = l.remixFade;
+        bool rx = l.remix;
+        if (rx) ImGui::BeginDisabled();
+        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
+        if (ImGui::SliderInt("##lxf", &xf, 0, 12, xf ? T("smooth transition: %d s") : T("smooth transition: off")))
+            l.crossfade = xf;  // (shown at once; sent when let go)
+        if (ImGui::IsItemDeactivatedAfterEdit()) eng.ListenControl("crossfade", l.crossfade);
+        if (rx) ImGui::EndDisabled();
+        if (ImGui::Checkbox(T("Remix: only a part of every song"), &rx)) eng.ListenControl("remix", rx ? 1 : 0);
+        ImGui::TextDisabled("%s", T("skips the beginnings and ends, flowing from part to part"));
+        if (l.remix) {
+            const int lens[] = {30, 45, 60, 90};
+            ImGui::TextUnformatted(T("Part length"));
+            for (int i = 0; i < 4; i++) {
+                ImGui::SameLine();
+                char b[16];
+                snprintf(b, sizeof b, "%d s##l", lens[i]);
+                if (ImGui::RadioButton(b, rl == lens[i])) eng.ListenControl("remixlen", lens[i]);
+            }
+            ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
+            if (ImGui::SliderInt("##lrf", &rf, 1, 12, T("blend: %d s"))) l.remixFade = rf;
+            if (ImGui::IsItemDeactivatedAfterEdit()) eng.ListenControl("remixfade", l.remixFade);
+        }
+        ImGui::Spacing();
+        if (ImGui::Button(T("Close"), ImVec2(mobile ? -1 : 0, h))) ImGui::CloseCurrentPopup();
+        if (ch) {
+            music::Play().SetSound(s);
+            musicSoundDirty = true;
+        }
+        ImGui::EndPopup();
+        return;
+    }
     if (s.remix) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
     ch |= ImGui::SliderInt("##xf", &s.crossfade, 0, 12, s.crossfade ? T("smooth transition: %d s") : T("smooth transition: off"));

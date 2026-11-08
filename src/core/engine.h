@@ -129,6 +129,14 @@ struct ListenInfo {
     int repeat = 0;            // 0 off, 1 the whole queue, 2 the song that's on
     std::vector<uint64_t> played;  // (shuffle: songs played in this round)
     uint64_t nextIid = 0;      // (shuffle: the one picked to come next - fetched ahead by everyone)
+    // transitions (everyone's): a crossfade into the next song, or remix - a part of every song blending into the next
+    int crossfade = 0;         // seconds (0 = a plain change)
+    bool remix = false;
+    int remixLen = 45, remixFade = 6;
+    double frag = 0;           // remix: where this song's part starts
+    int64_t seq = 0;           // counts song starts (the same song again is a new start)
+    double fade = 0;           // this start blends in over this many seconds (0 = cut)
+    double FragEnd() const;    // where this song's part ends (the song's end without remix)
     int NextForFetch() const {  // the song after this one, to have it here in time (-1: none)
         int n = (int)items.size();
         if (shuffle) {
@@ -669,7 +677,7 @@ private:
     void ListenBroadcast();
     void ListenSetPos(double pos);    // host: the clock
     void ListenApplyCtl(const std::string& op, double pos, uint64_t iid, const std::string& who, bool host);
-    void ListenGo(int at, double delay);  // host: to song `at`, starting after `delay` s
+    void ListenGo(int at, double delay, double fade = 0);  // host: to song `at`, starting after `delay` s (or blending in)
     int ListenNextIndex(bool skip);   // host: the song after this one (shuffle / repeat); items.size() = none
     std::vector<uint64_t> listenHistory_;  // host: songs in the order they played (shuffle: "previous")
     void EndListenLocked(const std::string& why);

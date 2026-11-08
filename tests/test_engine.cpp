@@ -827,6 +827,30 @@ int main() {
             CHECK(A->listen.at == 2, "shuffle, no repeat: everything played - the end");
         }
         A->ListenControl("shuffle", 0);
+        // remix (everyone's): a part of the song, blending into a part of the next one before it ends
+        B->ListenControl("remix", 1);
+        B->ListenControl("remixfade", 2);
+        B->ListenControl("repeat", 1);
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.remix && A->listen.remixFade == 2; }, 3000), "a listener turns remix on");
+        A->ListenControl("jump", 0, iidB);
+        int64_t seq0;
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.at == 1 && A->listen.frag >= 16 && A->listen.frag <= 135 && A->ListenPos() >= A->listen.frag - 1.01,
+                  "remix: the part starts at a random place past the intro, ending before the outro (%.1f)", A->listen.frag);
+            CHECK(std::abs(A->listen.FragEnd() - (A->listen.frag + 45)) < 0.01, "the part's end");
+            seq0 = A->listen.seq;
+            A->ListenControl("seek", A->listen.FragEnd() - 2.4);
+        }
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.seq > seq0; }, 3000), "before the part ends, the next one comes");
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.at == 0 && A->listen.fade == 2 && A->ListenPos() >= A->listen.frag, "blending in (2 s), right away");
+        }
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->listen.at == 0 && B->listen.fade == 2 && B->listen.seq > seq0; }, 3000),
+              "the listener blends in too");
+        A->ListenControl("remix", 0);
+        A->ListenControl("repeat", 0);
         A->ListenControl("jump", 0, iidB);
         // saving the listener's song on the host
         A->ListenSave(iidB);

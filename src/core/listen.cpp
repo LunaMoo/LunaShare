@@ -137,9 +137,30 @@ void Engine::ListenSetPos(double pos) {
     listen.posAt = SteadyMs();
 }
 
-void Engine::ListenGo(int at, double delay) {
+// remix: the part of a song - a random place past the intro, the whole part ending before the outro and the quiet
+static double FragHead(double dur) { return std::max(8.0, dur * 0.08); }
+static double FragTail(double dur) { return std::max(12.0, dur * 0.10); }
+static double PickFrag(double dur, int len) {
+    if (dur <= 0) return 0;
+    double lo = FragHead(dur), hi = dur - FragTail(dur) - len;
+    if (hi <= lo) return std::min(lo, dur * 0.2);
+    return lo + (hi - lo) * (double)(RandomU64() % 1000000) / 1000000.0;
+}
+
+double ListenInfo::FragEnd() const {
+    if (at < 0 || at >= (int)items.size()) return 0;
+    double dur = items[(size_t)at].dur;
+    if (!remix || dur <= 0) return dur;
+    double end = std::min(dur - FragTail(dur), frag + remixLen);
+    return std::max(end, std::min(dur, frag + 5));
+}
+
+void Engine::ListenGo(int at, double delay, double fade) {
     listen.at = std::clamp(at, 0, (int)listen.items.size());
     listen.playing = listen.at < (int)listen.items.size();
+    listen.seq++;
+    listen.fade = listen.playing ? fade : 0;
+    listen.frag = listen.playing && listen.remix ? PickFrag(listen.items[(size_t)listen.at].dur, listen.remixLen) : 0;
     if (listen.playing) {
         uint64_t iid = listen.items[(size_t)listen.at].iid;
         if (std::find(listen.played.begin(), listen.played.end(), iid) == listen.played.end()) listen.played.push_back(iid);
@@ -151,7 +172,8 @@ void Engine::ListenGo(int at, double delay) {
         int nx = ListenNextIndex(true);
         if (nx < (int)listen.items.size() && nx != listen.at) listen.nextIid = listen.items[(size_t)nx].iid;
     }
-    ListenSetPos(listen.playing ? -delay : 0);
+    // (a blend: right away - the next song came ahead; otherwise a moment for it to arrive everywhere)
+    ListenSetPos(!listen.playing ? 0 : fade > 0 ? listen.frag : listen.frag > 0 ? std::max(0.0, listen.frag - delay) : -delay);
     listen.ver++;
     ListenBroadcast();
 }
@@ -190,7 +212,9 @@ json Engine::ListenStateJson() {
     for (auto& i : listen.items) items.push_back(ItemJson(i));
     return {{"sid", listen.sid}, {"items", items}, {"at", listen.at}, {"playing", listen.playing}, {"pos", ListenPos()},
             {"people", listen.people}, {"devs", listen.devs}, {"ver", listen.ver}, {"shuffle", listen.shuffle},
-            {"repeat", listen.repeat}, {"played", listen.played}, {"next", listen.nextIid}};
+            {"repeat", listen.repeat}, {"played", listen.played}, {"next", listen.nextIid}, {"xf", listen.crossfade},
+            {"remix", listen.remix}, {"rlen", listen.remixLen}, {"rfade", listen.remixFade}, {"frag", listen.frag},
+            {"seq", listen.seq}, {"fade", listen.fade}};
 }
 
 void Engine::ListenBroadcast() {
@@ -280,6 +304,18 @@ void Engine::ListenApplyCtl(const std::string& op, double pos, uint64_t iid, con
         }
     } else if (op == "repeat") {
         l.repeat = std::clamp((int)pos, 0, 2);
+    } else if (op == "crossfade") {
+        l.crossfade = std::clamp((int)pos, 0, 12);
+    } else if (op == "remix") {
+        l.remix = pos != 0;
+        if (l.remix && l.at < n && ListenPos() < l.items[(size_t)l.at].dur) {  // (this song's part: from where it is now)
+            l.frag = std::max(0.0, ListenPos());
+            if (l.frag + 5 > l.items[(size_t)l.at].dur - FragTail(l.items[(size_t)l.at].dur)) l.frag = 0;
+        }
+    } else if (op == "remixlen") {
+        l.remixLen = std::clamp((int)pos, 15, 180);
+    } else if (op == "remixfade") {
+        l.remixFade = std::clamp((int)pos, 1, 12);
     } else if (op == "jump") {
         for (int i = 0; i < n; i++)
             if (l.items[(size_t)i].iid == iid) {
@@ -475,7 +511,15 @@ void Engine::ListenTick() {
     if (!listen.sid) return;
     if (listen.host.empty()) {
         const ListenItem* cur = ListenCurrent();
-        if (cur && listen.playing && cur->dur > 0 && ListenPos() >= cur->dur + 1.0) {  // (the player didn't say: the clock does)
+        double fade = listen.remix ? listen.remixFade : listen.crossfade;
+        double end = listen.FragEnd();
+        bool due = cur && listen.playing && fade > 0 && end > 0 && ListenPos() >= end - fade;
+        int nx = due ? ListenNextIndex(false) : 0;
+        if (due && nx < (int)listen.items.size()) {  // the next one blends in before this one (or its part) ends
+            ListenGo(nx, 0, fade);
+        } else if (cur && listen.playing && listen.remix && end > 0 && ListenPos() >= end) {  // (the last part: done)
+            ListenGo(ListenNextIndex(false), 1.0);
+        } else if (cur && listen.playing && cur->dur > 0 && ListenPos() >= cur->dur + 1.0) {  // (the player didn't say: the clock does)
             ListenGo(ListenNextIndex(false), 1.0);
         } else if (now - listenLastBroadcast_ > 2000) {
             ListenBroadcast();
@@ -532,6 +576,13 @@ void Engine::ListenApply(const json& j) {
     l.ver = j.value("ver", (int64_t)0);
     l.shuffle = j.value("shuffle", false);
     l.nextIid = j.value("next", (uint64_t)0);
+    l.crossfade = std::clamp(j.value("xf", 0), 0, 12);
+    l.remix = j.value("remix", false);
+    l.remixLen = std::clamp(j.value("rlen", 45), 15, 180);
+    l.remixFade = std::clamp(j.value("rfade", 6), 1, 12);
+    l.frag = std::max(0.0, j.value("frag", 0.0));
+    l.seq = j.value("seq", (int64_t)0);
+    l.fade = std::clamp(j.value("fade", 0.0), 0.0, 12.0);
     l.repeat = std::clamp(j.value("repeat", 0), 0, 2);
     l.played.clear();
     for (auto& p : j.value("played", json::array()))

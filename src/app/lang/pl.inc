@@ -933,3 +933,4 @@
 {"Add a playlist to the shared queue", "Dodaj playlistę do wspólnej kolejki"},
 {"Autoplay (every movie starts on its own)", "Automatyczne odtwarzanie (każdy film startuje sam)"},
 {"typing...", "pisanie..."},
+{"listening together: for everyone", "wspólne słuchanie: dla wszystkich"},

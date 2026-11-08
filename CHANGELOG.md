@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Listening together: smooth transitions and remix work too (set in *Sound...*, for everyone) - the same part of
+  every song and the same blend into the next one for everybody.
 - Listening together: shuffle and repeat work (for everyone - anyone can switch them): repeat the song or the whole
   shared queue; shuffle plays the songs not played yet in random order, and the one picked to come next is fetched
   ahead. Songs from contacts' Shared folders follow the player's shuffle / repeat too.

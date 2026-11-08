@@ -79,6 +79,7 @@ struct Source {
     int64_t size = 0;
     Track track;
     bool follow = false;         // listening together: Follow() sets the position and play / pause
+    double fade = 0;             // blend in from the song that's on over this many seconds (0 = cut)
     int index = -1, count = 0;   // (shown as "3 / 10")
 };
 
@@ -186,7 +187,7 @@ private:
     double exPos_ = 0;             // Follow(): the clock
     bool exPlay_ = false;
     int64_t exAt_ = 0, exLastSeek_ = 0;
-    std::shared_ptr<ExtStream> exStream_, exPending_;
+    std::shared_ptr<ExtStream> exStream_, exPending_, exStreamOld_;  // (old: the song fading out)
     bool OpenAt(int index, double pos);  // (m_ held)
     void CloseLocked();
     // transitions (m_ held): the next song starts while this one fades out

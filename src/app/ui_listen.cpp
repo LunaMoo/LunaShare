@@ -63,10 +63,13 @@ void App::MusicExternalTick() {
         listenFollowing = true;
         const ListenItem* cur = eng.ListenCurrent();
         if (cur) {
-            if (!n.external || !n.follow || n.extId != cur->iid) {
+            uint64_t sid = cur->iid ^ ((uint64_t)eng.listen.seq * 0x9E3779B97F4A7C15ull);  // (the same song again: a new start)
+            if (!sid) sid = 1;
+            if (!n.external || !n.follow || n.extId != sid) {
                 music::Source s;
-                s.id = cur->iid;
+                s.id = sid;
                 s.follow = true;
+                s.fade = n.external && n.follow ? eng.listen.fade : 0;  // (blends in from the song that was on)
                 s.size = cur->size;
                 s.index = eng.listen.at;
                 s.count = (int)eng.listen.items.size();
@@ -84,7 +87,7 @@ void App::MusicExternalTick() {
                 music::Play().PlayExternal(s, eng.ListenPos(), eng.listen.playing);
             }
             music::Play().Follow(eng.ListenPos(), eng.listen.playing);
-            if (eng.listen.host.empty() && music::Play().ExternalEnded(cur->iid)) eng.ListenEnded(cur->iid);
+            if (eng.listen.host.empty() && music::Play().ExternalEnded(sid)) eng.ListenEnded(cur->iid);
         } else if (n.external && n.follow) {
             music::Play().EndExternal();  // (the shared queue played out: quiet until someone adds a song)
         }

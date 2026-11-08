@@ -64,7 +64,10 @@ whole playlist of yours at any time.
 - *Leave* - your songs that haven't played leave with you. *End for everyone* (the host) ends it.
 - **Shuffle** and **repeat** are everyone's: repeat the song or the whole shared queue; shuffle plays the songs not
   played yet in random order (the one picked to come next is fetched ahead, so it starts smoothly).
-- The equalizer works as always; smooth transitions and remix are for your own queue.
+- **Smooth transitions** and **remix** (in *Sound...*) are everyone's too while listening together: the one who
+  keeps the queue picks each song's part (a random place, clear of the intro, the outro and the quiet at the end) and
+  when the next one starts, so everyone hears the same part and the same blend.
+- The equalizer is each person's own.
 
 ## Contacts' Shared folders
 
