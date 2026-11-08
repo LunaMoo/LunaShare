@@ -41,9 +41,9 @@ void App::MusicExternalTick() {
                 }
                 return true;
             }
-            if (!musicLibList.empty()) {  // a contact's songs: next / previous in that folder
+            if (!musicLibList.empty()) {  // a contact's songs: next / previous in that folder (shuffle / repeat as set)
                 if (cmd == 2 || cmd == 3) {
-                    int n = musicLibAt + (cmd == 2 ? 1 : -1);
+                    int n = cmd == 2 ? MusicLibNext(true) : musicLibAt - 1;
                     if (n >= 0 && n < (int)musicLibList.size()) {
                         musicLibAt = n;
                         MusicLibOpen();
@@ -98,8 +98,9 @@ void App::MusicExternalTick() {
     if (!musicLibList.empty()) {
         if (!n.external || n.extId != musicLibSrc) MusicLibEnd();  // (something else is playing now)
         else if (music::Play().ExternalEnded(musicLibSrc)) {
-            if (musicLibAt + 1 < (int)musicLibList.size()) {
-                musicLibAt++;
+            int nx = MusicLibNext(false);
+            if (nx >= 0) {
+                musicLibAt = nx;
                 MusicLibOpen();
             }
         }
@@ -157,6 +158,22 @@ void App::MusicLibOpen() {
         s.track.artist = musicLibWho;
     }
     music::Play().PlayExternal(s, 0, true);
+}
+
+// a contact's songs: which one next (the player's shuffle / repeat); -1 = the end
+int App::MusicLibNext(bool skip) {
+    music::Now n = music::Play().GetNow();
+    int cnt = (int)musicLibList.size();
+    if (!cnt) return -1;
+    if (n.repeat == music::RepeatOne && !skip) return musicLibAt;
+    if (n.shuffle && cnt > 1) {
+        static std::mt19937 rng((uint32_t)SteadyMs());
+        int r = (int)(rng() % (uint32_t)(cnt - 1));
+        return r >= musicLibAt ? r + 1 : r;
+    }
+    int nx = musicLibAt + 1;
+    if (nx >= cnt) nx = n.repeat == music::RepeatAll ? 0 : -1;
+    return nx;
 }
 
 void App::MusicLibEnd() {
@@ -357,8 +374,10 @@ void App::DrawListenQueue() {
         std::string d = db;
         float dw = ImGui::CalcTextSize(d.c_str()).x;
         ImVec4 clipR(x, p.y, right - dw - 12, p.y + rowH);
-        ImU32 tc = cur ? ImGui::GetColorU32(ImGuiCol_SliderGrabActive) : i < eng.listen.at ? ImGui::GetColorU32(ImGuiCol_TextDisabled)
-                                                                                         : ImGui::GetColorU32(ImGuiCol_Text);
+        bool played = eng.listen.shuffle ? std::find(eng.listen.played.begin(), eng.listen.played.end(), it.iid) != eng.listen.played.end()
+                                         : i < eng.listen.at;
+        ImU32 tc = cur ? ImGui::GetColorU32(ImGuiCol_SliderGrabActive) : played ? ImGui::GetColorU32(ImGuiCol_TextDisabled)
+                                                                                : ImGui::GetColorU32(ImGuiCol_Text);
         std::string title = it.title.empty() ? Stem(it.name) : it.title;
         dl->AddText(nullptr, 0, ImVec2(x, p.y + rowH * 0.5f - lh - 1), tc, title.c_str(), nullptr, 0, &clipR);
         std::string sub = it.artist;

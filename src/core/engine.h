@@ -125,6 +125,20 @@ struct ListenInfo {
     int64_t posAt = 0;
     std::vector<std::string> people, devs;
     int64_t ver = 0;
+    bool shuffle = false;      // the next song is a random one not played yet (for everyone)
+    int repeat = 0;            // 0 off, 1 the whole queue, 2 the song that's on
+    std::vector<uint64_t> played;  // (shuffle: songs played in this round)
+    uint64_t nextIid = 0;      // (shuffle: the one picked to come next - fetched ahead by everyone)
+    int NextForFetch() const {  // the song after this one, to have it here in time (-1: none)
+        int n = (int)items.size();
+        if (shuffle) {
+            for (int i = 0; i < n; i++)
+                if (items[(size_t)i].iid == nextIid) return i;
+            return -1;
+        }
+        if (at + 1 < n) return at + 1;
+        return repeat == 1 && n ? 0 : -1;
+    }
 };
 struct ListenInviteInfo {
     uint64_t sid = 0;
@@ -656,6 +670,8 @@ private:
     void ListenSetPos(double pos);    // host: the clock
     void ListenApplyCtl(const std::string& op, double pos, uint64_t iid, const std::string& who, bool host);
     void ListenGo(int at, double delay);  // host: to song `at`, starting after `delay` s
+    int ListenNextIndex(bool skip);   // host: the song after this one (shuffle / repeat); items.size() = none
+    std::vector<uint64_t> listenHistory_;  // host: songs in the order they played (shuffle: "previous")
     void EndListenLocked(const std::string& why);
     void ListenApply(const json& j);  // listener: the host's state
     void ListenCaches();              // others' songs: the one that's on and the next one come here

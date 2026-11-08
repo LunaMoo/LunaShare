@@ -61,6 +61,7 @@ uint64_t Engine::StartListen(const std::string& key) {
     listen.people = {settings.displayName};
     listen.devs = {settings.deviceId};
     listenMembers_.clear();
+    listenHistory_.clear();
     listenNames_.clear();
     std::vector<std::string> to = DevicesOf(key);
     for (auto& d : MyOtherDevices()) to.push_back(d);
@@ -113,6 +114,7 @@ void Engine::EndListenLocked(const std::string& why) {
     }
     for (auto& c : caches) ListenCacheDrop(c);
     listenMembers_.clear();
+    listenHistory_.clear();
     listenNames_.clear();
     listen = ListenInfo();
     if (!why.empty() && !l.key.empty()) AddSystemMessage(l.key, why);
@@ -138,20 +140,72 @@ void Engine::ListenSetPos(double pos) {
 void Engine::ListenGo(int at, double delay) {
     listen.at = std::clamp(at, 0, (int)listen.items.size());
     listen.playing = listen.at < (int)listen.items.size();
+    if (listen.playing) {
+        uint64_t iid = listen.items[(size_t)listen.at].iid;
+        if (std::find(listen.played.begin(), listen.played.end(), iid) == listen.played.end()) listen.played.push_back(iid);
+        if (listenHistory_.empty() || listenHistory_.back() != iid) listenHistory_.push_back(iid);
+        if (listenHistory_.size() > 500) listenHistory_.erase(listenHistory_.begin());
+    }
+    listen.nextIid = 0;
+    if (listen.shuffle && listen.playing) {  // (picked now, so everyone can fetch it ahead)
+        int nx = ListenNextIndex(true);
+        if (nx < (int)listen.items.size() && nx != listen.at) listen.nextIid = listen.items[(size_t)nx].iid;
+    }
     ListenSetPos(listen.playing ? -delay : 0);
     listen.ver++;
     ListenBroadcast();
+}
+
+int Engine::ListenNextIndex(bool skip) {
+    int n = (int)listen.items.size();
+    if (!n) return 0;
+    if (listen.repeat == 2 && !skip && listen.at < n) return listen.at;  // (repeat one: when it ends by itself)
+    if (listen.shuffle && listen.nextIid)  // (the one picked ahead)
+        for (int i = 0; i < n; i++)
+            if (listen.items[(size_t)i].iid == listen.nextIid && i != listen.at) return i;
+    if (!listen.shuffle) {
+        int nx = listen.at + 1;
+        if (nx >= n) nx = listen.repeat == 1 ? 0 : n;
+        return nx;
+    }
+    auto pick = [&]() -> int {
+        std::vector<int> c;
+        for (int i = 0; i < n; i++)
+            if (i != listen.at && std::find(listen.played.begin(), listen.played.end(), listen.items[(size_t)i].iid) == listen.played.end())
+                c.push_back(i);
+        if (c.empty()) return -1;
+        return c[(size_t)(RandomU64() % c.size())];
+    };
+    int r = pick();
+    if (r >= 0) return r;
+    if (listen.repeat != 1) return n;  // (everything played)
+    listen.played.clear();             // a new round
+    if (listen.at < n) listen.played.push_back(listen.items[(size_t)listen.at].iid);
+    r = pick();
+    return r >= 0 ? r : (listen.at < n ? listen.at : 0);
 }
 
 json Engine::ListenStateJson() {
     json items = json::array();
     for (auto& i : listen.items) items.push_back(ItemJson(i));
     return {{"sid", listen.sid}, {"items", items}, {"at", listen.at}, {"playing", listen.playing}, {"pos", ListenPos()},
-            {"people", listen.people}, {"devs", listen.devs}, {"ver", listen.ver}};
+            {"people", listen.people}, {"devs", listen.devs}, {"ver", listen.ver}, {"shuffle", listen.shuffle},
+            {"repeat", listen.repeat}, {"played", listen.played}, {"next", listen.nextIid}};
 }
 
 void Engine::ListenBroadcast() {
     if (!listen.sid || !listen.host.empty()) return;
+    int n = (int)listen.items.size();
+    if (listen.shuffle && listen.at < n) {  // (the one picked to come next is still there - or another is picked)
+        bool ok = false;
+        for (int i = 0; i < n; i++)
+            if (listen.items[(size_t)i].iid == listen.nextIid && i != listen.at) ok = true;
+        if (!ok) {
+            listen.nextIid = 0;
+            int nx = ListenNextIndex(true);
+            if (nx < n && nx != listen.at) listen.nextIid = listen.items[(size_t)nx].iid;
+        }
+    }
     listenLastBroadcast_ = SteadyMs();
     json st = ListenStateJson();
     for (auto& d : listenMembers_) QueueToPeer(d, Msg::ListenState, st);
@@ -194,14 +248,38 @@ void Engine::ListenApplyCtl(const std::string& op, double pos, uint64_t iid, con
         double d = l.items[(size_t)l.at].dur;
         ListenSetPos(std::clamp(pos, 0.0, d > 0 ? d : 1e9));
     } else if (op == "next") {
-        ListenGo(l.at + 1, 1.0);
+        ListenGo(ListenNextIndex(true), 1.0);
         return;
     } else if (op == "prev") {
-        if (ListenPos() > 3 || l.at == 0) ListenSetPos(0);
-        else {
+        if (l.shuffle && ListenPos() <= 3 && listenHistory_.size() >= 2) {  // shuffled: the one that played before
+            listenHistory_.pop_back();
+            uint64_t back = listenHistory_.back();
+            listenHistory_.pop_back();
+            for (int i = 0; i < n; i++)
+                if (l.items[(size_t)i].iid == back) {
+                    ListenGo(i, 1.0);
+                    return;
+                }
+            ListenSetPos(0);
+        } else if (ListenPos() > 3 || l.at == 0) {
+            ListenSetPos(0);
+        } else {
             ListenGo(l.at - 1, 1.0);
             return;
         }
+    } else if (op == "shuffle") {
+        l.shuffle = pos != 0;
+        l.played.clear();
+        l.nextIid = 0;
+        if (l.at < n) {
+            l.played.push_back(l.items[(size_t)l.at].iid);
+            if (l.shuffle) {
+                int nx = ListenNextIndex(true);
+                if (nx < n && nx != l.at) l.nextIid = l.items[(size_t)nx].iid;
+            }
+        }
+    } else if (op == "repeat") {
+        l.repeat = std::clamp((int)pos, 0, 2);
     } else if (op == "jump") {
         for (int i = 0; i < n; i++)
             if (l.items[(size_t)i].iid == iid) {
@@ -232,7 +310,7 @@ void Engine::ListenEnded(uint64_t iid) {
     auto lk = Lock();
     const ListenItem* cur = ListenCurrent();
     if (!cur || cur->iid != iid || !listen.host.empty() || !listen.playing || ListenPos() < 1) return;
-    ListenGo(listen.at + 1, 1.0);
+    ListenGo(ListenNextIndex(false), 1.0);
 }
 
 void Engine::ListenAdd(std::vector<ListenItem> items, double startAt) {
@@ -265,7 +343,7 @@ void Engine::ListenAdd(std::vector<ListenItem> items, double startAt) {
     bool ended = listen.at >= (int)listen.items.size();
     for (auto& i : added) listen.items.push_back(i);
     if (ended && startAt >= 0) {  // (it goes on from where it was; the others catch up as it comes)
-        listen.playing = true;
+        ListenGo(listen.at, 0);
         ListenSetPos(startAt);
         listen.ver++;
         ListenBroadcast();
@@ -280,11 +358,10 @@ void Engine::ListenAdd(std::vector<ListenItem> items, double startAt) {
 
 void Engine::ListenCaches() {
     std::vector<const ListenItem*> want;
-    for (int k = 0; k < 2; k++) {
-        int i = listen.at + k;
-        if (i >= 0 && i < (int)listen.items.size() && listen.items[(size_t)i].owner != settings.deviceId)
+    for (int i : {listen.at, listen.NextForFetch()})
+        if (i >= 0 && i < (int)listen.items.size() && listen.items[(size_t)i].owner != settings.deviceId &&
+            (want.empty() || want[0] != &listen.items[(size_t)i]))
             want.push_back(&listen.items[(size_t)i]);
-    }
     std::vector<std::shared_ptr<WatchCache>> keep, drop, all;
     {
         std::lock_guard<std::mutex> g(watchCacheMtx_);
@@ -399,7 +476,7 @@ void Engine::ListenTick() {
     if (listen.host.empty()) {
         const ListenItem* cur = ListenCurrent();
         if (cur && listen.playing && cur->dur > 0 && ListenPos() >= cur->dur + 1.0) {  // (the player didn't say: the clock does)
-            ListenGo(listen.at + 1, 1.0);
+            ListenGo(ListenNextIndex(false), 1.0);
         } else if (now - listenLastBroadcast_ > 2000) {
             ListenBroadcast();
         }
@@ -453,6 +530,12 @@ void Engine::ListenApply(const json& j) {
     for (auto& p : j.value("devs", json::array()))
         if (p.is_string() && l.devs.size() < 64) l.devs.push_back(Trim(p.get<std::string>(), 128));
     l.ver = j.value("ver", (int64_t)0);
+    l.shuffle = j.value("shuffle", false);
+    l.nextIid = j.value("next", (uint64_t)0);
+    l.repeat = std::clamp(j.value("repeat", 0), 0, 2);
+    l.played.clear();
+    for (auto& p : j.value("played", json::array()))
+        if (p.is_number_unsigned() && l.played.size() < 4000) l.played.push_back(p.get<uint64_t>());
     Emit({EventType::Info, l.key, ""});
 }
 
@@ -516,7 +599,10 @@ void Engine::HandleListen(const std::shared_ptr<Connection>& c, Msg type, const 
                     if (i <= at || listen.items[(size_t)i].owner != dev) keep.push_back(listen.items[(size_t)i]);
                 listen.items = keep;
                 ListenPeerGone(dev);
-                if (curTheirs) ListenGo(at + 1, 1.0);
+                if (curTheirs) {
+                    listen.at = std::min(at, (int)listen.items.size() - 1);
+                    ListenGo(ListenNextIndex(true), 1.0);
+                }
             }
             break;
         case Msg::ListenCtl:
@@ -543,7 +629,7 @@ void Engine::HandleListen(const std::shared_ptr<Connection>& c, Msg type, const 
             if (!n) return;
             double start = j.value("start", -1.0);
             if (ended && start >= 0) {
-                listen.playing = true;
+                ListenGo(listen.at, 0);
                 ListenSetPos(start);
                 listen.ver++;
                 ListenBroadcast();

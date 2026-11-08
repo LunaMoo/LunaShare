@@ -62,6 +62,8 @@ whole playlist of yours at any time.
   your own songs, the host any.
 - *Save* keeps a copy of the song that's on (someone else's) in your received files - so it lands in your library.
 - *Leave* - your songs that haven't played leave with you. *End for everyone* (the host) ends it.
+- **Shuffle** and **repeat** are everyone's: repeat the song or the whole shared queue; shuffle plays the songs not
+  played yet in random order (the one picked to come next is fetched ahead, so it starts smoothly).
 - The equalizer works as always; smooth transitions and remix are for your own queue.
 
 ## Contacts' Shared folders

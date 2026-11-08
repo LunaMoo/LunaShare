@@ -798,6 +798,36 @@ int main() {
             auto l = A->Lock();
             CHECK(A->listen.items.size() == 2, "a listener can't remove someone else's song");
         }
+        // repeat one: the song starts again when it ends; shuffle: a random one not played yet, picked ahead
+        B->ListenControl("repeat", 2);
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.repeat == 2; }, 3000), "a listener turns repeat on for everyone");
+        A->ListenControl("play");
+        A->ListenControl("seek", 150);
+        A->ListenEnded(iidB);
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.at == 1 && A->ListenPos() < 0, "repeat one: the same song again");
+        }
+        A->ListenControl("repeat", 0);
+        A->ListenControl("shuffle", 1);
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.shuffle && A->listen.nextIid == iidA, "shuffle: the other song is picked to come next");
+        }
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->listen.shuffle && B->listen.NextForFetch() == 0; }, 3000),
+              "the listener knows which one comes next (to fetch it ahead)");
+        A->ListenControl("next");
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.at == 0, "shuffle: next is the picked one");
+        }
+        A->ListenControl("next");
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.at == 2, "shuffle, no repeat: everything played - the end");
+        }
+        A->ListenControl("shuffle", 0);
+        A->ListenControl("jump", 0, iidB);
         // saving the listener's song on the host
         A->ListenSave(iidB);
         std::string saved = JoinPath(A->settings.downloadDir, "songB.mp3");

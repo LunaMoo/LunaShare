@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Listening together: shuffle and repeat work (for everyone - anyone can switch them): repeat the song or the whole
+  shared queue; shuffle plays the songs not played yet in random order, and the one picked to come next is fetched
+  ahead. Songs from contacts' Shared folders follow the player's shuffle / repeat too.
 - Android: typing with the on-screen keyboard over a field (a dialog, the account backup, the folder picker...): the
   text is shown again in a strip just above the keyboard, with its cursor - tap (or slide) in the strip to put the
   cursor there. The app also measures the keyboard's real height now (it used to guess).

@@ -331,12 +331,14 @@ void App::DrawMusicNow(bool big) {
     float bs = std::min(h * 1.1f, (bw - sp * 4) / 5);
     float total = bs * 5 + sp * 4;
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (bw - total) * 0.5f));
-    bool sh = n.shuffle;
-    ImGui::BeginDisabled(n.external);  // (shuffle and repeat are for my own queue)
+    bool together = n.follow && eng.listen.sid;  // listening together: shuffle and repeat are everyone's
+    bool sh = together ? eng.listen.shuffle : n.shuffle;
     if (sh) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ui::IconButton("mshuf", Icon::Shuffle, sh ? T("Shuffle: on") : T("Shuffle: off"), bs)) music::Play().SetShuffle(!sh);
+    if (ui::IconButton("mshuf", Icon::Shuffle, sh ? T("Shuffle: on") : T("Shuffle: off"), bs)) {
+        if (together) eng.ListenControl("shuffle", sh ? 0 : 1);
+        else music::Play().SetShuffle(!sh);
+    }
     if (sh) ImGui::PopStyleColor();
-    ImGui::EndDisabled();
     ImGui::SameLine();
     if (ui::IconButton("mprev", Icon::Back, T("Previous"), bs)) music::Play().Prev();
     ImGui::SameLine();
@@ -354,13 +356,14 @@ void App::DrawMusicNow(bool big) {
         dl->AddLine(ImVec2(c.x + s * 0.4f, c.y), ImVec2(c.x - s * 0.6f, c.y + s), col, 2.5f);
     }
     ImGui::SameLine();
-    int rp = n.repeat;
+    int rp = together ? eng.listen.repeat : n.repeat;
     if (rp) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     const char* rt = rp == music::RepeatOne ? T("Repeat: this song") : rp == music::RepeatAll ? T("Repeat: the list") : T("Repeat: off");
     ImVec2 rpp = ImGui::GetCursorScreenPos();
-    ImGui::BeginDisabled(n.external);
-    if (ui::IconButton("mrep", Icon::Loop, rt, bs)) music::Play().SetRepeat((rp + 1) % 3);
-    ImGui::EndDisabled();
+    if (ui::IconButton("mrep", Icon::Loop, rt, bs)) {
+        if (together) eng.ListenControl("repeat", (rp + 1) % 3);
+        else music::Play().SetRepeat((rp + 1) % 3);
+    }
     if (rp == music::RepeatOne) dl->AddText(ImVec2(rpp.x + bs * 0.68f, rpp.y + bs * 0.05f), ImGui::GetColorU32(ImGuiCol_Text), "1");
     if (rp) ImGui::PopStyleColor();
     if (n.external) {  // a song from elsewhere: keep it / leave
