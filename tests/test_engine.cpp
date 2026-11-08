@@ -713,6 +713,21 @@ int main() {
         CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watchInvites.empty() && B->watchInvites.back().sid == sid2; }, 3000), "added afterwards: invited");
         CHECK(B->JoinWatch(sid2) && WaitFor([&] { auto l = A->Lock(); return A->watch.people.size() == 2; }, 3000), "and watching together");
         A->LeaveWatch();
+        {  // autoplay: a movie starts on its own
+            auto l = A->Lock();
+            CHECK(!A->watch.playing, "(stopped)");
+            Settings s = A->GetSettings();
+            s.playerAutoplay = true;
+            A->ApplySettings(s);
+            A->StartWatch("", movie);
+            CHECK(A->watch.playing, "autoplay: playing without pressing play");
+            A->LeaveWatch();
+            s.playerAutoplay = false;
+            A->ApplySettings(s);
+            A->StartWatch("", movie);
+            CHECK(!A->watch.playing, "without autoplay: waits for play");
+            A->LeaveWatch();
+        }
         CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
     }
 

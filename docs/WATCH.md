@@ -21,6 +21,14 @@ The ☰ menu has the picture settings: brightness, contrast, gamma, saturation, 
 tint (green - magenta). They apply to every movie on this device and are remembered; double-click or right-click a
 slider to put it back, *Reset picture* for all. (Done on the graphics card, where the picture is turned from YUV to RGB.)
 
+## Autoplay and play / pause
+
+- *Autoplay* (in the movie player's sound / subtitles / picture menu, remembered for every movie): a movie you open -
+  alone, together or from a Shared folder - starts playing on its own.
+- With the controls showing, a tap (or click) in the middle of the picture - on the big play / pause sign - plays or
+  pauses. On a phone, a tap elsewhere hides the controls; on a computer a click anywhere still plays / pauses, a
+  double-click is full screen.
+
 ## Loop and saving
 
 - The loop button starts the movie again at the end - for everyone (any of you can turn it on or off). Videos and

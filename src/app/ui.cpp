@@ -123,6 +123,8 @@ void App::Frame() {
                 break;
             }
     }
+    static const char* devMovie = getenv("LUNASHARE_MOVIE");  // dev: open a movie in the movie player (screenshots)
+    if (devMovie && ImGui::GetFrameCount() == 20 && eng.StartWatch("", devMovie)) watchShown = true;
     static const char* autoWatch = getenv("LUNASHARE_AUTOWATCH");  // dev: join the first movie invitation (screenshots)
     if (autoWatch && !eng.watch.sid && !eng.watchInvites.empty() && eng.JoinWatch(eng.watchInvites.back().sid)) watchShown = *autoWatch != 'b';
     static const char* autoGroup = getenv("LUNASHARE_AUTOGROUP");  // dev: open the first group (screenshots)

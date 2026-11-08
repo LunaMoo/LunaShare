@@ -281,6 +281,15 @@ void App::WatchTracksPopup() {
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     if (!ImGui::BeginPopup("##watchtracks")) return;
+    {  // remembered for every movie
+        bool ap = eng.settings.playerAutoplay;
+        if (ImGui::Checkbox(T("Autoplay (every movie starts on its own)"), &ap)) {
+            Settings s = eng.GetSettings();
+            s.playerAutoplay = ap;
+            eng.ApplySettings(s);
+            edit.playerAutoplay = ap;
+        }
+    }
     auto tracks = Player().Tracks();
     ImGui::SeparatorText(T("Sound"));
     int n = 0;
@@ -481,6 +490,11 @@ void App::DrawWatch() {
     ImGui::SetNextItemAllowOverlap();  // (the controls lie on top of it and take their own clicks)
     ImGui::InvisibleButton("##screen", ImVec2(b.x - a.x, b.y - a.y));
     bool tapped = ImGui::IsItemClicked() && controls && !tapToShow && wereShown;
+    // the middle of the screen (with the controls showing): play / pause
+    ImVec2 mid((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+    float midR = std::max(bh * 1.1f, std::min(b.x - a.x, b.y - a.y) * 0.13f);
+    ImVec2 mp = io.MousePos;
+    bool tapMid = tapped && (mp.x - mid.x) * (mp.x - mid.x) + (mp.y - mid.y) * (mp.y - mid.y) < midR * midR;
     bool dbl = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
     std::string cur = !w.libId.empty() ? "lib:" + w.libId : w.host.empty() ? w.path : "watch:" + std::to_string(w.sid);
     bool open = Player().IsCurrent(cur);
@@ -528,7 +542,11 @@ void App::DrawWatch() {
     double pos = w.Target(now);
     if (dur > 0) pos = std::min(pos, dur);
     bool playing = w.playing;
-    bool toggle = (tapped && !mobile && !dbl) || ImGui::IsKeyPressed(ImGuiKey_Space, false);
+    bool toggle = (tapped && (!mobile || tapMid) && !dbl) || ImGui::IsKeyPressed(ImGuiKey_Space, false);
+    if (controls && open && !w.hold) {  // the big play / pause in the middle
+        dl->AddCircleFilled(mid, midR * 0.62f, IM_COL32(0, 0, 0, 110));
+        ui::DrawIcon(dl, w.playing ? Icon::Pause : Icon::Play, mid, midR * 0.9f, IM_COL32(255, 255, 255, 230));
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) eng.WatchControl(playing, std::max(0.0, pos - 10));
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) eng.WatchControl(playing, dur > 0 ? std::min(dur - 1, pos + 10) : pos + 10);
 
@@ -632,7 +650,7 @@ void App::DrawWatch() {
         dl->AddText(ImVec2(p.x, p.y + bh + sp * 0.5f), IM_COL32(235, 235, 235, 255), time.c_str());
     }
     if (toggle) eng.WatchControl(!playing, -1);
-    if (tapped && mobile) watchActive = 0;  // phones: a tap on the picture hides the controls again
+    if (tapped && mobile && !tapMid) watchActive = 0;  // phones: a tap on the picture (not its middle) hides the controls again
     if (ImGui::IsKeyPressed(ImGuiKey_Escape) && watchFullscreen && Bridge().setFullscreen) {
         watchFullscreen = false;
         Bridge().setFullscreen(false, false);

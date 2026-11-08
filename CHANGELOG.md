@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Movie player: *Autoplay* (remembered for every movie) - no need to press play. A big play / pause sign in the
+  middle of the picture: tapping it plays or pauses while the controls are showing.
+
 ## 1.5.3
 
 - Listening together:

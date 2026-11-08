@@ -127,6 +127,7 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     watchViewers_.clear();
     watchBuffering_.clear();
     watch.allowSave = settings.watchAllowSave;
+    watch.playing = settings.playerAutoplay;  // (autoplay: no need to press play)
     {
         std::lock_guard<std::mutex> l(watchServe_.m);
         watchServe_.files[watch.sid] = {OpenFile(path, "rb"), size};
@@ -193,6 +194,7 @@ uint64_t Engine::StartLibraryWatch(const LibFile& f) {
     watch.libId = f.id;
     watch.saving = d->keep;
     watch.at = SteadyMs();
+    watch.playing = settings.playerAutoplay;
     watch.people = {settings.displayName};
     watchKeys.clear();
     watchViewers_.clear();
