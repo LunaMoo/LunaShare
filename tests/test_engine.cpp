@@ -657,10 +657,27 @@ int main() {
         CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watch.playing && std::abs(B->watch.Target(SteadyMs()) - 30) < 0.01; }, 3000),
               "and the host's reaches everyone");
         CHECK(B->WatchLoaded() > 0.1, "loaded %.0f%%", B->WatchLoaded() * 100);
+        B->WatchSetLoop(true);
+        CHECK(WaitFor([&] { auto l = A->Lock(); auto l2 = B->Lock(); return A->watch.loop && B->watch.loop; }, 3000), "loop on for everyone");
+        // the viewer keeps a copy: everything comes, then it's in Downloads
+        B->WatchSave();
+        std::string saved = JoinPath(B->GetSettings().downloadDir, "movie.bin");
+        std::string wantSha = Sha256File(movie);
+        CHECK(WaitFor([&] { return FileSize(saved) == (20 << 20) && Sha256File(saved) == wantSha; }, 15000), "a copy saved to Downloads (%lld bytes, %.0f%% loaded, saving %d)",
+              (long long)FileSize(saved), B->WatchLoaded() * 100, (int)B->watch.saving);
         A->LeaveWatch();
         CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "the host ends it for everyone");
         CHECK(B->WatchRead(0, tmp.data(), 100) < 0, "the player stops reading");
         CHECK(!FileExists(JoinPath(B->configDir, "watch/" + ToHex((const uint8_t*)&sid, 8) + ".part")), "the temporary copy is gone");
+        // the movie player: alone first, then someone is added
+        uint64_t sid2 = A->StartWatch("", movie);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(sid2 != 0 && WaitFor([&] { auto l = B->Lock(); return B->watchInvites.empty() || B->watchInvites.back().sid != sid2; }, 100), "alone: nobody invited");
+        A->WatchInviteTo(bob);
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watchInvites.empty() && B->watchInvites.back().sid == sid2; }, 3000), "added afterwards: invited");
+        CHECK(B->JoinWatch(sid2) && WaitFor([&] { auto l = A->Lock(); return A->watch.people.size() == 2; }, 3000), "and watching together");
+        A->LeaveWatch();
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
     }
 
     printf("[accounts: recovery phrase, backup, removing a device]\n");
@@ -743,6 +760,37 @@ int main() {
             for (auto& x : L3->peerLibraries[i1].files)
                 if (x.rel == "films/holiday.bin") f = x;
             CHECK(!f.id.empty() && L3->peerLibraries[i2].files[0].id == f.id, "the same content has the same id on both");
+        }
+        {  // played from their Shared folder while it comes (not kept)
+            CHECK(L3->StartLibraryWatch(f) != 0, "movie player on a contact's file");
+            auto read = L3->LibStreamReader(f.id);
+            FILE* mf = OpenFile(big, "rb");
+            std::mt19937 rng(9);
+            bool same = true;
+            for (int i = 0; i < 20 && same; i++) {
+                int64_t off = i == 0 ? 0 : (int64_t)(rng() % (BIG - 70000));
+                std::vector<uint8_t> got(65536), want(65536);
+                int n = -2;
+                int64_t t1 = SteadyMs();
+                while (n == -2 && SteadyMs() - t1 < 10000) n = read(off, got.data(), (int)got.size());
+                FileSeek(mf, off);
+                size_t w = n > 0 ? fread(want.data(), 1, (size_t)n, mf) : 0;
+                same = n > 0 && (size_t)n == w && memcmp(got.data(), want.data(), (size_t)n) == 0;
+            }
+            fclose(mf);
+            CHECK(same, "what the player reads is their file");
+            std::string part;
+            {
+                auto l = L3->Lock();
+                auto it = L3->swarm.find(f.id);
+                part = it == L3->swarm.end() ? "" : it->second->partPath;
+                CHECK(it != L3->swarm.end() && !it->second->keep, "played, not kept");
+            }
+            L3->LeaveWatch();
+            {
+                auto l = L3->Lock();
+                CHECK(!L3->swarm.count(f.id) && !FileExists(part) && !L3->HaveShared(f.id), "closing it leaves nothing behind");
+            }
         }
         for (auto* e : {L1.get(), L2.get()}) {  // each source alone is slow: together they're twice as fast
             Settings s = e->GetSettings();

@@ -146,6 +146,9 @@ void Engine::Stop() {
     if (maintThread_.joinable()) maintThread_.join();
     if (hashThread_.joinable()) hashThread_.join();
     if (libThread_.joinable()) libThread_.join();
+    for (auto& t : saveThreads_)
+        if (t.joinable()) t.join();
+    saveThreads_.clear();
     for (int i = 0; i < 100 && liveThreads_ > 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(50));
     CloseSocket(listener_);
     listener_ = kInvalidSocket;
@@ -2285,11 +2288,15 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
     }
     // watching together: someone of that conversation (or one of my devices) came online - they're invited too
-    if (watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), peer) == watchViewers_.end()) {
-        auto to = DevicesOf(watch.key);
+    if (watch.sid && watch.host.empty() && watch.libId.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), peer) == watchViewers_.end()) {
         auto mine = MyOtherDevices();
-        if (std::find(to.begin(), to.end(), peer) != to.end() || std::find(mine.begin(), mine.end(), peer) != mine.end())
-            Queue(c, Msg::WatchInvite, KeyField(watch.key, {{"sid", watch.sid}, {"name", watch.name}, {"size", watch.size}}));
+        for (auto& k : watchKeys) {
+            auto to = DevicesOf(k);
+            if (std::find(to.begin(), to.end(), peer) != to.end() || (k == watchKeys[0] && std::find(mine.begin(), mine.end(), peer) != mine.end())) {
+                Queue(c, Msg::WatchInvite, KeyField(k, {{"sid", watch.sid}, {"name", watch.name}, {"size", watch.size}}));
+                break;
+            }
+        }
     }
     // a group call going on that this device's person is in: "I'm in"
     if (call.state == CallState::Active && !call.group.empty() && !call.hub) {

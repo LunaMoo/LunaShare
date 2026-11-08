@@ -101,7 +101,7 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         ImGui::SameLine();
         double dur = cur && Player().Duration() > 0 ? Player().Duration() : meta.info.duration;
         double pos = cur ? Player().Position() : 0;
-        float barW = std::max(40.0f, width - h - ImGui::GetStyle().ItemSpacing.x);
+        float barW = std::max(40.0f, width - h * 2 - ImGui::GetStyle().ItemSpacing.x * 2);
         ImGui::BeginGroup();
         // progress bar you can tap / drag to seek
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -123,6 +123,13 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + barW);
         ImGui::TextDisabled("%s", label.c_str());
         ImGui::PopTextWrapPos();
+        ImGui::EndGroup();
+        ImGui::SameLine();
+        bool lp = eng.settings.playerLoop;
+        if (lp) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ui::IconButton("loop", Icon::Loop, lp ? T("Loop: on") : T("Loop: off"), h * 0.8f)) ToggleLoop();
+        if (lp) ImGui::PopStyleColor();
+        ImGui::BeginGroup();
         if (meta.done && !meta.ok) ImGui::TextDisabled("%s", T("can't play this file here"));
         ImGui::EndGroup();
         ImGui::PopID();
@@ -535,6 +542,11 @@ void App::DrawViewer() {
             ImGui::SetCursorScreenPos(ImVec2(viewer.areaMin.x + ImGui::GetStyle().ItemSpacing.x, y));
             bool playing = Player().Playing();
             if (ui::IconButton("vplay", playing ? Icon::Pause : Icon::Play, playing ? T("Pause (Space)") : T("Play (Space)"), vbh)) Player().Toggle(path);
+            ImGui::SameLine();
+            bool lp = eng.settings.playerLoop;
+            if (lp) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 110, 200, 255));
+            if (ui::IconButton("vloop", Icon::Loop, lp ? T("Loop: on") : T("Loop: off"), vbh)) ToggleLoop();
+            if (lp) ImGui::PopStyleColor();
             ImGui::SameLine();
             double dur = Player().Duration(), pos = Player().Position();
             std::string tl = Clock(pos) + " / " + Clock(dur);

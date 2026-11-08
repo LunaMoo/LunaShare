@@ -39,6 +39,8 @@ struct WatchCache {
     int waiting = 0;
     bool cancelled = false;
     bool buffering = true;
+    bool save = false, saved = false;   // keeping a copy: everything is asked for, then copied to Downloads
+    std::string saveName, saveDir, key;
     ~WatchCache() {
         if (f) fclose(f);
     }
@@ -91,12 +93,95 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
         }
         std::sort(watch.subFiles.begin(), watch.subFiles.end());
     }
+    watchKeys.clear();
+    if (key.empty()) return watch.sid;  // the movie player: alone until someone is added
+    watchKeys.push_back(key);
     json inv = KeyField(key, {{"sid", watch.sid}, {"name", watch.name}, {"size", size}});
     std::vector<std::string> to = DevicesOf(key);
     for (auto& d : MyOtherDevices()) to.push_back(d);  // (also my own: the TV computer, the tablet...)
     for (auto& d : to) QueueToPeer(d, Msg::WatchInvite, inv);
     AddSystemMessage(key, "You started watching \"" + watch.name + "\" together.");
     return watch.sid;
+}
+
+void Engine::WatchInviteTo(const std::string& key) {
+    auto lk = Lock();
+    if (!watch.sid || !watch.host.empty() || !watch.libId.empty() || key.empty()) return;
+    if (std::find(watchKeys.begin(), watchKeys.end(), key) != watchKeys.end()) return;
+    watchKeys.push_back(key);
+    if (watch.key.empty()) watch.key = key;  // (its chat shows the "watching" strip)
+    json inv = KeyField(key, {{"sid", watch.sid}, {"name", watch.name}, {"size", watch.size}});
+    for (auto& d : DevicesOf(key)) QueueToPeer(d, Msg::WatchInvite, inv);
+    AddSystemMessage(key, "You invited them to watch \"" + watch.name + "\" together.");
+}
+
+// a file from a contact's Shared folder, played while its pieces come (a library download that isn't kept unless
+// "Save" is pressed). One I have already is simply played from my Shared folder.
+uint64_t Engine::StartLibraryWatch(const LibFile& f) {
+    auto lk = Lock();
+    if (f.id.size() != 64 || f.size <= 0) return 0;
+    auto li = libIndex_.find(f.id);
+    if (li != libIndex_.end())
+        return StartWatch("", JoinPath(settings.sharedDir.empty() ? JoinPath(settings.downloadDir, "Shared") : settings.sharedDir, li->second.f.rel));
+    bool existed = swarm.count(f.id) > 0;
+    if (!DownloadShared(f)) return 0;
+    auto d = swarm[f.id];
+    if (!existed) d->keep = false;
+    d->streamStop = false;
+    d->streamPos = 0;
+    if (watch.sid) LeaveWatch();
+    watch = WatchInfo();
+    watch.sid = RandomU64() | 1;
+    watch.name = BaseName(f.rel);
+    watch.size = f.size;
+    watch.libId = f.id;
+    watch.saving = d->keep;
+    watch.at = SteadyMs();
+    watch.people = {settings.displayName};
+    watchKeys.clear();
+    watchViewers_.clear();
+    watchBuffering_.clear();
+    watchSelfBuffering_ = false;
+    SwarmTick();
+    return watch.sid;
+}
+
+void Engine::WatchSetLoop(bool on) {
+    auto lk = Lock();
+    if (!watch.sid) return;
+    watch.loop = on;
+    if (watch.host.empty()) WatchBroadcast();
+    else QueueToPeer(watch.host, Msg::WatchCtl, {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.Target(SteadyMs())}, {"loop", on}});
+}
+
+void Engine::WatchSave() {
+    auto lk = Lock();
+    if (!watch.sid || watch.saving) return;
+    if (!watch.libId.empty()) {  // the library download is simply kept: it lands in the Shared folder
+        auto it = swarm.find(watch.libId);
+        if (it == swarm.end()) return;
+        it->second->keep = true;
+        watch.saving = true;
+        MarkDirty();
+        if (it->second->state == SwarmDownload::Done && FileExists(it->second->partPath)) FinishSwarm(it->second);
+        return;
+    }
+    if (watch.host.empty()) return;  // (it's mine already)
+    auto wc = WatchCacheNow();
+    if (!wc) return;
+    {
+        std::lock_guard<std::mutex> l(wc->m);
+        wc->save = true;
+        wc->saveName = watch.name;
+        wc->saveDir = settings.downloadDir;
+        wc->key = watch.key;
+        if (!wc->saved && wc->haveCount == wc->Blocks()) {  // (all of it is here already)
+            wc->saved = true;
+            SaveWatchCopy(wc);
+        }
+    }
+    watch.saving = true;
+    WatchRequestOn(wc, 0);
 }
 
 bool Engine::JoinWatch(uint64_t sid) {
@@ -154,7 +239,19 @@ void Engine::LeaveWatch() {
 
 void Engine::EndWatchLocked(const std::string& why) {
     WatchInfo w = watch;
-    if (!w.host.empty()) {
+    if (!w.libId.empty()) {  // a library stream: dropped unless it was saved
+        auto it = swarm.find(w.libId);
+        if (it != swarm.end()) {
+            auto d = it->second;
+            d->streamPos = -1;
+            if (!d->keep) {
+                d->streamStop = true;
+                d->scv.notify_all();
+                d->state = SwarmDownload::Running;  // (so CancelShared deletes the part file even if it was complete)
+                CancelShared(w.libId);
+            }
+        }
+    } else if (!w.host.empty()) {
         std::shared_ptr<WatchCache> c;
         {
             std::lock_guard<std::mutex> l(watchCacheMtx_);
@@ -162,6 +259,7 @@ void Engine::EndWatchLocked(const std::string& why) {
         }
         if (c) {
             std::lock_guard<std::mutex> l(c->m);
+            if (c->save && !c->saved) AddSystemMessage(w.key, "Saving \"" + w.name + "\" stopped: the movie ended before all of it was here.");
             c->cancelled = true;  // the player's reads return; the file goes when the player lets go of it
             c->cv.notify_all();
             if (c->f) fclose(c->f);
@@ -179,8 +277,10 @@ void Engine::EndWatchLocked(const std::string& why) {
     }
     watchViewers_.clear();
     watchBuffering_.clear();
+    watchKeys.clear();
+    watchSelfBuffering_ = false;
     watch = WatchInfo();
-    if (!why.empty()) AddSystemMessage(w.key, why);
+    if (!why.empty() && !w.key.empty()) AddSystemMessage(w.key, why);
     Emit({EventType::Info, w.key, ""});
 }
 
@@ -218,7 +318,7 @@ json Engine::WatchStateJson() {
     json people = json::array({settings.displayName});
     for (auto& d : watchViewers_) people.push_back(PeerName(ChatKey(d)));
     return {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.Target(now)}, {"hold", watch.hold},
-            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"ver", ++watchVer_}};
+            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"loop", watch.loop}, {"ver", ++watchVer_}};
 }
 
 void Engine::WatchBroadcast() {
@@ -234,7 +334,7 @@ void Engine::WatchUpdateHold() {
     std::string wait;
     for (auto& [d, b] : watchBuffering_)
         if (b) wait += (wait.empty() ? "" : ", ") + PeerName(ChatKey(d));
-    bool hold = !wait.empty();
+    bool hold = !wait.empty() || watchSelfBuffering_;
     if (hold == watch.hold && wait == watch.waitFor) return;
     int64_t now = SteadyMs();
     watch.pos = watch.Target(now);  // (frozen while holding, goes on from there)
@@ -266,6 +366,15 @@ void Engine::WatchTick() {
     if (!watch.sid) return;
     int64_t now = SteadyMs();
     if (watch.host.empty()) {
+        if (!watch.libId.empty()) {  // a library stream: the clock waits while the pieces come
+            auto it = swarm.find(watch.libId);
+            bool b = it != swarm.end() && LibStreamBuffering(it->second);
+            if (b != watchSelfBuffering_) {
+                watchSelfBuffering_ = b;
+                WatchUpdateHold();
+            }
+            if (it != swarm.end()) watch.saving = it->second->keep;
+        }
         if (now - watchLastState_ > 1000) WatchBroadcast();
         return;
     }
@@ -354,6 +463,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.pos = pos >= 0 ? std::min(pos, 1e7) : watch.Target(now);
             watch.playing = j.value("playing", false);
             watch.at = now;
+            if (j.contains("loop")) watch.loop = j.value("loop", false);
             WatchBroadcast();
             break;
         }
@@ -379,6 +489,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.hold = j.value("hold", false);
             watch.waitFor = j.value("wait", "");
             watch.hostSub = j.value("hsub", "");
+            watch.loop = j.value("loop", false);
             watch.people.clear();
             for (auto& p : j.value("people", json::array()))
                 if (p.is_string()) watch.people.push_back(p.get<std::string>());
@@ -456,6 +567,10 @@ void Engine::HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& 
         wc->cv.notify_all();
         more = wc->inflight.size() < kWatchInflight / 2;
         from = wc->readPos;
+        if (wc->save && !wc->saved && wc->haveCount == wc->Blocks()) {
+            wc->saved = true;
+            SaveWatchCopy(wc);
+        }
     }
     if (more) WatchRequestOn(wc, from);
 }
@@ -489,6 +604,14 @@ void Engine::WatchRequestOn(const std::shared_ptr<WatchCache>& wc, int64_t from)
             if (!wc->have[(size_t)b] && !wc->inflight.count(b)) {
                 wc->inflight[b] = now;
                 ask.push_back(b);
+            }
+        if (wc->save)  // keeping a copy: after what the player needs, everything else (from where it reads, then the start)
+            for (int64_t k = 0, n = wc->Blocks(); k < n && wc->inflight.size() < kWatchInflight; k++) {
+                int64_t b = (end + k) % n;
+                if (!wc->have[(size_t)b] && !wc->inflight.count(b)) {
+                    wc->inflight[b] = now;
+                    ask.push_back(b);
+                }
             }
     }
     for (auto b : ask) {
@@ -545,10 +668,104 @@ bool Engine::WatchBuffering() {
 }
 
 double Engine::WatchLoaded() {
+    if (!watch.libId.empty()) {  // (UI thread, under the engine lock)
+        auto it = swarm.find(watch.libId);
+        return it == swarm.end() || !it->second->size ? 0.0 : (double)it->second->done / (double)it->second->size;
+    }
     auto wc = WatchCacheNow();
     if (!wc) return watch.sid ? 1.0 : 0.0;
     std::lock_guard<std::mutex> l(wc->m);
     return wc->Blocks() ? (double)wc->haveCount / (double)wc->Blocks() : 1.0;
+}
+
+// the whole movie is here: copied out of the cache into Downloads (on its own thread - it can be big)
+void Engine::SaveWatchCopy(const std::shared_ptr<WatchCache>& wc) {  // (wc->m is held)
+    std::string src = wc->path, name = wc->saveName.empty() ? "movie" : BaseName(wc->saveName), dir = wc->saveDir, key = wc->key;
+    int64_t size = wc->size;
+    // (never joined here: this runs under the engine lock, and the copying thread takes it at the end)
+    saveThreads_.emplace_back([this, src, name, dir, key, size] {
+        MakeDirs(dir);
+        std::string dest = UniquePath(JoinPath(dir, name));
+        bool ok = false;
+        FILE* in = OpenFile(src, "rb");
+        FILE* out = in ? OpenFile(dest, "wb") : nullptr;
+        if (in && out) {
+            std::vector<char> b(1 << 20);
+            int64_t left = size;
+            ok = true;
+            while (left > 0 && ok) {
+                size_t n = fread(b.data(), 1, (size_t)std::min<int64_t>(left, (int64_t)b.size()), in);
+                ok = n > 0 && fwrite(b.data(), 1, n, out) == n;
+                left -= (int64_t)n;
+            }
+        }
+        if (in) fclose(in);
+        if (out) ok = fclose(out) == 0 && ok;
+        if (!ok) RemoveFile(dest);
+        auto lk = Lock();
+        if (ok) {
+            HistoryEntry h;
+            h.name = BaseName(dest);
+            h.path = dest;
+            h.size = size;
+            h.ts = NowMs();
+            h.outgoing = false;
+            h.peer = watch.host;
+            h.peerName = watch.host.empty() ? std::string() : PeerName(watch.host);
+            history.push_back(h);
+            MarkDirty();
+            if (!key.empty()) AddSystemMessage(key, "Saved \"" + name + "\" to " + dest);
+            Emit({EventType::TransferDone, key, BaseName(dest), 0});
+        } else {
+            Emit({EventType::Error, key, "Could not save \"" + name + "\" to " + dir});
+        }
+    });
+}
+
+// ---------------------------------------------------------------- library streams (the player reads pieces)
+
+std::function<int(int64_t, uint8_t*, int)> Engine::LibStreamReader(const std::string& id) {
+    std::shared_ptr<SwarmDownload> d;
+    {
+        auto lk = Lock();
+        auto it = swarm.find(id);
+        if (it != swarm.end()) d = it->second;
+    }
+    return [d](int64_t off, uint8_t* buf, int len) -> int {
+        if (!d || len <= 0) return -1;
+        int64_t t0 = SteadyMs();
+        for (;;) {
+            std::string path;
+            int n = 0;
+            {
+                std::unique_lock<std::mutex> l(d->sm);
+                if (d->streamStop) return -1;
+                if (off >= d->size) return 0;
+                d->streamPos = off;
+                uint32_t idx = (uint32_t)(off / d->pieceSize);
+                if (idx < d->have.size() && d->have[idx]) {
+                    path = d->state == SwarmDownload::Done && !d->finalPath.empty() ? d->finalPath : d->partPath;
+                    n = (int)std::min<int64_t>(len, std::min(d->size, (int64_t)(idx + 1) * d->pieceSize) - off);
+                } else {
+                    if (SteadyMs() - t0 > 200) return -2;  // (the player asks again; it can stop meanwhile)
+                    d->streamWaitAt = SteadyMs();
+                    d->scv.wait_for(l, std::chrono::milliseconds(100));
+                    continue;
+                }
+            }
+            FILE* f = OpenFile(path, "rb");  // (opened per read: the file may move into the Shared folder meanwhile)
+            bool ok = f && FileSeek(f, off) && fread(buf, 1, (size_t)n, f) == (size_t)n;
+            if (f) fclose(f);
+            if (ok) return n;
+            if (SteadyMs() - t0 > 2000) return -1;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));  // (renamed just now: once more)
+        }
+    };
+}
+
+bool Engine::LibStreamBuffering(const std::shared_ptr<SwarmDownload>& d) {
+    // the player waited for a piece just now (it asks again every 200 ms while it waits)
+    return SteadyMs() - d->streamWaitAt.load() < 500;
 }
 
 }  // namespace ls

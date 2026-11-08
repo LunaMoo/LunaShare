@@ -536,6 +536,7 @@ int main(int argc, char** argv) {
         }
         ImGui::NewFrame();
         app.Frame();
+        Player().SetLoop(engine.settings.playerLoop && !engine.watch.sid);
         Player().Update();  // before Media(): hands it the current video picture to upload
         Media().Update();
         ImGui::Render();

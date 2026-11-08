@@ -121,6 +121,9 @@ struct WatchInfo {
     std::vector<std::string> people;  // names of everyone watching
     std::vector<std::string> subFiles;  // subtitle files for the movie (host: next to it; viewer: received copies)
     std::string hostSub;       // the subtitles the host has on: "" none, "file:<name>", "track:<n>:<lang>" (n-th in the file)
+    bool loop = false;         // start again at the end (everyone)
+    std::string libId;         // streamed from a contact's Shared folder (content id): played here, not shared on
+    bool saving = false;       // keeping a copy (viewer / library stream)
     double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 : 0); }
 };
 struct WatchInviteInfo {
@@ -165,6 +168,14 @@ struct SwarmDownload {
     double speed = 0;
     int64_t speedBytes = 0, speedTs = 0;
     uint32_t Pieces() const { return (uint32_t)((size + pieceSize - 1) / pieceSize); }
+    // played while it comes (movie player): pieces from where the player reads go first. `have`, the paths and
+    // the state change under `sm` too, so the player's thread can read without the engine lock.
+    bool keep = true;                   // false: only for playing - not kept, not passed on
+    std::atomic<int64_t> streamPos{-1}; // byte the player reads (-1: not playing)
+    std::atomic<bool> streamStop{false};
+    std::atomic<int64_t> streamWaitAt{0}; // steady ms the player last waited for a piece
+    std::mutex sm;
+    std::condition_variable scv;
 };
 
 struct CallPeer {          // group calls: another device in the call
@@ -345,7 +356,12 @@ public:
     // ---- watch together (watch.cpp)
     WatchInfo watch;                          // under Lock()
     std::vector<WatchInviteInfo> watchInvites;
-    uint64_t StartWatch(const std::string& key, const std::string& path);  // share a file to watch it together
+    uint64_t StartWatch(const std::string& key, const std::string& path);  // share a file to watch it together ("" key: alone, for now)
+    void WatchInviteTo(const std::string& key);  // host: invite a person / group to the movie that's on
+    uint64_t StartLibraryWatch(const LibFile& f);  // play a file from a contact's Shared folder while it comes
+    void WatchSetLoop(bool on);
+    void WatchSave();                         // viewer / library stream: keep a copy of the whole movie
+    std::vector<std::string> watchKeys;       // host: the conversations invited (under Lock())
     bool JoinWatch(uint64_t sid);
     void LeaveWatch();
     void WatchControl(bool playing, double pos);  // play / pause / seek (pos < 0: keep the position)
@@ -541,6 +557,14 @@ private:
     std::vector<std::string> watchViewers_;       // host: devices watching
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
     bool watchReportedBuffering_ = false;
+    bool watchSelfBuffering_ = false;             // host of a library stream: waiting for pieces
+    std::vector<std::thread> saveThreads_;        // copying saved movies out of the watch cache (joined in Stop)
+    bool LibStreamBuffering(const std::shared_ptr<SwarmDownload>& d);
+    void SaveWatchCopy(const std::shared_ptr<WatchCache>& wc);
+public:
+    // the player's read function for a library stream (any thread, no engine lock)
+    std::function<int(int64_t, uint8_t*, int)> LibStreamReader(const std::string& id);
+private:
     void HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const json& j);
     void HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& f);
     bool ProduceWatch(const std::shared_ptr<Connection>& c, std::vector<uint8_t>& buf);

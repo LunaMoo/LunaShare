@@ -48,6 +48,9 @@ public:
     enum class Opening { None, Busy, Failed, Ready };
     Opening OpenState();
     void SetPlaying(bool on);
+    // chats: start again at the end (not for watching together / the movie player: their clock decides)
+    void SetLoop(bool on) { loop_ = on; }
+    bool Loop() const { return loop_; }
     // sound tracks and subtitles of what's playing
     std::vector<LspTrack> Tracks() const;
     void SelectTrack(int kind, int id);
@@ -105,7 +108,8 @@ private:
     LspInfo openedInfo_{};
     std::string openingId_;
     std::function<int(int64_t, uint8_t*, int)> streamRead_;
-    std::atomic<bool> streamStop_{false};  // Stop(): reads waiting for the network give up
+    std::atomic<bool> streamStop_{false};
+    bool loop_ = false;  // Stop(): reads waiting for the network give up
     LspStream stream_{};
     Sub sub_;
     int subSerial_ = -1;

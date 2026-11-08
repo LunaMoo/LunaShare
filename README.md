@@ -44,6 +44,8 @@ after receiving, so you know it arrived intact.
 **Watch together** (see [docs/WATCH.md](docs/WATCH.md))
 - Stream a movie from your device to a person or a group and watch it in sync: pausing or jumping affects everyone,
   and everyone waits for whoever is still loading. Original quality, nothing to send in advance.
+- **Movie player:** play a movie alone and add people (or a group) later; videos in contacts' Shared folders play
+  while they stream. Loop for everyone, and viewers can save a copy.
 - Pick the sound track and subtitles (from the movie, from files next to it, or any file you choose); the host's
   subtitles are offered to everyone. Full screen with controls that hide by themselves; phones turn to landscape.
 

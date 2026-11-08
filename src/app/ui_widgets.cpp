@@ -56,6 +56,11 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->PathStroke(col, 0, t);
             dl->AddTriangleFilled(P(0.6f, -0.65f), P(0.85f, 0.05f), P(0.2f, -0.05f), col);
             break;
+        case Icon::Loop:  // a rounded loop with an arrow on top and one at the bottom
+            dl->AddRect(P(-0.75f, -0.45f), P(0.75f, 0.45f), col, h * 0.35f, 0, t);
+            dl->AddTriangleFilled(P(0.05f, -0.75f), P(0.45f, -0.45f), P(0.05f, -0.15f), col);
+            dl->AddTriangleFilled(P(-0.05f, 0.75f), P(-0.45f, 0.45f), P(-0.05f, 0.15f), col);
+            break;
         case Icon::Send:
             dl->AddTriangleFilled(P(-0.8f, -0.75f), P(0.85f, 0.0f), P(-0.8f, 0.75f), col);
             dl->AddTriangleFilled(P(-0.8f, -0.75f), P(-0.35f, 0.0f), P(-0.8f, 0.75f), ImGui::GetColorU32(ImGuiCol_Button));

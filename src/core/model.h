@@ -110,6 +110,7 @@ struct Settings {
     int callVideoRes = 1;          // 0 360p 1 540p 2 720p 3 1080p 4 1440p 5 4K 6 8K
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
+    bool playerLoop = false;  // videos / audio in chats: start again at the end
     bool fullscreenBorderless = false;  // Windows: movies full screen as a borderless window (no game HDR)
     bool callFullPreview = false;  // self-view in the camera's full size and frame rate (calls, video messages)
     std::string callCamera;        // preferred camera id (empty: front camera)

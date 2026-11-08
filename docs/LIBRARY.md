@@ -17,6 +17,14 @@ with. A device that merely appeared on the network isn't a contact and sees noth
   already offer the pieces they have. Downloads survive restarts (`swarm.json` + a `.part` file in
   `Shared/.lunashare-partial`).
 
+## Playing without downloading
+
+Videos and music in a contact's Shared folder have a **Play** button: the movie player opens and plays it while it
+comes, without the person sharing it doing anything. It's an ordinary download with two differences: the pieces from
+where the player reads come first (48 MB ahead, from every device that has the file), and nothing else is fetched.
+Closing the player deletes what came. **Save a copy** (↓) on the movie screen turns it into a normal download - the
+rest comes in the background and the file lands in your Shared folder.
+
 ## When it's faster
 
 The total speed is roughly the sum of what each source can send, up to your own download speed. That helps most over

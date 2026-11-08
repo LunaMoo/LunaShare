@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0
+
+- **Movie player:** play a movie on your own (*Library → Movie player...*, on phones on the main screen) and add a
+  person or a group at any time with **+** - from then on you watch it together.
+- **Play from Shared folders:** videos and music in your contacts' Shared folders have a *Play* button. They stream
+  piece by piece (from every device that has them, the part being played first); the person sharing doesn't need to
+  do anything. Nothing is kept unless you save it.
+- **Loop:** a loop button for watching together (for everyone) and for videos and audio in chats (remembered).
+- **Save a copy:** when watching someone's movie, ↓ fetches the rest in the background and saves it to Downloads;
+  a movie streamed from a Shared folder is saved into your Shared folder (each piece verified).
+
 ## 1.2.10
 
 - **Invites are easy to find:** the *Invites* section (use a code you got, invite someone) is now the first thing in

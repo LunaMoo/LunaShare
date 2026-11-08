@@ -84,6 +84,10 @@ private:
     void DrawWatch();
     void DrawWatchBanner(const std::string& peer);
     void OpenWatchPicker(const std::string& peer);
+    void OpenMoviePlayer();                 // the movie player: a movie alone (people can be added later)
+    void DrawWatchResume();                 // "the movie is on" strip outside its chat (movie player, library)
+    void WatchAddPopup();                   // host: add a person / group to the movie
+    void ToggleLoop();                      // chats: videos and audio start again at the end
     bool watchShown = false, watchFailed = false;
     std::string watchOpened;
     int64_t watchLastSeek = 0;
@@ -180,7 +184,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

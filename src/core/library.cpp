@@ -269,7 +269,10 @@ void Engine::HandleLibrary(const std::shared_ptr<Connection>& c, Msg type, const
                 break;
             }
             d.hashes = h;
-            if (d.have.size() != d.Pieces()) d.have.assign(d.Pieces(), 0);
+            if (d.have.size() != d.Pieces()) {
+                std::lock_guard<std::mutex> l(d.sm);
+                d.have.assign(d.Pieces(), 0);
+            }
             d.state = SwarmDownload::Running;
             MarkDirty();
             break;
@@ -378,6 +381,11 @@ bool Engine::DownloadShared(const LibFile& f) {
     if (f.id.size() != 64 || f.size <= 0 || libIndex_.count(f.id)) return false;
     auto it = swarm.find(f.id);
     if (it != swarm.end()) {
+        if (!it->second->keep) {  // being played (movie player): now it's kept
+            it->second->keep = true;
+            MarkDirty();
+            if (it->second->state == SwarmDownload::Done && FileExists(it->second->partPath)) FinishSwarm(it->second);
+        }
         if (it->second->state == SwarmDownload::Paused || it->second->state == SwarmDownload::Failed)
             it->second->state = it->second->hashes.empty() ? SwarmDownload::Searching : SwarmDownload::Running;
         return true;
@@ -415,6 +423,8 @@ void Engine::CancelShared(const std::string& id) {
     auto lk = Lock();
     auto it = swarm.find(id);
     if (it == swarm.end()) return;
+    it->second->streamStop = true;
+    it->second->scv.notify_all();
     if (it->second->state != SwarmDownload::Done) RemoveFile(it->second->partPath);
     swarm.erase(it);
     MarkDirty();
@@ -455,12 +465,25 @@ void Engine::SwarmTick() {
             }
         uint32_t missing = 0;
         for (uint32_t i = 0; i < n; i++) missing += !d.have[i];
+        if (d.done >= d.size) {  // (complete, but couldn't be moved yet: the player had it open)
+            FinishSwarm(dp);
+            continue;
+        }
+        // being played: the pieces from where the player reads go first (48 MB ahead); one that is only
+        // played (not kept) gets nothing else
+        int64_t sp = d.streamPos.load();
+        uint32_t w0 = sp >= 0 ? (uint32_t)std::min<int64_t>(n, sp / d.pieceSize) : 0, w1 = sp >= 0 ? std::min<uint32_t>(n, w0 + 48) : 0;
         // keep up to 8 pieces in flight per source; every source starts at a different place so they don't overlap
         int si = 0;
         for (auto& [dev, s] : d.sources) {
             uint32_t start = (uint32_t)(((uint64_t)n * (uint64_t)si++) / std::max<size_t>(1, d.sources.size()));
             while (s.inflight.size() < 8) {
                 int64_t pick = -1;
+                for (uint32_t i = w0; i < w1 && pick < 0; i++) {
+                    bool avail = s.full || (i < s.bits.size() && s.bits[i]);
+                    if (!d.have[i] && !inflight[i] && avail) pick = i;
+                }
+                if (pick < 0 && !d.keep) break;
                 for (uint32_t k = 0; k < n && pick < 0; k++) {
                     uint32_t i = (start + k) % n;
                     bool avail = s.full || (i < s.bits.size() && s.bits[i]);
@@ -539,7 +562,11 @@ void Engine::HandlePieceData(const std::shared_ptr<Connection>& c, const Frame& 
     totalDown += (int64_t)len;
     s.bytes += (int64_t)len;
     if (!d->have[idx]) {
-        d->have[idx] = 1;
+        {
+            std::lock_guard<std::mutex> l(d->sm);
+            d->have[idx] = 1;
+        }
+        d->scv.notify_all();
         d->done += (int64_t)len;
         d->speedBytes += (int64_t)len;
     }
@@ -549,16 +576,29 @@ void Engine::HandlePieceData(const std::shared_ptr<Connection>& c, const Frame& 
 }
 
 void Engine::FinishSwarm(const std::shared_ptr<SwarmDownload>& d) {
+    if (!d->keep) {  // only played: complete, but stays where it is (deleted when the movie player closes)
+        std::lock_guard<std::mutex> l(d->sm);
+        d->state = SwarmDownload::Done;
+        d->finalPath = d->partPath;
+        return;
+    }
     std::string root = settings.sharedDir.empty() ? JoinPath(settings.downloadDir, "Shared") : settings.sharedDir;
     std::string dest = UniquePath(JoinPath(root, d->rel));
     MakeDirs(DirName(dest));
-    if (!RenameFile(d->partPath, dest)) {
-        d->state = SwarmDownload::Failed;
-        d->error = "cannot move the file to " + dest;
-        return;
+    {
+        std::lock_guard<std::mutex> l(d->sm);  // (the player opens the file by name for every read)
+        if (!RenameFile(d->partPath, dest)) {
+            if (d->streamPos >= 0) {  // open in the player right now (Windows): again on the next tick
+                d->state = SwarmDownload::Running;
+                return;
+            }
+            d->state = SwarmDownload::Failed;
+            d->error = "cannot move the file to " + dest;
+            return;
+        }
+        d->state = SwarmDownload::Done;
+        d->finalPath = dest;
     }
-    d->state = SwarmDownload::Done;
-    d->finalPath = dest;
     for (auto& [dev, s] : d->sources) s.inflight.clear();
     // offered on to others right away (the piece hashes are already known)
     LibEntry le;
@@ -594,7 +634,7 @@ void Engine::FinishSwarm(const std::shared_ptr<SwarmDownload>& d) {
 json Engine::SwarmJson() {
     json a = json::array();
     for (auto& [id, d] : swarm) {
-        if (d->state == SwarmDownload::Done) continue;
+        if (d->state == SwarmDownload::Done || !d->keep) continue;
         a.push_back({{"id", d->id}, {"rel", d->rel}, {"size", d->size}, {"part", d->partPath}, {"h", Base64Encode(d->hashes)},
                      {"have", Bits(d->have)}, {"paused", d->state == SwarmDownload::Paused}, {"created", d->created}});
     }

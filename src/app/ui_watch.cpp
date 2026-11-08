@@ -55,8 +55,9 @@ void App::WatchSync() {
         }
         return;
     }
-    bool host = w.host.empty();
-    std::string cur = host ? w.path : id;
+    bool host = w.host.empty(), lib = !w.libId.empty();
+    bool stream = !host || lib;  // read through the network (a host's movie, or a contact's Shared folder)
+    std::string cur = lib ? "lib:" + w.libId : host ? w.path : id;
     if (watchOpened != cur) {  // a new session: open its movie (paused)
         watchOpened = cur;
         watchFailed = false;
@@ -64,7 +65,9 @@ void App::WatchSync() {
         watchSubsAdded.clear();
         watchSubFollow = true;
         watchSubApplied = "-";
-        if (host) {
+        if (lib) {
+            Player().OpenStream(cur, w.size, eng.LibStreamReader(w.libId));
+        } else if (host) {
             if (Player().Play(w.path)) Player().Pause();
             else watchFailed = true;
         } else {
@@ -72,7 +75,7 @@ void App::WatchSync() {
             Player().OpenStream(id, w.size, [e](int64_t off, uint8_t* buf, int len) { return e->WatchRead(off, buf, len, 200); });
         }
     }
-    if (!host) {
+    if (stream) {
         auto st = Player().OpenState();
         if (st == PlayerHost::Opening::Busy) return;
         if (st == PlayerHost::Opening::Failed && !Player().IsCurrent(cur)) {
@@ -82,7 +85,7 @@ void App::WatchSync() {
     }
     if (!Player().IsCurrent(cur)) return;  // (something else is playing just now)
     // subtitle files: next to the movie (here), or the copies the host sent
-    if (host && watchSubsAdded.empty()) {
+    if (host && !lib && watchSubsAdded.empty()) {
         watchSubsAdded.insert(w.path);
         Player().AddSidecarSubtitles(w.path);
     }
@@ -127,6 +130,12 @@ void App::WatchSync() {
     int64_t now = SteadyMs();
     double target = w.Target(now);
     double dur = Player().Duration();
+    // loop: the host starts everyone again from the beginning
+    if (host && w.loop && w.playing && !w.hold && dur > 0 && target >= dur - 0.15 && now - watchLastSeek > 1500) {
+        eng.WatchControl(true, 0);
+        watchLastSeek = now;
+        return;
+    }
     if (dur > 0) target = std::min(target, dur - 0.05);
     bool play = w.playing && !w.hold && !(dur > 0 && target >= dur - 0.1);
     if (play != Player().Playing()) Player().SetPlaying(play);
@@ -135,6 +144,56 @@ void App::WatchSync() {
         Player().Seek(target);
         watchLastSeek = now;
     }
+}
+
+void App::OpenMoviePlayer() {
+    browseFor = BrowseFor::Movie;
+    browser.Open(FileBrowser::Mode::OpenFile, T("Movie player"), browser.lastDir);
+}
+
+void App::ToggleLoop() {
+    Settings s = eng.GetSettings();
+    s.playerLoop = !s.playerLoop;
+    eng.ApplySettings(s);
+    edit.playerLoop = s.playerLoop;
+}
+
+// outside the movie's chat (the movie player, a stream from a Shared folder): a strip to get back to it
+void App::DrawWatchResume() {
+    const WatchInfo& w = eng.watch;
+    if (!w.sid || watchShown) return;
+    bool mobile = ui::M().mobile;
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(50, 60, 110, 255));
+    std::string label = TF("Movie: %s", w.name.c_str());
+    if (ui::IconTextButton((label + "##wresume").c_str(), Icon::Play, ImVec2(mobile ? -1 : ImGui::GetContentRegionAvail().x, mobile ? ui::M().rowH * 0.8f : 0)))
+        watchShown = true;
+    ImGui::PopStyleColor();
+}
+
+// add a person or a group to the movie that's on (the host)
+void App::WatchAddPopup() {
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImVec2 vs = ImGui::GetMainViewport()->Size;
+    ImGui::SetNextWindowSizeConstraints(ImVec2(mobile ? vs.x * 0.8f : ImGui::GetFontSize() * 16, 0), ImVec2(vs.x * 0.95f, vs.y * 0.7f));
+    if (!ImGui::BeginPopup("##watchadd")) return;
+    ImGui::TextUnformatted(T("Watch together with..."));
+    ImGui::Separator();
+    int shown = 0;
+    for (auto& k : SortedPeers()) {
+        if (std::find(eng.watchKeys.begin(), eng.watchKeys.end(), k) != eng.watchKeys.end()) continue;
+        const KnownDevice* d = eng.DeviceFor(k);
+        if (d && d->blocked) continue;
+        shown++;
+        std::string name = Emoji().Display(eng.PeerName(k));
+        if (eng.IsConnected(k)) name += "  ●";
+        if (ImGui::Selectable((name + "##" + k).c_str(), false, 0, ImVec2(0, h))) {
+            eng.WatchInviteTo(k);
+            toasts.push_back({EventType::Info, T("Watch together"), TF("Invited %s.", eng.PeerName(k).c_str()), "", 0, 3.0f});
+        }
+    }
+    if (!shown) ImGui::TextDisabled("%s", T("No one else to invite."));
+    ImGui::EndPopup();
 }
 
 void App::OpenWatchPicker(const std::string& peer) {
@@ -363,7 +422,7 @@ void App::DrawWatch() {
     ImVec2 a = vp->Pos, b(vp->Pos.x + vp->Size.x, vp->Pos.y + vp->Size.y);
 
     // ---- show the controls on any movement / touch / key; hide them a few seconds later while it plays
-    bool popupOpen = ImGui::IsPopupOpen("##watchtracks");
+    bool popupOpen = ImGui::IsPopupOpen("##watchtracks") || ImGui::IsPopupOpen("##watchadd");
     // were the controls already showing when the finger came down? (a touch moves the pointer in one frame and
     // clicks in the next: the move must not count as "visible" for the tap that follows)
     bool wereShown = now - watchActive < 3000 && now - watchShownSince > 350;
@@ -385,8 +444,9 @@ void App::DrawWatch() {
     ImGui::InvisibleButton("##screen", ImVec2(b.x - a.x, b.y - a.y));
     bool tapped = ImGui::IsItemClicked() && controls && !tapToShow && wereShown;
     bool dbl = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
-    std::string cur = w.host.empty() ? w.path : "watch:" + std::to_string(w.sid);
+    std::string cur = !w.libId.empty() ? "lib:" + w.libId : w.host.empty() ? w.path : "watch:" + std::to_string(w.sid);
     bool open = Player().IsCurrent(cur);
+    bool host = w.host.empty(), lib = !w.libId.empty();
     const auto& vt = Media().PlayerVideo();
     const LspInfo& inf = Player().Info();
     ImVec2 fit0 = a, fit1 = b;
@@ -462,7 +522,8 @@ void App::DrawWatch() {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(255, 255, 255, 30));
         if (ui::IconButton("wplay", playing ? Icon::Pause : Icon::Play, playing ? T("Pause for everyone") : T("Play for everyone"), bh)) toggle = true;
         bool inCall = eng.call.state == CallState::Active;
-        int right = 1 + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 2 : 0);
+        bool canAdd = host && !lib, canSave = (!host || lib) && !w.saving;
+        int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 2 : 0);
         float rightW = (bh + sp) * (float)right;
         ImGui::SameLine();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -479,15 +540,29 @@ void App::DrawWatch() {
         }
         float cy = p.y + bh * 0.5f;
         dl->AddRectFilled(ImVec2(p.x, cy - 4), ImVec2(p.x + barW, cy + 4), IM_COL32(255, 255, 255, 60), 4);
-        if (!w.host.empty()) {  // how much of the movie is here
+        if (!host || lib) {  // how much of the movie is here
             float lf = (float)std::clamp(eng.WatchLoaded(), 0.0, 1.0);
             dl->AddRectFilled(ImVec2(p.x, cy + 2), ImVec2(p.x + barW * lf, cy + 4), IM_COL32(255, 255, 255, 110), 2);
         }
         dl->AddRectFilled(ImVec2(p.x, cy - 4), ImVec2(p.x + barW * frac, cy + 4), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 4);
         dl->AddCircleFilled(ImVec2(p.x + barW * frac, cy), mobile ? 12.0f : 8.0f, ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
         ImGui::SameLine();
+        bool lp = w.loop;
+        if (lp) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 110, 200, 255));
+        if (ui::IconButton("wloop", Icon::Loop, lp ? T("Loop: on (for everyone)") : T("Loop: off"), bh)) eng.WatchSetLoop(!lp);
+        if (lp) ImGui::PopStyleColor();
+        ImGui::SameLine();
         if (ui::IconButton("wtracks", Icon::Sliders, T("Sound and subtitles"), bh)) ImGui::OpenPopup("##watchtracks");
         WatchTracksPopup();
+        if (canSave) {
+            ImGui::SameLine();
+            if (ui::IconButton("wsave", Icon::Down, lib ? T("Save a copy (to your Shared folder)") : T("Save a copy (to Downloads)"), bh)) eng.WatchSave();
+        }
+        if (canAdd) {
+            ImGui::SameLine();
+            if (ui::IconButton("wadd", Icon::Plus, T("Add a person"), bh)) ImGui::OpenPopup("##watchadd");
+            WatchAddPopup();
+        }
         if (Bridge().setFullscreen && !mobile) {
             ImGui::SameLine();
             if (ui::IconButton("wfull", Icon::Expand, watchFullscreen ? T("Leave full screen (F)") : T("Full screen (F)"), bh)) {
@@ -506,7 +581,9 @@ void App::DrawWatch() {
         }
         ImGui::PopStyleColor();
         std::string time = Hms(watchDrag >= 0 ? watchDrag * dur : pos) + " / " + (dur > 0 ? Hms(dur) : std::string("--:--"));
-        if (!w.host.empty()) time += "     " + TF("%d%% here", (int)(eng.WatchLoaded() * 100));
+        if (w.saving && eng.WatchLoaded() < 1) time += "     " + TF("saving: %d%%", (int)(eng.WatchLoaded() * 100));
+        else if (w.saving) time += "     " + std::string(T("saved"));
+        else if (!host || lib) time += "     " + TF("%d%% here", (int)(eng.WatchLoaded() * 100));
         dl->AddText(ImVec2(p.x, p.y + bh + sp * 0.5f), IM_COL32(235, 235, 235, 255), time.c_str());
     }
     if (toggle) eng.WatchControl(!playing, -1);

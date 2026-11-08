@@ -7,6 +7,22 @@ just joined, someone jumped ahead, or their connection is slow - everyone waits 
 and then all go on together. *Back* returns to the chat while the movie goes on; a group or voice call works at
 the same time (mute and hang up are on the movie screen).
 
+## Movie player
+
+*Library → Movie player...* (phones: *Movie player* on the main screen) plays a movie on its own, on the same screen.
+The **+** button (*Add a person*) invites a person or a group at any moment; from then on it is watching together,
+as above - you can add more people later too. A movie from a contact's Shared folder can be played the same way
+(*Play* next to it in the Library, see [LIBRARY.md](LIBRARY.md)).
+
+## Loop and saving
+
+- The loop button starts the movie again at the end - for everyone (any of you can turn it on or off). Videos and
+  audio in chats have their own loop button (remembered).
+- Viewers can **save a copy** (↓): the rest of the movie is fetched in the background next to what's being played,
+  then copied to *Downloads* ("saving: 63%" under the seek bar). Leaving or the host stopping before it's all here
+  cancels it. A movie played from someone's Shared folder is saved into your Shared folder instead, like any library
+  download (each piece checked against its hash).
+
 ## Sound, subtitles, full screen
 
 - The ☰ button: the sound track (language) and subtitles. Subtitles come from the movie itself (text, or the
@@ -32,7 +48,7 @@ the same time (mute and hang up are on the movie screen).
 
 ## Messages
 
-`WatchInvite {sid, name, size[, gid]}`, `WatchJoin`, `WatchLeave {end}`, `WatchCtl {playing, pos}`,
-`WatchState {playing, pos, hold, wait, people}`, `WatchReport {buffering}`, `WatchRead {off, len}` and the binary
+`WatchInvite {sid, name, size[, gid]}`, `WatchJoin`, `WatchLeave {end}`, `WatchCtl {playing, pos[, loop]}`,
+`WatchState {playing, pos, hold, wait, people, hsub, loop}`, `WatchReport {buffering}`, `WatchRead {off, len}` and the binary
 `WatchData [sid u64][offset u64][data]` (sent before other bulk data on the connection). The player module reads
 through `open_stream()` (player API 2): FFmpeg with a custom AVIOContext on computers, a `MediaDataSource` on Android.

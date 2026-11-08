@@ -762,6 +762,7 @@ void App::DrawSidebar() {
     }
     if (openInvites) ImGui::OpenPopup("##invites");
     DrawInvitesPopup();
+    if (eng.watch.sid && (eng.watch.key.empty() || eng.watch.key != selectedPeer)) DrawWatchResume();
     ImGui::Separator();
     auto peers = SortedPeers();
     float footer = ImGui::GetFrameHeightWithSpacing() * 2.2f;
@@ -937,6 +938,8 @@ void App::DrawMobileHome() {
         if (ui::BigButton(T("New group"), Icon::Users)) OpenNewGroup();
         if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Link)) ImGui::OpenPopup("##invites");
     }
+    if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMoviePlayer();
+    DrawWatchResume();
     DrawInvitesPopup();
 }
 
@@ -2893,6 +2896,9 @@ void App::DrawPopups() {
             }
             case BrowseFor::Watch:
                 if (!selectedPeer.empty() && !res.empty() && eng.StartWatch(selectedPeer, res[0])) watchShown = true;
+                break;
+            case BrowseFor::Movie:
+                if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;
                 break;
             case BrowseFor::DownloadDir:
                 edit.downloadDir = res[0];

@@ -196,8 +196,14 @@ void PlayerHost::Update() {
     // current picture of the playing video
     if (p_ && info_.has_video)
         mod_->video_frame(p_, [](void*, const LsvImage* im) { Media().PushPlayerFrame(*im); }, nullptr);
-    // finished: release the audio device (keeps the last picture)
-    if (p_ && dev_ && mod_->state(p_) == LSP_ENDED) CloseAudio();
+    // finished: again from the start (loop), or release the audio device (keeps the last picture)
+    bool ended = p_ && mod_->state(p_) == LSP_ENDED;
+    if (ended && loop_ && cur_.rfind("watch:", 0) != 0 && cur_.rfind("lib:", 0) != 0 && cur_.rfind("movie:", 0) != 0) {
+        mod_->seek(p_, 0);
+        SetPlaying(true);
+    } else if (ended && dev_) {
+        CloseAudio();
+    }
 }
 
 // ---------------------------------------------------------------- playback

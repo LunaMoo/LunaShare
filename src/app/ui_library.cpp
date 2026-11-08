@@ -8,6 +8,7 @@
 #include "imgui.h"
 #include "imgui_stdlib.h"
 #include "platform.h"
+#include "player_host.h"
 #include "ui.h"
 #include "ui_widgets.h"
 
@@ -35,6 +36,14 @@ void App::DrawLibrary() {
     float bw = mobile ? -1 : 0;
     ImGui::BeginChild("library");
     if (mobile) ui::TouchScroll();
+    DrawWatchResume();
+    if (Player().Available()) {
+        if (ui::IconTextButton(T("Movie player..."), Icon::Play, ImVec2(mobile ? -1 : 0, h))) OpenMoviePlayer();
+        if (!mobile) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", T("Play a movie here - you can add people to watch with you afterwards."));
+        }
+    }
 
     // ---- my Shared folder
     ImGui::SeparatorText(T("Your Shared folder"));
@@ -67,10 +76,13 @@ void App::DrawLibrary() {
     }
 
     // ---- downloads
-    if (!eng.swarm.empty()) {
+    bool anyKept = false;
+    for (auto& [id, d] : eng.swarm) anyKept |= d->keep;
+    if (anyKept) {
         ImGui::SeparatorText(T("Downloads"));
         std::vector<std::shared_ptr<SwarmDownload>> list;
-        for (auto& [id, d] : eng.swarm) list.push_back(d);
+        for (auto& [id, d] : eng.swarm)
+            if (d->keep) list.push_back(d);  // (not the ones only being played)
         std::sort(list.begin(), list.end(), [](auto& a, auto& b) { return a->created > b->created; });
         std::string removeId;
         for (auto& d : list) {
@@ -158,9 +170,13 @@ void App::DrawLibrary() {
                 ImGui::TextDisabled("%s", info.c_str());
                 if (!mobile) ImGui::SameLine();
                 auto sw = eng.swarm.find(f.id);
+                if (Player().Available() && Player().Playable(f.rel)) {  // watch it while it comes
+                    if (ui::IconTextButton(T("Play"), Icon::Play, ImVec2(mobile ? -1 : 0, h)) && eng.StartLibraryWatch(f)) watchShown = true;
+                    if (!mobile) ImGui::SameLine();
+                }
                 if (eng.HaveShared(f.id)) {
                     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColOk()), "%s", T("you have it"));
-                } else if (sw != eng.swarm.end() && sw->second->state != SwarmDownload::Done) {
+                } else if (sw != eng.swarm.end() && sw->second->keep && sw->second->state != SwarmDownload::Done) {
                     ImGui::TextDisabled(T("downloading %d%%"), (int)(sw->second->size ? sw->second->done * 100 / sw->second->size : 0));
                 } else if (ui::IconTextButton(T("Download file"), Icon::Down, ImVec2(mobile ? -1 : 0, h))) {
                     eng.DownloadShared(f);
