@@ -293,6 +293,7 @@ void App::Frame() {
     if (watchShown) DrawWatch();
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawToasts();
+    DrawTextMirror();
     if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
     // Touch scrolling everywhere (phone layout or a touch screen on desktop); the picture viewer handles its own drags.
     ui::TouchScrollUpdate((m.mobile || ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen) && !viewer.open);
@@ -4170,4 +4171,140 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         }
     }
     if (!Media().audioError.empty()) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ui::ColErr()), "%s", Media().audioError.c_str());
+}
+
+// ---------------------------------------------------------------- typing on a phone
+
+// The on-screen keyboard covers the bottom of the screen - often the very field being typed in (a dialog, a popup).
+// So while it's up, the text (with its cursor) is shown again in a strip just above it; tapping in the strip puts the
+// cursor there. (The taps never reach ImGui - that would end the typing - see main.cpp.)
+void App::DrawTextMirror() {
+    ImGuiContext& g = *GImGui;
+    ImGuiInputTextState* st = ImGui::GetInputTextState(g.ActiveId);
+    bool show = keyboardInset > 0 && ImGui::GetIO().WantTextInput && st && st->Stb;
+    if (show) {  // (only when the field's cursor is out of sight - under the keyboard; a field above it is fine as it is)
+        ImGuiViewport* v = ImGui::GetMainViewport();
+        float kbTop = v->WorkPos.y + v->WorkSize.y - keyboardInset;
+        const ImGuiPlatformImeData& ime = g.PlatformImeData;
+        bool visible = ime.WantVisible && ime.InputPos.y >= v->WorkPos.y && ime.InputPos.y + ime.InputLineHeight <= kbTop;
+        bool shownBefore = mirrorRect[2] > mirrorRect[0];
+        if (visible && !(shownBefore && ime.InputPos.y + ime.InputLineHeight > mirrorRect[1])) show = false;
+    }
+    if (!show) {
+        mirrorRect[0] = mirrorRect[1] = mirrorRect[2] = mirrorRect[3] = 0;
+        mirrorTapX = mirrorTapY = -1;
+        mirrorFirstLine = 0;
+        return;
+    }
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImFont* font = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 1.1f, lh = fs * 1.3f;
+    float pad = ImGui::GetStyle().WindowPadding.x;
+    float x0 = vp->WorkPos.x, x1 = vp->WorkPos.x + vp->WorkSize.x;
+    float bottom = vp->WorkPos.y + vp->WorkSize.y - keyboardInset;
+    float textW = x1 - x0 - pad * 2;
+    // the characters, wrapped to the strip's width: where each one starts
+    bool password = (st->Flags & ImGuiInputTextFlags_Password) != 0;
+    const char* text = st->GetText();
+    int len = st->TextLen;
+    struct Ch { int off; float x; int line; };
+    std::vector<Ch> chars;
+    chars.reserve((size_t)len + 1);
+    float x = 0;
+    int line = 0;
+    for (int i = 0; i < len;) {
+        unsigned int c = 0;
+        int n = ImTextCharFromUtf8(&c, text + i, text + len);
+        if (n <= 0) n = 1;
+        if (c == '\n') {
+            chars.push_back({i, x, line});
+            x = 0;
+            line++;
+            i += n;
+            continue;
+        }
+        float w = password ? font->CalcTextSizeA(fs, FLT_MAX, 0, "*").x : font->CalcTextSizeA(fs, FLT_MAX, 0, text + i, text + i + n).x;
+        if (x + w > textW && x > 0) {
+            x = 0;
+            line++;
+        }
+        chars.push_back({i, x, line});
+        x += w;
+        i += n;
+    }
+    chars.push_back({len, x, line});  // (the end: the cursor may stand there)
+    int lines = line + 1;
+    int show_lines = std::min(lines, 4);
+    float h = show_lines * lh + pad * 2;
+    float y0 = bottom - h;
+    // the cursor's line stays in view
+    int cur = st->GetCursorPos();
+    int curLine = 0;
+    float curX = 0;
+    for (auto& c : chars)
+        if (c.off <= cur) {
+            curLine = c.line;
+            curX = c.x;
+        }
+    if (curLine < mirrorFirstLine) mirrorFirstLine = curLine;
+    if (curLine >= mirrorFirstLine + show_lines) mirrorFirstLine = curLine - show_lines + 1;
+    mirrorFirstLine = std::clamp(mirrorFirstLine, 0, std::max(0, lines - show_lines));
+    // a tap in the strip: the cursor goes to the nearest place between two characters
+    if (mirrorTapX >= 0) {
+        int tl = mirrorFirstLine + (int)((mirrorTapY - y0 - pad) / lh);
+        tl = std::clamp(tl, mirrorFirstLine, mirrorFirstLine + show_lines - 1);
+        float tx = mirrorTapX - x0 - pad;
+        int best = -1;
+        float bd = 1e9f;
+        for (size_t k = 0; k < chars.size(); k++) {
+            if (chars[k].line != tl) continue;
+            float d = std::fabs(chars[k].x - tx);
+            if (d < bd) {
+                bd = d;
+                best = chars[k].off;
+            }
+            // (the end of a wrapped line: just before the first character of the next one)
+        }
+        if (best >= 0) {
+            st->SetSelection(best, best);
+            st->CursorAnimReset();
+            st->CursorFollow = true;
+            cur = best;
+        }
+        mirrorTapX = mirrorTapY = -1;
+    }
+    for (auto& c : chars)
+        if (c.off <= cur) {
+            curLine = c.line;
+            curX = c.x;
+        }
+    // draw it (on top of everything)
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, bottom), ImGui::GetColorU32(ImGuiCol_PopupBg));
+    dl->AddLine(ImVec2(x0, y0), ImVec2(x1, y0), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 2.0f);
+    int sa = std::min(st->GetSelectionStart(), st->GetSelectionEnd()), sb = std::max(st->GetSelectionStart(), st->GetSelectionEnd());
+    ImU32 tc = ImGui::GetColorU32(ImGuiCol_Text), selc = ImGui::GetColorU32(ImGuiCol_TextSelectedBg);
+    for (size_t k = 0; k + 1 < chars.size(); k++) {
+        const Ch& c = chars[k];
+        if (c.line < mirrorFirstLine || c.line >= mirrorFirstLine + show_lines) continue;
+        float cx = x0 + pad + c.x, cy = y0 + pad + (c.line - mirrorFirstLine) * lh + (lh - fs) * 0.5f;
+        int n = chars[k + 1].off - c.off;
+        if (text[c.off] == '\n') continue;
+        if (c.off >= sa && c.off < sb) {
+            float w = chars[k + 1].line == c.line ? chars[k + 1].x - c.x : fs * 0.5f;
+            dl->AddRectFilled(ImVec2(cx, cy), ImVec2(cx + w, cy + fs), selc);
+        }
+        if (password) dl->AddText(font, fs, ImVec2(cx, cy), tc, "*");
+        else dl->AddText(font, fs, ImVec2(cx, cy), tc, text + c.off, text + c.off + n);
+    }
+    if (len == 0 && !password)
+        dl->AddText(font, fs, ImVec2(x0 + pad, y0 + pad + (lh - fs) * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), T("typing..."));
+    if (fmodf((float)ImGui::GetTime(), 1.0f) < 0.6f || st->CursorAnim < 0) {  // the cursor (blinking)
+        float cx = x0 + pad + curX, cy = y0 + pad + (curLine - mirrorFirstLine) * lh + (lh - fs) * 0.5f;
+        dl->AddLine(ImVec2(cx, cy), ImVec2(cx, cy + fs), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 2.5f);
+    }
+    mirrorRect[0] = x0;
+    mirrorRect[1] = y0;
+    mirrorRect[2] = x1;
+    mirrorRect[3] = bottom;
 }

@@ -211,6 +211,32 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
+    /** How much of the app's height the on-screen keyboard covers (0..1), kept up to date by a layout listener. */
+    private static volatile float kbFraction = 0;
+    private static boolean kbListening = false;
+    public static float keyboardFraction() {
+        if (!kbListening) {
+            kbListening = true;
+            ui(() -> {
+                LunaShareActivity a = self;
+                if (a == null) { kbListening = false; return; }
+                final android.view.View content = a.findViewById(android.R.id.content);
+                if (content == null) { kbListening = false; return; }
+                content.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+                    android.graphics.Rect r = new android.graphics.Rect();
+                    content.getWindowVisibleDisplayFrame(r);
+                    int[] loc = new int[2];
+                    content.getLocationOnScreen(loc);
+                    int h = content.getHeight();
+                    int covered = loc[1] + h - r.bottom;
+                    float f = h > 0 ? (float)covered / h : 0;
+                    kbFraction = f > 0.12f ? f : 0;  // (less: only the navigation bar)
+                });
+            });
+        }
+        return kbFraction;
+    }
+
     /** Back on the home screen: keep running in the background instead of closing (like other messengers). */
     public static void moveToBack() { ui(() -> { if (self != null) self.moveTaskToBack(true); }); }
 

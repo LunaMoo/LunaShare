@@ -172,6 +172,14 @@ void AndroidBridgeInit(ls::Engine* engine) {
         return r;
     };
     b.setCallRoute = [](int id) { CallV("setCallRoute", "(I)V", (jint)id); };
+    b.keyboardFraction = []() -> float {
+        static jmethodID m = M("keyboardFraction", "()F");
+        if (!m) return -1.0f;
+        JNIEnv* env = Env();
+        jfloat f = env->CallStaticFloatMethod(g_cls, m);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return -1.0f; }
+        return f;
+    };
     b.javaVm = []() -> void* {
         JavaVM* vm = nullptr;
         Env()->GetJavaVM(&vm);

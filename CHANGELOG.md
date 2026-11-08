@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Android: typing with the on-screen keyboard over a field (a dialog, the account backup, the folder picker...): the
+  text is shown again in a strip just above the keyboard, with its cursor - tap (or slide) in the strip to put the
+  cursor there. The app also measures the keyboard's real height now (it used to guess).
 - Movie player: *Autoplay* (remembered for every movie) - no need to press play. A big play / pause sign in the
   middle of the picture: tapping it plays or pauses while the controls are showing.
 

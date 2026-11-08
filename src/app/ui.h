@@ -29,6 +29,12 @@ public:
     std::string windowTitle = "LunaShare";
     bool busy = false;           // transfers running -> keep redrawing
     float keyboardInset = 0;     // px hidden by the on-screen keyboard (mobile)
+    // the typed text shown again just above the on-screen keyboard (the field itself may be under it); tapping it
+    // moves the cursor. main.cpp keeps the taps inside mirrorRect away from ImGui (they'd end the typing)
+    void DrawTextMirror();
+    float mirrorRect[4] = {0, 0, 0, 0};  // x0 y0 x1 y1 (empty: none)
+    float mirrorTapX = -1, mirrorTapY = -1;
+    int mirrorFirstLine = 0;
 
     // style rebuild requests
     int styleGeneration = 0;

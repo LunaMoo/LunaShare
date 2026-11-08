@@ -54,6 +54,7 @@ struct HostBridge {
     // graphics driver treat it as a full-screen game, so no Auto HDR / RTX HDR)
     std::function<void(bool on, bool borderless)> setFullscreen;
     std::function<void(bool on)> keepAwake;
+    std::function<float()> keyboardFraction;          // Android: the part of the app's height the on-screen keyboard covers (0 = none)
     std::function<bool()> isMetered;                  // on mobile data (or another metered network)
     // Android call audio routes: "current id\n" + lines "id\tkind\tname" (kind: earpiece/speaker/bluetooth/wired/usb)
     std::function<std::string()> callRoutes;

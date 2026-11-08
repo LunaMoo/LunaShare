@@ -428,7 +428,28 @@ int main(int argc, char** argv) {
         bool idle = !app.busy && ls::SteadyMs() - lastInput > 1500;
         bool got = idle ? SDL_WaitEventTimeout(&ev, 250) != 0 : SDL_PollEvent(&ev) != 0;
         while (got) {
-            if (ev.type != SDL_DROPFILE) ImGui_ImplSDL2_ProcessEvent(&ev);
+            // a tap on the typing strip above the on-screen keyboard: only moves the cursor (ImGui would end the typing)
+            static bool mirrorDown = false;
+            bool swallow = false;
+            if (ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP || ev.type == SDL_MOUSEMOTION) {
+                float mx = ev.type == SDL_MOUSEMOTION ? (float)ev.motion.x : (float)ev.button.x;
+                float my = ev.type == SDL_MOUSEMOTION ? (float)ev.motion.y : (float)ev.button.y;
+                const float* r = app.mirrorRect;
+                bool inside = r[2] > r[0] && mx >= r[0] && mx < r[2] && my >= r[1] && my < r[3];
+                if (ev.type == SDL_MOUSEBUTTONDOWN && inside) {
+                    mirrorDown = true;
+                    app.mirrorTapX = mx;
+                    app.mirrorTapY = my;
+                }
+                swallow = mirrorDown || (inside && ev.type != SDL_MOUSEMOTION);
+                if (ev.type == SDL_MOUSEBUTTONUP) mirrorDown = false;
+                if (ev.type == SDL_MOUSEMOTION && mirrorDown) {  // (sliding the finger along moves the cursor too)
+                    app.mirrorTapX = mx;
+                    app.mirrorTapY = my;
+                }
+            }
+            if (swallow) lastInput = ls::SteadyMs();
+            if (ev.type != SDL_DROPFILE && !swallow) ImGui_ImplSDL2_ProcessEvent(&ev);
             switch (ev.type) {
                 case SDL_QUIT:
                     if (ls::IsMobilePlatform() ? app.RequestQuit() : (!hiddenToTray && closeRequested())) running = false;
@@ -516,7 +537,13 @@ int main(int argc, char** argv) {
         }
         int dw, dh;
         SDL_GetWindowSize(window, &dw, &dh);
-        app.keyboardInset = (ls::IsMobilePlatform() && SDL_IsScreenKeyboardShown(window)) ? (float)dh * 0.42f : 0.0f;
+        {  // the on-screen keyboard: how much of the window it covers (Android tells; otherwise a guess)
+            static const bool fakeKb = SDL_getenv("LUNASHARE_FAKEKB") != nullptr;  // (dev: the phone keyboard on a computer)
+            float frac = ls::Bridge().keyboardFraction ? ls::Bridge().keyboardFraction() : -1.0f;
+            bool shown = ls::IsMobilePlatform() ? (frac > 0 || SDL_IsScreenKeyboardShown(window)) : fakeKb && ImGui::GetIO().WantTextInput;
+            if (frac <= 0.05f) frac = 0.42f;
+            app.keyboardInset = shown ? (float)dh * std::min(frac, 0.7f) : 0.0f;
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
@@ -542,16 +569,44 @@ int main(int argc, char** argv) {
                 int got = sscanf(taps, "%d,%d,%d,%d%n", &x, &y, &ms, &hold, &n);
                 if (got < 4) { hold = 80; got = sscanf(taps, "%d,%d,%d%n", &x, &y, &ms, &n); }
                 int64_t now = ls::SteadyMs() - t0;
+                // (as SDL events, like a real finger: they go the same way - e.g. past the typing strip)
+                auto push = [&](Uint32 type) {
+                    SDL_Event e{};
+                    e.type = type;
+                    if (type == SDL_MOUSEMOTION) {
+                        e.motion.which = SDL_TOUCH_MOUSEID;
+                        e.motion.x = x;
+                        e.motion.y = y;
+                    } else {
+                        e.button.which = SDL_TOUCH_MOUSEID;
+                        e.button.button = SDL_BUTTON_LEFT;
+                        e.button.state = type == SDL_MOUSEBUTTONDOWN ? SDL_PRESSED : SDL_RELEASED;
+                        e.button.clicks = 1;
+                        e.button.x = x;
+                        e.button.y = y;
+                    }
+                    e.button.windowID = SDL_GetWindowID(window);
+                    SDL_PushEvent(&e);
+                };
                 if (got >= 3 && stage == 0 && now >= ms) {
-                    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
-                    io.AddMousePosEvent((float)x, (float)y);
-                    io.AddMouseButtonEvent(0, true);
+                    push(SDL_MOUSEMOTION);
+                    push(SDL_MOUSEBUTTONDOWN);
                     stage = 1;
                     upAt = now + hold;
                 } else if (stage == 1 && now >= upAt) {
-                    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
-                    io.AddMouseButtonEvent(0, false);
+                    push(SDL_MOUSEBUTTONUP);
                     SDL_Log("tap %d,%d done", x, y);
+                    if (const char* typed = SDL_getenv("LUNASHARE_TYPE")) {  // dev: then type this (once)
+                        static bool done = false;
+                        if (!done) {
+                            done = true;
+                            SDL_Event e{};
+                            e.type = SDL_TEXTINPUT;
+                            e.text.windowID = SDL_GetWindowID(window);
+                            SDL_strlcpy(e.text.text, typed, sizeof(e.text.text));
+                            SDL_PushEvent(&e);
+                        }
+                    }
                     stage = 0;
                     taps += n;
                     while (*taps == ';' || *taps == ' ') taps++;
