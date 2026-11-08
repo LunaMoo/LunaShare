@@ -19,9 +19,14 @@ as above - you can add more people later too. A movie from a contact's Shared fo
 - The loop button starts the movie again at the end - for everyone (any of you can turn it on or off). Videos and
   audio in chats have their own loop button (remembered).
 - Viewers can **save a copy** (↓): the rest of the movie is fetched in the background next to what's being played,
-  then copied to *Downloads* ("saving: 63%" under the seek bar). Leaving or the host stopping before it's all here
-  cancels it. A movie played from someone's Shared folder is saved into your Shared folder instead, like any library
-  download (each piece checked against its hash).
+  then copied to *Downloads* ("saving: 63%" under the seek bar). Leaving, or the host stopping the movie, doesn't stop
+  it: the rest keeps coming from the host's device (shown under *Library → Downloads*, where it can be cancelled) as
+  long as the host's app runs; it waits while the host is offline.
+- The host decides: *Let the others save a copy* in the ☰ menu (on by default, remembered). Turning it off hides the
+  button for everyone and stops copies still coming, also of movies that already ended.
+- A movie played from someone's Shared folder is always saveable - sharing is what that folder is for. It's saved
+  into your Shared folder like any library download (each piece checked against its hash), and closing the player
+  doesn't stop it.
 
 ## Sound, subtitles, full screen
 

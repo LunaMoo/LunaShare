@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+- **Saving goes on after the movie:** a copy being saved keeps coming when you leave or the host stops the movie
+  (shown under *Library → Downloads*); a movie from a Shared folder that you saved keeps downloading after closing
+  the player.
+- **The host can turn saving off:** *Let the others save a copy* in the movie's ☰ menu (remembered). It doesn't
+  apply to movies from Shared folders.
+
 ## 1.3.0
 
 - **Movie player:** play a movie on your own (*Library → Movie player...*, on phones on the main screen) and add a

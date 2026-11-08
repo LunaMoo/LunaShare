@@ -40,6 +40,8 @@ struct WatchCache {
     bool cancelled = false;
     bool buffering = true;
     bool save = false, saved = false;   // keeping a copy: everything is asked for, then copied to Downloads
+    bool bg = false;                    // the movie ended: only the copy is still coming
+    int64_t lastConnect = 0;
     std::string saveName, saveDir, key;
     ~WatchCache() {
         if (f) fclose(f);
@@ -72,13 +74,12 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     watch.people = {settings.displayName};
     watchViewers_.clear();
     watchBuffering_.clear();
+    watch.allowSave = settings.watchAllowSave;
     {
         std::lock_guard<std::mutex> l(watchServe_.m);
-        if (watchServe_.f) fclose(watchServe_.f);
-        watchServe_.f = OpenFile(path, "rb");
-        watchServe_.sid = watch.sid;
-        watchServe_.size = size;
+        watchServe_.files[watch.sid] = {OpenFile(path, "rb"), size};
     }
+    watchServed_[watch.sid].allowSave = watch.allowSave;
     {  // subtitles lying next to it (movie.srt, movie.pl.srt...) go to the viewers too
         std::string dir = DirName(path), stem = watch.name;
         size_t dot = stem.find_last_of('.');
@@ -166,7 +167,7 @@ void Engine::WatchSave() {
         if (it->second->state == SwarmDownload::Done && FileExists(it->second->partPath)) FinishSwarm(it->second);
         return;
     }
-    if (watch.host.empty()) return;  // (it's mine already)
+    if (watch.host.empty() || !watch.allowSave) return;  // (it's mine already / the host doesn't let)
     auto wc = WatchCacheNow();
     if (!wc) return;
     {
@@ -181,7 +182,107 @@ void Engine::WatchSave() {
         }
     }
     watch.saving = true;
+    QueueToPeer(watch.host, Msg::WatchReport, {{"sid", watch.sid}, {"buffering", watchReportedBuffering_}, {"saving", true}});
     WatchRequestOn(wc, 0);
+}
+
+void Engine::WatchSetAllowSave(bool on) {
+    auto lk = Lock();
+    settings.watchAllowSave = on;
+    MarkDirty();
+    if (!on)  // also no more copies of movies that already ended
+        for (auto& [sid, sv] : watchServed_) sv.allowSave = sid == watch.sid ? sv.allowSave : false;
+    if (!watch.sid || !watch.host.empty() || !watch.libId.empty()) return;
+    watch.allowSave = on;
+    auto& sv = watchServed_[watch.sid];
+    sv.allowSave = on;
+    if (!on) sv.savers.clear();
+    WatchBroadcast();
+}
+
+void Engine::WatchServeClose(uint64_t sid) {
+    watchServed_.erase(sid);
+    std::lock_guard<std::mutex> l(watchServe_.m);
+    auto it = watchServe_.files.find(sid);
+    if (it == watchServe_.files.end()) return;
+    if (it->second.f) fclose(it->second.f);
+    watchServe_.files.erase(it);
+}
+
+std::shared_ptr<WatchCache> Engine::WatchCacheFor(uint64_t sid) {
+    std::lock_guard<std::mutex> l(watchCacheMtx_);
+    if (watchCache_ && watchCache_->sid == sid) return watchCache_;
+    for (auto& c : watchSaves_)
+        if (c->sid == sid) return c;
+    return nullptr;
+}
+
+// every 250 ms (engine lock): copies still coming after their movie ended; ended movies nobody saves any more
+void Engine::WatchSavesTick() {
+    int64_t now = SteadyMs();
+    for (auto it = watchServed_.begin(); it != watchServed_.end();) {
+        auto cur = it++;
+        if (cur->second.ended && (now - cur->second.lastUse > 3600 * 1000LL || !cur->second.allowSave)) WatchServeClose(cur->first);
+    }
+    std::vector<std::shared_ptr<WatchCache>> list;
+    {
+        std::lock_guard<std::mutex> l(watchCacheMtx_);
+        watchSaves_.erase(std::remove_if(watchSaves_.begin(), watchSaves_.end(), [](const std::shared_ptr<WatchCache>& c) {
+                              std::lock_guard<std::mutex> l2(c->m);
+                              return c->saved;  // (copied out by now, or on its way)
+                          }),
+                          watchSaves_.end());
+        list = watchSaves_;
+    }
+    for (auto& c : list) {
+        auto conn = ReadyConn(c->hostId);
+        bool ask = false;
+        {
+            std::lock_guard<std::mutex> l(c->m);
+            c->host = conn;
+            if (!conn && now - c->lastConnect > 30000) {
+                c->lastConnect = now;
+                ask = true;
+            }
+        }
+        if (ask) ConnectPeer(c->hostId);
+        if (conn) WatchRequestOn(c, 0);
+    }
+}
+
+std::vector<Engine::WatchSaveInfo> Engine::WatchSaves() {
+    std::vector<WatchSaveInfo> v;
+    std::lock_guard<std::mutex> l(watchCacheMtx_);
+    for (auto& c : watchSaves_) {
+        std::lock_guard<std::mutex> l2(c->m);
+        WatchSaveInfo i;
+        i.sid = c->sid;
+        i.name = c->saveName;
+        i.key = c->key;
+        i.frac = c->Blocks() ? (double)c->haveCount / (double)c->Blocks() : 1;
+        i.connected = !c->host.expired();
+        v.push_back(i);
+    }
+    return v;
+}
+
+void Engine::CancelWatchSave(uint64_t sid) {
+    std::shared_ptr<WatchCache> c;
+    {
+        std::lock_guard<std::mutex> l(watchCacheMtx_);
+        for (auto it = watchSaves_.begin(); it != watchSaves_.end(); ++it)
+            if ((*it)->sid == sid) {
+                c = *it;
+                watchSaves_.erase(it);
+                break;
+            }
+    }
+    if (!c) return;
+    std::lock_guard<std::mutex> l(c->m);
+    c->cancelled = true;
+    if (c->f) fclose(c->f);
+    c->f = nullptr;
+    RemoveFile(c->path);
 }
 
 bool Engine::JoinWatch(uint64_t sid) {
@@ -257,9 +358,24 @@ void Engine::EndWatchLocked(const std::string& why) {
             std::lock_guard<std::mutex> l(watchCacheMtx_);
             c.swap(watchCache_);
         }
+        bool keepSaving = false;
         if (c) {
             std::lock_guard<std::mutex> l(c->m);
-            if (c->save && !c->saved) AddSystemMessage(w.key, "Saving \"" + w.name + "\" stopped: the movie ended before all of it was here.");
+            keepSaving = c->save && !c->saved && w.allowSave;
+        }
+        if (keepSaving) {  // the copy goes on coming (the player's reads stop: it isn't the current movie any more)
+            {
+                std::lock_guard<std::mutex> l(c->m);
+                c->bg = true;
+                c->cv.notify_all();
+            }
+            std::lock_guard<std::mutex> l(watchCacheMtx_);
+            watchSaves_.push_back(c);
+            AddSystemMessage(w.key, "Saving \"" + w.name + "\" goes on in the background.");
+            c.reset();
+        }
+        if (c) {
+            std::lock_guard<std::mutex> l(c->m);
             c->cancelled = true;  // the player's reads return; the file goes when the player lets go of it
             c->cv.notify_all();
             if (c->f) fclose(c->f);
@@ -270,10 +386,13 @@ void Engine::EndWatchLocked(const std::string& why) {
         if (!w.subFiles.empty()) RemoveFile(DirName(w.subFiles[0]));  // (their folder, where that works for folders)
     } else {
         for (auto& d : watchViewers_) QueueToPeer(d, Msg::WatchLeave, {{"sid", w.sid}, {"end", true}});
-        std::lock_guard<std::mutex> l(watchServe_.m);
-        if (watchServe_.f) fclose(watchServe_.f);
-        watchServe_.f = nullptr;
-        watchServe_.sid = 0;
+        auto sv = watchServed_.find(w.sid);
+        if (sv != watchServed_.end() && sv->second.allowSave && !sv->second.savers.empty()) {
+            sv->second.ended = true;  // someone is still saving it: the file stays open for them
+            sv->second.lastUse = SteadyMs();
+        } else {
+            WatchServeClose(w.sid);
+        }
     }
     watchViewers_.clear();
     watchBuffering_.clear();
@@ -318,7 +437,7 @@ json Engine::WatchStateJson() {
     json people = json::array({settings.displayName});
     for (auto& d : watchViewers_) people.push_back(PeerName(ChatKey(d)));
     return {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.Target(now)}, {"hold", watch.hold},
-            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"loop", watch.loop}, {"ver", ++watchVer_}};
+            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"loop", watch.loop}, {"save", watch.allowSave}, {"ver", ++watchVer_}};
 }
 
 void Engine::WatchBroadcast() {
@@ -363,6 +482,7 @@ void Engine::WatchControl(bool playing, double pos) {
 }
 
 void Engine::WatchTick() {
+    WatchSavesTick();
     if (!watch.sid) return;
     int64_t now = SteadyMs();
     if (watch.host.empty()) {
@@ -383,7 +503,7 @@ void Engine::WatchTick() {
     if (b != watchReportedBuffering_ || now - watchLastReport_ > 1000) {
         watchReportedBuffering_ = b;
         watchLastReport_ = now;
-        QueueToPeer(watch.host, Msg::WatchReport, {{"sid", watch.sid}, {"buffering", b}});
+        QueueToPeer(watch.host, Msg::WatchReport, {{"sid", watch.sid}, {"buffering", b}, {"saving", watch.saving}});
     }
     if (ReadyConn(watch.host)) watchHostSeen_ = now;
     else if (now - watchHostSeen_ > 20000) {
@@ -443,6 +563,28 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             WatchBroadcast();
             break;
         case Msg::WatchLeave:
+            if (j.value("nosave", false)) {  // a copy I'm still getting can't be had any more
+                std::shared_ptr<WatchCache> gone;
+                {
+                    std::lock_guard<std::mutex> l(watchCacheMtx_);
+                    for (auto it = watchSaves_.begin(); it != watchSaves_.end(); ++it)
+                        if ((*it)->sid == sid && (*it)->hostId == dev) {
+                            gone = *it;
+                            watchSaves_.erase(it);
+                            break;
+                        }
+                }
+                if (gone) {
+                    std::lock_guard<std::mutex> l(gone->m);
+                    gone->cancelled = true;
+                    if (gone->f) fclose(gone->f);
+                    gone->f = nullptr;
+                    RemoveFile(gone->path);
+                    AddSystemMessage(gone->key, "Saving \"" + gone->saveName + "\" stopped: " + PeerName(ChatKey(dev)) + " no longer offers the movie.");
+                    Emit({EventType::Info, gone->key, ""});
+                }
+                return;
+            }
             if (j.value("end", false)) {
                 watchInvites.erase(std::remove_if(watchInvites.begin(), watchInvites.end(), [&](const WatchInviteInfo& w) { return w.sid == sid; }),
                                    watchInvites.end());
@@ -490,6 +632,15 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.waitFor = j.value("wait", "");
             watch.hostSub = j.value("hsub", "");
             watch.loop = j.value("loop", false);
+            watch.allowSave = j.value("save", true);
+            if (!watch.allowSave && watch.saving) {  // the host turned saving off
+                if (auto wc = WatchCacheNow()) {
+                    std::lock_guard<std::mutex> l(wc->m);
+                    wc->save = false;
+                }
+                watch.saving = false;
+                AddSystemMessage(watch.key, PeerName(ChatKey(dev)) + " turned off saving copies of the movie.");
+            }
             watch.people.clear();
             for (auto& p : j.value("people", json::array()))
                 if (p.is_string()) watch.people.push_back(p.get<std::string>());
@@ -497,18 +648,35 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             break;
         }
         case Msg::WatchReport:
+            if (sid == watch.sid && watch.host.empty() && watch.allowSave && j.value("saving", false) &&
+                std::find(watchViewers_.begin(), watchViewers_.end(), dev) != watchViewers_.end())
+                watchServed_[sid].savers.insert(dev);
             if (sid != watch.sid || !watch.host.empty() || !watchBuffering_.count(dev)) return;
             watchBuffering_[dev] = j.value("buffering", false);
             WatchUpdateHold();
             break;
         case Msg::WatchRead: {
-            if (sid != watch.sid || !watch.host.empty()) return;
-            if (std::find(watchViewers_.begin(), watchViewers_.end(), dev) == watchViewers_.end()) return;
+            // the movie that's on, for those watching it; or one that ended, for those still saving a copy
+            bool viewer = sid == watch.sid && watch.host.empty() &&
+                          std::find(watchViewers_.begin(), watchViewers_.end(), dev) != watchViewers_.end();
+            auto sv = watchServed_.find(sid);
+            bool saver = sv != watchServed_.end() && sv->second.allowSave && sv->second.savers.count(dev);
+            if (!viewer && !saver) {
+                if (!(sid == watch.sid && watch.host.empty())) Queue(c, Msg::WatchLeave, {{"sid", sid}, {"end", true}, {"nosave", true}});
+                return;
+            }
+            if (sv != watchServed_.end()) sv->second.lastUse = SteadyMs();
+            int64_t size = 0;
+            {
+                std::lock_guard<std::mutex> l(watchServe_.m);
+                auto f = watchServe_.files.find(sid);
+                if (f != watchServe_.files.end()) size = f->second.size;
+            }
             Connection::WatchOut w;
             w.sid = sid;
             w.off = j.value("off", (int64_t)0);
             w.len = (int)std::clamp<int64_t>(j.value("len", (int64_t)0), 0, kWatchBlock);
-            if (w.off < 0 || w.off >= watch.size || w.len <= 0) return;
+            if (w.off < 0 || w.off >= size || w.len <= 0) return;
             {
                 std::lock_guard<std::mutex> l(c->qm);
                 if (c->watchOut.size() < 64) c->watchOut.push_back(w);
@@ -533,12 +701,14 @@ bool Engine::ProduceWatch(const std::shared_ptr<Connection>& c, std::vector<uint
         c->watchOut.pop_front();
     }
     std::lock_guard<std::mutex> l(watchServe_.m);
-    if (w.sid != watchServe_.sid || !watchServe_.f) return false;
-    size_t len = (size_t)std::min<int64_t>(w.len, watchServe_.size - w.off);
+    auto it = watchServe_.files.find(w.sid);
+    if (it == watchServe_.files.end() || !it->second.f) return false;
+    auto& sf = it->second;
+    size_t len = (size_t)std::min<int64_t>(w.len, sf.size - w.off);
     buf.resize(16 + len);
     PutU64(buf.data(), w.sid);
     PutU64(buf.data() + 8, (uint64_t)w.off);
-    if (!FileSeek(watchServe_.f, w.off) || fread(buf.data() + 16, 1, len, watchServe_.f) != len) return false;
+    if (!FileSeek(sf.f, w.off) || fread(buf.data() + 16, 1, len, sf.f) != len) return false;
     return true;
 }
 
@@ -549,8 +719,8 @@ void Engine::HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& 
     int64_t off = (int64_t)GetU64(f.payload.data() + 8);
     const uint8_t* data = f.payload.data() + 16;
     int64_t len = (int64_t)f.payload.size() - 16;
-    std::shared_ptr<WatchCache> wc = WatchCacheNow();
-    if (!wc || wc->sid != sid || c->peerId != wc->hostId) return;
+    std::shared_ptr<WatchCache> wc = WatchCacheFor(sid);
+    if (!wc || c->peerId != wc->hostId) return;
     bool more;
     int64_t from;
     {
@@ -569,7 +739,7 @@ void Engine::HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& 
         from = wc->readPos;
         if (wc->save && !wc->saved && wc->haveCount == wc->Blocks()) {
             wc->saved = true;
-            SaveWatchCopy(wc);
+            SaveWatchCopy(wc);  // (a background one is removed from the list by WatchSavesTick)
         }
     }
     if (more) WatchRequestOn(wc, from);
@@ -682,8 +852,13 @@ double Engine::WatchLoaded() {
 void Engine::SaveWatchCopy(const std::shared_ptr<WatchCache>& wc) {  // (wc->m is held)
     std::string src = wc->path, name = wc->saveName.empty() ? "movie" : BaseName(wc->saveName), dir = wc->saveDir, key = wc->key;
     int64_t size = wc->size;
+    bool bg = wc->bg;
+    if (bg && wc->f) {  // (nobody plays it any more: closed, and deleted once copied)
+        fflush(wc->f);
+    }
     // (never joined here: this runs under the engine lock, and the copying thread takes it at the end)
-    saveThreads_.emplace_back([this, src, name, dir, key, size] {
+    std::weak_ptr<WatchCache> weak = wc;
+    saveThreads_.emplace_back([this, src, name, dir, key, size, bg, weak] {
         MakeDirs(dir);
         std::string dest = UniquePath(JoinPath(dir, name));
         bool ok = false;
@@ -702,6 +877,14 @@ void Engine::SaveWatchCopy(const std::shared_ptr<WatchCache>& wc) {  // (wc->m i
         if (in) fclose(in);
         if (out) ok = fclose(out) == 0 && ok;
         if (!ok) RemoveFile(dest);
+        if (bg) {  // the temporary copy isn't needed any more
+            if (auto c = weak.lock()) {
+                std::lock_guard<std::mutex> l(c->m);
+                if (c->f) fclose(c->f);
+                c->f = nullptr;
+            }
+            RemoveFile(src);
+        }
         auto lk = Lock();
         if (ok) {
             HistoryEntry h;

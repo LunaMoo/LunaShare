@@ -78,9 +78,21 @@ void App::DrawLibrary() {
     // ---- downloads
     bool anyKept = false;
     for (auto& [id, d] : eng.swarm) anyKept |= d->keep;
-    if (anyKept) {
+    auto movieSaves = eng.WatchSaves();
+    if (anyKept || !movieSaves.empty()) {
         ImGui::SeparatorText(T("Downloads"));
-        std::vector<std::shared_ptr<SwarmDownload>> list;
+        for (auto& s : movieSaves) {  // copies of movies watched together, still coming after the movie ended
+            ImGui::PushID((int)(s.sid & 0x7fffffff));
+            ImGui::TextUnformatted(s.name.c_str());
+            std::string status = s.connected ? TF("%d%% - saving the movie", (int)(s.frac * 100))
+                                             : TF("%d%% - waiting for %s", (int)(s.frac * 100), eng.PeerName(s.key).c_str());
+            float pw = mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 22;
+            ui::ProgressBarText((float)s.frac, status.c_str(), ImVec2(pw, ImGui::GetFrameHeight()));
+            if (!mobile) ImGui::SameLine();
+            if (ui::IconButton("wcancel", Icon::Cancel, T("Cancel"), h > 0 ? h : 0, true)) eng.CancelWatchSave(s.sid);
+            ImGui::PopID();
+        }
+        std::vector<std::shared_ptr<SwarmDownload>> list;  // (shared-folder downloads)
         for (auto& [id, d] : eng.swarm)
             if (d->keep) list.push_back(d);  // (not the ones only being played)
         std::sort(list.begin(), list.end(), [](auto& a, auto& b) { return a->created > b->created; });

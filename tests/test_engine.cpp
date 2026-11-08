@@ -669,6 +669,42 @@ int main() {
         CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "the host ends it for everyone");
         CHECK(B->WatchRead(0, tmp.data(), 100) < 0, "the player stops reading");
         CHECK(!FileExists(JoinPath(B->configDir, "watch/" + ToHex((const uint8_t*)&sid, 8) + ".part")), "the temporary copy is gone");
+        // saving goes on after the host stops the movie; a host can also turn saving off
+        {
+            std::string movie2 = JoinPath(Root(), "src/movie2.bin");
+            WriteRandomFile(movie2, 160 << 20, 78);
+            std::string sha2 = Sha256File(movie2);
+            uint64_t s3 = A->StartWatch(bob, movie2);
+            CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watchInvites.empty() && B->watchInvites.back().sid == s3; }, 3000) && B->JoinWatch(s3),
+                  "second movie joined");
+            std::vector<uint8_t> t2(1000);
+            B->WatchRead(0, t2.data(), 1000);
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.allowSave; }, 3000), "saving allowed by default");
+            B->WatchSave();
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));  // (the host hears that B is saving)
+            A->LeaveWatch();  // the host stops before the copy is complete
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "the movie ended");
+            auto bgs = B->WatchSaves();
+            printf("  copy %s when the movie ended\n", bgs.empty() ? "already complete" : ("at " + std::to_string((int)(bgs[0].frac * 100)) + "%").c_str());
+            std::string saved2 = JoinPath(B->GetSettings().downloadDir, "movie2.bin");
+            CHECK(WaitFor([&] { return FileSize(saved2) == (160 << 20) && Sha256File(saved2) == sha2; }, 20000),
+                  "the copy kept coming and was saved (%lld bytes)", (long long)FileSize(saved2));
+            CHECK(WaitFor([&] { return B->WatchSaves().empty(); }, 3000), "nothing left in the background");
+            // the host turns saving off: viewers can't keep a copy
+            A->WatchSetAllowSave(false);
+            uint64_t s4 = A->StartWatch(bob, movie2);
+            CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watchInvites.empty() && B->watchInvites.back().sid == s4; }, 3000) && B->JoinWatch(s4),
+                  "third movie joined");
+            CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watch.allowSave && B->watch.people.size() == 2; }, 3000), "saving turned off reaches the viewer");
+            B->WatchSave();
+            {
+                auto l = B->Lock();
+                CHECK(!B->watch.saving, "the viewer can't save");
+            }
+            A->LeaveWatch();
+            A->WatchSetAllowSave(true);
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
+        }
         // the movie player: alone first, then someone is added
         uint64_t sid2 = A->StartWatch("", movie);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -734,11 +770,13 @@ int main() {
         WriteRandomFile(big, BIG, 77);
         WriteRandomFile(JoinPath(L2->SharedDir(), "holiday copy.bin"), BIG, 77);  // the same content elsewhere
         WriteRandomFile(JoinPath(L1->SharedDir(), "notes.txt"), 1000, 5);
+        std::string trailer = JoinPath(L1->SharedDir(), "films/trailer.bin");
+        WriteRandomFile(trailer, 6 << 20, 33);
         std::string want = Sha256File(big);
         L1->RescanShared();
         L2->RescanShared();
         auto libSize = [](Engine& e) { auto l = e.Lock(); return e.myLibrary.size(); };
-        CHECK(WaitFor([&] { return libSize(*L1) == 2 && libSize(*L2) == 1; }, 15000), "Shared folders indexed (%zu, %zu)", libSize(*L1), libSize(*L2));
+        CHECK(WaitFor([&] { return libSize(*L1) == 3 && libSize(*L2) == 1; }, 15000), "Shared folders indexed (%zu, %zu)", libSize(*L1), libSize(*L2));
         L3->ConnectAddress("127.0.0.1", L1->boundPort);
         L3->ConnectAddress("127.0.0.1", L2->boundPort);
         L4->ConnectAddress("127.0.0.1", L1->boundPort);
@@ -750,7 +788,7 @@ int main() {
         L3->RefreshLibrary(i1);
         L3->RefreshLibrary(i2);
         L4->RefreshLibrary(i1);
-        CHECK(WaitFor([&] { auto l = L3->Lock(); return L3->peerLibraries[i1].files.size() == 2 && L3->peerLibraries[i2].files.size() == 1; }, 5000),
+        CHECK(WaitFor([&] { auto l = L3->Lock(); return L3->peerLibraries[i1].files.size() == 3 && L3->peerLibraries[i2].files.size() == 1; }, 5000),
               "contacts see the lists");
         CHECK(WaitFor([&] { auto l = L4->Lock(); return L4->peerLibraries[i1].fetched && L4->peerLibraries[i1].off && L4->peerLibraries[i1].files.empty(); }, 5000),
               "a stranger sees nothing");
@@ -791,6 +829,24 @@ int main() {
                 auto l = L3->Lock();
                 CHECK(!L3->swarm.count(f.id) && !FileExists(part) && !L3->HaveShared(f.id), "closing it leaves nothing behind");
             }
+            // another one played, saved, closed: the download goes on and the file lands in the Shared folder
+            LibFile g;
+            {
+                auto l = L3->Lock();
+                for (auto& x : L3->peerLibraries[i1].files)
+                    if (x.rel == "films/trailer.bin") g = x;
+            }
+            CHECK(L3->StartLibraryWatch(g) != 0, "trailer played");
+            L3->WatchSave();
+            L3->LeaveWatch();
+            auto st = [&] { auto l = L3->Lock(); auto it = L3->swarm.find(g.id); return it == L3->swarm.end() ? -1 : (int)it->second->state; };
+            CHECK(WaitFor([&] { return st() == SwarmDownload::Done && L3->HaveShared(g.id); }, 30000), "saved: the download went on after closing (%d)", st());
+            std::string kept;
+            {
+                auto l = L3->Lock();
+                kept = L3->swarm[g.id]->finalPath;
+            }
+            CHECK(Sha256File(kept) == Sha256File(trailer), "and it's the right file");
         }
         for (auto* e : {L1.get(), L2.get()}) {  // each source alone is slow: together they're twice as fast
             Settings s = e->GetSettings();

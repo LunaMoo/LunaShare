@@ -328,6 +328,12 @@ void App::WatchTracksPopup() {
         }
         ImGui::EndDisabled();
     }
+    if (w.sid && w.host.empty() && w.libId.empty()) {  // my movie: may the others keep a copy?
+        ImGui::Separator();
+        bool b = w.allowSave;
+        if (ImGui::Checkbox(T("Let the others save a copy"), &b)) eng.WatchSetAllowSave(b);
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Remembered for the next movies too."));
+    }
 #ifdef _WIN32
     {  // full screen that Windows / the graphics driver don't treat as a game (their HDR for games stays off)
         ImGui::Separator();
@@ -522,7 +528,7 @@ void App::DrawWatch() {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(255, 255, 255, 30));
         if (ui::IconButton("wplay", playing ? Icon::Pause : Icon::Play, playing ? T("Pause for everyone") : T("Play for everyone"), bh)) toggle = true;
         bool inCall = eng.call.state == CallState::Active;
-        bool canAdd = host && !lib, canSave = (!host || lib) && !w.saving;
+        bool canAdd = host && !lib, canSave = ((!host && w.allowSave) || lib) && !w.saving;
         int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 2 : 0);
         float rightW = (bh + sp) * (float)right;
         ImGui::SameLine();

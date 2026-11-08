@@ -124,6 +124,7 @@ struct WatchInfo {
     bool loop = false;         // start again at the end (everyone)
     std::string libId;         // streamed from a contact's Shared folder (content id): played here, not shared on
     bool saving = false;       // keeping a copy (viewer / library stream)
+    bool allowSave = true;     // the host lets viewers keep a copy
     double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 : 0); }
 };
 struct WatchInviteInfo {
@@ -361,6 +362,15 @@ public:
     uint64_t StartLibraryWatch(const LibFile& f);  // play a file from a contact's Shared folder while it comes
     void WatchSetLoop(bool on);
     void WatchSave();                         // viewer / library stream: keep a copy of the whole movie
+    void WatchSetAllowSave(bool on);          // host: may viewers keep a copy (remembered for next time)
+    struct WatchSaveInfo {
+        uint64_t sid = 0;
+        std::string name, key;
+        double frac = 0;
+        bool connected = false;
+    };
+    std::vector<WatchSaveInfo> WatchSaves();  // copies still coming after their movie ended
+    void CancelWatchSave(uint64_t sid);
     std::vector<std::string> watchKeys;       // host: the conversations invited (under Lock())
     bool JoinWatch(uint64_t sid);
     void LeaveWatch();
@@ -547,12 +557,24 @@ private:
     std::mutex watchCacheMtx_;  // (the player's threads never take the engine lock: the UI holds it while closing the player)
     std::shared_ptr<WatchCache> WatchCacheNow();
     void WatchRequestOn(const std::shared_ptr<WatchCache>& wc, int64_t from);
-    struct WatchServe {
+    struct WatchServe {  // host: the open movie files (the current one, and ended ones still being saved by someone)
         std::mutex m;
-        uint64_t sid = 0;
-        FILE* f = nullptr;
-        int64_t size = 0;
+        struct File {
+            FILE* f = nullptr;
+            int64_t size = 0;
+        };
+        std::map<uint64_t, File> files;
     } watchServe_;
+    struct WatchServed {  // host (engine lock): who is saving a copy of which movie
+        std::set<std::string> savers;
+        bool ended = false, allowSave = true;
+        int64_t lastUse = 0;
+    };
+    std::map<uint64_t, WatchServed> watchServed_;
+    void WatchServeClose(uint64_t sid);
+    std::vector<std::shared_ptr<WatchCache>> watchSaves_;  // viewer: copies still coming after the movie ended (watchCacheMtx_)
+    std::shared_ptr<WatchCache> WatchCacheFor(uint64_t sid);
+    void WatchSavesTick();
     std::map<std::string, bool> watchBuffering_;  // host: viewer device -> still loading
     std::vector<std::string> watchViewers_;       // host: devices watching
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
