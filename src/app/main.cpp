@@ -542,7 +542,7 @@ int main(int argc, char** argv) {
             float frac = ls::Bridge().keyboardFraction ? ls::Bridge().keyboardFraction() : -1.0f;
             bool shown = ls::IsMobilePlatform() ? (frac > 0 || SDL_IsScreenKeyboardShown(window)) : fakeKb && ImGui::GetIO().WantTextInput;
             if (frac <= 0.05f) frac = 0.42f;
-            app.keyboardInset = shown ? (float)dh * std::min(frac, 0.7f) : 0.0f;
+            app.keyboardInset = shown ? (float)dh * (frac < 0.7f ? frac : 0.7f) : 0.0f;
         }
 
         ImGui_ImplOpenGL3_NewFrame();
