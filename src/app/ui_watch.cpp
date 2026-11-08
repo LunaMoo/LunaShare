@@ -133,6 +133,8 @@ void App::WatchSync() {
     // loop: the host starts everyone again from the beginning
     if (host && w.loop && w.playing && !w.hold && dur > 0 && target >= dur - 0.15 && now - watchLastSeek > 1500) {
         eng.WatchControl(true, 0);
+        Player().Seek(0);  // right away here (the follow-the-clock seek below waits 1.5 s after any seek)
+        Player().SetPlaying(true);
         watchLastSeek = now;
         return;
     }

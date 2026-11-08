@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1
+
+- Loop: the movie no longer stands still for about two seconds when it starts again on the device that plays it
+  (the jump back to the start waited for the pause between two seeks).
+
 ## 1.4.0
 
 - **One movie screen everywhere:** videos opened from a chat now play on the same full-screen movie player as the
