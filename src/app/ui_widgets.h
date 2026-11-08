@@ -6,7 +6,7 @@
 
 namespace ui {
 
-enum class Icon { Pause, Play, Cancel, Check, Folder, File, Retry, Send, Attach, Back, Up, Down, Trash, Copy, Share, Bluetooth, Wifi, Link, Gear, Users, History, Transfers, Edit, Star, Open, Plus, ZoomIn, ZoomOut, Fit, Image, List, Grid, Phone, HangUp, Mic, MicOff, Speaker, Video, VideoOff, FlipCamera, Sliders, Expand, RotateLeft, RotateRight, Webcam, Library, Loop };
+enum class Icon { Pause, Play, Cancel, Check, Folder, File, Retry, Send, Attach, Back, Up, Down, Trash, Copy, Share, Bluetooth, Wifi, Link, Gear, Users, History, Transfers, Edit, Star, Open, Plus, ZoomIn, ZoomOut, Fit, Image, List, Grid, Phone, HangUp, Mic, MicOff, Speaker, Video, VideoOff, FlipCamera, Sliders, Expand, RotateLeft, RotateRight, Webcam, Library, Loop, Shuffle };
 
 // Global UI metrics (set every frame by the app).
 struct Metrics {

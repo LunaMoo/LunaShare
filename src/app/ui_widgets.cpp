@@ -61,6 +61,12 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             dl->AddTriangleFilled(P(0.05f, -0.75f), P(0.45f, -0.45f), P(0.05f, -0.15f), col);
             dl->AddTriangleFilled(P(-0.05f, 0.75f), P(-0.45f, 0.45f), P(-0.05f, 0.15f), col);
             break;
+        case Icon::Shuffle:  // two paths crossing on their way forward, arrows at the right
+            dl->AddBezierCubic(P(-0.85f, -0.5f), P(-0.1f, -0.5f), P(0.0f, 0.5f), P(0.5f, 0.5f), col, t);
+            dl->AddBezierCubic(P(-0.85f, 0.5f), P(-0.1f, 0.5f), P(0.0f, -0.5f), P(0.5f, -0.5f), col, t);
+            dl->AddTriangleFilled(P(0.45f, -0.82f), P(0.9f, -0.5f), P(0.45f, -0.18f), col);
+            dl->AddTriangleFilled(P(0.45f, 0.18f), P(0.9f, 0.5f), P(0.45f, 0.82f), col);
+            break;
         case Icon::Send:
             dl->AddTriangleFilled(P(-0.8f, -0.75f), P(0.85f, 0.0f), P(-0.8f, 0.75f), col);
             dl->AddTriangleFilled(P(-0.8f, -0.75f), P(-0.35f, 0.0f), P(-0.8f, 0.75f), ImGui::GetColorU32(ImGuiCol_Button));

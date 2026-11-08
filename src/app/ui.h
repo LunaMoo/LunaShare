@@ -95,6 +95,21 @@ private:
     void DrawMusicNow(bool big);
     void DrawMusicMini();
     void MusicSoundPopup();
+    // listening together / contacts' songs (ui_listen.cpp)
+    void MusicExternalTick();
+    void MusicPlayLib(const std::vector<ls::LibFile>& list, int at, const std::string& who);
+    void MusicLibOpen();
+    void MusicLibEnd();
+    void MusicListenAdd(const std::vector<std::string>& paths);
+    void MusicListenPopup();
+    void DrawListenStrip();
+    void DrawListenQueue();
+    void DrawListenBanner(const std::string& peer);
+    bool musicListenOpen = false, listenFollowing = false;
+    std::vector<ls::LibFile> musicLibList;
+    int musicLibAt = -1;
+    std::string musicLibId, musicLibWho;
+    uint64_t musicLibSrc = 0;
     bool musicSoundOpen = false, musicSoundDirty = false;
     void MusicRefresh();
     const music::Track* MusicTrack(const std::string& path);

@@ -54,6 +54,9 @@ after receiving, so you know it arrived intact.
   your own playlists; repeat, shuffle, a mini player everywhere.
 - Plays on in the background (Android: media notification, lock screen, headset buttons; Windows: media keys) and
   pauses for movies and calls. Send songs or whole albums (as a folder) to people.
+- Equalizer, smooth transitions and a remix mode (a part of every song, blending into the next).
+- Listening together: everyone adds songs from their own music to a shared queue; each streams from its device.
+  Songs in contacts' Shared folders play straight in the music player.
 
 **Library (Shared folders)** (see [docs/LIBRARY.md](docs/LIBRARY.md))
 - Files in your *Shared* folder can be browsed and downloaded by your contacts. A download comes from every contact
@@ -281,6 +284,7 @@ src/core/        engine (no UI dependencies)
   engine.*         connections, discovery, chat, resumable transfers, persistence
   groups.cpp       group chats          group_calls.cpp  group voice/video calls (direct or through the server)
   watch.cpp        watch together       library.cpp      shared folders, multi-source downloads
+  listen.cpp       listening together (shared music queue, songs streamed from each device)
   protocol.*       framing: [u32 len][u8 type][payload]  (JSON control frames, binary data frames)
   crypto.*         handshake, frame encryption, identity and account keys, safety numbers
   hash.*           SHA-256, CRC-32

@@ -50,6 +50,14 @@ enum class Msg : uint8_t {
     WatchRead = 86,    // {sid, off, len}                     viewer -> host: send me these bytes
     WatchData = 87,    // binary: [sid u64][offset u64][data] host -> viewer
     WatchSubs = 88,    // {sid, name, data (base64)}          host -> viewer: a subtitle file lying next to the movie
+    // ---- listening together: one device keeps the shared queue and the clock; everyone adds songs from their own
+    // music, and each song streams from the device it's on (WatchRead / WatchData with the song's id as "sid")
+    ListenInvite = 90,  // {sid[, gid]}                          host -> the people it's shared with
+    ListenJoin = 91,    // {sid, name}                            -> host
+    ListenLeave = 92,   // {sid[, end]}                           a listener leaves / the host ends it for everyone
+    ListenCtl = 93,     // {sid, op, pos, iid}                    listener -> host: play/pause/seek/next/prev/jump/remove
+    ListenState = 94,   // {sid, items[], at, playing, pos, people[], devs[], ver}  host -> listeners
+    ListenAdd = 95,     // {sid, items[{iid, name, title, artist, album, dur, size}]}  listener -> host: songs of mine
     GroupInfo = 70,   // {gid, name, creator, ver, members[{acc, name, devs[{id, pub}]}]}  to every member device
                       // (chat frames of a group carry "gid": Chat, ChatAck, ChatSync(chat="#gid", from), ChatRead(chat),
                       //  ChatReact(Ack), ChatDelete(Ack))   // {secret, account{...AccountData}, name, avh, img, pv, devices[], accounts[], chats{}}

@@ -1262,6 +1262,7 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
                 WatchUpdateHold();
                 WatchBroadcast();
             }
+            ListenPeerGone(c->peerId);
             InterruptPeerTransfers(c->peerId);
             Device(c->peerId).lastSeen = NowMs();
         } else {
@@ -2123,6 +2124,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::WatchReport: case Msg::WatchRead: case Msg::WatchSubs:
             if (!c->mailbox) HandleWatch(c, f.type, j);
             break;
+        case Msg::ListenInvite: case Msg::ListenJoin: case Msg::ListenLeave: case Msg::ListenCtl: case Msg::ListenState:
+        case Msg::ListenAdd:
+            if (!c->mailbox) HandleListen(c, f.type, j);
+            break;
         case Msg::CallInvite: {
             uint64_t id = j.value("call", (uint64_t)0);
             if (j.contains("gid")) {
@@ -2764,6 +2769,7 @@ void Engine::MaintenanceLoop() {
                 FinishCall(call.outgoing ? "no answer" : "missed", call.outgoing);
             GroupCallTick();
             WatchTick();
+            ListenTick();
         }
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();

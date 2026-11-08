@@ -7,6 +7,7 @@
 #include "i18n.h"
 #include "imgui.h"
 #include "imgui_stdlib.h"
+#include "music.h"
 #include "platform.h"
 #include "player_host.h"
 #include "ui.h"
@@ -182,7 +183,20 @@ void App::DrawLibrary() {
                 ImGui::TextDisabled("%s", info.c_str());
                 if (!mobile) ImGui::SameLine();
                 auto sw = eng.swarm.find(f.id);
-                if (Player().Available() && Player().Playable(f.rel)) {  // watch it while it comes
+                if (Player().Available() && music::Library::IsAudioPath(f.rel)) {  // music: in the music player, while it comes
+                    if (ui::IconTextButton(T("Play"), Icon::Play, ImVec2(mobile ? -1 : 0, h))) {
+                        std::vector<LibFile> songs;  // (the songs of that folder after it, for "next")
+                        int at = 0;
+                        std::string dir = DirName(f.rel);
+                        for (auto& g : files)
+                            if (music::Library::IsAudioPath(g.rel) && DirName(g.rel) == dir) {
+                                if (g.id == f.id) at = (int)songs.size();
+                                songs.push_back(g);
+                            }
+                        MusicPlayLib(songs, at, eng.PeerName(key));
+                    }
+                    if (!mobile) ImGui::SameLine();
+                } else if (Player().Available() && Player().Playable(f.rel)) {  // watch it while it comes
                     if (ui::IconTextButton(T("Play"), Icon::Play, ImVec2(mobile ? -1 : 0, h)) && eng.StartLibraryWatch(f)) watchShown = true;
                     if (!mobile) ImGui::SameLine();
                 }

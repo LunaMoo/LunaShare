@@ -397,6 +397,22 @@ const int kEqPresetCount = (int)(sizeof(kEqPresets) / sizeof(kEqPresets[0]));
 
 // ---------------------------------------------------------------- player
 
+// a song from elsewhere: the decoder reads through this, asking again while the bytes are on their way
+struct Player::ExtStream {
+    LspStream s{};
+    std::function<int(int64_t, uint8_t*, int)> read;
+    std::atomic<bool> stop{false};
+    std::atomic<bool>* quit = nullptr;
+    static int Read(void* u, int64_t off, uint8_t* buf, int len) {
+        auto* x = (ExtStream*)u;
+        for (;;) {
+            if (x->stop || *x->quit) return -1;
+            int r = x->read(off, buf, len);
+            if (r != -2) return r;
+        }
+    }
+};
+
 void Player::Init(const LspModule* mod, Library* lib) {
     mod_ = mod;
     lib_ = lib;
@@ -409,7 +425,116 @@ void Player::Shutdown() {
     quit_ = true;
     if (th_.joinable()) th_.join();
     std::lock_guard<std::mutex> l(m_);
+    if (exStream_) exStream_->stop = true;
     CloseLocked();
+    exStream_.reset();
+}
+
+bool Player::EnsureDevice() {
+    if (dev_) return true;
+    if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
+    SDL_AudioSpec want{}, have{};
+    want.freq = 48000;
+    want.format = AUDIO_F32SYS;
+    want.channels = 2;
+    want.samples = 2048;
+    want.callback = AudioCb;
+    want.userdata = this;
+    dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    return dev_ != 0;
+}
+
+// ---------------------------------------------------------------- songs from elsewhere
+
+void Player::PlayExternal(const Source& s, double pos, bool playing) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (!ext_) {  // (my own music rests meanwhile, where it was)
+            CancelFade();
+            CloseLocked();
+        }
+        ext_ = true;
+        if (s.id != ex_.id) {
+            if (exPending_) exPending_->stop = true;  // (one still being opened: given up)
+            if (exStream_) exStream_->stop = true;    // (the old song stops reading at once)
+            exEnded_ = false;
+            exOpen_ = 0;
+        }
+        ex_ = s;
+        exPos_ = pos;
+        exPlay_ = playing;
+        exAt_ = (int64_t)SDL_GetTicks64();
+        if (!s.follow) wantPlay_ = playing;
+    }
+    Changed();
+}
+
+void Player::Follow(double pos, bool playing) {
+    std::lock_guard<std::mutex> l(m_);
+    exPos_ = pos;
+    exPlay_ = playing;
+    exAt_ = (int64_t)SDL_GetTicks64();
+}
+
+void Player::EndExternal() {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (!ext_) return;
+        if (exPending_) exPending_->stop = true;
+        if (exStream_) exStream_->stop = true;
+        CloseLocked();
+        exStream_.reset();
+        exPending_.reset();
+        ext_ = false;
+        ex_ = Source();
+        exOpen_ = 0;
+        wantPlay_ = false;
+    }
+    Changed();
+}
+
+bool Player::ExternalEnded(uint64_t id) {
+    std::lock_guard<std::mutex> l(m_);
+    return ext_ && ex_.id == id && exOpen_ == id && exEnded_;
+}
+
+bool Player::ExtCtl(int cmd, double arg) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (!ext_) return false;
+    }
+    return externalCtl && externalCtl(cmd, arg);
+}
+
+// (m_ held) the song from elsewhere that's open: follow the host's clock, notice its end
+void Player::LoopExternal() {
+    if (!p_ || exOpen_ != ex_.id) return;
+    int64_t now = (int64_t)SDL_GetTicks64();
+    if (ex_.follow) {
+        double target = exPos_ + (exPlay_ ? (double)(now - exAt_) / 1000.0 : 0.0);
+        bool on = exPlay_ && target >= 0 && !interrupted_ && !exEnded_;
+        if (on != playing_) {
+            mod_->set_playing(p_, on ? 1 : 0);
+            playing_ = on;
+            if (dev_) SDL_PauseAudioDevice(dev_, on ? 0 : 1);
+        }
+        if (target >= 0 && (dur_ <= 0 || target < dur_ - 1) && now - exLastSeek_ > 3000) {
+            double cur = mod_->position(p_);
+            if (std::fabs(cur - target) > (exPlay_ ? 2.0 : 0.5)) {  // (more than a moment off: a jump)
+                mod_->seek(p_, target);
+                exLastSeek_ = now;
+                exEnded_ = false;
+            }
+        }
+    }
+    if (mod_->state(p_) == LSP_ENDED && !exEnded_) {
+        exEnded_ = true;
+        if (!ex_.follow) {
+            playing_ = wantPlay_ = false;
+            if (dev_) SDL_PauseAudioDevice(dev_, 1);
+        }
+        Changed();
+    }
 }
 
 void Player::AudioCb(void* u, uint8_t* stream, int len) {
@@ -496,18 +621,22 @@ void Player::SetSound(const Sound& s) {
     Changed();  // (saved by the caller when done - sliders change it every frame)
 }
 
-// remix: which part of a song plays - past the start (intro), well before the end (outro)
-double Player::FragStart(double dur) const {
+// remix: which part of a song plays - a random place, but always past the intro and with the whole part fitting
+// before the outro (and the quiet at the end): at least 8 s / 8 % from the start, 12 s / 10 % from the end
+static double FragHead(double dur) { return std::max(8.0, dur * 0.08); }
+static double FragTail(double dur) { return std::max(12.0, dur * 0.10); }
+double Player::PickFrag(double dur) const {
     if (!snd_.remix || dur <= 0) return 0;
-    double len = snd_.remixLen;
-    if (dur < len + 40) return std::max(0.0, dur * 0.2);
-    return std::clamp(dur * 0.3, 20.0, dur - len - 20);
+    double lo = FragHead(dur), hi = dur - FragTail(dur) - snd_.remixLen;
+    if (hi <= lo) return std::min(lo, dur * 0.2);  // (a short song: its middle)
+    static std::mt19937 rng((uint32_t)SDL_GetPerformanceCounter());
+    return std::uniform_real_distribution<double>(lo, hi)(rng);
 }
+double Player::FragStart(double dur) const { return snd_.remix && dur > 0 ? fragA_ : 0; }
 double Player::FragEnd(double dur) const {
     if (!snd_.remix || dur <= 0) return dur;
-    double s = FragStart(dur), len = snd_.remixLen;
-    if (dur < len + 40) return std::max(s + 5, dur * 0.8);
-    return std::min(dur - 15, s + len);
+    double end = std::min(dur - FragTail(dur), fragA_ + snd_.remixLen);
+    return std::max(end, std::min(dur, fragA_ + 5));
 }
 
 // the next song in playing order, by the repeat mode; -1 = the list ended
@@ -527,8 +656,8 @@ void Player::StartFade(int next, double seconds) {
         nextAt_ = -1;
         return;
     }
-    double off = FragStart(info.duration);
-    if (off > 0) mod_->seek(q, off);
+    fragB_ = PickFrag(info.duration);
+    if (fragB_ > 0) mod_->seek(q, fragB_);
     mod_->set_playing(q, playing_ ? 1 : 0);
     std::lock_guard<std::mutex> l(pm_);
     pn_ = q;
@@ -552,6 +681,7 @@ void Player::FinishFade() {
     if (old) mod_->close(old);
     at_ = nextAt_;
     dur_ = nextDur_;
+    fragA_ = fragB_;
     nextAt_ = -1;
 }
 
@@ -610,7 +740,8 @@ bool Player::OpenAt(int index, double pos) {
         want.userdata = this;
         dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
     }
-    if (pos <= 0) pos = FragStart(info.duration);  // (remix: the part past the intro)
+    fragA_ = pos > 0 ? pos : PickFrag(info.duration);  // (remix: a part of it; resumed: from where it was)
+    if (pos <= 0) pos = fragA_;
     if (pos > 0) mod_->seek(p, pos);
     mod_->set_playing(p, wantPlay_ ? 1 : 0);
     if (dev_) SDL_PauseAudioDevice(dev_, wantPlay_ ? 0 : 1);
@@ -626,6 +757,14 @@ void Player::PlayList(const std::vector<std::string>& paths, int start, bool shu
     if (!mod_ || paths.empty()) return;
     {
         std::lock_guard<std::mutex> l(m_);
+        if (ext_) {  // (my own music again)
+            if (exStream_) exStream_->stop = true;
+            CloseLocked();
+            exStream_.reset();
+            ext_ = false;
+            ex_ = Source();
+            exOpen_ = 0;
+        }
         queue_ = paths;
         order_.resize(paths.size());
         for (size_t i = 0; i < paths.size(); i++) order_[i] = (int)i;
@@ -689,6 +828,7 @@ void Player::AddToQueue(const std::vector<std::string>& paths) {
 }
 
 void Player::SetPlaying(bool on) {
+    if (ExtCtl(on ? 5 : 4, 0)) return;
     {
         std::lock_guard<std::mutex> l(m_);
         wantPlay_ = on;
@@ -705,9 +845,17 @@ void Player::SetPlaying(bool on) {
     SaveState();
 }
 
-void Player::Toggle() { SetPlaying(!GetNow().playing); }
+void Player::Toggle() {
+    if (ExtCtl(1, 0)) return;
+    SetPlaying(!GetNow().playing);
+}
 
 void Player::Next() {
+    if (ExtCtl(2, 0)) return;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (ext_) return;
+    }
     {
         std::lock_guard<std::mutex> l(m_);
         if (order_.empty()) return;
@@ -720,6 +868,14 @@ void Player::Next() {
 }
 
 void Player::Prev() {
+    if (ExtCtl(3, 0)) return;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (ext_) {
+            if (p_) mod_->seek(p_, 0);
+            return;
+        }
+    }
     {
         std::lock_guard<std::mutex> l(m_);
         if (order_.empty()) return;
@@ -736,6 +892,7 @@ void Player::Prev() {
 }
 
 void Player::Seek(double s) {
+    if (ExtCtl(7, s)) return;
     std::lock_guard<std::mutex> l(m_);
     CancelFade();
     if (p_) mod_->seek(p_, std::max(0.0, s));
@@ -743,6 +900,18 @@ void Player::Seek(double s) {
 }
 
 void Player::Stop() {
+    if (ExtCtl(6, 0)) return;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (ext_) {
+            if (exStream_) exStream_->stop = true;
+            CloseLocked();
+            exStream_.reset();
+            ext_ = false;
+            ex_ = Source();
+            exOpen_ = 0;
+        }
+    }
     {
         std::lock_guard<std::mutex> l(m_);
         CloseLocked();
@@ -819,6 +988,21 @@ Now Player::GetNow() {
         std::lock_guard<std::mutex> l(m_);
         n.repeat = repeat_;
         n.shuffle = shuffle_;
+        if (ext_) {
+            n.active = n.external = true;
+            n.follow = ex_.follow;
+            n.extId = ex_.id;
+            n.track = ex_.track;
+            n.path = ex_.path;
+            bool open = p_ && exOpen_ == ex_.id;
+            n.loading = !open;
+            n.playing = open && playing_;
+            n.pos = open ? mod_->position(p_) : std::max(0.0, exPos_);
+            n.dur = open && dur_ > 0 ? dur_ : ex_.track.duration;
+            n.index = ex_.index;
+            n.count = ex_.count;
+            return n;
+        }
         n.count = (int)order_.size();
         n.index = at_;
         if (at_ < 0 || at_ >= (int)order_.size()) return n;
@@ -850,8 +1034,78 @@ void Player::Loop() {
     while (!quit_) {
         SDL_Delay(100);
         bool changed = false;
+        // a song from elsewhere to open (without the lock: its first bytes may take a moment to come)
+        Source src;
+        std::shared_ptr<ExtStream> st;
+        bool open = false;
         {
             std::lock_guard<std::mutex> l(m_);
+            if (ext_ && exOpen_ != ex_.id && !exOpening_ && ex_.id) {
+                exOpening_ = open = true;
+                src = ex_;
+                if (src.path.empty()) {
+                    st = std::make_shared<ExtStream>();
+                    st->read = src.read;
+                    st->quit = &quit_;
+                    st->s.user = st.get();
+                    st->s.size = src.size;
+                    st->s.read = ExtStream::Read;
+                    exPending_ = st;
+                }
+            }
+        }
+        if (open) {
+            LspInfo info{};
+            LspPlayer* q = nullptr;
+            if (!src.path.empty()) q = mod_->open(src.path.c_str(), 48000, 2, &info);
+            else if (src.read && mod_->open_stream) q = mod_->open_stream(&st->s, 48000, 2, &info);
+            std::lock_guard<std::mutex> l(m_);
+            exOpening_ = false;
+            if (exPending_ == st) exPending_.reset();
+            if (ext_ && ex_.id == src.id && q) {
+                LspPlayer* old;
+                {
+                    std::lock_guard<std::mutex> g(pm_);
+                    old = p_;
+                    p_ = q;
+                }
+                if (exStream_) exStream_->stop = true;
+                if (old) mod_->close(old);
+                exStream_ = st;
+                exOpen_ = src.id;
+                exEnded_ = false;
+                dur_ = info.duration > 0 ? info.duration : src.track.duration;
+                EnsureDevice();
+                bool on;
+                if (src.follow) {
+                    double target = exPos_ + (exPlay_ ? (double)((int64_t)SDL_GetTicks64() - exAt_) / 1000.0 : 0.0);
+                    if (target > 0.5) mod_->seek(q, target);
+                    on = exPlay_ && target >= 0 && !interrupted_;
+                    exLastSeek_ = (int64_t)SDL_GetTicks64();
+                } else {
+                    if (exPos_ > 0) mod_->seek(q, exPos_);
+                    on = wantPlay_ && !interrupted_;
+                }
+                mod_->set_playing(q, on ? 1 : 0);
+                playing_ = on;
+                if (dev_) SDL_PauseAudioDevice(dev_, on ? 0 : 1);
+                changed = true;
+            } else {
+                if (q) mod_->close(q);
+                if (ext_ && ex_.id == src.id && !q) {  // (can't be played: counts as played out)
+                    exOpen_ = src.id;
+                    exEnded_ = true;
+                    changed = true;
+                }
+            }
+        }
+        {
+            std::lock_guard<std::mutex> l(m_);
+            if (ext_) LoopExternal();
+        }
+        {
+            std::lock_guard<std::mutex> l(m_);
+            if (ext_) goto tail;
             if (fadeDone_) {  // the next song has fully taken over
                 FinishFade();
                 changed = true;
@@ -877,7 +1131,8 @@ void Player::Loop() {
                 else if (n >= (int)order_.size()) n = repeat_ == RepeatAll ? 0 : -1;
                 if (n >= 0) {
                     if (repeat_ == RepeatOne) {
-                        mod_->seek(p_, FragStart(dur_));
+                        fragA_ = PickFrag(dur_);
+                        mod_->seek(p_, fragA_);
                         mod_->set_playing(p_, 1);
                     } else {
                         OpenAt(n, 0);
@@ -892,6 +1147,7 @@ void Player::Loop() {
             }
             if (p_) savedPos_ = mod_->position(p_);
         }
+    tail:
         int64_t now = (int64_t)SDL_GetTicks64();
         if (changed) {
             lastChange = now;

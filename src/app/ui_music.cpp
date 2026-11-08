@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <random>
 #include <set>
 
 #include "emoji_host.h"
@@ -156,6 +157,7 @@ void App::MusicPlaylistPopup() {
 // a song's menu: play next, queue, playlist, send, (remove from the playlist)
 void App::MusicTrackMenu(const std::string& path, const std::string& playlistId, int playlistIndex) {
     float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
+    if (eng.listen.sid && ImGui::Selectable(T("Add to listening together"), false, 0, ImVec2(0, h))) MusicListenAdd({path});
     if (ImGui::Selectable(T("Play next"), false, 0, ImVec2(0, h))) music::Play().PlayNext({path});
     if (ImGui::Selectable(T("Add to the queue"), false, 0, ImVec2(0, h))) music::Play().AddToQueue({path});
     if (ImGui::Selectable(T("Add to a playlist..."), false, 0, ImVec2(0, h))) {
@@ -164,7 +166,7 @@ void App::MusicTrackMenu(const std::string& path, const std::string& playlistId,
     }
     if (ImGui::Selectable(T("Send to..."), false, 0, ImVec2(0, h))) MusicSend({path}, "");
     if (ImGui::Selectable(T("Select"), false, 0, ImVec2(0, h))) musicSel.insert(path);
-    if (!playlistId.empty() && ImGui::Selectable(T("Remove from this playlist"), false, 0, ImVec2(0, h))) {
+    if (!playlistId.empty() && playlistId[0] != '#' && ImGui::Selectable(T("Remove from this playlist"), false, 0, ImVec2(0, h))) {
         for (auto& p : music::Lib().Playlists())
             if (p.id == playlistId && playlistIndex >= 0 && playlistIndex < (int)p.paths.size()) {
                 auto v = p.paths;
@@ -196,6 +198,8 @@ void App::MusicTrackList(const std::vector<const music::Track*>& list, const std
                 if (selecting || ImGui::GetIO().KeyCtrl) {
                     if (sel) musicSel.erase(t->path);
                     else musicSel.insert(t->path);
+                } else if (eng.listen.sid && playlistId != "#queue") {  // listening together: to the shared queue
+                    MusicListenAdd({t->path});
                 } else {
                     std::vector<std::string> paths;
                     for (auto* x : list) paths.push_back(x->path);
@@ -242,9 +246,22 @@ void App::MusicGroupButtons(const std::vector<const music::Track*>& list, const 
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     std::vector<std::string> paths;
     for (auto* t : list) paths.push_back(t->path);
-    if (ui::IconTextButton(T("Play"), Icon::Play, ImVec2(0, h)) && !paths.empty()) music::Play().PlayList(paths, 0, false);
+    bool together = eng.listen.sid != 0;  // listening together: they go to the shared queue
+    if (ui::IconTextButton(together ? T("Add all") : T("Play"), together ? Icon::Plus : Icon::Play, ImVec2(0, h)) && !paths.empty()) {
+        if (together) MusicListenAdd(paths);
+        else music::Play().PlayList(paths, 0, false);
+    }
     ImGui::SameLine();
-    if (ui::IconTextButton(T("Shuffle"), Icon::Retry, ImVec2(0, h)) && !paths.empty()) music::Play().PlayList(paths, 0, true);
+    if (ui::IconTextButton(T("Shuffle"), Icon::Shuffle, ImVec2(0, h)) && !paths.empty()) {
+        if (together) {
+            std::vector<std::string> v = paths;
+            std::mt19937 rng((uint32_t)SteadyMs());
+            std::shuffle(v.begin(), v.end(), rng);
+            MusicListenAdd(v);
+        } else {
+            music::Play().PlayList(paths, 0, true);
+        }
+    }
     ImGui::SameLine();
     if (ui::IconTextButton(T("Send..."), Icon::Share, ImVec2(0, h)) && !paths.empty()) MusicSend(paths, sendFolder);
     if (!mobile) ImGui::SameLine();
@@ -261,7 +278,13 @@ void App::DrawMusicNow(bool big) {
     float h = mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 1.4f;
     music::Now n = music::Play().GetNow();
     if (!n.active) {
+        if (eng.listen.sid) {
+            ImGui::TextDisabled("%s", T("Nothing playing yet."));
+            DrawListenQueue();
+            return;
+        }
         ImGui::TextDisabled("%s", T("Nothing playing. Pick a song."));
+        if (ImGui::Button(T("Listen together..."), ImVec2(big ? -1 : 0, mobile ? h * 0.85f : 0))) musicListenOpen = true;
         return;
     }
     float w = ImGui::GetContentRegionAvail().x;
@@ -275,7 +298,15 @@ void App::DrawMusicNow(bool big) {
     ImGui::PopTextWrapPos();
     ImGui::PopFont();
     std::string sub = n.track.artist + (n.track.album.empty() ? "" : (n.track.artist.empty() ? "" : "  ·  ") + n.track.album);
+    if (n.follow && eng.ListenCurrent()) {  // listening together: whose song
+        const ListenItem* li = eng.ListenCurrent();
+        bool mine = li->owner == eng.settings.deviceId;
+        sub += (sub.empty() ? "" : "  ·  ") + TF("from %s", Emoji().Display(mine ? std::string(T("you")) : li->by).c_str());
+    } else if (n.external && !musicLibWho.empty()) {
+        sub += (sub.empty() ? "" : "  ·  ") + TF("from %s's Shared folder", Emoji().Display(musicLibWho).c_str());
+    }
     ImGui::TextDisabled("%s", sub.c_str());
+    if (n.loading) ImGui::TextDisabled("%s", T("on its way..."));
     // seek bar
     ImVec2 bp = ImGui::GetCursorScreenPos();
     float bw = ImGui::GetContentRegionAvail().x;
@@ -301,9 +332,11 @@ void App::DrawMusicNow(bool big) {
     float total = bs * 5 + sp * 4;
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (bw - total) * 0.5f));
     bool sh = n.shuffle;
+    ImGui::BeginDisabled(n.external);  // (shuffle and repeat are for my own queue)
     if (sh) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ui::IconButton("mshuf", Icon::Retry, sh ? T("Shuffle: on") : T("Shuffle: off"), bs)) music::Play().SetShuffle(!sh);
+    if (ui::IconButton("mshuf", Icon::Shuffle, sh ? T("Shuffle: on") : T("Shuffle: off"), bs)) music::Play().SetShuffle(!sh);
     if (sh) ImGui::PopStyleColor();
+    ImGui::EndDisabled();
     ImGui::SameLine();
     if (ui::IconButton("mprev", Icon::Back, T("Previous"), bs)) music::Play().Prev();
     ImGui::SameLine();
@@ -325,22 +358,68 @@ void App::DrawMusicNow(bool big) {
     if (rp) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     const char* rt = rp == music::RepeatOne ? T("Repeat: this song") : rp == music::RepeatAll ? T("Repeat: the list") : T("Repeat: off");
     ImVec2 rpp = ImGui::GetCursorScreenPos();
+    ImGui::BeginDisabled(n.external);
     if (ui::IconButton("mrep", Icon::Loop, rt, bs)) music::Play().SetRepeat((rp + 1) % 3);
+    ImGui::EndDisabled();
     if (rp == music::RepeatOne) dl->AddText(ImVec2(rpp.x + bs * 0.68f, rpp.y + bs * 0.05f), ImGui::GetColorU32(ImGuiCol_Text), "1");
     if (rp) ImGui::PopStyleColor();
+    if (n.external) {  // a song from elsewhere: keep it / leave
+        ImGui::Spacing();
+        float aw = (ImGui::GetContentRegionAvail().x - sp * 2) / 3, ah = mobile ? h * 0.85f : ImGui::GetFrameHeight() * 1.2f;
+        bool canSave = false, saved = false;
+        if (n.follow) {
+            const ListenItem* li = eng.ListenCurrent();
+            if (li && !eng.ListenMine(li->iid)) {
+                canSave = true;
+                saved = eng.ListenSaving(li->iid);
+                ImGui::BeginDisabled(saved);
+                if (ImGui::Button(saved ? T("Saving") : T("Save"), ImVec2(aw, ah))) eng.ListenSave(li->iid);
+                ImGui::EndDisabled();
+            }
+        } else if (!musicLibId.empty()) {
+            canSave = true;
+            saved = eng.LibStreamSaved(musicLibId);
+            ImGui::BeginDisabled(saved);
+            if (ImGui::Button(saved ? T("Saving") : T("Save"), ImVec2(aw, ah))) eng.LibStreamSave(musicLibId);
+            ImGui::EndDisabled();
+        }
+        if (canSave) ImGui::SameLine();
+        if (n.follow) {
+            if (ImGui::Button(eng.listen.host.empty() ? T("End for everyone") : T("Leave"), ImVec2(aw, ah))) eng.LeaveListen();
+        } else if (ImGui::Button(T("Stop"), ImVec2(aw, ah))) {
+            music::Play().Stop();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(T("Sound..."), ImVec2(aw, ah))) musicSoundOpen = true;
+        if (eng.listen.sid) DrawListenQueue();
+        return;
+    }
+    if (eng.listen.sid) {  // (listening together, nothing of it on yet)
+        DrawListenQueue();
+        return;
+    }
     if (big) {
         ImGui::Spacing();
-        if (ImGui::SmallButton(T("Send this song..."))) MusicSend({n.path}, "");
+        // finger-sized: three across
+        float aw = (ImGui::GetContentRegionAvail().x - sp * 2) / 3, ah = mobile ? h * 0.85f : ImGui::GetFrameHeight() * 1.2f;
+        if (ImGui::Button(T("Send..."), ImVec2(aw, ah))) MusicSend({n.path}, "");
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Stop"))) music::Play().Stop();
+        if (ImGui::Button(T("Stop"), ImVec2(aw, ah))) music::Play().Stop();
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Sound..."))) musicSoundOpen = true;
+        if (ImGui::Button(T("Sound..."), ImVec2(aw, ah))) musicSoundOpen = true;
         {  // the remix switch, right here: it changes how the queue plays
             music::Sound s = music::Play().GetSound();
-            ImGui::SameLine();
-            if (ImGui::Checkbox(T("Remix"), &s.remix)) music::Play().SetSound(s);
+            bool on = s.remix;
+            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(on ? T("Remix: on") : T("Remix: off"), ImVec2(aw, ah))) {
+                s.remix = !s.remix;
+                music::Play().SetSound(s);
+                music::Play().SaveState();
+            }
+            if (on) ImGui::PopStyleColor();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Only a part of every song, flowing into a part of the next one"));
         }
+        if (ImGui::Button(T("Listen together..."), ImVec2(-1, ah))) musicListenOpen = true;
         // the queue
         ImGui::SeparatorText(TF("Queue (%d)", n.count).c_str());
         auto q = music::Play().Queue();
@@ -359,7 +438,7 @@ void App::DrawMusicNow(bool big) {
             }
         }
         for (auto& t : tmp) list.push_back(&t);
-        MusicTrackList(list, "", true);
+        MusicTrackList(list, "#queue", true);
     }
 }
 
@@ -521,6 +600,8 @@ void App::DrawMusic() {
     MusicSendPopup();
     MusicPlaylistPopup();
     MusicSoundPopup();
+    MusicListenPopup();
+    DrawListenStrip();
     if (mobile && musicNowShown) {  // phones: "now playing" fills the screen
         if (ui::IconTextButton(T("Library"), Icon::List, ImVec2(0, h))) musicNowShown = false;
         ImGui::BeginChild("mnow");
@@ -564,30 +645,69 @@ void App::DrawMusic() {
         if (ui::IconTextButton(T("Folders..."), Icon::Folder)) ImGui::OpenPopup("##mfolders");
         ImGui::SameLine();
         if (ImGui::Button(T("Sound..."))) musicSoundOpen = true;
-    } else if (ImGui::SmallButton(T("Music folders..."))) {
-        ImGui::OpenPopup("##mfolders");
+        if (!eng.listen.sid) {
+            ImGui::SameLine();
+            if (ImGui::Button(T("Listen together..."))) musicListenOpen = true;
+        }
+    } else {
+        if (ImGui::Button(T("Music folders..."), ImVec2(eng.listen.sid ? -1 : ImGui::GetContentRegionAvail().x * 0.5f, h)))
+            ImGui::OpenPopup("##mfolders");
+        if (!eng.listen.sid) {
+            ImGui::SameLine();
+            if (ImGui::Button(T("Listen together..."), ImVec2(-1, h))) musicListenOpen = true;
+        }
     }
     if (music::Lib().Scanning()) {
         ImGui::SameLine();
         ImGui::TextDisabled(T("reading new music... %d"), music::Lib().ScanDone());
     }
+    static bool devFolders = getenv("LUNASHARE_OPENFOLDERS") != nullptr;  // (dev: screenshots)
+    if (devFolders && ImGui::GetFrameCount() > 30) {
+        devFolders = false;
+        ImGui::OpenPopup("##mfolders");
+    }
+    {  // (on a phone: across the screen, never taller than it - the buttons first, the list scrolls)
+        ImVec2 vp = ImGui::GetMainViewport()->WorkSize;
+        if (mobile) {
+            ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->WorkPos.x + vp.x * 0.5f, ImGui::GetMainViewport()->WorkPos.y + vp.y * 0.12f),
+                                    ImGuiCond_Always, ImVec2(0.5f, 0));
+            ImGui::SetNextWindowSize(ImVec2(vp.x * 0.94f, 0));
+        }
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(vp.x, vp.y * 0.75f));
+    }
     if (ImGui::BeginPopup("##mfolders")) {
         ImGui::TextUnformatted(T("Music folders"));
-        ImGui::Separator();
-        for (auto& f : music::Lib().Folders()) {
-            ImGui::PushID(f.c_str());
-            ImGui::TextUnformatted(f.c_str());
-            ImGui::SameLine();
-            if (ImGui::SmallButton(T("Remove"))) music::Lib().RemoveFolder(f);
-            ImGui::PopID();
-        }
-        ImGui::TextDisabled(T("+ received files: %s"), eng.settings.downloadDir.c_str());
-        if (ImGui::Button(T("Add a folder..."), ImVec2(mobile ? -1 : 0, h))) {
+        float half = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f : 0;
+        if (ui::IconTextButton(T("Add a folder..."), Icon::Plus, ImVec2(half, h))) {
             browseFor = BrowseFor::MusicFolder;
             browser.Open(FileBrowser::Mode::SelectDir, T("Add a music folder"), music::Library::DefaultMusicDir());
             ImGui::CloseCurrentPopup();
         }
-        if (ImGui::Button(T("Look again"), ImVec2(mobile ? -1 : 0, h))) music::Lib().Rescan();
+        ImGui::SameLine();
+        if (ui::IconTextButton(T("Look again"), Icon::Retry, ImVec2(half, h))) music::Lib().Rescan();
+        ImGui::Separator();
+        auto folders = music::Lib().Folders();
+        float rowH = (mobile ? h : ImGui::GetFrameHeight()) + ImGui::GetStyle().ItemSpacing.y;
+        float listH = std::min(rowH * (float)folders.size() + ImGui::GetTextLineHeightWithSpacing() * 2,
+                               ImGui::GetMainViewport()->WorkSize.y * 0.45f);
+        ImGui::BeginChild("##mfl", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 30, listH));
+        if (mobile) ui::TouchScroll();
+        for (auto& f : folders) {
+            ImGui::PushID(f.c_str());
+            float rw = ImGui::CalcTextSize(T("Remove")).x + ImGui::GetStyle().FramePadding.x * 2 + (mobile ? h * 0.3f : 0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x - rw - ImGui::GetStyle().ItemSpacing.x);
+            ImGui::TextUnformatted(f.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::SameLine(ImGui::GetContentRegionMax().x - rw);
+            if (ImGui::Button(T("Remove"), ImVec2(rw, mobile ? h * 0.8f : 0))) music::Lib().RemoveFolder(f);
+            ImGui::PopID();
+        }
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled(T("+ received files: %s"), eng.settings.downloadDir.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::EndChild();
+        if (mobile && ImGui::Button(T("Close"), ImVec2(-1, h))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     // selection: send / add to a playlist
@@ -597,6 +717,13 @@ void App::DrawMusic() {
         std::vector<std::string> sel(musicSel.begin(), musicSel.end());
         if (ImGui::SmallButton(T("Send..."))) MusicSend(sel, "");
         ImGui::SameLine();
+        if (eng.listen.sid) {
+            if (ImGui::SmallButton(T("Add to listening together"))) {
+                MusicListenAdd(sel);
+                musicSel.clear();
+            }
+            ImGui::SameLine();
+        }
         if (ImGui::SmallButton(T("To a playlist..."))) {
             musicAddPaths = sel;
             musicAddOpen = true;

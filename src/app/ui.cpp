@@ -307,6 +307,7 @@ void App::MusicTick() {
     music::Lib().SetImplicitFolders({eng.settings.downloadDir});
     bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
     music::Play().SetInterrupted(interrupt);
+    MusicExternalTick();
     music::MediaKeys(music::Play().GetNow().active);
 }
 
@@ -1121,6 +1122,7 @@ void App::DrawChat(const std::string& peer) {
     }
 
     DrawWatchBanner(peer);
+    DrawListenBanner(peer);
     // selection toolbar
     if (!selMsgs.empty()) {
         float h = mobile ? ui::M().rowH : 0;

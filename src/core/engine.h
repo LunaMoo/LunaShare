@@ -104,6 +104,34 @@ struct Group {
     }
 };
 
+// ---- listening together
+struct ListenItem {
+    uint64_t iid = 0;          // the song's id (also its "sid" for WatchRead)
+    std::string owner;         // the device it's on
+    std::string by;            // who added it (name)
+    std::string name, title, artist, album;  // name: the file name (for a saved copy)
+    double dur = 0;
+    int64_t size = 0;
+    std::string path;          // (only on the owner's device; never sent)
+};
+struct ListenInfo {
+    uint64_t sid = 0;          // 0 = not listening together
+    std::string host;          // "" = I keep the queue
+    std::string key;           // the conversation
+    std::vector<ListenItem> items;
+    int at = 0;                // the song that's on (>= items.size(): the queue played out)
+    bool playing = false;
+    double pos = 0;            // position at posAt (steady ms); may be < 0: the song starts in a moment
+    int64_t posAt = 0;
+    std::vector<std::string> people, devs;
+    int64_t ver = 0;
+};
+struct ListenInviteInfo {
+    uint64_t sid = 0;
+    std::string key, host;
+    int64_t at = 0;
+};
+
 // ---- watch together
 struct WatchInfo {
     uint64_t sid = 0;          // 0 = not watching
@@ -359,9 +387,33 @@ public:
     // ---- watch together (watch.cpp)
     WatchInfo watch;                          // under Lock()
     std::vector<WatchInviteInfo> watchInvites;
+    // ---- listening together (listen.cpp); under Lock()
+    ListenInfo listen;
+    std::vector<ListenInviteInfo> listenInvites;
+    uint64_t StartListen(const std::string& key);
+    bool JoinListen(uint64_t sid);
+    void LeaveListen();               // (the host: ends it for everyone)
+    void ListenAdd(std::vector<ListenItem> items);  // songs of mine (path, tags) to the end of the shared queue
+    void ListenControl(const std::string& op, double pos = 0, uint64_t iid = 0);  // play pause seek next prev jump remove
+    void ListenEnded(uint64_t iid);   // the host's player reached the end of this song
+    double ListenPos();               // where the song that's on is now (seconds)
+    const ListenItem* ListenCurrent();
+    bool ListenMine(uint64_t iid) { return listenOwn_.count(iid) > 0; }
+    void ListenSave(uint64_t iid);    // keep a copy of someone's song (in Downloads)
+    bool ListenSaving(uint64_t iid);
+    double ListenLoaded(uint64_t iid);  // 0..1 here
+    // the player's thread (no engine lock): bytes of someone else's song; -2 = not here yet (waited waitMs)
+    int ListenRead(uint64_t iid, int64_t off, uint8_t* buf, int len, int waitMs);
     uint64_t StartWatch(const std::string& key, const std::string& path);  // share a file to watch it together ("" key: alone, for now)
     void WatchInviteTo(const std::string& key);  // host: invite a person / group to the movie that's on
-    uint64_t StartLibraryWatch(const LibFile& f);  // play a file from a contact's Shared folder while it comes
+    uint64_t StartLibraryWatch(const LibFile& f);
+    // the music player: a song from a contact's Shared folder. Returns the id to read with LibStreamReader, or ""
+    // with localPath set when it's here already ("" and no path: can't)
+    std::string LibStreamStart(const LibFile& f, std::string& localPath);
+    void LibStreamEnd(const std::string& id);   // stops it (the pieces go unless saved)
+    void LibStreamSave(const std::string& id);  // keep it (it lands in the Shared folder)
+    bool LibStreamSaved(const std::string& id);
+    double LibStreamLoaded(const std::string& id);  // play a file from a contact's Shared folder while it comes
     void WatchSetLoop(bool on);
     void WatchSave();                         // viewer / library stream: keep a copy of the whole movie
     void WatchSetAllowSave(bool on);          // host: may viewers keep a copy (remembered for next time)
@@ -590,6 +642,25 @@ public:
     std::function<int(int64_t, uint8_t*, int)> LibStreamReader(const std::string& id);
 private:
     void HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    // listening together
+    std::map<uint64_t, std::string> listenOwn_;   // my songs in the session: id -> path (also in watchServe_)
+    std::vector<std::string> listenMembers_;      // host: devices listening
+    std::map<std::string, std::string> listenNames_;  // host: device -> name
+    std::vector<std::shared_ptr<WatchCache>> listenCaches_;  // others' songs coming here (watchCacheMtx_)
+    int64_t listenLastBroadcast_ = 0, listenHostSeen_ = 0;
+    void HandleListen(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    void ListenTick();
+    void ListenBroadcast();
+    void ListenSetPos(double pos);    // host: the clock
+    void ListenApplyCtl(const std::string& op, double pos, uint64_t iid, const std::string& who, bool host);
+    void ListenGo(int at, double delay);  // host: to song `at`, starting after `delay` s
+    void EndListenLocked(const std::string& why);
+    void ListenApply(const json& j);  // listener: the host's state
+    void ListenCaches();              // others' songs: the one that's on and the next one come here
+    void ListenPeerGone(const std::string& dev);
+    json ListenStateJson();
+    bool ListenCacheSaveNow(const std::shared_ptr<WatchCache>& c, const std::string& dir);  // (SaveWatchCopy is private)
+    int WatchReadOn(const std::shared_ptr<WatchCache>& wc, int64_t off, uint8_t* buf, int len, int waitMs);
     void HandleWatchData(const std::shared_ptr<Connection>& c, const Frame& f);
     bool ProduceWatch(const std::shared_ptr<Connection>& c, std::vector<uint8_t>& buf);
     void WatchRequest(int64_t from);   // viewer: ask the host for what's missing ahead of `from`

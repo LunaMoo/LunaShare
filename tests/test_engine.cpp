@@ -716,6 +716,98 @@ int main() {
         CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
     }
 
+    printf("[listening together]\n");
+    {
+        std::string songA = JoinPath(Root(), "src/songA.mp3"), songB = JoinPath(Root(), "src/songB.mp3");
+        WriteRandomFile(songA, 3 << 20, 11);
+        WriteRandomFile(songB, (5 << 20) + 1234, 12);
+        std::string bob = "@" + B->MyAccount();
+        uint64_t sid = A->StartListen(bob);
+        CHECK(sid != 0, "started");
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->listenInvites.empty() && B->listenInvites.back().sid == sid; }, 3000), "invited");
+        CHECK(B->JoinListen(sid), "joined");
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.people.size() == 2; }, 3000), "the host sees the listener");
+        // each adds a song of their own
+        ListenItem ia;
+        ia.path = songA;
+        ia.title = "Song A";
+        ia.dur = 3;
+        A->ListenAdd({ia});
+        ListenItem ib;
+        ib.path = songB;
+        ib.title = "Song B";
+        ib.dur = 200;
+        B->ListenAdd({ib});
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->listen.items.size() == 2 && B->listen.playing && B->listen.at == 0; }, 3000),
+              "the shared queue reaches everyone, the first song plays");
+        uint64_t iidB;
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.items[0].owner == A->settings.deviceId && A->listen.items[1].owner == B->settings.deviceId, "whose songs");
+            iidB = A->listen.items[1].iid;
+        }
+        uint64_t iidA;
+        {
+            auto l = B->Lock();
+            iidA = B->listen.items[0].iid;
+        }
+        // the listener reads the host's song through the stream, like the player does
+        auto readAll = [](Engine& e, uint64_t iid, int64_t size, const std::string& orig) {
+            std::vector<uint8_t> got((size_t)size), want((size_t)size);
+            FILE* f = OpenFile(orig, "rb");
+            bool ok = f && fread(want.data(), 1, want.size(), f) == want.size();
+            if (f) fclose(f);
+            int64_t off = 0, t0 = SteadyMs();
+            while (ok && off < size && SteadyMs() - t0 < 10000) {
+                int n = e.ListenRead(iid, off, got.data() + off, (int)std::min<int64_t>(100000, size - off), 200);
+                if (n == -2) continue;
+                if (n <= 0) return false;
+                off += n;
+            }
+            return ok && off == size && got == want;
+        };
+        CHECK(readAll(*B, iidA, 3 << 20, songA), "the host's song streams to the listener");
+        // the song ends (by the clock: 3 s + a moment): the listener's song is next, and it streams to the host
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.at == 1 && A->listen.playing; }, 8000), "next song by the clock");
+        CHECK(readAll(*A, iidB, (5 << 20) + 1234, songB), "the listener's song streams to the host");
+        // controls from the listener go through the host
+        B->ListenControl("pause");
+        CHECK(WaitFor([&] { auto l = A->Lock(); return !A->listen.playing; }, 3000), "a listener pauses for everyone");
+        B->ListenControl("seek", 42);
+        CHECK(WaitFor([&] { auto l = A->Lock(); return std::abs(A->ListenPos() - 42) < 0.01; }, 3000), "a listener seeks for everyone");
+        B->ListenControl("prev");
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.at == 1 && A->ListenPos() < 0.01; }, 3000), "back to the start of the song");
+        B->ListenControl("remove", 0, iidA);  // (not theirs: refused)
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.items.size() == 2, "a listener can't remove someone else's song");
+        }
+        // saving the listener's song on the host
+        A->ListenSave(iidB);
+        std::string saved = JoinPath(A->settings.downloadDir, "songB.mp3");
+        CHECK(WaitFor([&] { return FileSize(saved) == (5 << 20) + 1234; }, 5000), "a song kept from listening together");
+        RemoveFile(saved);
+        // the listener leaves: their songs that haven't played go
+        ListenItem ib2 = ib;
+        B->ListenAdd({ib2});
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.items.size() == 3; }, 3000), "another one added");
+        A->ListenControl("jump", 0, iidA);
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.at == 0; }, 3000), "jumped back to the first");
+        B->LeaveListen();
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->listen.items.size() == 1 && A->listen.people.size() == 1; }, 3000),
+              "the one who left takes their songs along");
+        {
+            auto l = B->Lock();
+            CHECK(B->listen.sid == 0, "left");
+        }
+        A->LeaveListen();
+        {
+            auto l = A->Lock();
+            CHECK(A->listen.sid == 0, "ended");
+        }
+    }
+
     printf("[accounts: recovery phrase, backup, removing a device]\n");
     {
         std::string phrase = A->RecoveryPhrase(), seed, err;

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.2
+
+- **Listening together** (music player, stage 3, see docs/MUSIC.md): invite a person or a group; everyone adds songs
+  from their own music to a shared queue, each song streams from the device it's on, and everyone hears the same
+  moment. Anyone can pause, skip, seek or pick a song; songs can be saved.
+- Songs in contacts' Shared folders play in the music player (while they come), with next / previous through the
+  folder and *Save*.
+- Remix: the part of every song now comes from a random place - still past the intro and ending well before the
+  outro and the quiet at the end.
+- Music: the folders window fits the phone screen (the *Add a folder* button first, the list scrolls); a new
+  shuffle icon (crossing arrows); bigger buttons under the phone's player.
+
 ## 1.5.1
 
 - Music player, stage 2 (*Sound...*, see docs/MUSIC.md):

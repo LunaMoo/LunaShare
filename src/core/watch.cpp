@@ -41,6 +41,7 @@ struct WatchCache {
     bool buffering = true;
     bool save = false, saved = false;   // keeping a copy: everything is asked for, then copied to Downloads
     bool bg = false;                    // the movie ended: only the copy is still coming
+    bool all = false;                   // fetch the whole file (a song of listening together: small, and soon needed)
     int64_t lastConnect = 0;
     std::string saveName, saveDir, key;
     ~WatchCache() {
@@ -56,6 +57,57 @@ struct WatchCache {
         return std::max<int64_t>(0, n - (from - (from / kWatchBlock) * kWatchBlock));
     }
 };
+
+// ---------------------------------------------------------------- the same cache for listening together (listen.cpp)
+
+std::shared_ptr<WatchCache> NewListenCache(uint64_t iid, int64_t size, const std::string& dir) {
+    auto c = std::make_shared<WatchCache>();
+    c->sid = iid;
+    c->size = size;
+    c->all = true;
+    c->have.assign((size_t)c->Blocks(), 0);
+    MakeDirs(dir);
+    c->path = JoinPath(dir, "l" + ToHex((const uint8_t*)&iid, 8) + ".part");
+    RemoveFile(c->path);
+    c->f = OpenFile(c->path, "w+b");
+    if (!c->f) return nullptr;
+    return c;
+}
+
+void ListenCacheSet(const std::shared_ptr<WatchCache>& c, const std::string& owner, const std::shared_ptr<Connection>& conn,
+                    const std::string& name, const std::string& key) {
+    std::lock_guard<std::mutex> l(c->m);
+    c->hostId = owner;
+    c->host = conn;
+    if (!name.empty()) c->saveName = name;
+    if (!key.empty()) c->key = key;
+}
+
+bool ListenCacheInfo(const std::shared_ptr<WatchCache>& c, uint64_t& iid, bool& saving, bool& done, int64_t& readPos,
+                     int64_t& lastConnect, double& loaded) {
+    std::lock_guard<std::mutex> l(c->m);
+    iid = c->sid;
+    saving = c->save;
+    done = c->haveCount == c->Blocks();
+    readPos = c->readPos;
+    lastConnect = c->lastConnect;
+    loaded = c->Blocks() ? (double)c->haveCount / (double)c->Blocks() : 1.0;
+    return true;
+}
+
+void ListenCacheConnectAt(const std::shared_ptr<WatchCache>& c, int64_t at) {
+    std::lock_guard<std::mutex> l(c->m);
+    c->lastConnect = at;
+}
+
+void ListenCacheDrop(const std::shared_ptr<WatchCache>& c) {
+    std::lock_guard<std::mutex> l(c->m);
+    c->cancelled = true;  // (the player's reads return)
+    c->cv.notify_all();
+    if (c->f) fclose(c->f);
+    c->f = nullptr;
+    RemoveFile(c->path);
+}
 
 // ---------------------------------------------------------------- starting, joining, leaving
 
@@ -212,10 +264,24 @@ void Engine::WatchServeClose(uint64_t sid) {
     watchServe_.files.erase(it);
 }
 
+bool Engine::ListenCacheSaveNow(const std::shared_ptr<WatchCache>& c, const std::string& dir) {
+    std::lock_guard<std::mutex> l(c->m);
+    if (c->save) return c->saved;
+    c->save = true;
+    c->saveDir = dir;
+    if (c->haveCount == c->Blocks() && !c->saved) {
+        c->saved = true;
+        SaveWatchCopy(c);
+    }
+    return c->saved;
+}
+
 std::shared_ptr<WatchCache> Engine::WatchCacheFor(uint64_t sid) {
     std::lock_guard<std::mutex> l(watchCacheMtx_);
     if (watchCache_ && watchCache_->sid == sid) return watchCache_;
     for (auto& c : watchSaves_)
+        if (c->sid == sid) return c;
+    for (auto& c : listenCaches_)
         if (c->sid == sid) return c;
     return nullptr;
 }
@@ -664,7 +730,11 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
                           std::find(watchViewers_.begin(), watchViewers_.end(), dev) != watchViewers_.end();
             auto sv = watchServed_.find(sid);
             bool saver = sv != watchServed_.end() && sv->second.allowSave && sv->second.savers.count(dev);
-            if (!viewer && !saver) {
+            // (a song of mine while listening together, for anyone listening)
+            bool listener = listen.sid && listenOwn_.count(sid) &&
+                            std::find(listen.devs.begin(), listen.devs.end(), dev) != listen.devs.end();
+            if (!viewer && !saver && !listener) {
+                if (listenOwn_.count(sid)) return;
                 if (!(sid == watch.sid && watch.host.empty())) Queue(c, Msg::WatchLeave, {{"sid", sid}, {"end", true}, {"nosave", true}});
                 return;
             }
@@ -778,7 +848,7 @@ void Engine::WatchRequestOn(const std::shared_ptr<WatchCache>& wc, int64_t from)
                 wc->inflight[b] = now;
                 ask.push_back(b);
             }
-        if (wc->save)  // keeping a copy: after what the player needs, everything else (from where it reads, then the start)
+        if (wc->save || wc->all)  // keeping a copy: after what the player needs, everything else (from where it reads, then the start)
             for (int64_t k = 0, n = wc->Blocks(); k < n && wc->inflight.size() < kWatchInflight; k++) {
                 int64_t b = (end + k) % n;
                 if (!wc->have[(size_t)b] && !wc->inflight.count(b)) {
@@ -795,6 +865,10 @@ void Engine::WatchRequestOn(const std::shared_ptr<WatchCache>& wc, int64_t from)
 
 int Engine::WatchRead(int64_t off, uint8_t* buf, int len, int waitMs) {
     std::shared_ptr<WatchCache> wc = WatchCacheNow();  // (the player's thread: never the engine lock)
+    return WatchReadOn(wc, off, buf, len, waitMs);
+}
+
+int Engine::WatchReadOn(const std::shared_ptr<WatchCache>& wc, int64_t off, uint8_t* buf, int len, int waitMs) {
     if (!wc || len <= 0) return -1;
     int64_t t0 = SteadyMs();
     for (;;) {
@@ -909,6 +983,59 @@ void Engine::SaveWatchCopy(const std::shared_ptr<WatchCache>& wc) {  // (wc->m i
 }
 
 // ---------------------------------------------------------------- library streams (the player reads pieces)
+
+// the music player: a song from a contact's Shared folder, played while its pieces come (kept only when saved)
+std::string Engine::LibStreamStart(const LibFile& f, std::string& localPath) {
+    auto lk = Lock();
+    localPath.clear();
+    if (f.id.size() != 64 || f.size <= 0) return "";
+    auto li = libIndex_.find(f.id);
+    if (li != libIndex_.end()) {
+        localPath = JoinPath(settings.sharedDir.empty() ? JoinPath(settings.downloadDir, "Shared") : settings.sharedDir, li->second.f.rel);
+        return "";
+    }
+    bool existed = swarm.count(f.id) > 0;
+    if (!DownloadShared(f)) return "";
+    auto d = swarm[f.id];
+    if (!existed) d->keep = false;
+    d->streamStop = false;
+    d->streamPos = 0;
+    return f.id;
+}
+
+void Engine::LibStreamEnd(const std::string& id) {
+    auto lk = Lock();
+    if (watch.sid && watch.libId == id) return;  // (the movie player has it too)
+    auto it = swarm.find(id);
+    if (it == swarm.end()) return;
+    auto d = it->second;
+    d->streamPos = -1;
+    if (!d->keep) {
+        d->streamStop = true;
+        d->scv.notify_all();
+        d->state = SwarmDownload::Running;  // (so CancelShared deletes the part file even if it was complete)
+        CancelShared(id);
+    }
+}
+
+void Engine::LibStreamSave(const std::string& id) {
+    auto lk = Lock();
+    auto it = swarm.find(id);
+    if (it == swarm.end() || it->second->keep) return;
+    it->second->keep = true;
+    MarkDirty();
+    if (it->second->state == SwarmDownload::Done && FileExists(it->second->partPath)) FinishSwarm(it->second);
+}
+
+bool Engine::LibStreamSaved(const std::string& id) {
+    auto it = swarm.find(id);
+    return it == swarm.end() || it->second->keep;
+}
+
+double Engine::LibStreamLoaded(const std::string& id) {
+    auto it = swarm.find(id);
+    return it == swarm.end() || !it->second->size ? 1.0 : (double)it->second->done / (double)it->second->size;
+}
 
 std::function<int(int64_t, uint8_t*, int)> Engine::LibStreamReader(const std::string& id) {
     std::shared_ptr<SwarmDownload> d;

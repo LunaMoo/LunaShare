@@ -37,12 +37,35 @@
   set it back to 0. Loud peaks are rounded off instead of clipping.
 - **Smooth transition** (0-12 s): the next song starts while this one fades out (an equal-power crossfade, so the
   loudness stays even). It follows repeat and shuffle; with repeat off the last song simply ends.
-- **Remix:** only a part of every song plays - past the intro and well before the outro (from about 30 % in, the
-  chosen length: 30, 45, 60 or 90 s) - blending into the part of the next song over the *blend* time (1-12 s). Short
-  songs play their middle 60 %. With repeat off the remix stops at the end of the last part. The switch is also right
-  on the phone's player.
+- **Remix:** only a part of every song plays - the chosen length (30, 45, 60 or 90 s) from a random place, but always
+  past the intro (at least 8 s / 8 % in) and with the whole part ending before the outro and the quiet at the end (at
+  least 12 s / 10 % before the end) - blending into a part of the next song over the *blend* time (1-12 s). Songs too
+  short for that play from about a fifth in. With repeat off the remix stops at the end of the last part. The switch
+  is also right on the phone's player.
 
 All of it is kept with the player's state in `music_state.json`.
+
+## Listening together
+
+*Listen together...* (next to *Sound...*; on a phone under the player, or next to *Music folders...*) picks a person or
+a group; they get an invitation in the chat and on their music screen, and *Join*.
+
+- Everyone adds songs **from their own music**: while listening together, tapping a song adds it to the **shared
+  queue** (an album's or a playlist's *Add all* / *Shuffle* add the whole lot). Each song streams straight from the
+  device it's on - nothing is sent first - in the same way as watching a movie together; the song that's on and the
+  next one are fetched whole ahead of time, so the change from one to the next is smooth.
+- The one who started it keeps the queue and the clock; everyone's player follows it (a jump when someone is more than
+  a moment off). Anyone can play / pause, skip, go back, seek or tap a song in the queue to play it; you can remove
+  your own songs, the host any.
+- *Save* keeps a copy of the song that's on (someone else's) in your received files - so it lands in your library.
+- *Leave* - your songs that haven't played leave with you. *End for everyone* (the host) ends it.
+- The equalizer works as always; smooth transitions and remix are for your own queue.
+
+## Contacts' Shared folders
+
+In *Library*, a song in a contact's Shared folder has *Play*: it opens in the music player and plays while it comes
+(like a movie in the movie player). Next / previous go through the songs of that folder; *Save* keeps it (it goes to
+your Shared folder, so it's in your library from then on).
 
 ## In the background
 

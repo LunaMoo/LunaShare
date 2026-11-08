@@ -65,6 +65,21 @@ struct Now {
     int index = -1, count = 0;
     int repeat = RepeatOff;
     bool shuffle = false;
+    bool external = false;  // a song from elsewhere (listening together / a contact's Shared folder)
+    bool follow = false;    // listening together: the host's clock decides
+    bool loading = false;   // waiting for it to arrive
+    uint64_t extId = 0;
+};
+
+// a song that isn't in the queue: listening together, or one from a contact's Shared folder
+struct Source {
+    uint64_t id = 0;             // another id = another song
+    std::string path;            // on this device, or:
+    std::function<int(int64_t, uint8_t*, int)> read;  // its bytes as they come (-2: not here yet, ask again)
+    int64_t size = 0;
+    Track track;
+    bool follow = false;         // listening together: Follow() sets the position and play / pause
+    int index = -1, count = 0;   // (shown as "3 / 10")
 };
 
 class Library {
@@ -145,17 +160,40 @@ public:
     // called on any change (track, play / pause, ...) from any thread: the UI wakes, the notification updates
     std::function<void()> onChange;
 
+    // a song from elsewhere instead of the queue (the queue stays for afterwards). The UI thread never waits: the
+    // player's thread opens it
+    void PlayExternal(const Source& s, double pos = 0, bool playing = true);
+    void Follow(double pos, bool playing);   // listening together: where the host's clock is
+    void EndExternal();                      // back to own music (paused)
+    bool ExternalEnded(uint64_t id);         // that song played to its end
+    // while a song from elsewhere is on, the controls go here (1 toggle, 2 next, 3 prev, 6 stop, 7 seek s); true = handled
+    std::function<bool(int cmd, double arg)> externalCtl;
+
     // remembered between runs (paused)
     void LoadState(const std::string& path);
     void SaveState();
 
 private:
     void Loop();
+    void LoopExternal();           // (m_ held)
+    bool ExtCtl(int cmd, double arg);
+    bool EnsureDevice();           // (m_ held)
+    struct ExtStream;              // the stream the decoder reads (alive until its player is closed)
+    bool ext_ = false;             // a song from elsewhere is on (m_)
+    Source ex_;                    // which (m_)
+    uint64_t exOpen_ = 0;          // the one open in p_
+    bool exOpening_ = false, exEnded_ = false;
+    double exPos_ = 0;             // Follow(): the clock
+    bool exPlay_ = false;
+    int64_t exAt_ = 0, exLastSeek_ = 0;
+    std::shared_ptr<ExtStream> exStream_, exPending_;
     bool OpenAt(int index, double pos);  // (m_ held)
     void CloseLocked();
     // transitions (m_ held): the next song starts while this one fades out
     int NextIndex();
+    double PickFrag(double dur) const;  // remix: a random start for a song's part
     double FragStart(double dur) const;
+    double fragA_ = 0, fragB_ = 0;      // remix: where the playing / the incoming song's part starts
     double FragEnd(double dur) const;
     void StartFade(int next, double seconds);
     void FinishFade();
