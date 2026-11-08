@@ -235,7 +235,7 @@ void Engine::ListenEnded(uint64_t iid) {
     ListenGo(listen.at + 1, 1.0);
 }
 
-void Engine::ListenAdd(std::vector<ListenItem> items) {
+void Engine::ListenAdd(std::vector<ListenItem> items, double startAt) {
     auto lk = Lock();
     if (!listen.sid) return;
     json out = json::array();
@@ -259,12 +259,17 @@ void Engine::ListenAdd(std::vector<ListenItem> items) {
     }
     if (added.empty()) return;
     if (!listen.host.empty()) {
-        QueueToPeer(listen.host, Msg::ListenAdd, {{"sid", listen.sid}, {"items", out}});
+        QueueToPeer(listen.host, Msg::ListenAdd, {{"sid", listen.sid}, {"items", out}, {"start", startAt}});
         return;
     }
     bool ended = listen.at >= (int)listen.items.size();
     for (auto& i : added) listen.items.push_back(i);
-    if (ended) ListenGo(listen.at, 1.5);  // (the queue had played out - or was empty: this one starts)
+    if (ended && startAt >= 0) {  // (it goes on from where it was; the others catch up as it comes)
+        listen.playing = true;
+        ListenSetPos(startAt);
+        listen.ver++;
+        ListenBroadcast();
+    } else if (ended) ListenGo(listen.at, 1.5);  // (the queue had played out - or was empty: this one starts)
     else {
         listen.ver++;
         ListenBroadcast();
@@ -536,7 +541,13 @@ void Engine::HandleListen(const std::shared_ptr<Connection>& c, Msg type, const 
                 n++;
             }
             if (!n) return;
-            if (ended) ListenGo(listen.at, 1.5);
+            double start = j.value("start", -1.0);
+            if (ended && start >= 0) {
+                listen.playing = true;
+                ListenSetPos(start);
+                listen.ver++;
+                ListenBroadcast();
+            } else if (ended) ListenGo(listen.at, 1.5);
             else {
                 listen.ver++;
                 ListenBroadcast();

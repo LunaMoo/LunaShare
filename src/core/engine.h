@@ -393,7 +393,9 @@ public:
     uint64_t StartListen(const std::string& key);
     bool JoinListen(uint64_t sid);
     void LeaveListen();               // (the host: ends it for everyone)
-    void ListenAdd(std::vector<ListenItem> items);  // songs of mine (path, tags) to the end of the shared queue
+    // songs of mine (path, tags) to the end of the shared queue. startAt >= 0: if nothing is playing, the first one
+    // starts right away from there (the song I was listening to goes on for everyone)
+    void ListenAdd(std::vector<ListenItem> items, double startAt = -1);
     void ListenControl(const std::string& op, double pos = 0, uint64_t iid = 0);  // play pause seek next prev jump remove
     void ListenEnded(uint64_t iid);   // the host's player reached the end of this song
     double ListenPos();               // where the song that's on is now (seconds)

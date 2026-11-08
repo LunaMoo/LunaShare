@@ -59,6 +59,7 @@ void App::MusicExternalTick() {
     // listening together: the song that's on, at the host's clock
     if (eng.listen.sid) {
         if (!musicLibList.empty()) MusicLibEnd();
+        if (!listenFollowing && n.active && !n.external && n.playing) music::Play().SetPlaying(false);  // (joined: mine rests)
         listenFollowing = true;
         const ListenItem* cur = eng.ListenCurrent();
         if (cur) {
@@ -170,7 +171,8 @@ void App::MusicLibEnd() {
 
 // ---------------------------------------------------------------- listening together: the UI
 
-void App::MusicListenAdd(const std::vector<std::string>& paths) {
+void App::MusicListenAdd(const std::vector<std::string>& paths, double startAt, bool quiet) {
+    if (paths.empty()) return;
     std::vector<ListenItem> items;
     for (auto& p : paths) {
         ListenItem i;
@@ -186,8 +188,8 @@ void App::MusicListenAdd(const std::vector<std::string>& paths) {
         }
         items.push_back(i);
     }
-    eng.ListenAdd(items);
-    toasts.push_back({EventType::Info, T("Listening together"),
+    eng.ListenAdd(items, startAt);
+    if (!quiet) toasts.push_back({EventType::Info, T("Listening together"),
                       paths.size() == 1 ? TF("Added \"%s\".", items[0].title.c_str()) : TF("Added %d songs.", (int)paths.size()), "", 0, 2.0f});
 }
 
@@ -202,8 +204,36 @@ void App::MusicListenPopup() {
     ImVec2 vs = ImGui::GetMainViewport()->Size;
     ImGui::SetNextWindowSizeConstraints(ImVec2(mobile ? vs.x * 0.8f : ImGui::GetFontSize() * 16, 0), ImVec2(vs.x * 0.95f, vs.y * 0.7f));
     if (!ImGui::BeginPopup("##listenwho")) return;
-    ImGui::TextUnformatted(T("Listen together with..."));
-    ImGui::Separator();
+    // what to start with
+    music::Now now = music::Play().GetNow();
+    bool haveNow = now.active && !now.external;
+    auto pls = music::Lib().Playlists();
+    if (!haveNow && musicListenStart == 0) musicListenStart = pls.empty() ? 2 : 1;
+    if (pls.empty() && musicListenStart == 1) musicListenStart = haveNow ? 0 : 2;
+    ImGui::TextUnformatted(T("Start with:"));
+    if (haveNow && ImGui::RadioButton(TF("what's playing now: %s", now.track.title.c_str()).c_str(), musicListenStart == 0)) musicListenStart = 0;
+    if (!pls.empty()) {
+        if (ImGui::RadioButton(T("a playlist:"), musicListenStart == 1)) musicListenStart = 1;
+        ImGui::SameLine();
+        std::string cur;
+        for (auto& p : pls)
+            if (p.id == musicListenPl) cur = p.name;
+        if (cur.empty()) {
+            musicListenPl = pls[0].id;
+            cur = pls[0].name;
+        }
+        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 10);
+        if (ImGui::BeginCombo("##lpl", cur.c_str())) {
+            for (auto& p : pls)
+                if (ImGui::Selectable((p.name + "##" + p.id).c_str(), p.id == musicListenPl, 0, ImVec2(0, h))) {
+                    musicListenPl = p.id;
+                    musicListenStart = 1;
+                }
+            ImGui::EndCombo();
+        }
+    }
+    if (ImGui::RadioButton(T("nothing yet - songs are added afterwards"), musicListenStart == 2)) musicListenStart = 2;
+    ImGui::SeparatorText(T("Listen together with..."));
     int shown = 0;
     for (auto& k : SortedPeers()) {
         const KnownDevice* d = eng.DeviceFor(k);
@@ -214,6 +244,16 @@ void App::MusicListenPopup() {
         if (ImGui::Selectable((name + "##" + k).c_str(), false, 0, ImVec2(0, h))) {
             if (!musicLibList.empty()) MusicLibEnd();
             eng.StartListen(k);
+            if (musicListenStart == 0 && haveNow) {  // the song that's on goes on (for everyone), then the rest of my queue
+                auto q = music::Play().Queue();
+                std::vector<std::string> paths;
+                for (int i = std::max(0, now.index); i < (int)q.size(); i++) paths.push_back(q[(size_t)i]);
+                if (paths.empty()) paths.push_back(now.path);
+                MusicListenAdd(paths, now.pos, true);
+            } else if (musicListenStart == 1) {
+                for (auto& p : pls)
+                    if (p.id == musicListenPl) MusicListenAdd(p.paths, -1, true);
+            }
         }
     }
     if (!shown) ImGui::TextDisabled("%s", T("No contacts yet."));
@@ -241,8 +281,15 @@ void App::DrawListenStrip() {
             ImGui::TextUnformatted(TF("Listening together with %s", Emoji().Display(who).c_str()).c_str());
         ImGui::TextDisabled("%s", T("Tap songs to add them to the shared queue; each one plays from the device it's on."));
         ImGui::PopTextWrapPos();
-        if (mobile && !musicNowShown && ImGui::Button(T("Shared queue"), ImVec2(ImGui::GetContentRegionAvail().x * 0.5f, h))) musicNowShown = true;
-        if (mobile && !musicNowShown) ImGui::SameLine();
+        float third = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3 : 0;
+        if (mobile && !musicNowShown) {
+            if (ImGui::Button(T("Shared queue"), ImVec2(third, h))) musicNowShown = true;
+            ImGui::SameLine();
+        }
+        if (!music::Lib().Playlists().empty()) {
+            if (ImGui::Button(T("Add a playlist..."), ImVec2(third, h))) musicListenPlOpen = true;
+            ImGui::SameLine();
+        }
         if (ImGui::Button(eng.listen.host.empty() ? T("End for everyone") : T("Leave"), ImVec2(mobile ? -1 : 0, h))) eng.LeaveListen();
     } else {
         uint64_t sid = inv->sid;
@@ -264,6 +311,21 @@ void App::DrawListenStrip() {
     }
     ImGui::EndChild();
     ImGui::PopStyleColor();
+}
+
+// listening together: a whole playlist of mine to the shared queue
+void App::MusicListenPlaylistPopup() {
+    if (musicListenPlOpen) {
+        ImGui::OpenPopup("##listenpl");
+        musicListenPlOpen = false;
+    }
+    float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
+    if (!ImGui::BeginPopup("##listenpl")) return;
+    ImGui::TextUnformatted(T("Add a playlist to the shared queue"));
+    ImGui::Separator();
+    for (auto& p : music::Lib().Playlists())
+        if (ImGui::Selectable((p.name + " (" + std::to_string(p.paths.size()) + ")##" + p.id).c_str(), false, 0, ImVec2(0, h))) MusicListenAdd(p.paths);
+    ImGui::EndPopup();
 }
 
 // the shared queue: who added what; tap to play it, remove your own (the host: any)

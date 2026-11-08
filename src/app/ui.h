@@ -100,7 +100,11 @@ private:
     void MusicPlayLib(const std::vector<ls::LibFile>& list, int at, const std::string& who);
     void MusicLibOpen();
     void MusicLibEnd();
-    void MusicListenAdd(const std::vector<std::string>& paths);
+    void MusicListenAdd(const std::vector<std::string>& paths, double startAt = -1, bool quiet = false);
+    void MusicListenPlaylistPopup();
+    int musicListenStart = 0;          // starting to listen together with: 0 what's on, 1 a playlist, 2 nothing yet
+    std::string musicListenPl;         // (that playlist)
+    bool musicListenPlOpen = false;
     void MusicListenPopup();
     void DrawListenStrip();
     void DrawListenQueue();

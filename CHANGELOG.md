@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.3
+
+- Listening together:
+  - starting it, you choose what to start with: the song that's playing now (it goes on from the same moment for
+    everyone, followed by the rest of your queue), one of your playlists, or nothing yet;
+  - *Add a playlist...* puts a whole playlist of yours into the shared queue (for everyone listening);
+  - joining pauses your own music, so you hear the shared queue only;
+  - no more empty "Info" notifications piling up while listening together.
+- Library: a *Music player* button next to the movie player.
+- The folder picker (e.g. *Add a music folder*) fits a phone's screen: *Use this folder* and *Cancel* are always
+  visible.
+- The separate *Remix* button under the player is gone; remix is switched in *Sound...*.
+
 ## 1.5.2
 
 - **Listening together** (music player, stage 3, see docs/MUSIC.md): invite a person or a group; everyone adds songs

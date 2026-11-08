@@ -151,6 +151,7 @@ void App::Frame() {
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
         if (getenv("LUNASHARE_OPENSOUND")) musicSoundOpen = true;
+        if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
         if (a == "music" || a == "musicnow") { tab = Tab::Music; screen = MScreen::Music; musicNowShown = a == "musicnow"; }
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
@@ -363,6 +364,7 @@ void App::PullEvents() {
                 wantAttention = true;
                 continue;
             case EventType::Info:
+                if (e.text.empty()) continue;  // (only wakes the window up: something changed)
                 t.title = T("Info");
                 t.text = e.text;
                 break;

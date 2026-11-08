@@ -589,6 +589,7 @@ void App::DrawMusic() {
     MusicPlaylistPopup();
     MusicSoundPopup();
     MusicListenPopup();
+    MusicListenPlaylistPopup();
     DrawListenStrip();
     if (mobile && musicNowShown) {  // phones: "now playing" fills the screen
         if (ui::IconTextButton(T("Library"), Icon::List, ImVec2(0, h))) musicNowShown = false;

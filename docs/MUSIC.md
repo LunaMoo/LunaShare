@@ -48,7 +48,10 @@ All of it is kept with the player's state in `music_state.json`.
 ## Listening together
 
 *Listen together...* (next to *Sound...*; on a phone under the player, or next to *Music folders...*) picks a person or
-a group; they get an invitation in the chat and on their music screen, and *Join*.
+a group; they get an invitation in the chat and on their music screen, and *Join*. You choose what it starts with:
+the song that's playing now (it goes on from the same moment, for everyone, followed by the rest of your queue), one
+of your playlists, or nothing yet. Joining pauses your own music. *Add a playlist...* (on the strip at the top) adds a
+whole playlist of yours at any time.
 
 - Everyone adds songs **from their own music**: while listening together, tapping a song adds it to the **shared
   queue** (an album's or a playlist's *Add all* / *Shuffle* add the whole lot). Each song streams straight from the
