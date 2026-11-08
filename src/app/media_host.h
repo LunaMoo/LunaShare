@@ -76,7 +76,8 @@ public:
         int64_t lastMs = 0;
     };
     // Draws a video picture into [p0,p1]: fit (letterbox) or cover (crop). Converts YUV on the GPU when it can.
-    void DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover, int extraRotation = 0);
+    // adjust (8 floats or null): brightness, contrast, saturation, gamma, temperature, tint (the movie player's picture settings)
+    void DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover, int extraRotation = 0, const float* adjust = nullptr);
     // turn the received picture by 90 degrees (dir -1 left, +1 right); also applies to the virtual camera
     void RotateRemote(int dir) { remoteRotAdj_ = ((remoteRotAdj_ + dir * 90) % 360 + 360) % 360; }
     int RemoteRotation() const { return remoteRotAdj_; }

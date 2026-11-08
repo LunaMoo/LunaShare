@@ -78,20 +78,54 @@ jint JNICALL NRead(JNIEnv* env, jclass, jlong stream, jlong pos, jbyteArray buf,
     return n;
 }
 
-void JNICALL NVideo(JNIEnv* env, jclass, jlong target, jobject y, jobject u, jobject v, jint ys, jint uvs, jint ps, jint w, jint h,
-                    jint rot, jlong pts) {
+void JNICALL NVideo(JNIEnv* env, jclass, jlong target, jobject y, jobject u, jobject v, jint ys, jint uvs, jint ps, jint yps, jint cx, jint cy,
+                    jint w, jint h, jint rot, jlong pts) {
     auto* sink = (Sink*)(intptr_t)target;
-    if (!sink || !sink->video) return;
+    if (!sink || !sink->video || w <= 0 || h <= 0) return;
+    const uint8_t* py = (const uint8_t*)env->GetDirectBufferAddress(y);
+    const uint8_t* pu = (const uint8_t*)env->GetDirectBufferAddress(u);
+    const uint8_t* pv = (const uint8_t*)env->GetDirectBufferAddress(v);
+    if (!py || !pu || !pv) return;
+    cx &= ~1;  // (the crop's corner, on a whole chroma sample)
+    cy &= ~1;
     LsvImage im{};
     im.width = w;
     im.height = h;
-    im.y = (const uint8_t*)env->GetDirectBufferAddress(y);
-    im.u = (const uint8_t*)env->GetDirectBufferAddress(u);
-    im.v = (const uint8_t*)env->GetDirectBufferAddress(v);
-    if (!im.y || !im.u || !im.v) return;
-    im.y_stride = ys;
-    im.uv_stride = uvs;
-    im.uv_pixel_stride = ps;
+    if (yps >= 2) {
+        // 10-bit (P010 and the like): 16 bits per sample, the value in the high bits - keep the high byte. Without
+        // this the picture comes out green (the low bytes read as colour).
+        int cw = (w + 1) / 2, ch = (h + 1) / 2;
+        thread_local std::vector<uint8_t> y8, u8, v8;
+        y8.resize((size_t)w * h);
+        u8.resize((size_t)cw * ch);
+        v8.resize((size_t)cw * ch);
+        for (int r = 0; r < h; r++) {
+            const uint8_t* s = py + (size_t)(r + cy) * ys + (size_t)cx * yps + 1;
+            uint8_t* d = &y8[(size_t)r * w];
+            for (int c = 0; c < w; c++) d[c] = s[(size_t)c * yps];
+        }
+        for (int r = 0; r < ch; r++) {
+            const uint8_t* su = pu + (size_t)(r + cy / 2) * uvs + (size_t)(cx / 2) * ps + 1;
+            const uint8_t* sv = pv + (size_t)(r + cy / 2) * uvs + (size_t)(cx / 2) * ps + 1;
+            for (int c = 0; c < cw; c++) {
+                u8[(size_t)r * cw + c] = su[(size_t)c * ps];
+                v8[(size_t)r * cw + c] = sv[(size_t)c * ps];
+            }
+        }
+        im.y = y8.data();
+        im.u = u8.data();
+        im.v = v8.data();
+        im.y_stride = w;
+        im.uv_stride = cw;
+        im.uv_pixel_stride = 1;
+    } else {
+        im.y = py + (size_t)cy * ys + cx;
+        im.u = pu + (size_t)(cy / 2) * uvs + (size_t)(cx / 2) * ps;
+        im.v = pv + (size_t)(cy / 2) * uvs + (size_t)(cx / 2) * ps;
+        im.y_stride = ys;
+        im.uv_stride = uvs;
+        im.uv_pixel_stride = ps;
+    }
     im.rotation = rot;
     sink->video(im, pts / 1e6);
 }
@@ -337,7 +371,7 @@ bool InitBackend(const LspHost* host, std::string* err) {
     g_cls = (jclass)e->NewGlobalRef((jobject)host->java_class);
     static const JNINativeMethod natives[] = {
         {(char*)"nativeAudio", (char*)"(JLjava/nio/ByteBuffer;IIIIZJ)V", (void*)NAudio},
-        {(char*)"nativeVideo", (char*)"(JLjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIIJ)V", (void*)NVideo},
+        {(char*)"nativeVideo", (char*)"(JLjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIIIIIJ)V", (void*)NVideo},
         {(char*)"nativeRead", (char*)"(JJ[BII)I", (void*)NRead},
         {(char*)"nativeSubtitle", (char*)"(JLjava/lang/String;J)V", (void*)NSubtitle},
     };

@@ -111,7 +111,10 @@ struct Settings {
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
     bool playerLoop = false;
-    bool watchAllowSave = true;  // watching together: people watching my movie may keep a copy  // videos / audio in chats: start again at the end
+    bool watchAllowSave = true;
+    // the movie player's picture: brightness -0.5..0.5, contrast / saturation / gamma 1 = unchanged, colour temperature and
+    // tint -1..1 (warmer / cooler, green / magenta)
+    float videoBrightness = 0, videoContrast = 1, videoSaturation = 1, videoGamma = 1, videoTemperature = 0, videoTint = 0;  // watching together: people watching my movie may keep a copy  // videos / audio in chats: start again at the end
     bool fullscreenBorderless = false;  // Windows: movies full screen as a borderless window (no game HDR)
     bool callFullPreview = false;  // self-view in the camera's full size and frame rate (calls, video messages)
     std::string callCamera;        // preferred camera id (empty: front camera)

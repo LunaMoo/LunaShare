@@ -31,6 +31,8 @@ public:
         LspInfo info{};
         unsigned tex = 0;  // thumbnail (RGBA), 0 if none
         int tw = 0, th = 0;
+        int tries = 0;       // probes that failed (phones: the decoders may just be busy - tried again a little later)
+        uint64_t failedAt = 0;
     };
     // probes in the background the first time; returns what is known so far
     const Meta& GetMeta(const std::string& path);
@@ -109,7 +111,8 @@ private:
     std::string openingId_;
     std::function<int(int64_t, uint8_t*, int)> streamRead_;
     std::atomic<bool> streamStop_{false};
-    bool loop_ = false;  // Stop(): reads waiting for the network give up
+    bool loop_ = false;
+    uint64_t endedAt_ = 0;  // when the current file reached its end (the audio device is let go a bit later)  // Stop(): reads waiting for the network give up
     LspStream stream_{};
     Sub sub_;
     int subSerial_ = -1;

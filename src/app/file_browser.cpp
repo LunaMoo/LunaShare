@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "image_cache.h"
+#include "player_host.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_stdlib.h"
@@ -178,12 +179,21 @@ void FileBrowser::DrawList(std::string& navigateTo, bool& confirmed) {
             ImVec2 p = ImGui::GetCursorScreenPos();
             ImGui::Dummy(ImVec2(ih, ih));
             bool isImg = !e.isDir && ImageCache::IsImagePath(e.name);
-            ui::DrawIcon(ImGui::GetWindowDrawList(), e.isDir ? ui::Icon::Folder : isImg ? ui::Icon::Image : ui::Icon::File,
+            bool isVid = !e.isDir && !isImg && Player().Available() && PlayerHost::IsVideoPath(e.name);
+            ui::DrawIcon(ImGui::GetWindowDrawList(), e.isDir ? ui::Icon::Folder : isImg ? ui::Icon::Image : isVid ? ui::Icon::Video : ui::Icon::File,
                          ImVec2(p.x + ih * 0.5f, p.y + ih * 0.5f), ih * 0.8f, e.isDir ? ui::ColWarn() : ImGui::GetColorU32(ImGuiCol_Text));
             ImGui::SameLine();
             if (ImGui::Selectable(e.name.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0, rowH))) {
                 if (!longPressHandled_) Click(i, confirmed, navigateTo, ImGui::IsMouseDoubleClicked(0));
                 longPressHandled_ = false;
+            }
+            if (isVid && !mobile && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                const auto& m = Player().GetMeta(full);
+                if (m.tex && ImGui::BeginTooltip()) {
+                    float s = ImGui::GetFontSize() * 10 / (float)std::max(m.tw, m.th);
+                    ImGui::Image(ImTextureRef((ImTextureID)(intptr_t)m.tex), ImVec2((float)m.tw * s, (float)m.th * s));
+                    ImGui::EndTooltip();
+                }
             }
             if (isImg && !mobile && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
                 const ImageTex& t = Images().Get(full, ImageCache::Size::Tile);
@@ -294,6 +304,32 @@ void FileBrowser::DrawGrid(std::string& navigateTo, bool& confirmed) {
                     } else {
                         ui::DrawIcon(dl, ui::Icon::Image, ImVec2(p0.x + cell * 0.5f, p0.y + cell * 0.5f), cell * 0.3f,
                                      t.state == ImageTex::Failed ? ui::ColErr() : ui::ColMuted());
+                    }
+                } else if (!e.isDir && Player().Available() && PlayerHost::IsVideoPath(e.name)) {
+                    // videos: a picture from the start of the movie (probed in the background), its length, a play mark
+                    const auto& m = Player().GetMeta(full);
+                    if (m.tex && m.tw > 0 && m.th > 0) {
+                        ImVec2 uv0(0, 0), uv1(1, 1);
+                        if (m.tw > m.th) { float f = (float)m.th / (float)m.tw; uv0.x = (1 - f) * 0.5f; uv1.x = 1 - uv0.x; }
+                        else { float f = (float)m.tw / (float)m.th; uv0.y = (1 - f) * 0.5f; uv1.y = 1 - uv0.y; }
+                        dl->AddImageRounded((ImTextureID)(intptr_t)m.tex, t0, t1, uv0, uv1, IM_COL32_WHITE, rounding);
+                    } else {
+                        ui::DrawIcon(dl, ui::Icon::Video, ImVec2(p0.x + cell * 0.5f, p0.y + cell * 0.5f), cell * 0.3f,
+                                     m.done && !m.ok ? ui::ColErr() : ui::ColMuted());
+                    }
+                    ImVec2 pc(p0.x + cell * 0.5f, p0.y + cell * 0.5f);
+                    float pr = cell * 0.13f;
+                    dl->AddCircleFilled(pc, pr, IM_COL32(0, 0, 0, 120));
+                    ui::DrawIcon(dl, ui::Icon::Play, ImVec2(pc.x + pr * 0.08f, pc.y), pr * 0.9f, IM_COL32(255, 255, 255, 230));
+                    if (m.done && m.ok && m.info.duration > 0) {
+                        int s = (int)m.info.duration;
+                        char d[32];
+                        if (s >= 3600) snprintf(d, sizeof(d), "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60);
+                        else snprintf(d, sizeof(d), "%d:%02d", s / 60, s % 60);
+                        ImVec2 ds = ImGui::CalcTextSize(d);
+                        ImVec2 dp(t1.x - ds.x - 6, t1.y - ds.y - 4);
+                        dl->AddRectFilled(ImVec2(dp.x - 3, dp.y - 1), ImVec2(dp.x + ds.x + 3, dp.y + ds.y + 1), IM_COL32(0, 0, 0, 150), 3);
+                        dl->AddText(dp, IM_COL32(255, 255, 255, 240), d);
                     }
                 } else {
                     ui::DrawIcon(dl, e.isDir ? ui::Icon::Folder : ui::Icon::File, ImVec2(p0.x + cell * 0.5f, p0.y + cell * 0.45f), cell * 0.38f,

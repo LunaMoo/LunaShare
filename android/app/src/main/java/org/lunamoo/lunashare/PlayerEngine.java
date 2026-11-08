@@ -19,7 +19,7 @@ import java.nio.ByteBuffer;
 public final class PlayerEngine {
     static native void nativeAudio(long target, ByteBuffer pcm, int offset, int size, int rate, int channels, boolean isFloat, long ptsUs);
     static native void nativeVideo(long target, ByteBuffer y, ByteBuffer u, ByteBuffer v, int yStride, int uvStride, int uvPixelStride,
-                                   int w, int h, int rotation, long ptsUs);
+                                   int yPixelStride, int cropX, int cropY, int w, int h, int rotation, long ptsUs);
 
     private MediaExtractor ex;
     private MediaCodec vdec, adec;
@@ -250,11 +250,14 @@ public final class PlayerEngine {
                 if (img != null) {
                     Image.Plane[] p = img.getPlanes();
                     Rect crop = img.getCropRect();
-                    int w = crop != null && crop.width() > 0 ? crop.width() : img.getWidth();
-                    int h = crop != null && crop.height() > 0 ? crop.height() : img.getHeight();
+                    boolean useCrop = crop != null && crop.width() > 0 && crop.height() > 0;
+                    int w = useCrop ? crop.width() : img.getWidth();
+                    int h = useCrop ? crop.height() : img.getHeight();
+                    // 10-bit video (HDR phone recordings) comes as 16 bits per sample (P010): Y's pixel stride is 2
                     if (p.length >= 3)
                         nativeVideo(target, p[0].getBuffer(), p[1].getBuffer(), p[2].getBuffer(), p[0].getRowStride(), p[1].getRowStride(),
-                                p[1].getPixelStride(), w, h, rotation, bi.presentationTimeUs);
+                                p[1].getPixelStride(), p[0].getPixelStride(), useCrop ? crop.left : 0, useCrop ? crop.top : 0, w, h, rotation,
+                                bi.presentationTimeUs);
                     img.close();
                 }
             }

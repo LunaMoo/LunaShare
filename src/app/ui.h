@@ -89,6 +89,7 @@ private:
     void WatchAddPopup();                   // host: add a person / group to the movie
     void ToggleLoop();                      // chats: videos and audio start again at the end
     bool watchShown = false, watchFailed = false;
+    bool watchFromViewer = false;  // the movie was opened from the picture viewer: leaving it reopens the viewer
     std::string watchOpened;
     int64_t watchLastSeek = 0;
     float watchDrag = -1;

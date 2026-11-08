@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.0
+
+- **One movie screen everywhere:** videos opened from a chat now play on the same full-screen movie player as the
+  movie player and watching together - sound tracks, subtitles, loop, full screen, adding people. Leaving it brings
+  you back to the pictures.
+- **Picture settings:** brightness, contrast, gamma, saturation, colour temperature and tint in the movie's ☰ menu
+  (remembered; double-click or right-click a slider to reset it).
+- **Video thumbnails in the file picker:** the gallery shows a picture from each video with its length.
+- Android: 10-bit videos (HDR recordings of newer phones) no longer play green; the decoder's crop is respected.
+- Android: no pause when a looping movie starts again (the audio device stays open).
+- Thumbnails that failed (the phone's decoders busy) are tried again.
+
 ## 1.3.1
 
 - **Saving goes on after the movie:** a copy being saved keeps coming when you leave or the host stops the movie

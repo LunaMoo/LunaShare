@@ -368,17 +368,15 @@ void App::DrawViewer() {
     if (fabsf(viewer.swipeX) < 0.5f) viewer.swipeX = 0;
 
     bool isVideo = PlayerHost::IsVideoPath(path);
-    // the video on screen plays; anything else that was playing from here stops
-    if (isVideo && viewer.videoPath != path) {
-        Player().Play(path);
-        viewer.videoPath = path;
-    } else if (!isVideo && !viewer.videoPath.empty()) {
+    // videos play on the movie screen (the same one as the movie player: sound, subtitles, picture, loop, people)
+    if (!viewer.videoPath.empty()) {
         Player().Stop();
         viewer.videoPath.clear();
     }
+    bool playVideo = false;
 
-    // keyboard (space plays/pauses a video, otherwise next picture)
-    if (isVideo && ImGui::IsKeyPressed(ImGuiKey_Space)) Player().Toggle(path);
+    // keyboard (space plays a video, otherwise next picture)
+    if (isVideo && (ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsKeyPressed(ImGuiKey_Enter))) playVideo = true;
     else if (ImGui::IsKeyPressed(ImGuiKey_Space)) ViewerGo(1);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_PageDown)) ViewerGo(1);
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) ViewerGo(-1);
@@ -401,10 +399,28 @@ void App::DrawViewer() {
                 dl->AddImage(t.id, ImVec2(c.x + off.x - dw * 0.5f, c.y - dh * 0.5f), ImVec2(c.x + off.x + dw * 0.5f, c.y + dh * 0.5f));
             }
         }
-        if (Player().State() == LSP_ERROR || (Player().GetMeta(path).done && !Player().GetMeta(path).ok)) {
-            const char* msg = T("This video can't be played here");
-            ImVec2 ts = ImGui::CalcTextSize(msg);
-            dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32(220, 220, 220, 255), msg);
+        // a big play button in the middle
+        float r = std::min(areaSize.x, areaSize.y) * 0.09f;
+        r = std::max(r, ImGui::GetFontSize() * 1.8f);
+        ImVec2 pc(c.x + off.x, c.y);
+        ImGui::SetCursorScreenPos(ImVec2(pc.x - r, pc.y - r));
+        if (ImGui::InvisibleButton("##vplaybig", ImVec2(r * 2, r * 2))) playVideo = true;
+        bool hov = ImGui::IsItemHovered();
+        dl->AddCircleFilled(pc, r, IM_COL32(0, 0, 0, hov ? 170 : 130));
+        dl->AddCircle(pc, r, IM_COL32(255, 255, 255, 200), 0, 2.5f);
+        ui::DrawIcon(dl, Icon::Play, ImVec2(pc.x + r * 0.08f, pc.y), r * 0.9f, IM_COL32_WHITE);
+        const auto& meta = Player().GetMeta(path);
+        if (meta.done && meta.ok && meta.info.duration > 0) {
+            std::string d = Clock(meta.info.duration);
+            ImVec2 ts = ImGui::CalcTextSize(d.c_str());
+            dl->AddText(ImVec2(pc.x - ts.x * 0.5f, pc.y + r * 1.25f), IM_COL32(230, 230, 230, 255), d.c_str());
+        }
+        if (playVideo) {
+            if (eng.StartWatch("", path)) {
+                watchShown = true;
+                watchFromViewer = true;  // (leaving the movie comes back here)
+                close = true;
+            }
         }
     }
     // ---- image

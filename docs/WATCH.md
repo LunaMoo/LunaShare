@@ -10,9 +10,16 @@ the same time (mute and hang up are on the movie screen).
 ## Movie player
 
 *Library → Movie player...* (phones: *Movie player* on the main screen) plays a movie on its own, on the same screen.
+Videos opened from a chat play on it too (back returns to the pictures).
 The **+** button (*Add a person*) invites a person or a group at any moment; from then on it is watching together,
 as above - you can add more people later too. A movie from a contact's Shared folder can be played the same way
 (*Play* next to it in the Library, see [LIBRARY.md](LIBRARY.md)).
+
+## Picture
+
+The ☰ menu has the picture settings: brightness, contrast, gamma, saturation, colour temperature (cool - warm) and
+tint (green - magenta). They apply to every movie on this device and are remembered; double-click or right-click a
+slider to put it back, *Reset picture* for all. (Done on the graphics card, where the picture is turned from YUV to RGB.)
 
 ## Loop and saving
 

@@ -95,7 +95,10 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
         std::sort(watch.subFiles.begin(), watch.subFiles.end());
     }
     watchKeys.clear();
-    if (key.empty()) return watch.sid;  // the movie player: alone until someone is added
+    if (key.empty()) {  // the movie player: alone until someone is added
+        watch.loop = settings.playerLoop;
+        return watch.sid;
+    }
     watchKeys.push_back(key);
     json inv = KeyField(key, {{"sid", watch.sid}, {"name", watch.name}, {"size", size}});
     std::vector<std::string> to = DevicesOf(key);

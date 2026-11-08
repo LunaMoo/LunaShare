@@ -154,10 +154,18 @@ void PlayerHost::Worker() {
 const PlayerHost::Meta& PlayerHost::GetMeta(const std::string& path) {
     std::lock_guard<std::mutex> l(mm_);
     auto it = meta_.find(path);
-    if (it != meta_.end()) return it->second;
+    if (it != meta_.end()) {
+        Meta& m = it->second;
+        if (mod_ && m.done && !m.ok && m.tries < 3 && SDL_GetTicks64() - m.failedAt > 4000) {  // once more, a little later
+            m.done = false;
+            queue_.push_front(path);
+            mcv_.notify_one();
+        }
+        return m;
+    }
     Meta& m = meta_[path];
     if (mod_) {
-        queue_.push_back(path);
+        queue_.push_front(path);  // (the newest first: what's on screen now)
         mcv_.notify_one();
     } else {
         m.done = true;
@@ -178,6 +186,10 @@ void PlayerHost::Update() {
         Meta& m = meta_[pd.path];
         m.done = true;
         m.ok = pd.ok;
+        if (!pd.ok) {
+            m.tries++;
+            m.failedAt = SDL_GetTicks64();
+        }
         m.info = pd.info;
         if (!pd.rgba.empty()) {
             glf::GenTextures(1, &m.tex);
@@ -198,10 +210,13 @@ void PlayerHost::Update() {
         mod_->video_frame(p_, [](void*, const LsvImage* im) { Media().PushPlayerFrame(*im); }, nullptr);
     // finished: again from the start (loop), or release the audio device (keeps the last picture)
     bool ended = p_ && mod_->state(p_) == LSP_ENDED;
+    if (!ended) endedAt_ = 0;
+    else if (!endedAt_) endedAt_ = SDL_GetTicks64();
     if (ended && loop_ && cur_.rfind("watch:", 0) != 0 && cur_.rfind("lib:", 0) != 0 && cur_.rfind("movie:", 0) != 0) {
         mod_->seek(p_, 0);
         SetPlaying(true);
-    } else if (ended && dev_) {
+    } else if (ended && dev_ && SDL_GetTicks64() - endedAt_ > 3000) {
+        // (not right away: a movie that starts again - loop - would wait for the phone to reopen its audio device)
         CloseAudio();
     }
 }

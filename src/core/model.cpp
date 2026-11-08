@@ -60,7 +60,9 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"watchAllowSave", s.watchAllowSave}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"watchAllowSave", s.watchAllowSave},
+        {"videoBrightness", s.videoBrightness}, {"videoContrast", s.videoContrast}, {"videoSaturation", s.videoSaturation}, {"videoGamma", s.videoGamma},
+        {"videoTemperature", s.videoTemperature}, {"videoTint", s.videoTint}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
         {"accountVer", s.accountVer}, {"accountSig", s.accountSig},
     };
@@ -188,6 +190,12 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "fullscreenBorderless", s.fullscreenBorderless);
     Get(j, "playerLoop", s.playerLoop);
     Get(j, "watchAllowSave", s.watchAllowSave);
+    Get(j, "videoBrightness", s.videoBrightness);
+    Get(j, "videoContrast", s.videoContrast);
+    Get(j, "videoSaturation", s.videoSaturation);
+    Get(j, "videoGamma", s.videoGamma);
+    Get(j, "videoTemperature", s.videoTemperature);
+    Get(j, "videoTint", s.videoTint);
     Get(j, "callVideoAdaptive", s.callVideoAdaptive);
     Get(j, "callCamera", s.callCamera);
     Get(j, "virtualCamera", s.virtualCamera);

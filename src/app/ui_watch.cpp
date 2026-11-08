@@ -328,6 +328,36 @@ void App::WatchTracksPopup() {
         }
         ImGui::EndDisabled();
     }
+    {  // the picture: brightness, contrast, colour... (this device only, remembered)
+        ImGui::SeparatorText(T("Picture"));
+        Settings st = eng.GetSettings();
+        bool ch = false;
+        float sw = mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 14;
+        auto slider = [&](const char* id, const char* label, float* v, float lo, float hi, float def) {
+            ImGui::SetNextItemWidth(sw);
+            ch |= ImGui::SliderFloat(id, v, lo, hi, (std::string(label) + ": %.2f").c_str());
+            if (ImGui::IsItemClicked(1) || (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))) {
+                *v = def;
+                ch = true;
+            }
+        };
+        slider("##vbright", T("Brightness"), &st.videoBrightness, -0.5f, 0.5f, 0);
+        slider("##vcontrast", T("Contrast"), &st.videoContrast, 0.5f, 2.0f, 1);
+        slider("##vgamma", T("Gamma"), &st.videoGamma, 0.4f, 2.5f, 1);
+        slider("##vsat", T("Saturation"), &st.videoSaturation, 0.0f, 2.0f, 1);
+        slider("##vtemp", T("Colour temperature (cool - warm)"), &st.videoTemperature, -1.0f, 1.0f, 0);
+        slider("##vtint", T("Tint (green - magenta)"), &st.videoTint, -1.0f, 1.0f, 0);
+        bool def = st.videoBrightness == 0 && st.videoContrast == 1 && st.videoGamma == 1 && st.videoSaturation == 1 && st.videoTemperature == 0 &&
+                   st.videoTint == 0;
+        ImGui::BeginDisabled(def);
+        if (ImGui::Button(T("Reset picture"), ImVec2(mobile ? -1 : 0, h))) {
+            st.videoBrightness = st.videoTemperature = st.videoTint = 0;
+            st.videoContrast = st.videoGamma = st.videoSaturation = 1;
+            ch = true;
+        }
+        ImGui::EndDisabled();
+        if (ch) eng.ApplySettings(st);
+    }
     if (w.sid && w.host.empty() && w.libId.empty()) {  // my movie: may the others keep a copy?
         ImGui::Separator();
         bool b = w.allowSave;
@@ -463,7 +493,9 @@ void App::DrawWatch() {
         fit1 = ImVec2(fit0.x + pw, fit0.y + ph);
     }
     if (open && vt.valid && inf.has_video) {
-        Media().DrawVideo(dl, vt, a, b, false);
+        const Settings& st = eng.settings;
+        float adj[8] = {st.videoBrightness, st.videoContrast, st.videoSaturation, st.videoGamma, st.videoTemperature, st.videoTint, 0, 0};
+        Media().DrawVideo(dl, vt, a, b, false, 0, adj);
     } else {
         const char* msg = watchFailed ? T("This movie can't be played on this device.")
                         : !open ? T("Loading the movie...") : inf.has_video ? T("Loading...") : "";
@@ -515,8 +547,10 @@ void App::DrawWatch() {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(150, 50, 50, 255));
         bool leave = ImGui::Button(w.host.empty() ? T("Stop") : T("Leave"), ImVec2(leaveW, bh));
         ImGui::PopStyleColor();
-        if (back) watchShown = false;
-        if (leave) {
+        // a video opened from the picture viewer (nobody added): back = done with it, and the viewer comes back
+        bool fromViewer = watchFromViewer && eng.watchKeys.empty() && host;
+        if (back && !fromViewer) watchShown = false;
+        if (leave || (back && fromViewer)) {
             eng.LeaveWatch();
             watchShown = false;
         }
@@ -555,10 +589,13 @@ void App::DrawWatch() {
         ImGui::SameLine();
         bool lp = w.loop;
         if (lp) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 110, 200, 255));
-        if (ui::IconButton("wloop", Icon::Loop, lp ? T("Loop: on (for everyone)") : T("Loop: off"), bh)) eng.WatchSetLoop(!lp);
+        if (ui::IconButton("wloop", Icon::Loop, lp ? T("Loop: on (for everyone)") : T("Loop: off"), bh)) {
+            eng.WatchSetLoop(!lp);
+            if (host && eng.watchKeys.empty() && eng.settings.playerLoop == lp) ToggleLoop();  // (alone: remembered)
+        }
         if (lp) ImGui::PopStyleColor();
         ImGui::SameLine();
-        if (ui::IconButton("wtracks", Icon::Sliders, T("Sound and subtitles"), bh)) ImGui::OpenPopup("##watchtracks");
+        if (ui::IconButton("wtracks", Icon::Sliders, T("Sound, subtitles and picture"), bh)) ImGui::OpenPopup("##watchtracks");
         WatchTracksPopup();
         if (canSave) {
             ImGui::SameLine();
@@ -598,7 +635,15 @@ void App::DrawWatch() {
         watchFullscreen = false;
         Bridge().setFullscreen(false, false);
     } else if (ImGui::IsKeyPressed(ImGuiKey_AppBack) || (ImGui::IsKeyPressed(ImGuiKey_Escape) && !popupOpen)) {
+        if (watchFromViewer && eng.watchKeys.empty() && w.host.empty()) eng.LeaveWatch();
         watchShown = false;
+    }
+    if (!watchShown && watchFromViewer) {  // back to the pictures
+        watchFromViewer = false;
+        if (!viewer.paths.empty()) {
+            viewer.open = true;
+            viewer.requestOpen = true;
+        }
     }
     ImGui::End();
 }

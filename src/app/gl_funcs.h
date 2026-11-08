@@ -33,6 +33,7 @@ extern void (*UseProgram)(unsigned int);
 extern int (*GetUniformLocation)(unsigned int, const char*);
 extern int (*GetAttribLocation)(unsigned int, const char*);
 extern void (*Uniform1i)(int, int);
+extern void (*Uniform4f)(int, float, float, float, float);
 extern void (*UniformMatrix4fv)(int, int, unsigned char, const float*);
 extern void (*GetUniformfv)(unsigned int, int, float*);
 extern void (*ActiveTexture)(Enum);

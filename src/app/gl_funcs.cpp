@@ -31,6 +31,7 @@ void (*UseProgram)(unsigned int);
 int (*GetUniformLocation)(unsigned int, const char*);
 int (*GetAttribLocation)(unsigned int, const char*);
 void (*Uniform1i)(int, int);
+void (*Uniform4f)(int, float, float, float, float);
 void (*UniformMatrix4fv)(int, int, unsigned char, const float*);
 void (*GetUniformfv)(unsigned int, int, float*);
 void (*ActiveTexture)(Enum);
@@ -75,6 +76,7 @@ bool LoadShaders() {
     ok &= L(GetUniformLocation, "glGetUniformLocation");
     ok &= L(GetAttribLocation, "glGetAttribLocation");
     ok &= L(Uniform1i, "glUniform1i");
+    ok &= L(Uniform4f, "glUniform4f");
     ok &= L(UniformMatrix4fv, "glUniformMatrix4fv");
     ok &= L(GetUniformfv, "glGetUniformfv");
     ok &= L(ActiveTexture, "glActiveTexture");

@@ -370,7 +370,7 @@ void MediaHost::UploadVideo() {
 namespace {
 struct YuvGl {
     unsigned prog = 0;
-    int proj = -1, texY = -1, texUV = -1;
+    int proj = -1, texY = -1, texUV = -1, adj1 = -1, adj2 = -1;
     bool failed = false;
 };
 YuvGl g_yuv;
@@ -399,12 +399,19 @@ bool BuildYuv(unsigned backendProg) {
                      "uniform mat4 ProjMtx;\nin vec2 Position;\nin vec2 UV;\nin vec4 Color;\nout vec2 Frag_UV;\nout vec4 Frag_Color;\n"
                      "void main() { Frag_UV = UV; Frag_Color = Color; gl_Position = ProjMtx * vec4(Position.xy, 0, 1); }\n";
     std::string fs = g_glsl + "\n" + (es ? "precision mediump float;\n" : "") +
-                     "uniform sampler2D TexY;\nuniform sampler2D TexUV;\nin vec2 Frag_UV;\nin vec4 Frag_Color;\nout vec4 Out_Color;\n"
+                     "uniform sampler2D TexY;\nuniform sampler2D TexUV;\nuniform vec4 Adj1;\nuniform vec4 Adj2;\n"
+                     "in vec2 Frag_UV;\nin vec4 Frag_Color;\nout vec4 Out_Color;\n"
                      "void main() {\n"
                      "  float y = 1.16438 * (texture(TexY, Frag_UV).r - 0.0625);\n"
                      "  vec2 c = texture(TexUV, Frag_UV).rg - vec2(0.5);\n"
-                     "  vec3 rgb = vec3(y + 1.59603 * c.y, y - 0.39176 * c.x - 0.81297 * c.y, y + 2.01723 * c.x);\n"
-                     "  Out_Color = vec4(clamp(rgb, 0.0, 1.0), 1.0) * Frag_Color;\n"
+                     "  vec3 rgb = clamp(vec3(y + 1.59603 * c.y, y - 0.39176 * c.x - 0.81297 * c.y, y + 2.01723 * c.x), 0.0, 1.0);\n"
+                     // picture settings: Adj1 = brightness, contrast, saturation, gamma; Adj2 = temperature, tint
+                     "  rgb = (rgb - 0.5) * Adj1.y + 0.5 + Adj1.x;\n"
+                     "  float l = dot(rgb, vec3(0.2126, 0.7152, 0.0722));\n"
+                     "  rgb = mix(vec3(l), rgb, Adj1.z);\n"
+                     "  rgb *= vec3(1.0 + 0.15 * Adj2.x + 0.05 * Adj2.y, 1.0 - 0.1 * Adj2.y, 1.0 - 0.15 * Adj2.x + 0.05 * Adj2.y);\n"
+                     "  rgb = pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / max(Adj1.w, 0.1)));\n"
+                     "  Out_Color = vec4(rgb, 1.0) * Frag_Color;\n"
                      "}\n";
     unsigned v = Compile(glf::VERTEX_SHADER, vs), f = Compile(glf::FRAGMENT_SHADER, fs);
     if (!v || !f) return false;
@@ -428,11 +435,19 @@ bool BuildYuv(unsigned backendProg) {
     g_yuv.proj = glf::GetUniformLocation(p, "ProjMtx");
     g_yuv.texY = glf::GetUniformLocation(p, "TexY");
     g_yuv.texUV = glf::GetUniformLocation(p, "TexUV");
+    g_yuv.adj1 = glf::GetUniformLocation(p, "Adj1");
+    g_yuv.adj2 = glf::GetUniformLocation(p, "Adj2");
     return true;
 }
 
+struct YuvCall {
+    unsigned uvTex = 0;
+    float adj[8] = {0, 1, 1, 1, 0, 0, 0, 0};
+};
+
 void YuvBegin(const ImDrawList*, const ImDrawCmd* cmd) {
-    unsigned uvTex = *(const unsigned*)cmd->UserCallbackData;
+    const YuvCall& call = *(const YuvCall*)cmd->UserCallbackData;
+    unsigned uvTex = call.uvTex;
     int backend = 0;
     glf::GetIntegerv(glf::CURRENT_PROGRAM, &backend);
     if (!g_yuv.prog && !g_yuv.failed && !BuildYuv((unsigned)backend)) {
@@ -446,6 +461,8 @@ void YuvBegin(const ImDrawList*, const ImDrawCmd* cmd) {
     glf::UniformMatrix4fv(g_yuv.proj, 1, 0, m);
     glf::Uniform1i(g_yuv.texY, 0);
     glf::Uniform1i(g_yuv.texUV, 1);
+    if (g_yuv.adj1 >= 0) glf::Uniform4f(g_yuv.adj1, call.adj[0], call.adj[1], call.adj[2], call.adj[3]);
+    if (g_yuv.adj2 >= 0) glf::Uniform4f(g_yuv.adj2, call.adj[4], call.adj[5], call.adj[6], call.adj[7]);
     glf::ActiveTexture(glf::TEXTURE1);
     glf::BindTexture(glf::TEXTURE_2D, uvTex);
     glf::ActiveTexture(glf::TEXTURE0);
@@ -464,7 +481,7 @@ void MediaHost::SetGlsl(const char* glsl) {
     if (!gpuYuv_) SDL_Log("video: converting YUV on the CPU (%s)", glsl);
 }
 
-void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover, int extraRotation) {
+void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p1, bool cover, int extraRotation, const float* adjust) {
     float bw = p1.x - p0.x, bh = p1.y - p0.y;
     if (!t.valid || t.w <= 0 || t.h <= 0 || bw <= 0 || bh <= 0) return;
     int extra = ((extraRotation % 360) + 360) % 360;
@@ -493,8 +510,10 @@ void MediaHost::DrawVideo(ImDrawList* dl, const VideoTex& t, ImVec2 p0, ImVec2 p
     };
     ImTextureID id = (ImTextureID)(intptr_t)t.tex;
     if (t.gpu) {
-        unsigned uv = t.uvTex;
-        dl->AddCallback(YuvBegin, &uv, sizeof(uv));
+        YuvCall call;
+        call.uvTex = t.uvTex;
+        if (adjust) memcpy(call.adj, adjust, sizeof(call.adj));
+        dl->AddCallback(YuvBegin, &call, sizeof(call));
     }
     dl->AddImageQuad(id, a, ImVec2(b.x, a.y), b, ImVec2(a.x, b.y), tc(u0, v0), tc(u1, v0), tc(u1, v1), tc(u0, v1));
     if (t.gpu) dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
