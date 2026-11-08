@@ -89,8 +89,13 @@ private:
     void OpenMoviePlayer();                 // the movie player: a movie alone (people can be added later)
     // ---- music (ui_music.cpp)
     void DrawMusic();
+public:
+    void MusicTick();
+private:
     void DrawMusicNow(bool big);
     void DrawMusicMini();
+    void MusicSoundPopup();
+    bool musicSoundOpen = false, musicSoundDirty = false;
     void MusicRefresh();
     const music::Track* MusicTrack(const std::string& path);
     void MusicTrackList(const std::vector<const music::Track*>& list, const std::string& playlistId, bool showAlbum);

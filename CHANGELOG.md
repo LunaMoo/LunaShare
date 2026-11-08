@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.1
+
+- Music player, stage 2 (*Sound...*, see docs/MUSIC.md):
+  - a ten-band equalizer with presets and a preamp;
+  - smooth transitions between songs (0-12 s crossfade);
+  - **remix**: only a part of every song (30-90 s, skipping the beginnings and ends), blending into a part of the next.
+- Android: the music no longer stops a moment after the app goes to the background (the system's pause of the app
+  stopped all its sound while the time in the notification went on).
+
 ## 1.5.0
 
 - **Music player** (*Music* tab; *Music player* on a phone's main screen), see docs/MUSIC.md:

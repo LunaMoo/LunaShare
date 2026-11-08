@@ -254,6 +254,9 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait PortraitUpsideDown LandscapeLeft LandscapeRight");
     // Android: sound goes on in the background (music, calls); a movie or a chat video is paused on its own
+    // (with the default "block on pause", SDL pauses every audio device whatever the hint above says - and the app's
+    // loop doesn't need to stop in the background: it only waits, without drawing, while the window is minimized)
+    SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
     SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE_PAUSEAUDIO, "0");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
         printf("SDL_Init failed: %s\n", SDL_GetError());
@@ -491,7 +494,8 @@ int main(int argc, char** argv) {
             notify::SetBackground(false);
         }
         if (SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) {
-            SDL_Delay(50);
+            SDL_Delay(ls::IsMobilePlatform() ? 200 : 50);  // (phones in the background: nothing drawn, few wake-ups)
+            app.MusicTick();  // (a call coming in pauses the music also now)
             continue;
         }
 

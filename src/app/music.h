@@ -35,6 +35,26 @@ struct Playlist {
 
 enum Repeat { RepeatOff = 0, RepeatAll = 1, RepeatOne = 2 };
 
+// how it sounds: equalizer, smooth transitions, remix (only the middle part of each song, one flowing into the next)
+constexpr int kEqBands = 10;
+extern const float kEqFreq[kEqBands];  // 31 Hz .. 16 kHz
+struct Sound {
+    bool eqOn = false;
+    float eq[kEqBands] = {0};   // dB, -12..12
+    float preamp = 0;           // dB
+    std::string preset = "Flat";
+    int crossfade = 0;          // seconds of overlap between songs (0 = off)
+    bool remix = false;
+    int remixLen = 45;          // seconds of each song
+    int remixFade = 6;          // seconds one flows into the next
+};
+struct EqPreset {
+    const char* name;
+    float g[kEqBands];
+};
+extern const EqPreset kEqPresets[];
+extern const int kEqPresetCount;
+
 // what's playing (a copy, for the UI and the notification)
 struct Now {
     bool active = false;   // something is loaded (playing or paused)
@@ -115,6 +135,8 @@ public:
     void SetRepeat(int r);
     void SetShuffle(bool on);
     void SetVolume(float v);      // ducking (0..1)
+    Sound GetSound();
+    void SetSound(const Sound& s);
     // a movie / call / chat audio is on: music pauses, and goes on afterwards
     void SetInterrupted(bool on);
     Now GetNow();
@@ -131,6 +153,14 @@ private:
     void Loop();
     bool OpenAt(int index, double pos);  // (m_ held)
     void CloseLocked();
+    // transitions (m_ held): the next song starts while this one fades out
+    int NextIndex();
+    double FragStart(double dur) const;
+    double FragEnd(double dur) const;
+    void StartFade(int next, double seconds);
+    void FinishFade();
+    void CancelFade();
+    void UpdateEq();                 // coefficients from snd_ (m_ held)
     void Changed();
     static void AudioCb(void* u, uint8_t* stream, int len);
     const LspModule* mod_ = nullptr;
@@ -141,6 +171,18 @@ private:
     std::atomic<bool> quit_{false};
     uint32_t dev_ = 0;
     LspPlayer* p_ = nullptr;
+    LspPlayer* pn_ = nullptr;         // the next song, fading in (pm_)
+    int nextAt_ = -1;
+    double nextDur_ = 0;
+    int64_t fadeTotal_ = 0, fadePos_ = 0;  // frames (pm_)
+    std::atomic<bool> fadeDone_{false};
+    Sound snd_;
+    // equalizer (pm_): peaking filters per band, both channels
+    bool eqActive_ = false;
+    float eqGain_ = 1;
+    float eqC_[kEqBands][5] = {};
+    float eqZ_[kEqBands][2][2] = {};
+    std::vector<float> mixBuf_;
     std::vector<std::string> queue_;  // in the order they were given
     std::vector<int> order_;          // playing order (shuffled or not) -> index into queue_
     int at_ = -1;                     // position in order_

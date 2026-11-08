@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <random>
 
@@ -377,6 +378,23 @@ void Library::ScanLoop() {
     }
 }
 
+// ---------------------------------------------------------------- sound
+
+const float kEqFreq[kEqBands] = {31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000};
+const EqPreset kEqPresets[] = {
+    {"Flat", {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+    {"Bass boost", {7, 6, 4.5f, 2.5f, 0.5f, 0, 0, 0, 0, 0}},
+    {"Treble boost", {0, 0, 0, 0, 0, 0.5f, 2, 4, 5.5f, 6.5f}},
+    {"Vocal", {-2, -2, -1, 1, 3, 4, 3.5f, 2, 0, -1}},
+    {"Rock", {5, 4, 2.5f, -0.5f, -1.5f, -0.5f, 2, 3.5f, 4.5f, 5}},
+    {"Pop", {-1, 1, 3, 4, 3, 0.5f, -1, -1, -0.5f, 0}},
+    {"Jazz", {3.5f, 2.5f, 1, 2, -1.5f, -1.5f, 0, 1.5f, 3, 3.5f}},
+    {"Classical", {4, 3, 2.5f, 1.5f, -1, -1, 0, 2, 3, 3.5f}},
+    {"Electronic", {5, 4.5f, 1.5f, 0, -2, 1.5f, 0.5f, 1.5f, 4.5f, 5}},
+    {"Loudness", {6, 4, 1, 0, -1, -1, 0, 1, 4, 6}},
+};
+const int kEqPresetCount = (int)(sizeof(kEqPresets) / sizeof(kEqPresets[0]));
+
 // ---------------------------------------------------------------- player
 
 void Player::Init(const LspModule* mod, Library* lib) {
@@ -398,17 +416,160 @@ void Player::AudioCb(void* u, uint8_t* stream, int len) {
     auto* self = (Player*)u;
     float* out = (float*)stream;
     int frames = len / (int)(sizeof(float) * 2);
-    {
-        std::lock_guard<std::mutex> l(self->pm_);
-        if (self->p_) self->mod_->read_audio(self->p_, out, frames);
-        else memset(stream, 0, (size_t)len);
+    std::lock_guard<std::mutex> l(self->pm_);
+    if (self->p_) self->mod_->read_audio(self->p_, out, frames);
+    else memset(stream, 0, (size_t)len);
+    // a transition: the next song comes in while this one goes (equal power, so the loudness stays even)
+    if (self->pn_) {
+        auto& b = self->mixBuf_;
+        if ((int)b.size() < frames * 2) b.resize((size_t)frames * 2);
+        self->mod_->read_audio(self->pn_, b.data(), frames);
+        double total = (double)std::max<int64_t>(1, self->fadeTotal_);
+        for (int i = 0; i < frames; i++) {
+            double t = std::min(1.0, (double)(self->fadePos_ + i) / total);
+            float ga = (float)std::cos(t * 1.5707963), gb = (float)std::sin(t * 1.5707963);
+            out[i * 2] = out[i * 2] * ga + b[(size_t)i * 2] * gb;
+            out[i * 2 + 1] = out[i * 2 + 1] * ga + b[(size_t)i * 2 + 1] * gb;
+        }
+        self->fadePos_ += frames;
+        if (self->fadePos_ >= self->fadeTotal_) self->fadeDone_ = true;
+    }
+    // equalizer: ten peaking filters (RBJ biquads, transposed direct form II), then a soft limit
+    if (self->eqActive_) {
+        float g = self->eqGain_;
+        for (int i = 0; i < frames; i++)
+            for (int ch = 0; ch < 2; ch++) {
+                float x = out[i * 2 + ch] * g;
+                for (int k = 0; k < kEqBands; k++) {
+                    const float* c = self->eqC_[k];
+                    float* z = self->eqZ_[k][ch];
+                    float y = c[0] * x + z[0];
+                    z[0] = c[1] * x - c[3] * y + z[1];
+                    z[1] = c[2] * x - c[4] * y;
+                    x = y;
+                }
+                // (above about -1 dBFS: bent smoothly instead of clipping)
+                float a = std::fabs(x);
+                if (a > 0.9f) x = (x > 0 ? 1 : -1) * (0.9f + 0.1f * std::tanh((a - 0.9f) * 10.0f));
+                out[i * 2 + ch] = x;
+            }
     }
     float v = self->volume_.load();
     if (v < 0.999f)
         for (int i = 0; i < frames * 2; i++) out[i] *= v;
 }
 
+void Player::UpdateEq() {
+    std::lock_guard<std::mutex> l(pm_);
+    eqActive_ = snd_.eqOn;
+    if (!eqActive_) return;
+    eqGain_ = std::pow(10.0f, snd_.preamp / 20.0f);
+    const double fs = 48000, q = 1.2;
+    for (int k = 0; k < kEqBands; k++) {
+        double A = std::pow(10.0, snd_.eq[k] / 40.0), w0 = 2 * 3.14159265358979 * kEqFreq[k] / fs;
+        double alpha = std::sin(w0) / (2 * q), cw = std::cos(w0);
+        double b0 = 1 + alpha * A, b1 = -2 * cw, b2 = 1 - alpha * A, a0 = 1 + alpha / A, a1 = -2 * cw, a2 = 1 - alpha / A;
+        eqC_[k][0] = (float)(b0 / a0);
+        eqC_[k][1] = (float)(b1 / a0);
+        eqC_[k][2] = (float)(b2 / a0);
+        eqC_[k][3] = (float)(a1 / a0);
+        eqC_[k][4] = (float)(a2 / a0);
+    }
+}
+
+Sound Player::GetSound() {
+    std::lock_guard<std::mutex> l(m_);
+    return snd_;
+}
+
+void Player::SetSound(const Sound& s) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        bool fadeChanged = s.remix != snd_.remix;
+        snd_ = s;
+        snd_.crossfade = std::clamp(snd_.crossfade, 0, 12);
+        snd_.remixLen = std::clamp(snd_.remixLen, 15, 180);
+        snd_.remixFade = std::clamp(snd_.remixFade, 1, 12);
+        UpdateEq();
+        if (fadeChanged) CancelFade();
+    }
+    Changed();  // (saved by the caller when done - sliders change it every frame)
+}
+
+// remix: which part of a song plays - past the start (intro), well before the end (outro)
+double Player::FragStart(double dur) const {
+    if (!snd_.remix || dur <= 0) return 0;
+    double len = snd_.remixLen;
+    if (dur < len + 40) return std::max(0.0, dur * 0.2);
+    return std::clamp(dur * 0.3, 20.0, dur - len - 20);
+}
+double Player::FragEnd(double dur) const {
+    if (!snd_.remix || dur <= 0) return dur;
+    double s = FragStart(dur), len = snd_.remixLen;
+    if (dur < len + 40) return std::max(s + 5, dur * 0.8);
+    return std::min(dur - 15, s + len);
+}
+
+// the next song in playing order, by the repeat mode; -1 = the list ended
+int Player::NextIndex() {
+    if (order_.empty()) return -1;
+    if (repeat_ == RepeatOne) return at_;
+    int n = at_ + 1;
+    if (n >= (int)order_.size()) n = repeat_ == RepeatAll ? 0 : -1;
+    return n;
+}
+
+void Player::StartFade(int next, double seconds) {
+    const std::string& path = queue_[(size_t)order_[(size_t)next]];
+    LspInfo info{};
+    LspPlayer* q = mod_->open(path.c_str(), 48000, 2, &info);
+    if (!q) {  // (can't be played: skipped - the plain end-of-song handling goes on to the next)
+        nextAt_ = -1;
+        return;
+    }
+    double off = FragStart(info.duration);
+    if (off > 0) mod_->seek(q, off);
+    mod_->set_playing(q, playing_ ? 1 : 0);
+    std::lock_guard<std::mutex> l(pm_);
+    pn_ = q;
+    nextAt_ = next;
+    nextDur_ = info.duration;
+    fadeTotal_ = std::max<int64_t>(1, (int64_t)(seconds * 48000));
+    fadePos_ = 0;
+    fadeDone_ = false;
+}
+
+void Player::FinishFade() {
+    LspPlayer* old;
+    {
+        std::lock_guard<std::mutex> l(pm_);
+        if (!pn_) return;
+        old = p_;
+        p_ = pn_;
+        pn_ = nullptr;
+        fadeDone_ = false;
+    }
+    if (old) mod_->close(old);
+    at_ = nextAt_;
+    dur_ = nextDur_;
+    nextAt_ = -1;
+}
+
+void Player::CancelFade() {
+    LspPlayer* q;
+    {
+        std::lock_guard<std::mutex> l(pm_);
+        q = pn_;
+        pn_ = nullptr;
+        fadeDone_ = false;
+    }
+    if (q) mod_->close(q);
+    nextAt_ = -1;
+}
+
+
 void Player::CloseLocked() {
+    CancelFade();
     LspPlayer* p;
     {
         std::lock_guard<std::mutex> l(pm_);
@@ -425,6 +586,7 @@ void Player::CloseLocked() {
 
 bool Player::OpenAt(int index, double pos) {
     if (index < 0 || index >= (int)order_.size()) return false;
+    CancelFade();
     at_ = index;
     const std::string& path = queue_[(size_t)order_[(size_t)index]];
     LspInfo info{};
@@ -448,6 +610,7 @@ bool Player::OpenAt(int index, double pos) {
         want.userdata = this;
         dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
     }
+    if (pos <= 0) pos = FragStart(info.duration);  // (remix: the part past the intro)
     if (pos > 0) mod_->seek(p, pos);
     mod_->set_playing(p, wantPlay_ ? 1 : 0);
     if (dev_) SDL_PauseAudioDevice(dev_, wantPlay_ ? 0 : 1);
@@ -531,6 +694,7 @@ void Player::SetPlaying(bool on) {
         wantPlay_ = on;
         pausedByInterrupt_ = false;
         if (!p_ && on && at_ >= 0) OpenAt(at_, savedPos_);  // (remembered from the last run)
+        if (pn_) mod_->set_playing(pn_, on ? 1 : 0);
         if (p_) {
             mod_->set_playing(p_, on ? 1 : 0);
             playing_ = on;
@@ -559,8 +723,9 @@ void Player::Prev() {
     {
         std::lock_guard<std::mutex> l(m_);
         if (order_.empty()) return;
-        if (p_ && mod_->position(p_) > 3) {  // like every player: back to the start of this one first
-            mod_->seek(p_, 0);
+        if (p_ && mod_->position(p_) > FragStart(dur_) + 3) {  // like every player: back to the start of this one first
+            CancelFade();
+            mod_->seek(p_, FragStart(dur_));
         } else {
             int n = at_ - 1;
             if (n < 0) n = repeat_ == RepeatAll ? (int)order_.size() - 1 : 0;
@@ -572,6 +737,7 @@ void Player::Prev() {
 
 void Player::Seek(double s) {
     std::lock_guard<std::mutex> l(m_);
+    CancelFade();
     if (p_) mod_->seek(p_, std::max(0.0, s));
     else savedPos_ = std::max(0.0, s);
 }
@@ -628,12 +794,14 @@ void Player::SetInterrupted(bool on) {
         if (on == interrupted_) return;
         interrupted_ = on;
         if (on && p_ && playing_) {
+            if (pn_) mod_->set_playing(pn_, 0);
             mod_->set_playing(p_, 0);
             playing_ = false;
             pausedByInterrupt_ = true;
             if (dev_) SDL_PauseAudioDevice(dev_, 1);
             changed = true;
         } else if (!on && p_ && pausedByInterrupt_) {
+            if (pn_) mod_->set_playing(pn_, 1);
             mod_->set_playing(p_, 1);
             playing_ = true;
             pausedByInterrupt_ = false;
@@ -684,13 +852,32 @@ void Player::Loop() {
         bool changed = false;
         {
             std::lock_guard<std::mutex> l(m_);
-            if (p_ && mod_->state(p_) == LSP_ENDED && playing_) {
+            if (fadeDone_) {  // the next song has fully taken over
+                FinishFade();
+                changed = true;
+            }
+            // smooth transitions / remix: start the next one before this one ends
+            double fade = snd_.remix ? snd_.remixFade : snd_.crossfade;
+            if (p_ && playing_ && !pn_ && dur_ > 0 && fade > 0) {
+                double pos = mod_->position(p_), end = FragEnd(dur_);
+                if (pos >= end - fade && pos < dur_ - 0.05) {
+                    int n = NextIndex();
+                    if (n >= 0) StartFade(n, fade);
+                    else if (snd_.remix && pos >= end) {  // the list ended: stop at the end of the part
+                        playing_ = wantPlay_ = false;
+                        mod_->set_playing(p_, 0);
+                        if (dev_) SDL_PauseAudioDevice(dev_, 1);
+                        changed = true;
+                    }
+                }
+            }
+            if (p_ && !pn_ && mod_->state(p_) == LSP_ENDED && playing_) {
                 int n = at_ + 1;
                 if (repeat_ == RepeatOne) n = at_;
                 else if (n >= (int)order_.size()) n = repeat_ == RepeatAll ? 0 : -1;
                 if (n >= 0) {
                     if (repeat_ == RepeatOne) {
-                        mod_->seek(p_, 0);
+                        mod_->seek(p_, FragStart(dur_));
                         mod_->set_playing(p_, 1);
                     } else {
                         OpenAt(n, 0);
@@ -735,6 +922,20 @@ void Player::LoadState(const std::string& path) {
     repeat_ = std::clamp(j.value("repeat", 0), 0, 2);
     shuffle_ = j.value("shuffle", false);
     savedPos_ = j.value("pos", 0.0);
+    json s = j.value("sound", json::object());
+    if (s.is_object()) {
+        snd_.eqOn = s.value("eqOn", false);
+        json eq = s.value("eq", json::array());
+        for (int k = 0; k < kEqBands && k < (int)eq.size(); k++)
+            if (eq[(size_t)k].is_number()) snd_.eq[k] = std::clamp(eq[(size_t)k].get<float>(), -12.0f, 12.0f);
+        snd_.preamp = std::clamp(s.value("preamp", 0.0f), -12.0f, 6.0f);
+        snd_.preset = s.value("preset", "Flat");
+        snd_.crossfade = std::clamp(s.value("crossfade", 0), 0, 12);
+        snd_.remix = s.value("remix", false);
+        snd_.remixLen = std::clamp(s.value("remixLen", 45), 15, 180);
+        snd_.remixFade = std::clamp(s.value("remixFade", 6), 1, 12);
+    }
+    UpdateEq();
 }
 
 void Player::SaveState() {
@@ -742,7 +943,11 @@ void Player::SaveState() {
     json j;
     {
         std::lock_guard<std::mutex> l(m_);
-        j = {{"queue", queue_}, {"order", order_}, {"at", at_}, {"repeat", repeat_}, {"shuffle", shuffle_}, {"pos", savedPos_}};
+        json eq = json::array();
+        for (float g : snd_.eq) eq.push_back(g);
+        j = {{"queue", queue_}, {"order", order_}, {"at", at_}, {"repeat", repeat_}, {"shuffle", shuffle_}, {"pos", savedPos_},
+             {"sound", {{"eqOn", snd_.eqOn}, {"eq", eq}, {"preamp", snd_.preamp}, {"preset", snd_.preset}, {"crossfade", snd_.crossfade},
+                        {"remix", snd_.remix}, {"remixLen", snd_.remixLen}, {"remixFade", snd_.remixFade}}}};
         lastSave_ = (int64_t)SDL_GetTicks64();
     }
     SaveJsonFile(statePath_, j);

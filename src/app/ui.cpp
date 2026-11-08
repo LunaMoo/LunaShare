@@ -150,6 +150,7 @@ void App::Frame() {
         if (a == "nearby") { tab = Tab::Nearby; screen = MScreen::Nearby; }
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
+        if (getenv("LUNASHARE_OPENSOUND")) musicSoundOpen = true;
         if (a == "music" || a == "musicnow") { tab = Tab::Music; screen = MScreen::Music; musicNowShown = a == "musicnow"; }
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
@@ -244,16 +245,8 @@ void App::Frame() {
         if (t->state == TState::Active || t->state == TState::Hashing || t->state == TState::Verifying) busy = true;
     for (auto& [peer, cv] : eng.chats) unread += cv.unread;
     if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing() || eng.watch.sid) busy = true;  // keep the timer / seek bar moving
-    {
-        // music: received files count as music too; it pauses for a movie, a call, a recording or chat audio, and
-        // goes on afterwards
-        music::Lib().SetImplicitFolders({eng.settings.downloadDir});
-        bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
-        music::Play().SetInterrupted(interrupt);
-        music::Now mn = music::Play().GetNow();
-        music::MediaKeys(mn.active);
-        if (mn.playing) busy = true;
-    }
+    MusicTick();
+    if (music::Play().GetNow().playing) busy = true;
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 
     ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -305,6 +298,16 @@ void App::Frame() {
         selMsgs.clear();
         selectionMode = false;
     }
+}
+
+// music: received files count as music too; it pauses for a movie, a call, a recording or chat audio, and goes on
+// afterwards. (Also called while the window is minimized - the phone in the background - when no frames are drawn.)
+void App::MusicTick() {
+    auto lk = eng.Lock();
+    music::Lib().SetImplicitFolders({eng.settings.downloadDir});
+    bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
+    music::Play().SetInterrupted(interrupt);
+    music::MediaKeys(music::Play().GetNow().active);
 }
 
 void App::PullEvents() {

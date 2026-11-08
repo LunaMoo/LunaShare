@@ -333,6 +333,14 @@ void App::DrawMusicNow(bool big) {
         if (ImGui::SmallButton(T("Send this song..."))) MusicSend({n.path}, "");
         ImGui::SameLine();
         if (ImGui::SmallButton(T("Stop"))) music::Play().Stop();
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Sound..."))) musicSoundOpen = true;
+        {  // the remix switch, right here: it changes how the queue plays
+            music::Sound s = music::Play().GetSound();
+            ImGui::SameLine();
+            if (ImGui::Checkbox(T("Remix"), &s.remix)) music::Play().SetSound(s);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Only a part of every song, flowing into a part of the next one"));
+        }
         // the queue
         ImGui::SeparatorText(TF("Queue (%d)", n.count).c_str());
         auto q = music::Play().Queue();
@@ -401,12 +409,118 @@ void App::DrawMusicMini() {
 
 // ---------------------------------------------------------------- the music screen
 
+// sound: equalizer, smooth transitions, remix
+// i18n-keys: "Flat", "Bass boost", "Treble boost", "Vocal", "Rock", "Pop", "Jazz", "Classical", "Electronic", "Loudness"
+void App::MusicSoundPopup() {
+    if (musicSoundOpen) {
+        ImGui::OpenPopup("##msound");
+        musicSoundOpen = false;
+    }
+    bool mobile = ui::M().mobile;
+    ImVec2 vp = ImGui::GetMainViewport()->Size;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (mobile) ImGui::SetNextWindowSize(ImVec2(vp.x * 0.96f, 0));
+    if (!ImGui::BeginPopup("##msound")) {
+        if (musicSoundDirty) music::Play().SaveState();
+        musicSoundDirty = false;
+        return;
+    }
+    music::Sound s = music::Play().GetSound();
+    bool ch = false;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGui::SeparatorText(T("Equalizer"));
+    ch |= ImGui::Checkbox(T("On"), &s.eqOn);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9);
+    std::string cur = s.preset.empty() ? std::string(T("Custom")) : std::string(T(s.preset.c_str()));
+    if (ImGui::BeginCombo("##eqp", cur.c_str())) {
+        for (int i = 0; i < music::kEqPresetCount; i++)
+            if (ImGui::Selectable(T(music::kEqPresets[i].name), s.preset == music::kEqPresets[i].name, 0, ImVec2(0, h))) {
+                s.preset = music::kEqPresets[i].name;
+                for (int k = 0; k < music::kEqBands; k++) s.eq[k] = music::kEqPresets[i].g[k];
+                s.eqOn = true;
+                ch = true;
+            }
+        ImGui::EndCombo();
+    }
+    if (!s.eqOn) ImGui::BeginDisabled();
+    float avail = mobile ? vp.x * 0.96f - ImGui::GetStyle().WindowPadding.x * 2 : ImGui::GetFontSize() * 26;
+    float sp = ImGui::GetStyle().ItemSpacing.x * 0.5f;
+    float bw = std::max(ImGui::GetFontSize() * 1.4f, (avail - sp * (music::kEqBands - 1)) / music::kEqBands);
+    float bh = ImGui::GetFontSize() * (mobile ? 9 : 8);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(sp, ImGui::GetStyle().ItemSpacing.y));
+    for (int k = 0; k < music::kEqBands; k++) {
+        if (k) ImGui::SameLine();
+        ImGui::PushID(k);
+        if (ImGui::VSliderFloat("##b", ImVec2(bw, bh), &s.eq[k], -12, 12, "")) {
+            s.preset.clear();
+            ch = true;
+        }
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetTooltip("%+.1f dB", s.eq[k]);
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {  // (double click: back to 0)
+            s.eq[k] = 0;
+            s.preset.clear();
+            ch = true;
+        }
+        ImGui::PopID();
+    }
+    for (int k = 0; k < music::kEqBands; k++) {  // the frequencies under the sliders
+        if (k) ImGui::SameLine();
+        float f = music::kEqFreq[k];
+        char lb[16];
+        if (f >= 1000) snprintf(lb, sizeof lb, "%gk", f / 1000);
+        else snprintf(lb, sizeof lb, "%g", f);
+        float tw = ImGui::CalcTextSize(lb).x;
+        ImVec2 c = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(c.x + (bw - tw) * 0.5f, c.y));
+        ImGui::TextDisabled("%s", lb);
+        ImGui::SameLine(0, 0);
+        ImGui::SetCursorScreenPos(ImVec2(c.x + bw, c.y));
+        ImGui::Dummy(ImVec2(0, ImGui::GetTextLineHeight()));
+    }
+    ImGui::PopStyleVar();
+    ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
+    ch |= ImGui::SliderFloat("##pre", &s.preamp, -12, 6, T("preamp %+.1f dB"));
+    if (!s.eqOn) ImGui::EndDisabled();
+
+    ImGui::SeparatorText(T("Transitions"));
+    if (s.remix) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
+    ch |= ImGui::SliderInt("##xf", &s.crossfade, 0, 12, s.crossfade ? T("smooth transition: %d s") : T("smooth transition: off"));
+    if (s.remix) ImGui::EndDisabled();
+    ch |= ImGui::Checkbox(T("Remix: only a part of every song"), &s.remix);
+    ImGui::TextDisabled("%s", T("skips the beginnings and ends, flowing from part to part"));
+    if (s.remix) {
+        const int lens[] = {30, 45, 60, 90};
+        ImGui::TextUnformatted(T("Part length"));
+        for (int i = 0; i < 4; i++) {
+            ImGui::SameLine();
+            char b[16];
+            snprintf(b, sizeof b, "%d s", lens[i]);
+            if (ImGui::RadioButton(b, s.remixLen == lens[i])) {
+                s.remixLen = lens[i];
+                ch = true;
+            }
+        }
+        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
+        ch |= ImGui::SliderInt("##rf", &s.remixFade, 1, 12, T("blend: %d s"));
+    }
+    ImGui::Spacing();
+    if (ImGui::Button(T("Close"), ImVec2(mobile ? -1 : 0, h))) ImGui::CloseCurrentPopup();
+    if (ch) {
+        music::Play().SetSound(s);
+        musicSoundDirty = true;
+    }
+    ImGui::EndPopup();
+}
+
 void App::DrawMusic() {
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     MusicRefresh();
     MusicSendPopup();
     MusicPlaylistPopup();
+    MusicSoundPopup();
     if (mobile && musicNowShown) {  // phones: "now playing" fills the screen
         if (ui::IconTextButton(T("Library"), Icon::List, ImVec2(0, h))) musicNowShown = false;
         ImGui::BeginChild("mnow");
@@ -448,6 +562,8 @@ void App::DrawMusic() {
     if (!mobile) {
         ImGui::SameLine();
         if (ui::IconTextButton(T("Folders..."), Icon::Folder)) ImGui::OpenPopup("##mfolders");
+        ImGui::SameLine();
+        if (ImGui::Button(T("Sound..."))) musicSoundOpen = true;
     } else if (ImGui::SmallButton(T("Music folders..."))) {
         ImGui::OpenPopup("##mfolders");
     }

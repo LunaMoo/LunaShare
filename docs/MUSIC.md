@@ -28,6 +28,22 @@
   pause and next; tapping it opens the player.
 - Music pauses on its own for a movie, a chat video or voice message, a call or a recording, and goes on afterwards.
 
+## Sound
+
+*Sound...* (next to *Folders...* on a computer; under the song on a phone's player) holds:
+
+- **Equalizer:** ten bands from 31 Hz to 16 kHz (±12 dB) with presets (Flat, Bass boost, Treble boost, Vocal, Rock,
+  Pop, Jazz, Classical, Electronic, Loudness) and a preamp. Moving a band makes it *Custom*; double-click a band to
+  set it back to 0. Loud peaks are rounded off instead of clipping.
+- **Smooth transition** (0-12 s): the next song starts while this one fades out (an equal-power crossfade, so the
+  loudness stays even). It follows repeat and shuffle; with repeat off the last song simply ends.
+- **Remix:** only a part of every song plays - past the intro and well before the outro (from about 30 % in, the
+  chosen length: 30, 45, 60 or 90 s) - blending into the part of the next song over the *blend* time (1-12 s). Short
+  songs play their middle 60 %. With repeat off the remix stops at the end of the last part. The switch is also right
+  on the phone's player.
+
+All of it is kept with the player's state in `music_state.json`.
+
 ## In the background
 
 - **Android:** the music plays on with the app in the background or the screen off. The notification (and the lock
