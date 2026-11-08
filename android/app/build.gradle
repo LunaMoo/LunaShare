@@ -41,10 +41,25 @@ android {
         }
     }
 
+    // A fixed key, so a new version installs over the old one (and keeps settings, chats, playlists). Without one -
+    // a fresh debug key on every build machine - Android refuses the update and the app has to be removed first.
+    // CI: the secrets ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD.
+    def ks = System.getenv("LUNASHARE_KEYSTORE")
+    signingConfigs {
+        if (ks && file(ks).exists()) {
+            fixed {
+                storeFile file(ks)
+                storePassword System.getenv("LUNASHARE_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("LUNASHARE_KEY_ALIAS")
+                keyPassword System.getenv("LUNASHARE_KEY_PASSWORD") ?: System.getenv("LUNASHARE_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug   // replace with your own key for distribution
+            signingConfig((ks && file(ks).exists()) ? signingConfigs.fixed : signingConfigs.debug)
         }
     }
 

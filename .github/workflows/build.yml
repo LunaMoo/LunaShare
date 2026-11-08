@@ -199,8 +199,23 @@ jobs:
             cd ..
           done
           cp ffsrc/COPYING.LGPLv2.1 ffandroid/FFmpeg-LICENSE.txt
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          # the same key every time, so updates install over the old version (keeping its data)
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/lunashare.jks"
+            echo "LUNASHARE_KEYSTORE=$RUNNER_TEMP/lunashare.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret: the APK is signed with a throwaway debug key (updates won't install over the old version)"
+          fi
       - name: Build APK
         working-directory: android
+        env:
+          LUNASHARE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LUNASHARE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LUNASHARE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon
       - name: Check modules in the APK
         run: |
