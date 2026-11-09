@@ -1152,3 +1152,4 @@
 {"A: %d:%02d", "A: %d:%02d"},
 {"B: to here", "B: do tego miejsca"},
 {"B: %d:%02d", "B: %d:%02d"},
+{"Screen (share it)", "Ekran (udostępnij go)"},

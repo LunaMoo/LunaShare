@@ -189,6 +189,9 @@ after receiving, so you know it arrived intact.
 **Video calls (optional module: Windows, Linux and Android)**
 - A second plug-in, `lunashare_video` (`lunashare_video.dll` / `liblunashare_video.so`), sits next to the voice module. It adds the
   video call button when both devices have it, and any call between two video-capable devices can turn the camera on or off.
+- **Sharing the screen** (Windows and Linux): *Screen (share it)* is one more choice in the call's camera list - the whole
+  desktop, ten pictures a second (at most 1920 wide), through the same encoder. Linux grabs it through X11 (on Wayland only
+  what XWayland shows). Not on Android yet.
 - Windows and Android use the system's own H.264: Media Foundation on Windows (a GPU encoder when one works, otherwise
   Microsoft's software encoder) and MediaCodec on Android (hardware).
 - **Linux:** cameras through V4L2 (raw YUYV/NV12 or MJPEG, whichever gives the asked size and frame rate). H.264 is encoded on

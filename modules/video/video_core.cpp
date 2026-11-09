@@ -560,7 +560,9 @@ public:
             if (c.id == cameraId) return c.id;
         for (auto& c : cams)
             if (c.facing == LSV_FACING_FRONT) return c.id;  // calls start with the selfie camera
-        return cams[0].id;
+        for (auto& c : cams)
+            if (strcmp(c.id, "screen") != 0) return c.id;  // (the screen only when it's picked)
+        return std::string();
     }
 
     bool StartCameraLocked() {

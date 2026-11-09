@@ -23,6 +23,7 @@
 #include <mutex>
 #include <thread>
 
+#include "screen_grab.h"
 #include "video_backend.h"
 
 namespace lsv {
@@ -277,6 +278,13 @@ public:
                                                                                                                    : LSV_FACING_EXTERNAL;
             out.push_back(c);
         }
+        if (ScreenGrab::Available()) {  // the screen: shared like a camera
+            LsvCamera c{};
+            snprintf(c.id, sizeof(c.id), "screen");
+            snprintf(c.name, sizeof(c.name), "Screen (share it)");
+            c.facing = LSV_FACING_EXTERNAL;
+            out.push_back(c);
+        }
         return out;
     }
 
@@ -294,12 +302,12 @@ public:
         bitrate_ = s.bitrate;
         std::string dev = id;
         if (dev.empty()) {
-            auto cams = Cameras();
-            if (cams.empty()) {
+            for (auto& c : Cameras())
+                if (dev.empty() && strcmp(c.id, "screen") != 0) dev = c.id;  // (the screen only when it's picked)
+            if (dev.empty()) {
                 if (err) *err = "no camera found";
                 return false;
             }
-            dev = cams[0].id;
         }
         if (!OpenCamera(dev, err)) {
             CloseCamera();
@@ -493,6 +501,22 @@ private:
     }
 
     bool OpenCamera(const std::string& dev, std::string* err) {
+        if (dev == "screen") {
+            if (!grab_.Open(err)) return false;
+            screen_ = true;
+            w_ = grab_.Width();
+            h_ = grab_.Height();
+            fps_ = 10;  // (enough for a screen; the bitrate goes to sharpness)
+            std::string e;
+            if (!enc_.Open(w_, h_, fps_, std::max<int>(bitrate_, 1500000), &e)) {
+                if (err) *err = "H.264 encoder: " + e;
+                return false;
+            }
+            std::lock_guard<std::mutex> l(nameM_);
+            encName_ = enc_.Name();
+            return true;
+        }
+        screen_ = false;
         if (dev == "test") {
             test_ = true;
             w_ = s_.width & ~1;
@@ -606,6 +630,10 @@ private:
     }
 
     void CloseCamera() {
+        if (screen_) {
+            grab_.Close();
+            screen_ = false;
+        }
         if (streaming_) {
             v4l2_buf_type t = V4L2_BUF_TYPE_VIDEO_CAPTURE;
             Xioctl(fd_, VIDIOC_STREAMOFF, &t);
@@ -684,6 +712,27 @@ private:
         int misses = 0;
         auto next = std::chrono::steady_clock::now();
         int n = 0;
+        while (run_ && screen_) {  // the screen, ten times a second
+            next += std::chrono::milliseconds(100);
+            std::this_thread::sleep_until(next);
+            if (!grab_.Grab(frame, 1)) {
+                if (++misses > 50) {
+                    sink_->OnCameraError("the screen can't be read");
+                    return;
+                }
+                continue;
+            }
+            misses = 0;
+            int W = w_, H = h_;
+            LsvImage img{W, H, frame.data(), frame.data() + (size_t)W * H, frame.data() + (size_t)W * H * 5 / 4, W, W / 2, 1, 0, 0};
+            sink_->OnLocalImage(img);  // (not mirrored: it's a screen)
+            {
+                std::lock_guard<std::mutex> l(encM_);
+                pending_.swap(frame);
+                havePending_ = true;
+            }
+            encCv_.notify_one();
+        }
         while (run_ && test_) {
             next += std::chrono::microseconds(1000000 / fps_);
             std::this_thread::sleep_until(next);
@@ -809,7 +858,8 @@ private:
     bool havePending_ = false;
     int fd_ = -1, w_ = 0, h_ = 0, stride_ = 0, fps_ = 30;
     uint32_t fourcc_ = 0;
-    bool streaming_ = false, test_ = false;
+    bool streaming_ = false, test_ = false, screen_ = false;
+    ScreenGrab grab_;
     int encFails_ = 0, decFails_ = 0;
     bool decHw_ = true;
     std::vector<std::pair<void*, size_t>> bufs_;

@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <cstdio>
@@ -35,6 +36,7 @@
 #include <vector>
 
 #include "vcam_shared.h"
+#include "screen_grab.h"
 #include "video_backend.h"
 
 // Windows 11 virtual camera API (mfvirtualcamera.h, SDK 10.0.22000+). Loaded at run time from mfsensorgroup.dll so the
@@ -650,6 +652,13 @@ public:
             devs[i]->Release();
         }
         CoTaskMemFree(devs);
+        {  // the screen: shared like a camera
+            LsvCamera c{};
+            snprintf(c.id, sizeof(c.id), "screen");
+            snprintf(c.name, sizeof(c.name), "Screen (share it)");
+            c.facing = LSV_FACING_EXTERNAL;
+            out.push_back(c);
+        }
         return out;
     }
 
@@ -663,6 +672,7 @@ public:
             if (err) *err = "Media Foundation unavailable";
             return false;
         }
+        if (id == "screen") return StartScreen(s, err);
         Cameras();  // refresh links
         unsigned idx = (unsigned)atoi(id.c_str());
         std::string link = links_[idx % 16];
@@ -1009,6 +1019,91 @@ private:
     void SetEncName(const std::string& n) {
         std::lock_guard<std::mutex> l(nameM_);
         encName_ = n;
+    }
+
+    // the screen instead of a camera: grabbed ten times a second, through the same encoder
+    bool StartScreen(const LsvSettings& s, std::string* err) {
+        s_ = s;
+        s_.fps = 10;
+        bitrate_ = std::max(s.bitrate, 1500000);
+        run_ = true;
+        std::mutex wm;
+        std::condition_variable wcv;
+        int state = 0;
+        std::string startErr;
+        th_ = std::thread([&] {
+            ComInit com;
+            ScreenGrab grab;
+            bool ok = grab.Open(&startErr);
+            if (ok) {
+                w_ = grab.Width();
+                h_ = grab.Height();
+                ok = OpenEncoder(&startErr);
+            }
+            {
+                std::lock_guard<std::mutex> l(wm);
+                state = ok ? 1 : -1;
+            }
+            wcv.notify_all();
+            if (ok) ScreenLoop(grab);
+            CloseCamera();
+        });
+        std::unique_lock<std::mutex> l(wm);
+        wcv.wait(l, [&] { return state != 0; });
+        if (state < 0) {
+            l.unlock();
+            run_ = false;
+            th_.join();
+            if (err) *err = startErr;
+            return false;
+        }
+        return true;
+    }
+
+    void ScreenLoop(ScreenGrab& grab) {
+        std::vector<uint8_t> frame;
+        LONGLONG ts = 0;
+        auto next = std::chrono::steady_clock::now();
+        int misses = 0;
+        while (run_) {
+            next += std::chrono::milliseconds(100);
+            std::this_thread::sleep_until(next);
+            if (!grab.Grab(frame, 2)) {
+                if (++misses > 50) {
+                    sink_->OnCameraError("the screen can't be read");
+                    break;
+                }
+                continue;
+            }
+            misses = 0;
+            LsvImage img{w_, h_, frame.data(), frame.data() + (size_t)w_ * h_, frame.data() + (size_t)w_ * h_ + 1, w_, w_, 2, 0, 0};
+            sink_->OnLocalImage(img);  // (not mirrored: it's a screen)
+            if (!enc_) continue;
+            if (newBitrate_.exchange(false)) enc_->SetBitrate(bitrate_);
+            if (keyReq_.exchange(false)) enc_->ForceKey();
+            enc_->Encode(frame.data(), ts, [&](const uint8_t* d, size_t n, bool key) {
+                EncodedFrame f;
+                f.data = d;
+                f.len = n;
+                f.key = key;
+                f.width = w_;
+                f.height = h_;
+                f.codec = kH264;
+                sink_->OnEncoded(f);
+            });
+            ts += 1000000;  // (100 ms in 100 ns units)
+            if (enc_->Failed()) {
+                sink_->Log("hardware encoder failed, switching to software");
+                enc_->Close();
+                triedSoftwareOnly_ = true;
+                std::string e;
+                if (!OpenEncoder(&e)) {
+                    sink_->OnCameraError("no working H.264 encoder: " + e);
+                    break;
+                }
+                keyReq_ = true;
+            }
+        }
     }
 
     void CaptureLoop() {

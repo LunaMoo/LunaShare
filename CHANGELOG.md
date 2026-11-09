@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Calls: **share your screen** (Windows, Linux/X11) - *Screen (share it)* in the call's camera list.
+
 - Movies: **chapters** (marks on the seek bar, a list to jump to) and **repeating a part (A-B)**.
 
 - Music: **no gap between songs** (on by default when there's no smooth transition) - live albums and mixes play

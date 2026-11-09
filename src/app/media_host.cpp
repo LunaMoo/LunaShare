@@ -623,6 +623,8 @@ std::vector<LsvCamera> MediaHost::Cameras() {
     std::vector<LsvCamera> v(16);
     int n = vmod_ ? vmod_->list_cameras(v.data(), 16) : 0;
     v.resize((size_t)std::max(0, n));
+    for (auto& c : v)
+        if (strcmp(c.id, "screen") == 0) snprintf(c.name, sizeof(c.name), "%s", T("Screen (share it)"));  // (in my language)
     return v;
 }
 
