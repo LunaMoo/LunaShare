@@ -28,6 +28,12 @@
   pause and next; tapping it opens the player.
 - Music pauses on its own for a movie, a chat video or voice message, a call or a recording, and goes on afterwards.
 
+## Lyrics
+
+A song with a `.lrc` file of the same name next to it (`Song.mp3` + `Song.lrc`) shows its lyrics in the cover's
+place: the line being sung in the middle, bright, moving along with the song (`[offset:]` is honoured; lyrics without
+times scroll by hand). The cover has a *Lyrics* tag when there are some; a tap on the cover / lyrics switches.
+
 ## Sleep timer
 
 *Sleep timer* (under the player on a phone, in the bar on a computer; in the movie player's menu too): in 5, 15, 30,

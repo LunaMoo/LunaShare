@@ -320,6 +320,101 @@ void App::MusicGroupButtons(const std::vector<const music::Track*>& list, const 
 
 // ---------------------------------------------------------------- now playing
 
+// ---------------------------------------------------------------- lyrics: song.lrc next to song.mp3
+
+static void LoadLyrics(const std::string& song, std::vector<std::pair<double, std::string>>& out, bool& synced) {
+    out.clear();
+    synced = false;
+    std::string base = song.substr(0, song.find_last_of('.'));
+    std::string path;
+    for (const char* ext : {".lrc", ".LRC", ".Lrc"})
+        if (FileExists(base + ext)) path = base + ext;
+    if (path.empty()) return;
+    FILE* f = OpenFile(path, "rb");
+    if (!f) return;
+    std::string all;
+    char buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0 && all.size() < (1 << 20)) all.append(buf, n);
+    fclose(f);
+    if (all.size() >= 3 && (unsigned char)all[0] == 0xEF && (unsigned char)all[1] == 0xBB && (unsigned char)all[2] == 0xBF) all.erase(0, 3);
+    double offset = 0;
+    std::vector<std::string> plain;
+    size_t a = 0;
+    while (a <= all.size()) {
+        size_t e = all.find('\n', a);
+        if (e == std::string::npos) e = all.size();
+        std::string line = all.substr(a, e - a);
+        a = e + 1;
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        std::vector<double> times;
+        size_t i = 0;
+        while (i < line.size() && line[i] == '[') {  // [mm:ss.xx] (several on one line), or [ar:...] and friends
+            size_t c = line.find(']', i);
+            if (c == std::string::npos) break;
+            std::string tag = line.substr(i + 1, c - i - 1);
+            int mm = 0;
+            double ss = 0;
+            if (sscanf(tag.c_str(), "%d:%lf", &mm, &ss) == 2 && isdigit((unsigned char)tag[0])) times.push_back(mm * 60 + ss);
+            else if (tag.rfind("offset:", 0) == 0) offset = atof(tag.c_str() + 7) / 1000.0;
+            i = c + 1;
+        }
+        std::string text = line.substr(i);
+        for (double t : times) out.push_back({t, text});
+        if (times.empty() && i == 0 && !line.empty()) plain.push_back(line);
+    }
+    if (!out.empty()) {
+        synced = true;
+        for (auto& l : out) l.first = std::max(0.0, l.first - offset);  // (positive offset: the lyrics come sooner)
+        std::stable_sort(out.begin(), out.end(), [](auto& x, auto& y) { return x.first < y.first; });
+    } else {
+        for (auto& p : plain) out.push_back({-1, p});
+    }
+}
+
+// the lyrics in the cover's place: the line being sung in the middle, bright; the others around it, dimmer
+void App::DrawLyrics(ImDrawList* dl, ImVec2 a, ImVec2 b, double pos) {
+    dl->AddRectFilled(a, b, IM_COL32(25, 27, 34, 255), 8);
+    ImFont* f = ImGui::GetFont();
+    float fs = ImGui::GetFontSize() * 1.05f, lh = fs * 1.55f, wrap = (b.x - a.x) * 0.9f;
+    int cur = -1;
+    if (musicLyricsSynced)
+        for (int i = 0; i < (int)musicLyrics.size(); i++)
+            if (musicLyrics[(size_t)i].first <= pos + 0.15) cur = i;
+    // heights (lines can wrap) and where the current one is
+    std::vector<float> hs;
+    float total = 0, curY = 0;
+    for (int i = 0; i < (int)musicLyrics.size(); i++) {
+        const std::string& t = musicLyrics[(size_t)i].second;
+        float hh = std::max(lh, f->CalcTextSizeA(fs, FLT_MAX, wrap, t.empty() ? " " : t.c_str()).y + lh - fs);
+        if (i == cur) curY = total + hh * 0.5f;
+        hs.push_back(hh);
+        total += hh;
+    }
+    float target = musicLyricsSynced ? curY - (b.y - a.y) * 0.5f : musicLyricsScroll;
+    if (!musicLyricsSynced) {  // (not timed: scrolled by hand)
+        if (ImGui::IsItemHovered()) target -= ImGui::GetIO().MouseWheel * lh * 2;
+        if (ImGui::IsItemActive()) target -= ImGui::GetIO().MouseDelta.y;
+        target = std::clamp(target, 0.0f, std::max(0.0f, total - (b.y - a.y)));
+        musicLyricsScroll = target;
+    }
+    musicLyricsY += (target - musicLyricsY) * std::min(1.0f, ImGui::GetIO().DeltaTime * 8);  // (slides along)
+    dl->PushClipRect(a, b, true);
+    float y = a.y - musicLyricsY;
+    for (int i = 0; i < (int)musicLyrics.size(); i++) {
+        float hh = hs[(size_t)i];
+        if (y + hh > a.y && y < b.y) {
+            const std::string& t = musicLyrics[(size_t)i].second;
+            ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, wrap, t.c_str());
+            ImU32 col = !musicLyricsSynced ? IM_COL32(225, 225, 230, 255) : i == cur ? IM_COL32(255, 255, 255, 255)
+                                                                         : IM_COL32(150, 152, 165, i < cur ? 150 : 210);
+            dl->AddText(f, fs, ImVec2((a.x + b.x - ts.x) * 0.5f, y + (hh - ts.y) * 0.5f), col, t.c_str(), nullptr, wrap);
+        }
+        y += hh;
+    }
+    dl->PopClipRect();
+}
+
 void App::DrawMusicNow(bool big) {
     bool mobile = ui::M().mobile;
     float h = mobile ? ui::M().rowH : ImGui::GetFrameHeight() * 1.4f;
@@ -337,7 +432,28 @@ void App::DrawMusicNow(bool big) {
     float w = ImGui::GetContentRegionAvail().x;
     float cs = big ? std::min(w, ImGui::GetContentRegionAvail().y * 0.5f) : std::min(w, ImGui::GetFontSize() * 14);
     ImVec2 p = ImGui::GetCursorScreenPos();
-    Cover(ImGui::GetWindowDrawList(), n.track.cover, ImVec2(p.x + (w - cs) * 0.5f, p.y), cs, 8);
+    if (musicLyricsFor != n.path) {  // (the lyrics of this song, if it has them)
+        musicLyricsFor = n.path;
+        LoadLyrics(n.path, musicLyrics, musicLyricsSynced);
+        musicLyricsY = musicLyricsScroll = 0;
+    }
+    ImVec2 c0(p.x + (w - cs) * 0.5f, p.y), c1(c0.x + cs, c0.y + cs);
+    ImGui::SetCursorScreenPos(c0);
+    ImGui::InvisibleButton("##mcover", ImVec2(cs, cs));  // (a tap: the lyrics / the cover)
+    if (ImGui::IsItemDeactivated() && !musicLyrics.empty() && std::fabs(ImGui::GetMouseDragDelta(0, 0).y) < 6) musicLyricsOn = !musicLyricsOn;
+    if (!musicLyrics.empty() && musicLyricsOn) {
+        DrawLyrics(ImGui::GetWindowDrawList(), c0, c1, n.pos);
+    } else {
+        Cover(ImGui::GetWindowDrawList(), n.track.cover, c0, cs, 8);
+        if (!musicLyrics.empty()) {  // (there are lyrics: a tag in the corner)
+            const char* lt = T("Lyrics");
+            ImVec2 ts = ImGui::CalcTextSize(lt);
+            ImVec2 q(c1.x - ts.x - 14, c1.y - ts.y - 12);
+            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(q.x - 6, q.y - 3), ImVec2(c1.x - 6, c1.y - 6), IM_COL32(0, 0, 0, 170), 6);
+            ImGui::GetWindowDrawList()->AddText(q, IM_COL32(255, 255, 255, 235), lt);
+        }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y));
     ImGui::Dummy(ImVec2(w, cs + 6));
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.25f);
     ImGui::PushTextWrapPos(0);

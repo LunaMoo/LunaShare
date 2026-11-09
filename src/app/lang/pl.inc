@@ -1009,3 +1009,4 @@
 {"Stopping in %d s", "Zatrzymanie za %d s"},
 {"The sleep timer. Longer?", "Wyłącznik czasowy. Wydłużyć?"},
 {"Stop now", "Zatrzymaj teraz"},
+{"Lyrics", "Tekst"},

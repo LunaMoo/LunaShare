@@ -168,6 +168,11 @@ private:
     void MusicTrackList(const std::vector<const music::Track*>& list, const std::string& playlistId, bool showAlbum);
     void MusicTrackMenu(const std::string& path, const std::string& playlistId, int playlistIndex);
     void MusicPlaylistMove(const std::string& id, int from, int to);  // to = -1: remove
+    void DrawLyrics(ImDrawList* dl, ImVec2 a, ImVec2 b, double pos);
+    std::string musicLyricsFor;
+    std::vector<std::pair<double, std::string>> musicLyrics;
+    bool musicLyricsSynced = false, musicLyricsOn = true;
+    float musicLyricsY = 0, musicLyricsScroll = 0;
     std::vector<std::string> musicListShown;  // (the playlist's songs as shown)
     void MusicGroupButtons(const std::vector<const music::Track*>& list, const std::string& sendFolder);
     void MusicSend(const std::vector<std::string>& paths, const std::string& folder);

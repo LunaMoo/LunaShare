@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Music: **lyrics** from a `.lrc` file next to the song (`song.mp3` + `song.lrc`) - the line being sung in the middle,
+  moving along with the song (untimed lyrics scroll by hand). Shown in the cover's place; a tap switches between the
+  two.
 - **Sleep timer** (music player and movie player): in 5 - 120 minutes, at the end of this song or of this movie, the
   music and the movie stop. A minute before, a window asks: +5 / +15 / +30 min, *Stop now* or *Turn the timer off*
   (unanswered, it stops).
