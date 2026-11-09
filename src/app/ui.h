@@ -168,6 +168,11 @@ private:
     void DrawHistory();
     void DrawDevices();
     void DrawDeviceDetails(const std::string& peer);
+    // verifying a contact by QR code: mine shown, theirs scanned with the camera
+    void DrawVerifyQrPopup();
+    bool verifyQrOpen = false, verifyQrScan = false;
+    std::string verifyQrPeer, verifyQrMsg;
+    int verifyQrResult = 0;  // after a scan: 1 the same keys, -1 different, 2 not a LunaShare code
     void DrawNearby();
     void DrawSettings();
     void DrawLibrary();  // ui_library.cpp

@@ -335,6 +335,11 @@ public:
     void SetTrusted(const std::string& peer, bool v);
     void SetBlocked(const std::string& peer, bool v);
     void SetVerified(const std::string& peer, bool v);
+    // verifying by QR code: my code shows my account and device keys; scanning someone's code from their device's page
+    // compares them with the keys I hold. 1 = the same (that device and every device of their account become
+    // verified), 0 = not a LunaShare code, -1 = different keys (someone may be in between)
+    std::string VerifyCode();
+    int VerifyByCode(const std::string& peer, const std::string& code);
     void AcceptNewKey(const std::string& peer);  // after a key change warning
     std::string MyPublicKey() const { return identity_.PubHex(); }
 

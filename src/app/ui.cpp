@@ -155,6 +155,9 @@ void App::Frame() {
             OpenPollNew(selectedPeer);
             pollQ = "Sunday lunch?";
             pollOpts = {"12:00", "14:00", ""};
+        } else if (std::string(getenv("LUNASHARE_OPENHIST")) == "verify") {
+            verifyQrOpen = true;
+            verifyQrPeer = selectedPeer;
         } else if (std::string(getenv("LUNASHARE_OPENHIST")) == "starred") {
             starredOpen = true;
         } else if (std::string(getenv("LUNASHARE_OPENHIST")) == "mute") {
@@ -353,6 +356,7 @@ void App::Frame() {
     DrawPollNewPopup();
     DrawUpdatePopup();
     DrawLockSetPopup();
+    DrawVerifyQrPopup();
     DrawLockEncPopup();
     SleepPopup();
     DrawSleepAsk();
@@ -2830,6 +2834,14 @@ void App::DrawDeviceDetails(const std::string& peer) {
         ImGui::PopFont();
         bool ver = d.verified;
         if (ImGui::Checkbox(T("I compared it - mark as verified"), &ver)) eng.SetVerified(peer, ver);
+        // or by QR code: each scans the other's
+        if (ImGui::Button(T("Verify with QR codes..."), ImVec2(0, ui::M().mobile ? ui::M().rowH * 0.8f : 0))) {
+            verifyQrOpen = true;
+            verifyQrPeer = peer;
+            verifyQrScan = false;
+            verifyQrResult = 0;
+            verifyQrMsg.clear();
+        }
         ImGui::TextDisabled(T("Their key: %s    Yours: %s"), KeyFingerprint(d.pubKey).c_str(), KeyFingerprint(eng.MyPublicKey()).c_str());
     }
     ImGui::Spacing();

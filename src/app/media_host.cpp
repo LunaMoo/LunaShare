@@ -11,6 +11,7 @@ static constexpr double kPi = 3.14159265358979323846;
 
 #include "bluetooth.h"
 #include "gl_funcs.h"
+#include "quirc.h"
 #include "platform.h"
 
 using namespace ls;
@@ -211,6 +212,7 @@ void MediaHost::VLog(void*, const char* m) { SDL_Log("%s", m); }
 void MediaHost::VImage(void* u, int src, const LsvImage* img) {
     auto* self = (MediaHost*)u;
     if (src != LSV_LOCAL && src != LSV_REMOTE) return;
+    if (src == LSV_LOCAL && self->scanOpen_) ScanFeed(self, *img);
     if (src == LSV_REMOTE && self->vcamOn_) {  // to "LunaShare Camera" as well, turned the way the user chose
         LsvImage v = *img;
         v.rotation = (v.rotation + self->remoteRotAdj_) % 360;
@@ -956,6 +958,7 @@ void MediaHost::ApplyLiveAudio() {
 }
 
 void MediaHost::Shutdown() {
+    CloseScanner();
     CloseVideoMessage(false);
     if (recording_) StopRecording(false);
     SetMode(Mode::Off);
@@ -1136,6 +1139,146 @@ double MediaHost::CloseVideoMessage(bool keep) {
         slots_[LSV_LOCAL].fresh = false;
     }
     return secs;
+}
+
+// ---- QR scanner
+bool MediaHost::OpenScanner() {
+    if (!CanScan() || scanOpen_ || recording_) return false;
+#if defined(__ANDROID__)
+    if (!SDL_AndroidRequestPermission("android.permission.CAMERA")) {
+        audioError = T("camera permission denied");
+        return false;
+    }
+#endif
+    Settings cs = eng_ ? eng_->GetSettings() : Settings();
+    LsvSettings vs = Preset(std::min(cs.callVideoRes, 3), 30, false);
+    if (!StartVideoModule(&vs)) return false;
+    // the back camera (phones), else any real one - not the screen
+    std::string pick;
+    for (auto& c : Cameras())
+        if (std::string(c.id) != "screen" && (pick.empty() || c.facing == LSV_FACING_BACK)) pick = c.id;
+    if (pick.empty()) {
+        vmod_->stop();
+        audioError = T("no camera");
+        return false;
+    }
+    vmod_->select_camera(pick.c_str());
+    {
+        std::lock_guard<std::mutex> l(scanM_);
+        scanResult_.clear();
+        scanHave_ = false;
+    }
+    scanOpen_ = true;
+    vmsgOpen_ = true;  // (as for a video message: nothing goes to the network, no file is written without recording)
+    vmsgRec_ = false;
+    if (!vmod_->set_camera_on(1)) {
+        vmod_->stop();
+        vmsgOpen_ = false;
+        scanOpen_ = false;
+        audioError = T("camera could not be started");
+        return false;
+    }
+    camOn_ = true;
+    scanThread_ = std::thread([this] { ScanLoop(); });
+    return true;
+}
+
+void MediaHost::CloseScanner() {
+    if (!scanOpen_) return;
+    vmod_->set_camera_on(0);
+    vmod_->stop();
+    camOn_ = false;
+    {
+        std::lock_guard<std::mutex> l(scanM_);
+        scanOpen_ = false;
+    }
+    scanCv_.notify_all();
+    if (scanThread_.joinable()) scanThread_.join();
+    vmsgOpen_ = false;
+    if (!camId_.empty()) vmod_->select_camera(camId_.c_str());  // (calls keep their camera)
+    else
+        for (auto& c : Cameras())
+            if (c.facing == LSV_FACING_FRONT) {
+                vmod_->select_camera(c.id);
+                break;
+            }
+    tex_[LSV_LOCAL].valid = false;
+    std::lock_guard<std::mutex> l(slots_[LSV_LOCAL].m);
+    slots_[LSV_LOCAL].fresh = false;
+}
+
+std::string MediaHost::ScannedText() {
+    std::lock_guard<std::mutex> l(scanM_);
+    std::string r;
+    r.swap(scanResult_);
+    return r;
+}
+
+void MediaHost::ScanFeed(MediaHost* self, const LsvImage& im) {
+    int64_t now = (int64_t)SDL_GetTicks64();
+    if (now - self->scanLastMs_ < 150) return;  // (a few pictures a second are plenty)
+    int W = im.width, H = im.height;
+    if (W <= 0 || H <= 0 || W > 8192 || H > 8192) return;
+    int step = std::max(1, std::max(W, H) / 960);  // (big pictures: every 2nd / 3rd pixel)
+    int w = W / step, h = H / step;
+    std::unique_lock<std::mutex> l(self->scanM_, std::try_to_lock);
+    if (!l.owns_lock() || self->scanHave_) return;
+    self->scanLastMs_ = now;
+    self->scanGrey_.resize((size_t)w * h);
+    for (int r = 0; r < h; r++) {
+        const uint8_t* src = im.y + (size_t)r * step * im.y_stride;
+        uint8_t* d = &self->scanGrey_[(size_t)r * w];
+        if (step == 1) memcpy(d, src, (size_t)w);
+        else
+            for (int c = 0; c < w; c++) d[c] = src[(size_t)c * step];
+    }
+    self->scanW_ = w;
+    self->scanH_ = h;
+    self->scanHave_ = true;
+    l.unlock();
+    self->scanCv_.notify_one();
+}
+
+void MediaHost::ScanLoop() {
+    struct quirc* q = quirc_new();
+    if (!q) return;
+    std::vector<uint8_t> grey;
+    int w = 0, h = 0, qw = 0, qh = 0;
+    for (;;) {
+        {
+            std::unique_lock<std::mutex> l(scanM_);
+            scanCv_.wait(l, [&] { return !scanOpen_ || scanHave_; });
+            if (!scanOpen_) break;
+            grey.swap(scanGrey_);
+            w = scanW_;
+            h = scanH_;
+        }
+        if (w != qw || h != qh) {
+            if (quirc_resize(q, w, h) < 0) break;
+            qw = w;
+            qh = h;
+        }
+        memcpy(quirc_begin(q, nullptr, nullptr), grey.data(), (size_t)w * h);
+        quirc_end(q);
+        std::string found;
+        for (int i = 0; i < quirc_count(q) && found.empty(); i++) {
+            struct quirc_code code;
+            struct quirc_data data;
+            quirc_extract(q, i, &code);
+            quirc_decode_error_t e = quirc_decode(&code, &data);
+            if (e == QUIRC_ERROR_DATA_ECC) {  // (seen in a mirror: flip it)
+                quirc_flip(&code);
+                e = quirc_decode(&code, &data);
+            }
+            if (e != QUIRC_SUCCESS) continue;
+            found.assign((const char*)data.payload, (size_t)data.payload_len);
+        }
+        std::lock_guard<std::mutex> l(scanM_);
+        scanHave_ = false;
+        if (!found.empty()) scanResult_ = found;
+        if (!found.empty()) WakeUi();
+    }
+    quirc_destroy(q);
 }
 
 void MediaHost::StartMicTest() { micTest_ = true; }

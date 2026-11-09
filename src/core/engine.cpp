@@ -3623,6 +3623,27 @@ void Engine::SetVerified(const std::string& peer, bool v) {
     MarkDirty();
 }
 
+std::string Engine::VerifyCode() { return "LSV1:" + MyAccount() + ":" + MyPublicKey(); }
+
+int Engine::VerifyByCode(const std::string& peer, const std::string& code) {
+    if (code.size() != 5 + 64 + 1 + 64 || code.compare(0, 5, "LSV1:") != 0 || code[69] != ':') return 0;
+    std::string acc = code.substr(5, 64), dev = code.substr(70);
+    for (auto& s : {acc, dev})
+        if (s.find_first_not_of("0123456789abcdef") != std::string::npos) return 0;
+    auto lk = Lock();
+    bool match = false;
+    for (auto& id : DevicesOf(peer)) {
+        KnownDevice& d = Device(id);
+        if ((!d.accountPub.empty() && d.accountPub == acc) || (!d.pubKey.empty() && d.pubKey == dev && (d.accountPub.empty() || d.accountPub == acc)))
+            match = true;
+    }
+    if (!match) return -1;
+    for (auto& [id, d] : devices)
+        if ((!d.accountPub.empty() && d.accountPub == acc) || d.pubKey == dev) d.verified = true;
+    MarkDirty();
+    return 1;
+}
+
 void Engine::AcceptNewKey(const std::string& peer) {
     {
         auto lk = Lock();

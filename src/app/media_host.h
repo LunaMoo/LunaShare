@@ -1,6 +1,7 @@
 // Loads the optional media module (calls) and drives the audio devices for it.
 #pragma once
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -115,6 +116,13 @@ public:
     double RecordingSeconds() const;
     float RecordLevel() const { return mod_ && (recording_ || vmsgRec_) ? mod_->rec_level() : 0.f; }
 
+    // QR scanner (verifying a contact): the camera on (the back one on phones), its pictures searched for a QR code
+    bool CanScan() const { return vmod_ && mode_ != Mode::Call && !videoRunning_ && !vmsgOpen_; }
+    bool OpenScanner();
+    void CloseScanner();
+    bool Scanning() const { return scanOpen_; }
+    std::string ScannedText();  // what the last code said ("" = none yet); taken once
+
     // microphone test from the settings page
     void StartMicTest();
     void StopMicTest();
@@ -198,6 +206,18 @@ private:
     std::string vmsgPath_;
     int vmsgPreSkip_ = 0;
     int64_t vmsgT0_ = 0;
+    // QR scanner: pictures (grey, a few per second) go to a thread that runs quirc
+    std::atomic<bool> scanOpen_{false};
+    std::mutex scanM_;
+    std::condition_variable scanCv_;
+    std::thread scanThread_;
+    std::vector<uint8_t> scanGrey_;
+    int scanW_ = 0, scanH_ = 0;
+    bool scanHave_ = false;
+    std::string scanResult_;
+    std::atomic<int64_t> scanLastMs_{0};
+    static void ScanFeed(MediaHost* self, const LsvImage& img);
+    void ScanLoop();
     static void VmsgAudio(void* u, const uint8_t* d, int n);
     uint32_t recStart_ = 0;
     std::atomic<float> micTestLevel_{0};

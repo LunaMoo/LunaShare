@@ -127,7 +127,7 @@ after receiving, so you know it arrived intact.
   XChaCha20-Poly1305 for every frame, and a per-device EdDSA identity key ([Monocypher](https://monocypher.org)).
 - The identity key signs the key exchange, so a man in the middle can't relay it. Keys are pinned to the device on first contact. If a known device later shows up
   with a different key, the connection is refused and you have to review it (*Accept new key* or *Block*).
-- Each pair of people has a **safety number** (30 digits from the two account keys, identical on both screens). Compare it once and mark them as *verified*; their other devices are vouched for by their account.
+- Each pair of people has a **safety number** (30 digits from the two account keys, identical on both screens). Compare it once and mark them as *verified* - or let each phone **scan the other's QR code**, which checks the keys for you; their other devices are vouched for by their account.
 - Bluetooth links and hotspot logins sent over them are encrypted the same way. Only the discovery beacons (name, ID, port) are plain.
 
 **Audio and video files (optional player module)**
@@ -253,7 +253,7 @@ after receiving, so you know it arrived intact.
 
 ## Building
 
-Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, stb_image, Monocypher, KCP).
+Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, quirc, stb_image, Monocypher, KCP).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -275,7 +275,7 @@ cmake --build build --config Release
 - The modules (voice, video, player, emoji) build next to the executable. To ship them, put them next to `LunaShare.exe`
   or in a `modules/` folder, together with the FFmpeg libraries for the player and video modules. `./build/lunashare_voice_tests` checks the audio pipeline
   (packet loss, jitter, echo cancellation), and `./build/lunashare_video_tests` checks the video core (keyframe recovery after loss, bitrate adaptation on a slow link).
-- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`, `RNNOISE`.
+- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`, `RNNOISE`, `QUIRC`.
 
 The GitHub Actions workflow builds Windows, Linux, the Android APK and the OPNsense plugin (FreeBSD) on every push and
 uploads them as artifacts.
@@ -351,7 +351,7 @@ tests/           engine, voice, video and player tests
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
-QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
+QR Code generator (MIT), quirc (ISC), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
 and in the voice module Opus (BSD-3-Clause), SpeexDSP (BSD-3-Clause) and RNNoise (BSD-3-Clause).
 
 FFmpeg: the Windows and Android builds use LGPL builds; on Linux the bundled FFmpeg includes x264 and is therefore

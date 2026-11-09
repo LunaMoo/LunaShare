@@ -5,6 +5,7 @@
 #include "i18n.h"
 #include "imgui.h"
 #include "imgui_stdlib.h"
+#include "media_host.h"
 #include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
@@ -368,4 +369,86 @@ void App::DrawFolderSyncSettings(float h) {
         browseFor = BrowseFor::SyncFolder;
         browser.Open(FileBrowser::Mode::SelectDir, T("A folder to send to my devices"), eng.settings.downloadDir);
     }
+}
+
+// ---- verifying a contact by QR code (Device details > Verify with QR codes...): my code for them to scan, and the
+// camera to scan theirs. A match marks that device and every device of their account verified.
+void App::DrawVerifyQrPopup() {
+    if (verifyQrOpen) {
+        ImGui::OpenPopup("##verifyqr");
+        verifyQrOpen = false;
+    }
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (mobile) ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x * 0.94f, 0));
+    if (!ImGui::BeginPopupModal("##verifyqr", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (Media().Scanning()) Media().CloseScanner();  // (closed some other way)
+        return;
+    }
+    float side = mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 18;
+    std::string who = Emoji().Display(eng.PeerName(verifyQrPeer));
+    ImGui::TextUnformatted(TF("Verify %s", who.c_str()).c_str());
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + side);
+    // the two halves: my code / the camera
+    if (ImGui::RadioButton(T("My code"), !verifyQrScan) && verifyQrScan) {
+        verifyQrScan = false;
+        Media().CloseScanner();
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!Media().CanScan() && !Media().Scanning());
+    if (ImGui::RadioButton(T("Scan their code"), verifyQrScan) && !verifyQrScan) {
+        verifyQrScan = true;
+        verifyQrResult = 0;
+        Media().audioError.clear();
+        if (!Media().OpenScanner()) verifyQrMsg = Media().audioError.empty() ? T("camera could not be started") : Media().audioError;
+        else verifyQrMsg.clear();
+    }
+    ImGui::EndDisabled();
+    if (!verifyQrScan) {
+        ImGui::TextDisabled("%s", T("On their device: Devices, you, Verify with QR codes..., Scan their code - and point it here."));
+        ImGui::Spacing();
+        float s = std::min(side, ImGui::GetFontSize() * 16);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (side - s) * 0.5f);
+        ui::QrCode(eng.VerifyCode().c_str(), s);
+    } else {
+        if (Media().Scanning()) {
+            std::string code = Media().ScannedText();
+            if (!code.empty()) {
+                int r = eng.VerifyByCode(verifyQrPeer, code);
+                if (r == 0) {
+                    verifyQrResult = 2;  // (some other QR code: keep looking)
+                } else {
+                    verifyQrResult = r;
+                    Media().CloseScanner();
+                }
+            }
+        }
+        if (Media().Scanning()) {
+            ImGui::TextDisabled("%s", T("Point the camera at the code on their screen."));
+            ImVec2 p0 = ImGui::GetCursorScreenPos(), p1(p0.x + side, p0.y + side * 0.75f);
+            ImGui::Dummy(ImVec2(side, side * 0.75f));
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 255));
+            Media().UploadVideoNow();
+            if (Media().LocalVideo().valid) Media().DrawVideo(dl, Media().LocalVideo(), p0, p1, true);
+            if (verifyQrResult == 2) ImGui::TextDisabled("%s", T("That's not a LunaShare code."));
+        } else if (verifyQrResult == 1) {
+            ImGui::TextColored(ImVec4(0.35f, 0.8f, 0.45f, 1), "%s", TF("Verified: the keys are the same. %s is who LunaShare says.", who.c_str()).c_str());
+            ImGui::TextDisabled("%s", T("Now let them scan your code too."));
+        } else if (verifyQrResult == -1) {
+            ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.4f, 1), "%s",
+                               T("The keys are different! Either this is another person's code, or someone is in between. Not verified."));
+        } else if (!verifyQrMsg.empty()) {
+            ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.4f, 1), "%s", verifyQrMsg.c_str());
+        }
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button(T("Close"), ImVec2(mobile ? -1 : side, h))) {
+        Media().CloseScanner();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }

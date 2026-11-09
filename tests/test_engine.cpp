@@ -333,6 +333,14 @@ int main() {
     }
     A->SendChat(idB, u8"cześć Bob! zażółć gęślą jaźń");
     CHECK(WaitFor([&] { auto l = B->Lock(); return !B->chats[B->ChatKey(idA)].messages.empty(); }, 3000), "chat arrives");
+    {  // verifying by QR code (the scanned text)
+        CHECK(A->VerifyByCode(idB, "https://example.com") == 0, "verify: not a LunaShare code");
+        CHECK(A->VerifyByCode(idB, A->VerifyCode()) == -1, "verify: someone else's code doesn't match");
+        CHECK(!A->devices[idB].verified, "verify: still not verified");
+        CHECK(A->VerifyByCode(idB, B->VerifyCode()) == 1, "verify: bob's code matches");
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->devices[idB].verified; }, 10), "verify: bob verified");
+        A->SetVerified(idB, false);
+    }
     CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[A->ChatKey(idB)].messages.back().delivered; }, 3000), "chat delivered ack");
     {
         auto lk = B->Lock();

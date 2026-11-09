@@ -329,7 +329,9 @@ if(LUNASHARE_BUILD_APP)
     FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG v1.93.0 GIT_SHALLOW TRUE)
     FetchContent_Declare(qrcodegen GIT_REPOSITORY https://github.com/nayuki/QR-Code-generator.git GIT_TAG v1.8.0 GIT_SHALLOW TRUE)
     FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git GIT_TAG 003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5)
-    FetchContent_MakeAvailable(imgui qrcodegen stb)
+    # quirc (ISC): reads QR codes from camera pictures (verifying a contact by scanning their code)
+    FetchContent_Declare(quirc GIT_REPOSITORY https://github.com/dlbeer/quirc.git GIT_TAG v1.2 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+    FetchContent_MakeAvailable(imgui qrcodegen stb quirc)
     if(ANDROID OR IOS)
         set(LUNASHARE_GL_API "GLES3")
     endif()
@@ -386,6 +388,7 @@ if(LUNASHARE_BUILD_APP)
         ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
         ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
         ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
+        ${quirc_SOURCE_DIR}/lib/quirc.c ${quirc_SOURCE_DIR}/lib/decode.c ${quirc_SOURCE_DIR}/lib/identify.c ${quirc_SOURCE_DIR}/lib/version_db.c
     )
 
     if(ANDROID)
@@ -412,7 +415,7 @@ if(LUNASHARE_BUILD_APP)
 
     target_compile_definitions(${APP_TARGET} PRIVATE IMGUI_USE_WCHAR32)  # emoji and other characters beyond U+FFFF
     target_include_directories(${APP_TARGET} PRIVATE src/app src/media_api ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends
-        ${imgui_SOURCE_DIR}/misc/cpp ${qrcodegen_SOURCE_DIR}/cpp ${stb_SOURCE_DIR})
+        ${imgui_SOURCE_DIR}/misc/cpp ${qrcodegen_SOURCE_DIR}/cpp ${stb_SOURCE_DIR} ${quirc_SOURCE_DIR}/lib)
     if(LUNASHARE_GL_API STREQUAL "GLES3")
         target_compile_definitions(${APP_TARGET} PRIVATE IMGUI_IMPL_OPENGL_ES3)
     elseif(LUNASHARE_GL_API STREQUAL "GLES2")

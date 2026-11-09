@@ -17,6 +17,13 @@ Contacts trust the **account**: a new device of someone you know (valid certific
 without a new "safety number" warning, and verifying one of their devices verifies the person. The safety number shown
 for a person is computed from the two **account** keys.
 
+**Verifying with QR codes** (*Devices → the person → Verify with QR codes...*): instead of reading 30 digits, one
+device shows its code - `LSV1:<account key>:<device key>` (hex) - and the other scans it with its camera (the back
+camera on phones; QR decoding by quirc). The scanning side compares both keys with the ones it holds for that person:
+the same → that device and every device of their account are marked verified; different → a warning, nothing is
+marked. It proves their keys to you only, so both sides scan each other's code. (Desktops without a camera can show
+their code for a phone to scan.)
+
 ## Conversations
 
 A conversation's key is `@` + the person's account key. Messages to a person go to **each** of their devices
