@@ -285,6 +285,9 @@ public:
     void SendChat(const std::string& peer, const std::string& text, const std::string& replyTo = "",
                   const std::vector<std::string>& mentions = {}, bool forwarded = false);  // mentions: groups, the @named people (account keys)
     void PinMessage(const std::string& peer, const std::string& mid, bool on);   // for everyone in the chat
+    void SendPoll(const std::string& peer, const std::string& question, const std::vector<std::string>& answers, bool several);
+    void Vote(const std::string& peer, const std::string& mid, const std::vector<int>& answers);  // [] takes my answer back
+    std::string MyVoterKey();  // how my votes are kept ("@account")
     void StarMessage(const std::string& peer, const std::string& mid, bool on);  // only for me
     bool EditMessage(const std::string& peer, const std::string& mid, const std::string& text);  // my own text messages
     // Paths may be files or folders. Returns batch id (0 if nothing was queued).
@@ -548,6 +551,8 @@ public:
 
     // helpers usable under Lock()
     std::shared_ptr<Connection> ReadyConn(const std::string& peer);
+    void SendChatPoll(const std::string& peer, const std::string& text, const std::string& replyTo, const std::vector<std::string>& mentions,
+                      bool forwarded, const nlohmann::json& poll);
     std::map<std::string, nlohmann::json> syncOut_;                         // kind -> mine (as last pushed)
     std::deque<std::pair<std::string, nlohmann::json>> syncIn_;            // theirs, for the app
     bool IsConnected(const std::string& peer) { return (bool)ReadyConn(peer); }

@@ -1705,6 +1705,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.replyText = j.value("ret", "").substr(0, 400);
                 m.edited = j.value("edited", (int64_t)0);
                 m.forwarded = j.value("fwd", false);
+                if (j.contains("poll")) PollFromJson(j["poll"], m);
                 m.delivered = true;
                 m.readSent = false;
                 bool me = false;
@@ -1765,6 +1766,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.replyText = j.value("ret", "").substr(0, 400);
                 m.edited = j.value("edited", (int64_t)0);
                 m.forwarded = j.value("fwd", false);
+                if (j.contains("poll")) PollFromJson(j["poll"], m);
                 for (auto& x : j.value("men", json::array()))
                     if (x.is_string() && m.mentions.size() < 64) m.mentions.push_back(x.get<std::string>());
                 m.delivered = true;
@@ -1884,6 +1886,32 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 }
             }
             Queue(c, Msg::ChatDeleteAck, KeyField(key, {{"mids", mids}}));
+            break;
+        }
+        case Msg::ChatVote: {
+            std::string mid = j.value("mid", "");
+            int64_t ts = j.value("ts", (int64_t)0);
+            auto dv = devices.find(c->peerId);
+            bool mine = dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount();
+            std::string key = mine && j.contains("chat") ? j.value("chat", "") : FrameKey(c, j);
+            std::string who = mine ? MyVoterKey() : ChatKey(c->peerId);
+            auto it = chats.find(key);
+            if (it == chats.end() || mid.empty()) break;
+            for (auto& m : it->second.messages)
+                if (m.mid == mid && !m.pollQ.empty()) {
+                    auto& v = m.votes[who];
+                    if (ts > v.ts && ts <= NowMs() + 86400000LL) {
+                        v.opts.clear();
+                        for (auto& o : j.value("o", json::array()))
+                            if (o.is_number_integer() && o.get<int>() >= 0 && o.get<int>() < (int)m.pollOpts.size() && v.opts.size() < 12)
+                                v.opts.push_back(o.get<int>());
+                        if (!m.pollMulti && v.opts.size() > 1) v.opts.resize(1);
+                        v.ts = ts;
+                        Emit({EventType::Info, key, ""});
+                        MarkDirty();
+                    }
+                    break;
+                }
             break;
         }
         case Msg::ChatPin: {
@@ -2454,6 +2482,8 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
             if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}});
             if (m.pinTs) Queue(c, Msg::ChatPin, {{"mid", m.mid}, {"on", m.pinned}, {"ts", m.pinTs}});  // (whoever missed it; the later wins)
+            if (auto v = m.votes.find(MyVoterKey()); v != m.votes.end() && !m.pollQ.empty())
+                Queue(c, Msg::ChatVote, {{"mid", m.mid}, {"o", v->second.opts}, {"ts", v->second.ts}});
         }
     }
     {  // my own device: the pins of every chat
@@ -2499,6 +2529,8 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
                 if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}, {"gid", gid}});
                 if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}, {"gid", gid}});
                 if (m.pinTs) Queue(c, Msg::ChatPin, {{"mid", m.mid}, {"on", m.pinned}, {"ts", m.pinTs}, {"gid", gid}});
+                if (auto v = m.votes.find(MyVoterKey()); v != m.votes.end() && !m.pollQ.empty())
+                    Queue(c, Msg::ChatVote, {{"mid", m.mid}, {"o", v->second.opts}, {"ts", v->second.ts}, {"gid", gid}});
             }
         }
     }
@@ -2973,6 +3005,11 @@ void Engine::StartBtServer() {
 
 void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo, const std::vector<std::string>& mentions,
                       bool forwarded) {
+    SendChatPoll(peerArg, text, replyTo, mentions, forwarded, json());
+}
+
+void Engine::SendChatPoll(const std::string& peerArg, const std::string& text, const std::string& replyTo,
+                          const std::vector<std::string>& mentions, bool forwarded, const json& poll) {
     if (text.empty()) return;
     auto lk = Lock();
     const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
@@ -2982,6 +3019,7 @@ void Engine::SendChat(const std::string& peerArg, const std::string& text, const
     m.ts = NowMs();
     m.text = text;
     m.forwarded = forwarded;
+    if (poll.is_object()) PollFromJson(poll, m);
     if (IsGroupKey(peerArg))
         for (auto& a : mentions)
             if (m.mentions.size() < 64) m.mentions.push_back(a);
@@ -3024,6 +3062,7 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
     }
     if (!m.mentions.empty()) j["men"] = m.mentions;
     if (m.forwarded) j["fwd"] = true;
+    if (!m.pollQ.empty()) j["poll"] = {{"q", m.pollQ}, {"o", m.pollOpts}, {"m", m.pollMulti}};
     if (m.edited) j["edited"] = m.edited;
     if (auto c = ReadyConn(device)) {
         Queue(c, type, j);
@@ -3076,7 +3115,7 @@ bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
     switch (type) {
         case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
         case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: case Msg::GroupInfo: break;
-        case Msg::ChatEdit: case Msg::ChatEditAck: case Msg::ChatPin: break;
+        case Msg::ChatEdit: case Msg::ChatEditAck: case Msg::ChatPin: case Msg::ChatVote: break;
         case Msg::CallInvite: case Msg::CallEnd: break;  // (group calls; a call with one person needs a connection)
         default: return true;  // nothing else travels by mail
     }
@@ -3485,6 +3524,35 @@ void Engine::DeleteMessages(const std::string& peerArg, const std::vector<std::s
         for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, KeyField(peer, {{"mids", remote}}));
     }
     MarkDirty();
+}
+
+std::string Engine::MyVoterKey() { return MyAccount().empty() ? settings.deviceId : "@" + MyAccount(); }
+
+void Engine::SendPoll(const std::string& peerArg, const std::string& question, const std::vector<std::string>& answers, bool several) {
+    // older versions see it as text
+    std::string text = "\xF0\x9F\x93\x8A " + question;  // (a chart emoji)
+    for (size_t i = 0; i < answers.size(); i++) text += "\n" + std::to_string(i + 1) + ". " + answers[i];
+    SendChatPoll(peerArg, text, "", {}, false, {{"q", question}, {"o", answers}, {"m", several}});
+}
+
+void Engine::Vote(const std::string& peerArg, const std::string& mid, const std::vector<int>& answers) {
+    auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) || IsGroupKey(peerArg) ? peerArg : ChatKey(peerArg);
+    auto it = chats.find(peer);
+    if (it == chats.end()) return;
+    for (auto& m : it->second.messages)
+        if (m.mid == mid && !m.pollQ.empty()) {
+            auto& v = m.votes[MyVoterKey()];
+            v.opts.clear();
+            for (int a : answers)
+                if (a >= 0 && a < (int)m.pollOpts.size() && std::find(v.opts.begin(), v.opts.end(), a) == v.opts.end()) v.opts.push_back(a);
+            if (!m.pollMulti && v.opts.size() > 1) v.opts.resize(1);
+            v.ts = std::max(NowMs(), v.ts + 1);
+            for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatVote, KeyField(peer, {{"mid", mid}, {"o", v.opts}, {"ts", v.ts}}));
+            for (auto& d : MyOtherDevices()) QueueToPeer(d, Msg::ChatVote, {{"chat", peer}, {"mid", mid}, {"o", v.opts}, {"ts", v.ts}});
+            MarkDirty();
+            return;
+        }
 }
 
 void Engine::PinMessage(const std::string& peerArg, const std::string& mid, bool on) {

@@ -295,6 +295,12 @@ json ToJson(const ChatMessage& m) {
         j["pinTs"] = m.pinTs;
     }
     if (m.starred) j["star"] = true;
+    if (!m.pollQ.empty()) {
+        j["poll"] = {{"q", m.pollQ}, {"o", m.pollOpts}, {"m", m.pollMulti}};
+        json v = json::object();
+        for (auto& [who, x] : m.votes) v[who] = {{"o", x.opts}, {"ts", x.ts}};
+        j["votes"] = v;
+    }
     if (!m.replyTo.empty()) {
         j["re"] = m.replyTo;
         j["ret"] = m.replyText;
@@ -302,6 +308,18 @@ json ToJson(const ChatMessage& m) {
     if (m.edited) j["edited"] = m.edited;
     if (m.editPending) j["editPending"] = true;
     return j;
+}
+
+void PollFromJson(const json& p, ChatMessage& m) {
+    if (!p.is_object()) return;
+    std::string q = p.value("q", "");
+    std::vector<std::string> o;
+    for (auto& x : p.value("o", json::array()))
+        if (x.is_string() && o.size() < 12) o.push_back(x.get<std::string>().substr(0, 200));
+    if (q.empty() || o.size() < 2) return;
+    m.pollQ = q.substr(0, 500);
+    m.pollOpts = o;
+    m.pollMulti = p.value("m", false);
 }
 
 ChatMessage MessageFromJson(const json& j) {
@@ -333,6 +351,16 @@ ChatMessage MessageFromJson(const json& j) {
     Get(j, "pin", m.pinned);
     Get(j, "pinTs", m.pinTs);
     Get(j, "star", m.starred);
+    if (j.contains("poll")) PollFromJson(j["poll"], m);
+    if (j.contains("votes") && j["votes"].is_object())
+        for (auto& [who, x] : j["votes"].items()) {
+            if (!x.is_object() || m.votes.size() > 2000) continue;
+            ChatMessage::Vote v;
+            v.ts = x.value("ts", (int64_t)0);
+            for (auto& o : x.value("o", json::array()))
+                if (o.is_number_integer()) v.opts.push_back(o.get<int>());
+            m.votes[who] = v;
+        }
     for (auto& x : j.value("men", json::array()))
         if (x.is_string() && m.mentions.size() < 64) m.mentions.push_back(x.get<std::string>());
     Get(j, "ret", m.replyText);

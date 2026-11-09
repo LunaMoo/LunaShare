@@ -665,6 +665,30 @@ int main() {
             auto l = B->Lock();
             CHECK(!B->chats[gk].mentioned, "read: no more @");
         }
+        // a poll: everyone sees everyone's answers
+        A->SendPoll(gk, "Sunday lunch?", {"12:00", "14:00", "16:00"}, false);
+        std::string pm;
+        CHECK(WaitFor([&] {
+            auto l = B->Lock();
+            auto& m = B->chats[gk].messages.back();
+            pm = m.mid;
+            return m.pollQ == "Sunday lunch?" && m.pollOpts.size() == 3;
+        }, 3000), "the poll arrives");
+        B->Vote(gk, pm, {1});
+        C->Vote(gk, pm, {1, 2});  // (one answer only: the first counts)
+        auto votesOn = [&](Engine& e, const std::string& who, int want) {
+            auto l = e.Lock();
+            for (auto& m : e.chats[gk].messages)
+                if (m.mid == pm) {
+                    auto v = m.votes.find(who);
+                    return v != m.votes.end() && v->second.opts.size() == 1 && v->second.opts[0] == want;
+                }
+            return false;
+        };
+        CHECK(WaitFor([&] { return votesOn(*A, "@" + B->MyAccount(), 1) && votesOn(*A, "@" + C->MyAccount(), 1); }, 3000), "answers reach the asker");
+        CHECK(WaitFor([&] { return votesOn(*C, "@" + B->MyAccount(), 1); }, 5000), "and the others");
+        B->Vote(gk, pm, {0});
+        CHECK(WaitFor([&] { return votesOn(*A, "@" + B->MyAccount(), 0); }, 3000), "a changed answer");
         // ---- group call (directly between the devices)
         printf("[group calls: directly]\n");
         {

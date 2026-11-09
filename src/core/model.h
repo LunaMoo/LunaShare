@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -200,6 +201,15 @@ struct ChatMessage {
     bool pinned = false;                    // pinned in its chat (for everyone in it)
     int64_t pinTs = 0;                      // when it was (un)pinned - the later change wins
     bool starred = false;                   // kept in "Starred messages" (only for me)
+    // a poll (the text then lists it too, for older versions): the question, the answers, one or several
+    std::string pollQ;
+    std::vector<std::string> pollOpts;
+    bool pollMulti = false;
+    struct Vote {
+        std::vector<int> opts;
+        int64_t ts = 0;
+    };
+    std::map<std::string, Vote> votes;  // who (a chat key: "@account", or me) -> their answers
 };
 
 struct Conversation {
@@ -281,6 +291,7 @@ json ToJson(const KnownDevice& d);
 KnownDevice DeviceFromJson(const json& j);
 json ToJson(const ChatMessage& m);
 ChatMessage MessageFromJson(const json& j);
+void PollFromJson(const json& p, ChatMessage& m);  // {q, o: [...], m} (checked: sizes, at least 2 answers)
 json ToJson(const Transfer& t);
 void TransferFromJson(const json& j, Transfer& t);
 json ToJson(const HistoryEntry& h);
