@@ -285,6 +285,12 @@ public:
     void SendChat(const std::string& peer, const std::string& text, const std::string& replyTo = "",
                   const std::vector<std::string>& mentions = {}, bool forwarded = false);  // mentions: groups, the @named people (account keys)
     void PinMessage(const std::string& peer, const std::string& mid, bool on);   // for everyone in the chat
+    // disappearing messages: new text messages in the chat go away after this (for everyone; 0 = off)
+    void SetChatTtl(const std::string& peer, int seconds);
+    static int TtlChoice(int seconds);  // (one of: off, 1 hour, 1 day, 1 week)
+    void ExpireMessages();
+    int64_t lastExpire_ = 0;
+    void ApplyChatTtl(const std::string& key, int ttl, int64_t ts);
     void SendPoll(const std::string& peer, const std::string& question, const std::vector<std::string>& answers, bool several);
     void Vote(const std::string& peer, const std::string& mid, const std::vector<int>& answers);  // [] takes my answer back
     std::string MyVoterKey();  // how my votes are kept ("@account")

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Chat: **disappearing messages** (*Chat history > Messages disappear*: after 1 hour / 1 day / 1 week) - for
+  everyone in the chat; new text messages are removed on every device when their time is up.
+
 - Groups: **polls** - the chart button next to the typing field (while it's empty): a question, 2 - 12 answers, one
   or several allowed. Everyone sees how many chose what (and who - hover, or *Who?* on phones); a tap changes your
   answer. Older versions see the poll as text.

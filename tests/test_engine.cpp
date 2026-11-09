@@ -407,6 +407,32 @@ int main() {
         CHECK(WaitFor([&] { return pinnedOn(*A, A->ChatKey(idB), false); }, 3000), "unpinned by the other side");
     }
 
+    // disappearing messages: set on one side, both follow; messages go away when their time is up
+    {
+        A->SetChatTtl(idB, 3600);
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->chats[B->ChatKey(idA)].ttl == 3600; }, 3000), "both sides disappear after an hour");
+        A->SendChat(idB, "self-destruct");
+        CHECK(WaitFor([&] {
+            auto l = B->Lock();
+            auto& m = B->chats[B->ChatKey(idA)].messages.back();
+            return m.text == "self-destruct" && m.expires > NowMs() + 3500 * 1000LL && m.expires < NowMs() + 3700 * 1000LL;
+        }, 3000), "it carries its time");
+        {
+            auto l = B->Lock();
+            B->chats[B->ChatKey(idA)].messages.back().expires = NowMs() - 1;  // (an hour later)
+            B->ExpireMessages();
+            CHECK(B->chats[B->ChatKey(idA)].messages.back().text != "self-destruct", "and goes away");
+        }
+        {
+            auto l = A->Lock();
+            for (auto& m : A->chats[A->ChatKey(idB)].messages)
+                if (m.text == "self-destruct") m.expires = NowMs() - 1;
+            A->ExpireMessages();
+        }
+        B->SetChatTtl(idA, 0);
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[A->ChatKey(idB)].ttl == 0; }, 3000), "turned off by the other side");
+    }
+
     // ------------------------------------------------------------ silent chats
     printf("[silent chats]\n");
     {

@@ -61,6 +61,7 @@ enum class Msg : uint8_t {
     ChatEdit = 102,     // {mid, text, ts[, gid] | chat (my other devices)}  a message changed by who wrote it
     ChatEditAck = 103,  // {mid[, gid]}
     SyncData = 104,     // my own devices: {kind, data} - playlists / settings, merged by the app
+    ChatTtl = 107,      // {ttl (s), ts[, gid | chat]} - disappearing messages in that chat; the later change wins
     ChatVote = 106,     // {mid, o: [answers], ts[, gid | chat]} - my answers to a poll; the later change wins
     ChatPin = 105,      // {mid, on, ts[, gid | chat]} - a message (un)pinned in its chat; the later change wins
     HistoryAsk = 100,   // {chat[, gid]}                                   -> the other side (or my other devices)

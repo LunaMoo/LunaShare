@@ -210,6 +210,7 @@ struct ChatMessage {
         int64_t ts = 0;
     };
     std::map<std::string, Vote> votes;  // who (a chat key: "@account", or me) -> their answers
+    int64_t expires = 0;                // disappearing: removed after this (ms, this device's clock)
 };
 
 struct Conversation {
@@ -219,6 +220,8 @@ struct Conversation {
     std::vector<std::string> pendingDeletes;  // "delete for everyone" not yet confirmed by the other device
     bool readPending = false;                 // incoming messages whose read receipt wasn't sent yet
     bool mentioned = false;                   // an unread message @names me (until read)
+    int ttl = 0;                              // disappearing messages: seconds (0 = off), the same for everyone in it
+    int64_t ttlTs = 0;                        // (when it was set - the later change wins)
 };
 
 enum class TState : int {

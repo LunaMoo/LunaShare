@@ -213,6 +213,13 @@ void Engine::Load() {
                 cv.peer = peer;
                 for (auto& m : arr) cv.messages.push_back(MessageFromJson(m));
             }
+        if (j.contains("ttl") && j["ttl"].is_object())
+            for (auto& [peer, v] : j["ttl"].items())
+                if (v.is_array() && v.size() == 2 && v[0].is_number_integer() && v[1].is_number_integer()) {
+                    chats[peer].peer = peer;
+                    chats[peer].ttl = TtlChoice(v[0].get<int>());
+                    chats[peer].ttlTs = v[1].get<int64_t>();
+                }
         if (j.contains("pendingDeletes") && j["pendingDeletes"].is_object())
             for (auto& [peer, arr] : j["pendingDeletes"].items())
                 for (auto& mid : arr)
@@ -277,6 +284,9 @@ void Engine::Save() {
                 jh["chats"][peer] = arr;
             }
         }
+        jh["ttl"] = json::object();
+        for (auto& [peer, cv] : chats)
+            if (cv.ttlTs) jh["ttl"][peer] = {cv.ttl, cv.ttlTs};
         jh["pendingDeletes"] = json::object();
         for (auto& [peer, cv] : chats)
             if (!cv.pendingDeletes.empty()) jh["pendingDeletes"][peer] = cv.pendingDeletes;
@@ -1706,6 +1716,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.edited = j.value("edited", (int64_t)0);
                 m.forwarded = j.value("fwd", false);
                 if (j.contains("poll")) PollFromJson(j["poll"], m);
+                if (int64_t t = j.value("ttl", (int64_t)0); t > 0) m.expires = NowMs() + std::min<int64_t>(t, 30LL * 86400) * 1000;
                 m.delivered = true;
                 m.readSent = false;
                 bool me = false;
@@ -1767,6 +1778,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.edited = j.value("edited", (int64_t)0);
                 m.forwarded = j.value("fwd", false);
                 if (j.contains("poll")) PollFromJson(j["poll"], m);
+                if (int64_t t = j.value("ttl", (int64_t)0); t > 0) m.expires = NowMs() + std::min<int64_t>(t, 30LL * 86400) * 1000;
                 for (auto& x : j.value("men", json::array()))
                     if (x.is_string() && m.mentions.size() < 64) m.mentions.push_back(x.get<std::string>());
                 m.delivered = true;
@@ -1886,6 +1898,16 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 }
             }
             Queue(c, Msg::ChatDeleteAck, KeyField(key, {{"mids", mids}}));
+            break;
+        }
+        case Msg::ChatTtl: {
+            auto dv = devices.find(c->peerId);
+            bool mine = dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount();
+            std::string key = mine && j.contains("chat") ? j.value("chat", "") : FrameKey(c, j);
+            int64_t ts = j.value("ts", (int64_t)0);
+            if (key.empty() || ts > NowMs() + 86400000LL) break;
+            if (IsGroupKey(key) && !GroupOf(key)) break;
+            ApplyChatTtl(key, j.value("ttl", 0), ts);
             break;
         }
         case Msg::ChatVote: {
@@ -2478,6 +2500,7 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             if (m.outgoing && !m.delivered && m.kind == MsgKind::Text && m.pendingTo.empty())  // (from older versions)
                 Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
+        if (it->second.ttlTs) Queue(c, Msg::ChatTtl, {{"ttl", it->second.ttl}, {"ts", it->second.ttlTs}});
         for (auto& m : it->second.messages) {
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
             if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}});
@@ -2492,6 +2515,9 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             for (auto& [key, cv] : chats)
                 for (auto& m : cv.messages)
                     if (m.pinTs) Queue(c, Msg::ChatPin, {{"chat", key}, {"mid", m.mid}, {"on", m.pinned}, {"ts", m.pinTs}});
+            for (auto& [key, cv] : chats)
+                if (cv.ttlTs && dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount())
+                    Queue(c, Msg::ChatTtl, {{"chat", key}, {"ttl", cv.ttl}, {"ts", cv.ttlTs}});
     }
     // watching together: someone of that conversation (or one of my devices) came online - they're invited too
     if (watch.sid && watch.host.empty() && watch.libId.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), peer) == watchViewers_.end()) {
@@ -2525,6 +2551,7 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             auto gc = chats.find("#" + gid);
             if (gc == chats.end() || g.left) continue;
             if (!gc->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", gc->second.pendingDeletes}, {"gid", gid}});
+            if (gc->second.ttlTs) Queue(c, Msg::ChatTtl, {{"ttl", gc->second.ttl}, {"ts", gc->second.ttlTs}, {"gid", gid}});
             for (auto& m : gc->second.messages) {
                 if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}, {"gid", gid}});
                 if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}, {"gid", gid}});
@@ -2913,6 +2940,10 @@ void Engine::MaintenanceLoop() {
         {
             auto lk = Lock();
             SwarmTick();  // shared-library downloads: ask for pieces
+            if (now - lastExpire_ > 5000) {  // disappearing messages whose time is up
+                lastExpire_ = now;
+                ExpireMessages();
+            }
             if (now - lastMailScan_ > 20000) {  // messages for offline devices: into the server mailbox
                 lastMailScan_ = now;
                 MailPending();
@@ -3020,6 +3051,7 @@ void Engine::SendChatPoll(const std::string& peerArg, const std::string& text, c
     m.text = text;
     m.forwarded = forwarded;
     if (poll.is_object()) PollFromJson(poll, m);
+    if (auto cvi = chats.find(peer); cvi != chats.end() && cvi->second.ttl > 0) m.expires = m.ts + (int64_t)cvi->second.ttl * 1000;
     if (IsGroupKey(peerArg))
         for (auto& a : mentions)
             if (m.mentions.size() < 64) m.mentions.push_back(a);
@@ -3063,6 +3095,7 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
     if (!m.mentions.empty()) j["men"] = m.mentions;
     if (m.forwarded) j["fwd"] = true;
     if (!m.pollQ.empty()) j["poll"] = {{"q", m.pollQ}, {"o", m.pollOpts}, {"m", m.pollMulti}};
+    if (m.expires) j["ttl"] = std::max<int64_t>(1, (m.expires - NowMs()) / 1000);  // (what's left: their clock may differ)
     if (m.edited) j["edited"] = m.edited;
     if (auto c = ReadyConn(device)) {
         Queue(c, type, j);
@@ -3115,7 +3148,7 @@ bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
     switch (type) {
         case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
         case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: case Msg::GroupInfo: break;
-        case Msg::ChatEdit: case Msg::ChatEditAck: case Msg::ChatPin: case Msg::ChatVote: break;
+        case Msg::ChatEdit: case Msg::ChatEditAck: case Msg::ChatPin: case Msg::ChatVote: case Msg::ChatTtl: break;
         case Msg::CallInvite: case Msg::CallEnd: break;  // (group calls; a call with one person needs a connection)
         default: return true;  // nothing else travels by mail
     }
@@ -3524,6 +3557,61 @@ void Engine::DeleteMessages(const std::string& peerArg, const std::vector<std::s
         for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, KeyField(peer, {{"mids", remote}}));
     }
     MarkDirty();
+}
+
+int Engine::TtlChoice(int s) {
+    if (s <= 0) return 0;
+    if (s <= 3600) return 3600;
+    if (s <= 86400) return 86400;
+    return 604800;
+}
+
+static const char* TtlText(int s) {
+    return s == 0 ? "Disappearing messages: off" : s == 3600 ? "Disappearing messages: 1 hour" : s == 86400 ? "Disappearing messages: 1 day"
+                                                                                                          : "Disappearing messages: 1 week";
+}
+
+void Engine::ApplyChatTtl(const std::string& key, int ttl, int64_t ts) {
+    Conversation& cv = chats[key];
+    cv.peer = key;
+    if (ts <= cv.ttlTs) return;
+    bool changed = TtlChoice(ttl) != cv.ttl;
+    cv.ttl = TtlChoice(ttl);
+    cv.ttlTs = ts;
+    if (changed) {
+        ChatMessage s;
+        s.mid = RandomHex(8);
+        s.kind = MsgKind::System;
+        s.ts = NowMs();
+        s.text = TtlText(cv.ttl);
+        s.delivered = true;
+        cv.messages.push_back(s);
+        Emit({EventType::Info, key, ""});
+    }
+    MarkDirty();
+}
+
+void Engine::SetChatTtl(const std::string& peerArg, int seconds) {
+    auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) || IsGroupKey(peerArg) ? peerArg : ChatKey(peerArg);
+    int ttl = TtlChoice(seconds);
+    int64_t ts = std::max(NowMs(), chats[peer].ttlTs + 1);
+    ApplyChatTtl(peer, ttl, ts);
+    for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatTtl, KeyField(peer, {{"ttl", ttl}, {"ts", ts}}));
+    for (auto& d : MyOtherDevices()) QueueToPeer(d, Msg::ChatTtl, {{"chat", peer}, {"ttl", ttl}, {"ts", ts}});
+}
+
+void Engine::ExpireMessages() {
+    int64_t now = NowMs();
+    for (auto& [key, cv] : chats) {
+        size_t n = cv.messages.size();
+        cv.messages.erase(std::remove_if(cv.messages.begin(), cv.messages.end(), [&](const ChatMessage& m) { return m.expires && m.expires <= now; }),
+                          cv.messages.end());
+        if (cv.messages.size() != n) {
+            Emit({EventType::Info, key, ""});
+            MarkDirty();
+        }
+    }
 }
 
 std::string Engine::MyVoterKey() { return MyAccount().empty() ? settings.deviceId : "@" + MyAccount(); }

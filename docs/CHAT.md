@@ -5,6 +5,14 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Disappearing messages
+
+*Chat history > Messages disappear*: never, after 1 hour, 1 day or 1 week. It's the same for everyone in the chat
+(whoever changes it last wins; the chat says who set what, and the header shows a *disappear* badge). New text
+messages carry how long they have left (`ttl`, seconds) and each device removes them when that's up (checked every
+few seconds, also from the saved history). Files that came are left where they were saved. It doesn't stop
+anyone copying or photographing a message before it goes. (Message type 107 `ChatTtl` `{ttl, ts}`.)
+
 ## Pinned and starred
 
 *Pin in this chat* (a message's menu) pins it for everyone in the chat: a bar under the chat's name shows it, a

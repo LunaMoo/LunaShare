@@ -202,6 +202,27 @@ void App::DrawChatHistoryPopup() {
         starredOpen = true;
         ImGui::CloseCurrentPopup();
     }
+    {  // disappearing messages: the same for everyone in the chat
+        auto cvi = eng.chats.find(histPeer);
+        int cur = cvi == eng.chats.end() ? 0 : cvi->second.ttl;
+        const int opts[] = {0, 3600, 86400, 604800};
+        const char* names[] = {T("never"), T("after 1 hour"), T("after 1 day"), T("after 1 week")};
+        int sel = 0;
+        for (int i = 0; i < 4; i++)
+            if (opts[i] == cur) sel = i;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(T("Messages disappear"));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 9);
+        if (ImGui::BeginCombo("##ttl", names[sel])) {
+            for (int i = 0; i < 4; i++)
+                if (ImGui::Selectable(names[i], i == sel, 0, ImVec2(0, h))) eng.SetChatTtl(histPeer, opts[i]);
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ui::HelpMarker(T("For everyone in this chat: new text messages are removed after that time on every device (also yours). "
+                         "Files that came stay where they were saved. Someone can still copy or photograph a message before it goes."));
+    }
     auto it = eng.chats.find(histPeer);
     int count = it == eng.chats.end() ? 0 : (int)it->second.messages.size();
 

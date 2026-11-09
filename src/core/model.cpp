@@ -295,6 +295,7 @@ json ToJson(const ChatMessage& m) {
         j["pinTs"] = m.pinTs;
     }
     if (m.starred) j["star"] = true;
+    if (m.expires) j["exp"] = m.expires;
     if (!m.pollQ.empty()) {
         j["poll"] = {{"q", m.pollQ}, {"o", m.pollOpts}, {"m", m.pollMulti}};
         json v = json::object();
@@ -351,6 +352,7 @@ ChatMessage MessageFromJson(const json& j) {
     Get(j, "pin", m.pinned);
     Get(j, "pinTs", m.pinTs);
     Get(j, "star", m.starred);
+    Get(j, "exp", m.expires);
     if (j.contains("poll")) PollFromJson(j["poll"], m);
     if (j.contains("votes") && j["votes"].is_object())
         for (auto& [who, x] : j["votes"].items()) {

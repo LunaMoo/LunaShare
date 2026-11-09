@@ -1184,6 +1184,11 @@ void App::DrawChat(const std::string& peer) {
     else if (eng.IsOnline(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
     else if (eng.WanStatus().rfind("connected", 0) == 0) ImGui::TextDisabled("%s", T("offline - messages wait on your server, files are queued"));
     else ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
+    if (auto cvt = eng.chats.find(peer); cvt != eng.chats.end() && cvt->second.ttl > 0) {  // disappearing
+        ImGui::SameLine();
+        int t = cvt->second.ttl;
+        ui::Badge(t == 3600 ? T("disappear: 1 hour") : t == 86400 ? T("disappear: 1 day") : T("disappear: 1 week"), ui::ColWarn());
+    }
     if (grp) {
     } else if (d && !d->pendingKey.empty()) {
         ImGui::SameLine();
