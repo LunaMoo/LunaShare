@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSP_API_VERSION 5
+#define LSP_API_VERSION 6
 
 #if defined(_WIN32)
 #define LSP_EXPORT __declspec(dllexport)
@@ -47,6 +47,11 @@ typedef struct LspInfo {
 } LspInfo;
 
 enum { LSP_PLAYING = 0, LSP_PAUSED = 1, LSP_ENDED = 2, LSP_ERROR = 3 };
+
+typedef struct LspChapter {
+    double start;     /* seconds */
+    char title[96];   /* "" when it has none */
+} LspChapter;
 
 typedef struct LspPlayer LspPlayer;
 
@@ -124,6 +129,8 @@ typedef struct LspModule {
        (positive: the subtitles come later) */
     void (*set_speed)(LspPlayer* p, double speed);
     void (*set_sub_delay)(LspPlayer* p, double seconds);
+    /* --- since version 6: the chapters of a film (MKV / MP4 / ...), in order; returns how many */
+    int (*chapters)(LspPlayer* p, LspChapter* out, int max);
 } LspModule;
 
 typedef const LspModule* (*LspGetModuleFn)(void);

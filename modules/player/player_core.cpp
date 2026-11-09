@@ -358,6 +358,7 @@ struct LspPlayer {
     bool clockRunning = false;
     // tracks and subtitles
     std::vector<lsp::TrackInfo> tracks;              // the file's own (from the source)
+    std::vector<std::pair<double, std::string>> chapters;  // (start s, title)
     std::vector<std::pair<lsp::TrackInfo, std::vector<lsp::SubEvent>>> external;  // subtitle files, ids from 1000
     std::vector<lsp::SubEvent> subs;                 // decoded from the file (the selected subtitle track)
     int audioId = -1, subId = -1;
@@ -633,6 +634,7 @@ int ApiProbe(const char* path, LspInfo* info, LspImageFn thumb, void* user) {
 
 void InitTracks(LspPlayer* p) {
     p->tracks = p->src->Tracks();
+    p->chapters = p->src->Chapters();
     for (auto& t : p->tracks)
         if (t.kind == LSP_TRACK_AUDIO && t.selected) p->audioId = t.id;
 }
@@ -793,6 +795,19 @@ static void CopyStr(char* dst, size_t n, const std::string& s) {
     snprintf(dst, n, "%s", s.c_str());
 }
 
+int ApiChapters(LspPlayer* p, LspChapter* out, int max) {
+    if (!p) return 0;
+    std::lock_guard<std::mutex> l(p->m);
+    int n = 0;
+    for (auto& [start, title] : p->chapters) {
+        if (n >= max) break;
+        out[n].start = start;
+        snprintf(out[n].title, sizeof(out[n].title), "%s", title.c_str());
+        n++;
+    }
+    return n;
+}
+
 int ApiTracks(LspPlayer* p, LspTrack* out, int max) {
     if (!p) return 0;
     std::lock_guard<std::mutex> l(p->m);
@@ -918,9 +933,9 @@ void ApiSetSubDelay(LspPlayer* p, double s) {
     p->subDelay = std::clamp(s, -600.0, 600.0);
 }
 
-const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.4", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
+const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.5", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
                            ApiSeek, ApiReadAudio, ApiVideoFrame, ApiPosition, ApiState, ApiOpenStream,
-                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags, ApiSetSpeed, ApiSetSubDelay};
+                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags, ApiSetSpeed, ApiSetSubDelay, ApiChapters};
 
 }  // namespace
 }  // namespace lsp

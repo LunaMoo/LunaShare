@@ -37,6 +37,12 @@ In the sound / subtitles / picture menu: *Speed* 0.5x, 0.75x, 1x, 1.25x, 1.5x, 2
 watching together it's everyone's speed. Under the subtitles: *-0.5 s* / *+0.5 s* when they're out of step with the
 voices (this device, this movie) and the subtitles' text size (remembered).
 
+## Chapters and repeating a part
+
+A film with chapters (MKV, MP4...) shows them as marks on the seek bar; dragging shows the chapter's name, and the
+*Sound, subtitles and picture* window lists them - a tap goes there. *Repeat a part (A-B)*: *A* where it should start,
+*B* where it should end - it then goes back to A every time it gets to B (for everyone watching), until *Off*.
+
 ## Sleep timer
 
 *Sleep timer* (in the movie player's menu, and in the music player): in 5, 15, 30,

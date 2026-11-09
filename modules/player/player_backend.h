@@ -43,6 +43,7 @@ public:
     }
     virtual bool Seek(double seconds) = 0;
     virtual std::vector<TrackInfo> Tracks() { return {}; }
+    virtual std::vector<std::pair<double, std::string>> Chapters() { return {}; }  // start (s), title
     // decode thread, between Step()s; the core seeks to the current position afterwards
     virtual bool SelectAudio(int id) { (void)id; return false; }
     virtual bool SelectSubtitle(int id) { (void)id; return false; }  // -1 = none

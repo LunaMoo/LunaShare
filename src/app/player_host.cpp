@@ -329,6 +329,14 @@ void PlayerHost::SetSpeed(double s) {
     speed_ = s;
 }
 
+std::vector<LspChapter> PlayerHost::Chapters() {
+    std::vector<LspChapter> out;
+    if (!p_ || mod_->api_version < 6 || !mod_->chapters) return out;
+    out.resize(500);
+    out.resize((size_t)std::max(0, mod_->chapters(p_, out.data(), (int)out.size())));
+    return out;
+}
+
 void PlayerHost::SetSubDelay(double s) {
     if (!p_ || mod_->api_version < 5 || !mod_->set_sub_delay) return;
     mod_->set_sub_delay(p_, s);

@@ -366,6 +366,19 @@ public:
         return out;
     }
 
+    std::vector<std::pair<double, std::string>> Chapters() override {
+        std::vector<std::pair<double, std::string>> out;
+        for (unsigned i = 0; fmt_ && i < fmt_->nb_chapters && i < 500; i++) {
+            const AVChapter* c = fmt_->chapters[i];
+            double start = (double)c->start * c->time_base.num / std::max(1, c->time_base.den);
+            std::string title;
+            if (auto* e = A.dict_get(c->metadata, "title", nullptr, 0)) title = e->value;
+            out.push_back({std::max(0.0, start), title});
+        }
+        std::sort(out.begin(), out.end(), [](auto& a, auto& b) { return a.first < b.first; });
+        return out;
+    }
+
     bool SelectAudio(int id) override {
         if (!fmt_ || id < 0 || id >= (int)fmt_->nb_streams || fmt_->streams[id]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) return false;
         const AVCodec* c = A.find_decoder(fmt_->streams[id]->codecpar->codec_id);

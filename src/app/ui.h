@@ -265,6 +265,8 @@ private:
     int watchOrient = -1;             // Android, by the movie's shape: 0 sideways, 1 upright (-1 not set)
     int64_t watchNextAt = 0;
     double watchSubDelay = 0;
+    double watchAbA = -1, watchAbB = -1;  // repeating a part (A-B); -1 = not set
+    uint64_t watchAbSid = 0;              // (the movie it was set for)
     int watchPipState = -1;           // Android: what picture-in-picture was last told (-1 nothing)
     bool watchInPip = false;         // subtitles later (+) / sooner (-), this movie
     // phone gestures: double tap a side = 10 s back / on, a swipe up / down = brightness (left) / volume (right)

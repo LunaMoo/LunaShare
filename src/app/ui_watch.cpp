@@ -195,6 +195,9 @@ void App::WatchSync() {
         return;
     }
     if (std::fabs(Player().Speed() - w.speed) > 0.001) Player().SetSpeed(w.speed);  // (everyone's speed)
+    // repeating a part: at B, back to A (only this movie's)
+    if (watchAbA >= 0 && watchAbSid != w.sid) watchAbA = watchAbB = -1;
+    if (watchAbA >= 0 && watchAbB > watchAbA && w.playing && Player().Position() >= watchAbB) eng.WatchControl(true, watchAbA);
     if (std::fabs(Player().SubDelay() - watchSubDelay) > 0.001) Player().SetSubDelay(watchSubDelay);  // (mine)
     if (dur > 0) target = std::min(target, dur - 0.05);
     bool play = w.playing && !w.hold && !(dur > 0 && target >= dur - 0.1);
@@ -375,6 +378,45 @@ void App::WatchTracksPopup() {
             edit.playerOrientByAspect = s.playerOrientByAspect;
             edit.playerPip = s.playerPip;
         }
+    }
+    {  // chapters (a tap goes there) and repeating a part
+        auto ch = Player().Chapters();
+        double pos = Player().Position();
+        if (!ch.empty()) {
+            ImGui::SeparatorText(T("Chapters"));
+            ImGui::BeginChild("##chap", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 20, std::min((float)ch.size(), 6.0f) * ((mobile ? h : ImGui::GetFrameHeight()) + 4) + 4),
+                              ImGuiChildFlags_None);
+            if (mobile) ui::TouchScroll();
+            for (size_t i = 0; i < ch.size(); i++) {
+                bool here = pos >= ch[i].start && (i + 1 == ch.size() || pos < ch[i + 1].start);
+                int s = (int)ch[i].start;
+                char t[16];
+                snprintf(t, sizeof(t), s >= 3600 ? "%d:%02d:%02d" : "%d:%02d", s >= 3600 ? s / 3600 : s / 60, s >= 3600 ? s / 60 % 60 : s % 60, s % 60);
+                std::string label = std::string(t) + "   " + (ch[i].title[0] ? std::string(ch[i].title) : TF("Chapter %d", (int)i + 1));
+                ImGui::PushID((int)i);
+                if (ImGui::Selectable(label.c_str(), here, 0, ImVec2(0, h))) eng.WatchControl(eng.watch.playing, ch[i].start);
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
+        }
+        ImGui::SeparatorText(T("Repeat a part (A-B)"));
+        float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3 : 0;
+        if (ImGui::Button(watchAbA < 0 ? T("A: from here") : TF("A: %d:%02d", (int)watchAbA / 60, (int)watchAbA % 60).c_str(), ImVec2(bw, h))) {
+            watchAbA = pos;
+            watchAbSid = eng.watch.sid;
+            if (watchAbB >= 0 && watchAbB <= watchAbA) watchAbB = -1;
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(watchAbA < 0);
+        if (ImGui::Button(watchAbB < 0 ? T("B: to here") : TF("B: %d:%02d", (int)watchAbB / 60, (int)watchAbB % 60).c_str(), ImVec2(bw, h)) && pos > watchAbA + 0.5) {
+            watchAbB = pos;
+            eng.WatchControl(eng.watch.playing, watchAbA);
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(watchAbA < 0);
+        if (ImGui::Button(T("Off"), ImVec2(bw, h))) watchAbA = watchAbB = -1;
+        ImGui::EndDisabled();
     }
     auto tracks = Player().Tracks();
     ImGui::SeparatorText(T("Sound"));
@@ -895,6 +937,40 @@ void App::DrawWatch() {
             dl->AddRectFilled(ImVec2(p.x, cy + 2), ImVec2(p.x + barW * lf, cy + 4), IM_COL32(255, 255, 255, 110), 2);
         }
         dl->AddRectFilled(ImVec2(p.x, cy - 4), ImVec2(p.x + barW * frac, cy + 4), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 4);
+        if (dur > 0) {  // chapter marks; the repeated part
+            static std::vector<LspChapter> chap;
+            static int chapAt = -1;
+            if (chapAt != ImGui::GetFrameCount() / 60) {  // (asked again about once a second)
+                chapAt = ImGui::GetFrameCount() / 60;
+                chap = Player().Chapters();
+            }
+            for (auto& c : chap)
+                if (c.start > 0.5 && c.start < dur) {
+                    float x = p.x + barW * (float)(c.start / dur);
+                    dl->AddRectFilled(ImVec2(x - 1, cy - 6), ImVec2(x + 1, cy + 6), IM_COL32(255, 255, 255, 170));
+                }
+            if (watchAbA >= 0 && watchAbSid == w.sid) {
+                float xa = p.x + barW * (float)std::clamp(watchAbA / dur, 0.0, 1.0);
+                float xb = watchAbB >= 0 ? p.x + barW * (float)std::clamp(watchAbB / dur, 0.0, 1.0) : xa + 2;
+                dl->AddRectFilled(ImVec2(xa, cy - 7), ImVec2(xb, cy + 7), IM_COL32(255, 200, 60, 110), 3);
+            }
+            // where in the film (the chapter's name) while dragging
+            if (watchDrag >= 0 && !chap.empty()) {
+                double at = watchDrag * dur;
+                const char* nm = nullptr;
+                int ci = 0;
+                for (size_t i = 0; i < chap.size(); i++)
+                    if (chap[i].start <= at) {
+                        nm = chap[i].title;
+                        ci = (int)i;
+                    }
+                std::string s = nm && nm[0] ? std::string(nm) : TF("Chapter %d", ci + 1);
+                ImVec2 ts = ImGui::CalcTextSize(s.c_str());
+                float tx = std::clamp(p.x + barW * watchDrag - ts.x * 0.5f, p.x, p.x + barW - ts.x);
+                dl->AddRectFilled(ImVec2(tx - 6, cy - bh * 0.5f - ts.y - 10), ImVec2(tx + ts.x + 6, cy - bh * 0.5f - 4), IM_COL32(0, 0, 0, 200), 4);
+                dl->AddText(ImVec2(tx, cy - bh * 0.5f - ts.y - 7), IM_COL32_WHITE, s.c_str());
+            }
+        }
         dl->AddCircleFilled(ImVec2(p.x + barW * frac, cy), mobile ? 12.0f : 8.0f, ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
         ImGui::SameLine();
         bool lp = w.loop;

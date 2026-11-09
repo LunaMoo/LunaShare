@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Movies: **chapters** (marks on the seek bar, a list to jump to) and **repeating a part (A-B)**.
+
 - Music: **no gap between songs** (on by default when there's no smooth transition) - live albums and mixes play
   through without a click.
 

@@ -56,6 +56,7 @@ public:
     double Speed() const { return p_ ? speed_ : 1.0; }
     void SetSubDelay(double s);
     double SubDelay() const { return p_ ? subDelay_ : 0.0; }
+    std::vector<LspChapter> Chapters();  // the film's chapters (empty when it has none)
     // chats: start again at the end (not for watching together / the movie player: their clock decides)
     void SetLoop(bool on) { loop_ = on; }
     bool Loop() const { return loop_; }

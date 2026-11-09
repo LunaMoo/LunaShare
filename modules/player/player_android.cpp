@@ -318,6 +318,7 @@ public:
         return ok;
     }
     std::vector<TrackInfo> Tracks() override { return sideOk_ ? side_->Tracks() : main_.Tracks(); }
+    std::vector<std::pair<double, std::string>> Chapters() override { return sideOk_ ? side_->Chapters() : main_.Chapters(); }
     bool SelectAudio(int id) override { return sideAudio_ ? side_->SelectAudio(id) : main_.SelectAudio(id); }
     bool SelectSubtitle(int id) override { return sideOk_ ? side_->SelectSubtitle(id) : main_.SelectSubtitle(id); }
 
