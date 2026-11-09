@@ -157,6 +157,8 @@ private:
     const music::Track* MusicTrack(const std::string& path);
     void MusicTrackList(const std::vector<const music::Track*>& list, const std::string& playlistId, bool showAlbum);
     void MusicTrackMenu(const std::string& path, const std::string& playlistId, int playlistIndex);
+    void MusicPlaylistMove(const std::string& id, int from, int to);  // to = -1: remove
+    std::vector<std::string> musicListShown;  // (the playlist's songs as shown)
     void MusicGroupButtons(const std::vector<const music::Track*>& list, const std::string& sendFolder);
     void MusicSend(const std::vector<std::string>& paths, const std::string& folder);
     void MusicSendPopup();

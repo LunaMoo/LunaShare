@@ -166,19 +166,55 @@ void App::MusicTrackMenu(const std::string& path, const std::string& playlistId,
     }
     if (ImGui::Selectable(T("Send to..."), false, 0, ImVec2(0, h))) MusicSend({path}, "");
     if (ImGui::Selectable(T("Select"), false, 0, ImVec2(0, h))) musicSel.insert(path);
-    if (!playlistId.empty() && playlistId[0] != '#' && ImGui::Selectable(T("Remove from this playlist"), false, 0, ImVec2(0, h))) {
-        for (auto& p : music::Lib().Playlists())
-            if (p.id == playlistId && playlistIndex >= 0 && playlistIndex < (int)p.paths.size()) {
-                auto v = p.paths;
-                v.erase(v.begin() + playlistIndex);
-                music::Lib().SetPlaylistPaths(p.id, v);
-            }
+    if (!playlistId.empty() && playlistId[0] != '#') {  // its place in the playlist
+        ImGui::Separator();
+        int n = (int)musicListShown.size();
+        if (playlistIndex > 0 && ImGui::Selectable(T("Move up"), false, 0, ImVec2(0, h))) MusicPlaylistMove(playlistId, playlistIndex, playlistIndex - 1);
+        if (playlistIndex + 1 < n && ImGui::Selectable(T("Move down"), false, 0, ImVec2(0, h)))
+            MusicPlaylistMove(playlistId, playlistIndex, playlistIndex + 1);
+        if (playlistIndex > 0 && ImGui::Selectable(T("Move to the top"), false, 0, ImVec2(0, h))) MusicPlaylistMove(playlistId, playlistIndex, 0);
+        if (playlistIndex + 1 < n && ImGui::Selectable(T("Move to the bottom"), false, 0, ImVec2(0, h)))
+            MusicPlaylistMove(playlistId, playlistIndex, n - 1);
+        if (ImGui::Selectable(T("Remove from this playlist"), false, 0, ImVec2(0, h))) MusicPlaylistMove(playlistId, playlistIndex, -1);
+    }
+}
+
+// a song of a playlist (by its place in the list shown: songs that aren't found any more aren't shown) to another
+// place; to = -1: out of the playlist
+void App::MusicPlaylistMove(const std::string& id, int from, int to) {
+    for (auto& p : music::Lib().Playlists()) {
+        if (p.id != id) continue;
+        // where the shown songs are in the playlist (in order; the same song twice is fine)
+        std::vector<int> at;
+        size_t k = 0;
+        for (auto& path : musicListShown) {
+            while (k < p.paths.size() && p.paths[k] != path) k++;
+            if (k >= p.paths.size()) return;  // (the list changed meanwhile)
+            at.push_back((int)k++);
+        }
+        if (from < 0 || from >= (int)at.size()) return;
+        auto v = p.paths;
+        std::string moved = v[(size_t)at[(size_t)from]];
+        v.erase(v.begin() + at[(size_t)from]);
+        if (to >= 0 && to < (int)at.size()) {
+            int dest = at[(size_t)to];
+            if (at[(size_t)to] > at[(size_t)from]) dest--;  // (one fewer before it now)
+            if (to > from) dest++;                          // (after the one it was dropped on)
+            v.insert(v.begin() + std::clamp(dest, 0, (int)v.size()), moved);
+        }
+        music::Lib().SetPlaylistPaths(p.id, v);
+        return;
     }
 }
 
 // rows of songs; tapping one plays the list from there. Returns nothing - it acts right away.
 void App::MusicTrackList(const std::vector<const music::Track*>& list, const std::string& playlistId, bool showAlbum) {
     bool mobile = ui::M().mobile;
+    bool ordered = !playlistId.empty() && playlistId[0] != '#';  // a playlist: its order can change (drag a song, or its menu)
+    if (ordered) {
+        musicListShown.clear();
+        for (auto* t : list) musicListShown.push_back(t->path);
+    }
     float rowH = mobile ? ui::M().rowH * 1.1f : ImGui::GetFontSize() * 2.6f;
     float cov = rowH - 8;
     std::string cur = music::Play().GetNow().path;
@@ -204,6 +240,17 @@ void App::MusicTrackList(const std::vector<const music::Track*>& list, const std
                     std::vector<std::string> paths;
                     for (auto* x : list) paths.push_back(x->path);
                     music::Play().PlayList(paths, i);
+                }
+            }
+            if (ordered && !mobile) {  // drag and drop within the playlist
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                    ImGui::SetDragDropPayload("LS_PLITEM", &i, sizeof(int));
+                    ImGui::TextUnformatted(t->title.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                if (ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("LS_PLITEM")) MusicPlaylistMove(playlistId, *(const int*)pl->Data, i);
+                    ImGui::EndDragDropTarget();
                 }
             }
             if (ImGui::BeginPopup("##trk")) {

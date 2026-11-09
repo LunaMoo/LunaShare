@@ -28,6 +28,11 @@
   pause and next; tapping it opens the player.
 - Music pauses on its own for a movie, a chat video or voice message, a call or a recording, and goes on afterwards.
 
+## Playlist order
+
+In a playlist, drag a song to another place (on a computer), or use its menu (right click / long press): *Move up*,
+*Move down*, *Move to the top*, *Move to the bottom*, *Remove from this playlist*.
+
 ## Sound
 
 *Sound...* (next to *Folders...* on a computer; under the song on a phone's player) holds:

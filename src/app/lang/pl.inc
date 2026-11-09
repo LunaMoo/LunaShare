@@ -992,3 +992,7 @@
 {"Speed", "Prędkość"},
 {"Keep playing in a small window when leaving the app", "Odtwarzaj dalej w małym oknie po wyjściu z aplikacji"},
 {"Small window now", "Małe okno teraz"},
+{"Move up", "Przesuń w górę"},
+{"Move down", "Przesuń w dół"},
+{"Move to the top", "Na początek"},
+{"Move to the bottom", "Na koniec"},
