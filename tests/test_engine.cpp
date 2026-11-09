@@ -1192,7 +1192,16 @@ int main() {
         for (char ch : phrase) words += ch == ' ';
         CHECK(words == 24, "24 words (%d)", words);
         CHECK(PhraseToSeed(phrase, seed, &err) && SeedToPhrase(seed) == phrase, "phrase round trip");
-        std::string typo = phrase.substr(0, phrase.rfind(' ')) + (phrase.substr(phrase.rfind(' ') + 1) == "zoo" ? " abandon" : " zoo");
+        // a wrong last word: the checksum notices it - except by chance (1 in 256), so the first of a few that's noticed
+        std::string typo;
+        for (const char* w : {" zoo", " abandon", " zebra", " absurd", " youth"}) {
+            std::string t = phrase.substr(0, phrase.rfind(' ')) + w;
+            std::string s2, e2;
+            if (t != phrase && !PhraseToSeed(t, s2, &e2)) {
+                typo = t;
+                break;
+            }
+        }
         CHECK(!PhraseToSeed(typo, seed, &err), "a wrong word is noticed (%s)", err.c_str());
         CHECK(!PhraseToSeed("abandon ability", seed, &err), "too few words");
 
