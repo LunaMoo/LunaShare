@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.5
+
+- Movie player options (in the sound / subtitles / picture menu, remembered for every movie):
+  - **Play the next one automatically**: at the end of a movie the next one in its folder starts (watching together,
+    everyone comes along);
+  - **Hide the controls while playing**: the moment a movie starts playing - a new one, or after a pause - the
+    controls go; only a tap / click brings them back (moving the mouse doesn't);
+  - Android: **Turn the screen by the movie's shape**: a movie taller than wide plays upright, a wide one sideways.
+
 ## 1.5.4
 
 - **Chat history** (the clock button in a chat's header), see docs/CHAT.md:

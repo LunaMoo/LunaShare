@@ -33,6 +33,15 @@ slider to put it back, *Reset picture* for all. (Done on the graphics card, wher
 
 ## Autoplay and play / pause
 
+Options in the player's sound / subtitles / picture menu, remembered for every movie:
+
+- *Autoplay* - and *Play the next one automatically*: at the end, the next movie in the folder (watching together,
+  everyone comes along).
+- *Hide the controls while playing*: they go the moment it starts playing (a new movie, or after a pause); only a tap
+  or a click brings them back.
+- Android: *Turn the screen by the movie's shape*: a movie taller than wide (phone videos) plays upright, others
+  sideways.
+
 - *Autoplay* (in the movie player's sound / subtitles / picture menu, remembered for every movie): a movie you open -
   alone, together or from a Shared folder - starts playing on its own.
 - With the controls showing, a tap (or click) in the middle of the picture - on the big play / pause sign - plays or

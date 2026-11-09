@@ -50,6 +50,7 @@ struct HostBridge {
     // watching a movie: Android turns sideways (landscape, even with rotation locked) and hides the system bars;
     // computers go full screen (setFullscreen); keepAwake: no screen saver / screen off while it plays
     std::function<void(bool on)> movieMode;
+    std::function<void(bool portrait)> movieOrientation;  // Android: upright / sideways while a movie shows
     // borderless: a window that leaves one pixel of the screen uncovered (Windows: then neither Windows nor the
     // graphics driver treat it as a full-screen game, so no Auto HDR / RTX HDR)
     std::function<void(bool on, bool borderless)> setFullscreen;

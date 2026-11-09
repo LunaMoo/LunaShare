@@ -175,6 +175,10 @@ private:
     int64_t watchActive = 0;  // last time someone touched / moved the mouse (controls hide a few seconds later)
     int64_t watchShownSince = 0;
     bool watchCtlShown = false, watchTapHides = false;
+    bool watchWasPlaying = false;     // (hide the controls when it starts playing)
+    uint64_t watchHideSid = 0;
+    int watchOrient = -1;             // Android, by the movie's shape: 0 sideways, 1 upright (-1 not set)
+    int64_t watchNextAt = 0;
     bool watchFullscreen = false, watchMovie = false, watchAwake = false, watchDevSub = false;
     std::set<std::string> watchSubsAdded;
     bool watchSubFollow = true;       // viewer: subtitles as the host has them (until picking others)

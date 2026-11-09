@@ -977,3 +977,6 @@
 {"%s didn't send the history.", "%s nie odesłał historii."},
 {"%s has no history of this chat either.", "%s też nie ma historii tego czatu."},
 {"Restored %s message(s) sent back by %s.", "Przywrócono wiadomości: %s - odesłane przez: %s."},
+{"Play the next one automatically (in the folder)", "Automatycznie odtwarzaj następny (w folderze)"},
+{"Hide the controls while playing (a tap brings them back)", "Ukryj UI przy odtwarzaniu (stuknięcie je przywraca)"},
+{"Turn the screen by the movie's shape (tall: upright)", "Zmień położenie ze względu na proporcje (wysoki film: pionowo)"},

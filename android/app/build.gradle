@@ -23,8 +23,8 @@ android {
         applicationId 'org.lunamoo.lunashare'
         minSdk 24          // getifaddrs() + modern Wi-Fi APIs
         targetSdk 35
-        versionCode 154   // major * 100 + minor * 10 + patch
-        versionName '1.5.4'
+        versionCode 155   // major * 100 + minor * 10 + patch
+        versionName '1.5.5'
         manifestPlaceholders = [appLabel: 'LunaShare']
         externalNativeBuild {
             cmake {

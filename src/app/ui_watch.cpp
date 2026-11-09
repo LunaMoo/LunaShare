@@ -36,6 +36,7 @@ void App::WatchSync() {
     if (movie != watchMovie) {
         watchMovie = movie;
         if (ui::M().mobile && Bridge().movieMode) Bridge().movieMode(movie);
+        watchOrient = -1;
         if (!movie && watchFullscreen && Bridge().setFullscreen) {
             watchFullscreen = false;
             Bridge().setFullscreen(false, false);
@@ -130,6 +131,28 @@ void App::WatchSync() {
     int64_t now = SteadyMs();
     double target = w.Target(now);
     double dur = Player().Duration();
+    // Android: upright for a tall movie, sideways for a wide one (once its size is known)
+    if (eng.settings.playerOrientByAspect && ui::M().mobile && Bridge().movieOrientation) {
+        const LspInfo& inf = Player().Info();
+        if (inf.has_video && inf.width > 0 && inf.height > 0) {
+            int want = inf.height > inf.width ? 1 : 0;
+            if (want != watchOrient) {
+                watchOrient = want;
+                Bridge().movieOrientation(want == 1);
+            }
+        }
+    } else if (watchOrient >= 0 && Bridge().movieOrientation) {  // (switched off: sideways again)
+        watchOrient = -1;
+        Bridge().movieOrientation(false);
+    }
+    // the next movie in the folder when this one ends (the host / alone)
+    if (host && !w.loop && eng.settings.playerAutoNext && w.playing && !w.hold && dur > 0 && target >= dur - 0.15 && now - watchNextAt > 3000 &&
+        WatchNeighbor(1) >= 0) {
+        watchNextAt = now;
+        WatchStep(1);
+        eng.WatchControl(true, 0);  // (it plays on, autoplay or not)
+        return;
+    }
     // loop: the host starts everyone again from the beginning
     if (host && w.loop && w.playing && !w.hold && dur > 0 && target >= dur - 0.15 && now - watchLastSeek > 1500) {
         eng.WatchControl(true, 0);
@@ -292,12 +315,18 @@ void App::WatchTracksPopup() {
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     if (!ImGui::BeginPopup("##watchtracks")) return;
     {  // remembered for every movie
-        bool ap = eng.settings.playerAutoplay;
-        if (ImGui::Checkbox(T("Autoplay (every movie starts on its own)"), &ap)) {
-            Settings s = eng.GetSettings();
-            s.playerAutoplay = ap;
+        Settings s = eng.GetSettings();
+        bool ch = false;
+        ch |= ImGui::Checkbox(T("Autoplay (every movie starts on its own)"), &s.playerAutoplay);
+        ch |= ImGui::Checkbox(T("Play the next one automatically (in the folder)"), &s.playerAutoNext);
+        ch |= ImGui::Checkbox(T("Hide the controls while playing (a tap brings them back)"), &s.playerHideUi);
+        if (IsMobilePlatform()) ch |= ImGui::Checkbox(T("Turn the screen by the movie's shape (tall: upright)"), &s.playerOrientByAspect);
+        if (ch) {
             eng.ApplySettings(s);
-            edit.playerAutoplay = ap;
+            edit.playerAutoplay = s.playerAutoplay;
+            edit.playerAutoNext = s.playerAutoNext;
+            edit.playerHideUi = s.playerHideUi;
+            edit.playerOrientByAspect = s.playerOrientByAspect;
         }
     }
     auto tracks = Player().Tracks();
@@ -549,11 +578,21 @@ void App::DrawWatch() {
     // clicks in the next: the move must not count as "visible" for the tap that follows)
     bool wereShown = now - watchActive < 3000 && now - watchShownSince > 350;
     if (ImGui::IsMouseClicked(0)) watchTapHides = wereShown;
-    bool moved = !mobile && (io.MouseDelta.x != 0 || io.MouseDelta.y != 0);  // (phones: only touches count)
+    bool hideUi = eng.settings.playerHideUi;  // (option: only a tap / click brings the controls back)
+    bool moved = !mobile && !hideUi && (io.MouseDelta.x != 0 || io.MouseDelta.y != 0);  // (phones: only touches count)
     if (moved || ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1) || io.InputQueueCharacters.Size ||
         ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_RightArrow) || popupOpen ||
         watchDrag >= 0 || !w.playing || w.hold)
         watchActive = now;
+    {  // "hide while playing": the moment it starts playing (a new movie too), the controls go
+        bool pl = w.playing && !w.hold;
+        if (watchHideSid != w.sid) {
+            watchHideSid = w.sid;
+            watchWasPlaying = false;
+        }
+        if (hideUi && pl && !watchWasPlaying && !popupOpen) watchActive = 0;
+        watchWasPlaying = pl;
+    }
     bool controls = now - watchActive < 3000;
     if (controls && !watchCtlShown) watchShownSince = now;
     watchCtlShown = controls;

@@ -287,6 +287,7 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.requestBatteryExemption = [] { NotifyV("requestBatteryExemption", "()V"); };
     b.moveToBack = [] { CallV("moveToBack", "()V"); };
     b.movieMode = [](bool on) { CallV("movieMode", "(Z)V", (jboolean)on); };
+    b.movieOrientation = [](bool portrait) { CallV("movieOrientation", "(Z)V", (jboolean)portrait); };
     b.isMetered = []() -> bool {
         if (!g_notify) return false;
         JNIEnv* e = Env();

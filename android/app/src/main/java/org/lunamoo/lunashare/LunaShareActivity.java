@@ -237,6 +237,16 @@ public class LunaShareActivity extends SDLActivity {
         return kbFraction;
     }
 
+    /** While a movie shows: a tall movie upright, a wide one sideways (the "by the movie's shape" option). */
+    public static void movieOrientation(final boolean portrait) {
+        ui(() -> {
+            LunaShareActivity a = self;
+            if (a == null) return;
+            a.setRequestedOrientation(portrait ? android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                                               : android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        });
+    }
+
     /** Back on the home screen: keep running in the background instead of closing (like other messengers). */
     public static void moveToBack() { ui(() -> { if (self != null) self.moveTaskToBack(true); }); }
 
