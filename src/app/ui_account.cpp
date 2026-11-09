@@ -60,6 +60,13 @@ void App::DrawAccountSettings(float fieldW, float h) {
             eng.ApplySettings(s);
             edit.syncOwn = s.syncOwn;
         }
+        if (ImGui::Checkbox(T("Share the clipboard with my devices"), &s.clipShare)) {
+            eng.ApplySettings(s);
+            edit.clipShare = s.clipShare;
+        }
+        ImGui::SameLine();
+        ui::HelpMarker(T("Text copied on one of your linked devices can be pasted on the others (while LunaShare is open on both; "
+                         "on a phone, while it's in front). Off by default: a clipboard often holds passwords."));
         ImGui::SameLine();
         ui::HelpMarker(T("Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's "
                          "options, silent chats and the language follow you to your other linked devices. A playlist changed on two "

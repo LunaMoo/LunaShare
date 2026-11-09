@@ -4,7 +4,10 @@
 #include <algorithm>
 #include <cmath>
 
+#include <SDL.h>
+
 #include "i18n.h"
+#include "notify.h"
 #include "model.h"
 #include "music.h"
 #include "platform.h"
@@ -86,8 +89,13 @@ void App::SyncTick() {
     if (now < g_nextCheck) return;
     g_nextCheck = now + 500;
     if (!replyFor.empty() && editMid.empty() && replyFor == selectedPeer) DraftSet(replyFor, chatInput);  // (kept as it's typed)
-    if (!eng.settings.syncOwn) {
+    if (!eng.settings.syncOwn) {  // (the clipboard has its own switch)
         g_started = false;
+        std::string k;
+        json d;
+        while (eng.SyncPop(k, d))
+            if (k == "clip") ClipReceived(d);
+        ClipTick();
         return;
     }
     if (!g_started) {  // (on start, or turned on: what's here goes to them; theirs comes when they connect)
@@ -107,6 +115,8 @@ void App::SyncTick() {
                 g_plSent = music::Lib().PlaylistsVersion();
                 eng.SyncPush("playlists", PlaylistsMsg());
             }
+        } else if (kind == "clip") {
+            ClipReceived(data);
         } else if (kind == "prefs") {
             int64_t ver = data.value("ver", (int64_t)0);
             if (ver > eng.settings.prefsVer && data.contains("p") && data["p"].is_object()) {
@@ -121,6 +131,7 @@ void App::SyncTick() {
         }
     }
     // mine, changed here
+    ClipTick();
     if (music::Lib().Version() != g_libSeen) {  // (a scan: songs from another device's playlists may be here now)
         g_libSeen = music::Lib().Version();
         music::Lib().ResolveSynced();
@@ -136,6 +147,49 @@ void App::SyncTick() {
         eng.SetPrefsVer(std::max(NowMs(), eng.settings.prefsVer + 1));
         eng.SyncPush("prefs", {{"ver", eng.settings.prefsVer}, {"p", json::parse(p)}});
     }
+}
+
+// ---- the clipboard, the same on my devices (an option): copied here -> theirs; copied there -> here
+namespace {
+std::string g_clipSeen;  // what the clipboard had when last looked at (or was set to)
+int64_t g_clipTs = 0;    // the newest clipboard taken (from any device)
+bool g_clipStarted = false;
+}  // namespace
+
+static std::string ClipNow() {
+    if (!SDL_HasClipboardText()) return "";
+    char* t = SDL_GetClipboardText();
+    std::string s = t ? t : "";
+    SDL_free(t);
+    return s;
+}
+
+void App::ClipTick() {
+    if (!eng.settings.clipShare) {
+        g_clipStarted = false;
+        return;
+    }
+    if (notify::Background()) return;  // (Android doesn't let an app in the background read it)
+    std::string now = ClipNow();
+    if (!g_clipStarted) {  // (what's there already isn't news)
+        g_clipStarted = true;
+        g_clipSeen = now;
+        return;
+    }
+    if (now == g_clipSeen || now.empty() || now.size() > 256 * 1024) return;
+    g_clipSeen = now;
+    g_clipTs = std::max(NowMs(), g_clipTs + 1);
+    eng.SyncPush("clip", {{"text", now}, {"ts", g_clipTs}, {"from", eng.settings.displayName}});
+}
+
+void App::ClipReceived(const json& d) {
+    int64_t ts = d.value("ts", (int64_t)0);
+    std::string text = d.value("text", "");
+    if (!eng.settings.clipShare || ts <= g_clipTs || text.empty() || text.size() > 256 * 1024) return;
+    g_clipTs = ts;
+    g_clipSeen = text;
+    SDL_SetClipboardText(text.c_str());
+    toasts.push_back({EventType::Info, T("Clipboard"), TF("Copied on %s - paste it here.", d.value("from", std::string("?")).c_str()), "", 0, 2.5f});
 }
 
 // ---- drafts: what was typed in a chat and not sent stays there (also across restarts)

@@ -73,6 +73,8 @@ public:
     bool MuteItem(const std::string& key, float h, bool button = false);  // (a menu line / button: opens the choices, or turns them back on)
     void DrawMutePopup();
     void SyncTick();  // my other devices: playlists and settings
+    void ClipTick();  // ... and the clipboard (an option)
+    void ClipReceived(const nlohmann::json& d);
     // unsent text, per chat (kept in drafts.json)
     std::string DraftGet(const std::string& peer);
     void DraftSet(const std::string& peer, const std::string& text);

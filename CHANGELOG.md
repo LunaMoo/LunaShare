@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Shared clipboard** between your linked devices (Settings > Your account, off by default): copy on one, paste
+  on another.
+
 - Chat: **disappearing messages** (*Chat history > Messages disappear*: after 1 hour / 1 day / 1 week) - for
   everyone in the chat; new text messages are removed on every device when their time is up.
 

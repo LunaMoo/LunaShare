@@ -1982,8 +1982,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::SyncData: {
             auto dv = devices.find(c->peerId);
-            if (!settings.syncOwn || dv == devices.end() || MyAccount().empty() || dv->second.accountPub != MyAccount()) break;  // (mine only)
+            if (dv == devices.end() || MyAccount().empty() || dv->second.accountPub != MyAccount()) break;  // (mine only)
             std::string kind = j.value("kind", "");
+            if (kind == "clip" ? !settings.clipShare : !settings.syncOwn) break;
             if (kind.empty() || kind.size() > 32 || !j.contains("data")) break;
             for (auto it = syncIn_.begin(); it != syncIn_.end();)  // (an older one of the same kind isn't needed any more)
                 it = it->first == kind ? syncIn_.erase(it) : it + 1;
@@ -2436,7 +2437,7 @@ void Engine::HandleData(const std::shared_ptr<Connection>& c, const Frame& f) {
 
 void Engine::SyncPush(const std::string& kind, const json& data) {
     auto lk = Lock();
-    if (!settings.syncOwn) return;
+    if (!settings.syncOwn && kind != "clip") return;  // (the clipboard has its own switch)
     syncOut_[kind] = data;
     for (auto& d : MyOtherDevices())
         if (auto c = ReadyConn(d)) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
@@ -2483,8 +2484,10 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
     {  // my own device: what I keep the same everywhere
         auto dv = devices.find(peer);
-        if (settings.syncOwn && dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount())
-            for (auto& [kind, data] : syncOut_) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
+        if (dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount())
+            for (auto& [kind, data] : syncOut_)
+                if (kind == "clip" ? settings.clipShare && NowMs() - data.value("ts", (int64_t)0) < 600000 : settings.syncOwn)  // (an old clipboard isn't wanted)
+                    Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
     }
     if (IsContact(peer)) {  // their Shared folder (and a new source for running downloads)
         Queue(c, Msg::LibGet, json::object());

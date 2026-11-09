@@ -1114,3 +1114,7 @@
 {"Messages disappear", "Wiadomości znikają"},
 {"For everyone in this chat: new text messages are removed after that time on every device (also yours). Files that came stay where they were saved. Someone can still copy or photograph a message before it goes.", "Dla wszystkich w tym czacie: nowe wiadomości tekstowe są usuwane po tym czasie na każdym urządzeniu (także Twoim). Otrzymane pliki zostają tam, gdzie zostały zapisane. Ktoś nadal może skopiować lub sfotografować wiadomość, zanim zniknie."},
 {"never", "nigdy"},
+{"Copied on %s - paste it here.", "Skopiowano na %s - wklej tutaj."},
+{"Share the clipboard with my devices", "Wspólny schowek z moimi urządzeniami"},
+{"Text copied on one of your linked devices can be pasted on the others (while LunaShare is open on both; on a phone, while it's in front). Off by default: a clipboard often holds passwords.", "Tekst skopiowany na jednym z połączonych urządzeń można wkleić na pozostałych (gdy LunaShare jest otwarty na obu; na telefonie - gdy jest na wierzchu). Domyślnie wyłączone: schowek często zawiera hasła."},
+{"Clipboard", "Schowek"},

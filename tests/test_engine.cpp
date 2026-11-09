@@ -612,6 +612,17 @@ int main() {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             CHECK(!popKind(*B, "playlists", none), "not to a contact");
         }
+        // the clipboard: only when the receiving device shares it too
+        A->settings.clipShare = true;
+        A->SyncPush("clip", {{"text", "secret"}, {"ts", NowMs()}});
+        {
+            json none;
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            CHECK(!popKind(*A2, "clip", none), "not taken while it's off there");
+        }
+        A2->settings.clipShare = true;
+        A->SyncPush("clip", {{"text", "copied"}, {"ts", NowMs()}});
+        CHECK(WaitFor([&] { return popKind(*A2, "clip", got); }, 3000) && got["text"] == "copied", "the clipboard reaches my other device");
         A2->Stop();
     }
     printf("[group conversations]\n");

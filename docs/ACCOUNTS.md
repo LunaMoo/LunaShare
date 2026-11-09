@@ -49,6 +49,10 @@ these the same whenever they are connected to each other:
   hiding the controls, rotation, small window, subtitle size), silent chats and the language - as one piece, the
   later change wins.
 
+*Share the clipboard with my devices* (off by default - a clipboard often holds passwords): text copied on one
+linked device can be pasted on the others while LunaShare is open (on a phone: in front - Android doesn't let apps
+read the clipboard from the background). A device that comes online gets a clipboard copied in the last 10 minutes.
+
 Not synced: how a screen looks (theme, size), folders and ports - those belong to each device. (Message type 104
 `SyncData` `{kind, data}`, only between devices of the same account.)
 
