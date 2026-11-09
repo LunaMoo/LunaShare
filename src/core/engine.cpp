@@ -304,6 +304,27 @@ KnownDevice& Engine::Device(const std::string& id) {
     return d;
 }
 
+void Engine::MuteChat(const std::string& key, int minutes) {
+    auto lk = Lock();
+    if (minutes < 0) settings.mutedChats.erase(key);
+    else settings.mutedChats[key] = minutes == 0 ? 0 : NowMs() + (int64_t)minutes * 60000;
+    MarkDirty();
+}
+
+int64_t Engine::ChatMutedUntil(const std::string& key) {
+    auto lk = Lock();
+    auto it = settings.mutedChats.find(key);
+    if (it == settings.mutedChats.end()) return -1;
+    if (it->second != 0 && it->second <= NowMs()) {  // (the time is up)
+        settings.mutedChats.erase(it);
+        MarkDirty();
+        return -1;
+    }
+    return it->second;
+}
+
+bool Engine::ChatMuted(const std::string& key) { return ChatMutedUntil(key) >= 0; }
+
 std::string Engine::PeerName(const std::string& peerOrKey) {
     auto lk = Lock();
     std::string peer = peerOrKey;
@@ -3453,6 +3474,7 @@ void Engine::ApplySettings(const Settings& s) {
     settings.accountSig = old.accountSig;
     settings.accountBackedUp = old.accountBackedUp;
     settings.profileVer = old.profileVer;
+    settings.mutedChats = old.mutedChats;  // only MuteChat changes these (the settings page keeps an older copy)
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);
     if (settings.tcpPort != old.tcpPort && running_) restartListener_ = true;

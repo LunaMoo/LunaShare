@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Chat: **silence a chat's notifications** for 1 hour / 8 hours / a day / a week or until turned back on (a chat's
+  menu - long press / right click in the list - or *Chat history*). New messages are only counted, in grey, and
+  don't count in the window title; calls still ring.
 - Chat: **reply** to a message (in its menu - long press / right click): the answer shows the message it answers on
   top, and a tap on that goes there. **Change** your own text messages (marked *changed*, also for the other side and
   your other devices; a change made while they're away arrives later, like messages).

@@ -374,6 +374,28 @@ int main() {
         CHECK(!A->EditMessage(idB, theirs, "hacked"), "cannot change their message");
     }
 
+    // ------------------------------------------------------------ silent chats
+    printf("[silent chats]\n");
+    {
+        std::string k = A->ChatKey(idB);
+        CHECK(!A->ChatMuted(k), "not silent at first");
+        A->MuteChat(k, 60);
+        CHECK(A->ChatMuted(k) && A->ChatMutedUntil(k) > 0, "silent for an hour");
+        A->MuteChat(k, 0);
+        CHECK(A->ChatMutedUntil(k) == 0, "silent until turned back on");
+        {
+            auto l = A->Lock();
+            A->settings.mutedChats[k] = 1;  // (a time long gone)
+        }
+        CHECK(!A->ChatMuted(k), "time is up");
+        Settings s = A->settings;
+        A->MuteChat(k, 0);
+        A->ApplySettings(s);  // (an older copy from the settings page)
+        CHECK(A->ChatMuted(k), "settings page keeps it");
+        A->MuteChat(k, -1);
+        CHECK(!A->ChatMuted(k), "back on");
+    }
+
     // ------------------------------------------------------------ reactions
     printf("[reactions]\n");
     A->SendChat(idB, "react to this");

@@ -20,6 +20,52 @@ void App::OpenChatHistory(const std::string& peer) {
     histConfirmDelete.clear();
 }
 
+bool App::MuteItem(const std::string& key, float h, bool button) {
+    auto item = [&](const std::string& l) {
+        return button ? ui::IconTextButton(l.c_str(), Icon::Speaker, ImVec2(ui::M().mobile ? -1 : 0, h)) : ImGui::Selectable(l.c_str(), false, 0, ImVec2(0, h));
+    };
+    int64_t until = eng.ChatMutedUntil(key);
+    if (until >= 0) {
+        std::string l = until == 0 ? std::string(T("Turn notifications back on")) : TF("Turn notifications back on (silent until %s)", FormatTime(until, until - NowMs() > 20 * 3600000LL).c_str());
+        if (!item(l)) return false;
+        eng.MuteChat(key, -1);
+        return true;
+    }
+    if (!item(T("Silence notifications..."))) return false;
+    muteKey = key;
+    muteOpen = true;
+    return true;
+}
+
+void App::DrawMutePopup() {
+    if (muteOpen) {
+        ImGui::OpenPopup("##mute");
+        muteOpen = false;
+    }
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (mobile) ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x * 0.8f, 0));
+    bool open = true;
+    if (!ImGui::BeginPopupModal("##mute", &open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextUnformatted(TF("Silence %s", Emoji().Display(eng.PeerName(muteKey)).c_str()).c_str());
+    ImGui::PushTextWrapPos(mobile ? 0 : ImGui::GetFontSize() * 22);
+    ImGui::TextDisabled("%s", T("New messages don't make a sound or show a notification - they're only counted (in grey). Calls still ring."));
+    ImGui::PopTextWrapPos();
+    ImGui::Separator();
+    struct { const char* label; int min; } opts[] = {{T("For 1 hour"), 60}, {T("For 8 hours"), 480}, {T("For a day"), 1440}, {T("For a week"), 10080},
+                                          {T("Until I turn them back on"), 0}};
+    for (auto& o : opts)
+        if (ImGui::Selectable(o.label, false, 0, ImVec2(0, h))) {
+            eng.MuteChat(muteKey, o.min);
+            ImGui::CloseCurrentPopup();
+        }
+    ImGui::Separator();
+    if (ImGui::Button(T("Cancel"), ImVec2(mobile ? -1 : 0, h))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void App::DrawChatHistoryPopup() {
     if (histOpen) {
         ImGui::OpenPopup("##chathist");
@@ -41,6 +87,7 @@ void App::DrawChatHistoryPopup() {
         OpenChatSearch();
         ImGui::CloseCurrentPopup();
     }
+    if (MuteItem(histPeer, h, true)) ImGui::CloseCurrentPopup();
     auto it = eng.chats.find(histPeer);
     int count = it == eng.chats.end() ? 0 : (int)it->second.messages.size();
 

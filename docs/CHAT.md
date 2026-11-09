@@ -5,6 +5,13 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Silent chats
+
+*Silence notifications...* (a chat's menu in the list - long press / right click - or the *Chat history* window):
+for 1 hour, 8 hours, a day, a week or until you turn them back on. New messages in a silent chat show no
+notification and no message popup; they're counted in grey (and not in the window title). Calls still ring. The
+list shows *silent* under the name; *Turn notifications back on* in the same places ends it early.
+
 ## Replying and changing messages
 
 A message's menu (long press on a phone, right click on a computer) has *Reply*: a strip above the typing field

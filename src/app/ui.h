@@ -62,6 +62,11 @@ public:
     // chat history: archives, clearing, restoring, asking for it back (ui_archive.cpp)
     void OpenChatHistory(const std::string& peer);
     void DrawChatHistoryPopup();
+    // a chat's notifications: off for a while / for good, or back on
+    bool MuteItem(const std::string& key, float h, bool button = false);  // (a menu line / button: opens the choices, or turns them back on)
+    void DrawMutePopup();
+    std::string muteKey;
+    bool muteOpen = false;
     void DrawHistoryAskBanner(const std::string& peer);
     // search in a chat / all chats (ui_archive.cpp)
     void DrawChatSearch(const std::string& peer);

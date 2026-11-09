@@ -537,6 +537,10 @@ public:
     std::shared_ptr<Connection> ReadyConn(const std::string& peer);
     bool IsConnected(const std::string& peer) { return (bool)ReadyConn(peer); }
     std::string PeerName(const std::string& peer);
+    // a chat without notifications: forever (minutes 0) or for a while; minutes < 0 turns them back on
+    void MuteChat(const std::string& key, int minutes);
+    bool ChatMuted(const std::string& key);
+    int64_t ChatMutedUntil(const std::string& key);  // 0 forever, -1 not muted
     std::vector<std::shared_ptr<Transfer>> BatchTransfers(uint64_t batch);
     std::string ConfigPath();  // this engine's config folder
 

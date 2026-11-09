@@ -123,8 +123,8 @@ void App::Frame() {
                 break;
             }
         if (selectedPeer.empty() && std::string(autoSel) != "1")  // =<name>: that chat, also offline
-            for (auto& [id, d] : eng.devices)
-                if (d.DisplayName() == autoSel) {
+            for (auto& [id, cv] : eng.chats)
+                if (eng.PeerName(id) == autoSel) {
                     SelectPeer(id);
                     if (m.mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
                     break;
@@ -144,9 +144,14 @@ void App::Frame() {
         devSearch = nullptr;
     }
     static bool devHist = getenv("LUNASHARE_OPENHIST") != nullptr;  // dev: the chat history window (screenshots)
-    if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 200) {
+    if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 3) {
         devHist = false;
-        OpenChatHistory(selectedPeer);
+        if (std::string(getenv("LUNASHARE_OPENHIST")) == "mute") {
+            muteKey = selectedPeer;
+            muteOpen = true;
+        } else {
+            OpenChatHistory(selectedPeer);
+        }
     }
     static const char* devMovie = getenv("LUNASHARE_MOVIE");  // dev: open a movie in the movie player (screenshots)
     if (devMovie && ImGui::GetFrameCount() == 20 && eng.StartWatch("", devMovie)) {
@@ -280,7 +285,8 @@ void App::Frame() {
     int unread = 0;
     for (auto& [id, t] : eng.transfers)
         if (t->state == TState::Active || t->state == TState::Hashing || t->state == TState::Verifying) busy = true;
-    for (auto& [peer, cv] : eng.chats) unread += cv.unread;
+    for (auto& [peer, cv] : eng.chats)
+        if (cv.unread && !eng.ChatMuted(peer)) unread += cv.unread;
     if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing() || eng.watch.sid) busy = true;  // keep the timer / seek bar moving
     MusicTick();
     if (music::Play().GetNow().playing) busy = true;
@@ -322,6 +328,7 @@ void App::Frame() {
     if (watchShown) DrawWatch();
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawChatHistoryPopup();
+    DrawMutePopup();
     SleepPopup();
     DrawSleepAsk();
     DrawToasts();
@@ -364,6 +371,7 @@ void App::PullEvents() {
         switch (e.type) {
             case EventType::ChatReceived:
                 if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat)) continue;
+                if (eng.ChatMuted(e.peer)) continue;  // (silent: only the unread count)
                 t.title = who;
                 t.text = e.text.size() > 120 ? e.text.substr(0, 117) + "..." : e.text;
                 wantAttention = true;
@@ -685,6 +693,8 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     else if (online) sub += "  " + TF("online (%s)", TS(eng.online[dev].Via()).c_str());
     else sub += sub.empty() ? T("offline") : std::string("  ") + T("offline");
 
+    bool muted = eng.ChatMuted(peer);
+    if (muted) sub = std::string(T("silent")) + (sub.empty() ? "" : "  ") + sub;
     int unread = 0;
     auto cv = eng.chats.find(peer);
     if (cv != eng.chats.end()) unread = cv->second.unread;
@@ -723,13 +733,14 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         ImVec2 us = ImGui::CalcTextSize(u.c_str());
         float bw = std::max(us.x + 10, textH);
         ImVec2 b0(p1.x - pad - bw, cy - textH * 0.5f);
-        dl->AddRectFilled(b0, ImVec2(b0.x + bw, b0.y + textH), ui::ColErr(), textH * 0.5f);
+        dl->AddRectFilled(b0, ImVec2(b0.x + bw, b0.y + textH), muted ? IM_COL32(110, 110, 120, 255) : ui::ColErr(), textH * 0.5f);
         dl->AddText(ImVec2(b0.x + (bw - us.x) * 0.5f, b0.y), IM_COL32_WHITE, u.c_str());
     }
     if (rightClick) ImGui::OpenPopup(grp ? "groupctx" : "peerctx");
     if (ImGui::BeginPopup("groupctx")) {
         float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
         if (ImGui::Selectable(T("People in this group"), false, 0, ImVec2(0, h))) OpenGroupMembers(peer);
+        if (MuteItem(peer, h)) ImGui::CloseCurrentPopup();
         if (grp && !grp->left && ImGui::Selectable(T("Add people"), false, 0, ImVec2(0, h))) OpenAddToGroup(peer);
         if (grp && !grp->left && ImGui::Selectable(T("Leave the group"), false, 0, ImVec2(0, h))) eng.LeaveGroup(peer);
         ImGui::EndPopup();
@@ -737,6 +748,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     if (ImGui::BeginPopup("peerctx")) {
         float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
         if (ImGui::Selectable(connected ? T("Disconnect") : T("Connect"), false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
+        if (MuteItem(peer, h)) ImGui::CloseCurrentPopup();
         if (ImGui::Selectable(T("Rename..."), false, 0, ImVec2(0, h))) {
             renamePeer = peer;
             renameBuf = d ? d->customName : "";
