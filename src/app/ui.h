@@ -370,10 +370,11 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();
+    void DrawFolderSyncSettings(float h);  // folders that go to my other devices by themselves
     bool openLinkPick = false, openLinkAsk = false, openPhrase = false, openRestore = false, openBackupPass = false;
     std::string linkTarget;               // device we offered to link (waiting for its answer)
     std::string linkAskPeer, linkAskCode, linkAskName;  // a device asks this one to join its account

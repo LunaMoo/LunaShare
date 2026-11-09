@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Folders sent to your devices by themselves** (Settings > Your account): e.g. the phone's camera folder - new and
+  changed files go to your computer without asking, every minute and when it comes online.
+
 - **Shared clipboard** between your linked devices (Settings > Your account, off by default): copy on one, paste
   on another.
 

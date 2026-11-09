@@ -1,6 +1,7 @@
 // Settings > Your account: the account's devices, linking another device, recovery phrase and backup files.
 #include <algorithm>
 
+#include "emoji_host.h"
 #include "i18n.h"
 #include "imgui.h"
 #include "imgui_stdlib.h"
@@ -60,6 +61,11 @@ void App::DrawAccountSettings(float fieldW, float h) {
             eng.ApplySettings(s);
             edit.syncOwn = s.syncOwn;
         }
+        ImGui::SameLine();
+        ui::HelpMarker(T("Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's "
+                         "options, silent chats and the language follow you to your other linked devices. A playlist changed on two "
+                         "devices: the later change counts. Songs are found by their name and tags, wherever they are on each device."));
+        s = eng.settings;
         if (ImGui::Checkbox(T("Share the clipboard with my devices"), &s.clipShare)) {
             eng.ApplySettings(s);
             edit.clipShare = s.clipShare;
@@ -67,10 +73,7 @@ void App::DrawAccountSettings(float fieldW, float h) {
         ImGui::SameLine();
         ui::HelpMarker(T("Text copied on one of your linked devices can be pasted on the others (while LunaShare is open on both; "
                          "on a phone, while it's in front). Off by default: a clipboard often holds passwords."));
-        ImGui::SameLine();
-        ui::HelpMarker(T("Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's "
-                         "options, silent chats and the language follow you to your other linked devices. A playlist changed on two "
-                         "devices: the later change counts. Songs are found by their name and tags, wherever they are on each device."));
+        DrawFolderSyncSettings(h);
     }
     if (!eng.settings.accountBackedUp) {
         ImGui::PushTextWrapPos(0);
@@ -310,5 +313,59 @@ void App::DrawAccountPopups() {
         if (!mobile) ImGui::SameLine();
         if (ImGui::Button(T("Cancel"), ImVec2(bw, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
+    }
+}
+
+// ---- folders that go to my other devices by themselves (photos from the phone to the computer...)
+void App::DrawFolderSyncSettings(float h) {
+    bool mobile = ui::M().mobile;
+    auto mine = eng.MyOtherDevices();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(T("Folders sent to my devices by themselves"));
+    ImGui::SameLine();
+    ui::HelpMarker(T("New and changed files of these folders go to the chosen device of yours by themselves - checked every "
+                     "minute and when it comes online - into its download folder, in a folder of the same name. Nothing is "
+                     "deleted there. A file changed later arrives again as a new copy."));
+    Settings s = eng.settings;
+    bool changed = false;
+    int remove = -1;
+    for (size_t i = 0; i < s.folderSyncs.size(); i++) {
+        auto& f = s.folderSyncs[i];
+        ImGui::PushID((int)i);
+        changed |= ImGui::Checkbox("##on", &f.on);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(f.path.c_str());
+        std::string to = f.to.empty() ? std::string(T("(choose a device)")) : Emoji().Display(eng.PeerName(f.to));
+        ImGui::SetNextItemWidth(mobile ? ImGui::GetContentRegionAvail().x * 0.6f : ImGui::GetFontSize() * 12);
+        if (ImGui::BeginCombo("##to", (std::string("-> ") + to).c_str())) {
+            for (auto& d : mine)
+                if (ImGui::Selectable(Emoji().Display(eng.PeerName(d)).c_str(), d == f.to, 0, ImVec2(0, h))) {
+                    f.to = d;
+                    changed = true;
+                }
+            if (mine.empty()) ImGui::TextDisabled("%s", T("No other devices linked to your account yet."));
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        std::string st = eng.FolderSyncStatus(f.id);
+        int sent = std::atoi(st.c_str()), way = std::atoi(st.c_str() + st.find('|') + 1);
+        if (way) ImGui::TextDisabled("%s", TF("%d sent, %d on the way", sent, way).c_str());
+        else ImGui::TextDisabled("%s", TF("%d sent", sent).c_str());
+        ImGui::SameLine();
+        if (ui::IconButton("rm", ui::Icon::Trash, T("Stop sending this folder"), mobile ? ui::M().rowH * 0.7f : ImGui::GetFrameHeight())) remove = (int)i;
+        ImGui::PopID();
+    }
+    if (remove >= 0) {
+        s.folderSyncs.erase(s.folderSyncs.begin() + remove);
+        changed = true;
+    }
+    if (changed) {
+        eng.ApplySettings(s);
+        edit.folderSyncs = s.folderSyncs;
+        eng.FolderSyncSoon();
+    }
+    if (ImGui::Button(T("Add a folder..."), ImVec2(mobile ? -1 : 0, h))) {
+        browseFor = BrowseFor::SyncFolder;
+        browser.Open(FileBrowser::Mode::SelectDir, T("A folder to send to my devices"), eng.settings.downloadDir);
     }
 }

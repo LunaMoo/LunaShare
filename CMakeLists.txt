@@ -43,6 +43,7 @@ add_library(lunashare_core STATIC
     src/core/groups.cpp
     src/core/group_calls.cpp
     src/core/watch.cpp
+    src/core/folder_sync.cpp
     src/core/listen.cpp
     src/core/chat_archive.cpp
     src/core/crypto.cpp

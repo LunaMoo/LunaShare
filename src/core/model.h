@@ -129,6 +129,11 @@ struct Settings {
     int64_t updateLast = 0;       // (when it last asked)
     std::string updateSeen;       // a new version already shown (not again)
     bool syncOwn = true;      // keep playlists and settings the same on my other devices
+    struct FolderSync {
+        std::string id, path, to;  // this folder -> my device "to" (into its downloads, in a folder of the same name)
+        bool on = true;
+    };
+    std::vector<FolderSync> folderSyncs;
     bool clipShare = false;   // the clipboard: copied on one of my devices, pasted on another (off: it may hold passwords)
     int64_t prefsVer = 0;     // when the synced settings last changed here (the newer ones win)  // chat key -> silent until (ms; 0 = until turned back on)
     std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)
@@ -243,6 +248,7 @@ const char* TStateName(TState s);
 bool TStateFinal(TState s);
 
 struct Transfer {
+    bool sync = false;  // folder sync between my own devices (taken without asking)
     uint64_t tid = 0;
     uint64_t batch = 0;
     std::string batchName;

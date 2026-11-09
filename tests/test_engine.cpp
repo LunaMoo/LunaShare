@@ -623,6 +623,33 @@ int main() {
         A2->settings.clipShare = true;
         A->SyncPush("clip", {{"text", "copied"}, {"ts", NowMs()}});
         CHECK(WaitFor([&] { return popKind(*A2, "clip", got); }, 3000) && got["text"] == "copied", "the clipboard reaches my other device");
+        // folder sync: a folder's files go to my other device by themselves (new ones later too), without asking
+        {
+            namespace fs = std::filesystem;
+            std::string src = JoinPath(A->ConfigPath(), "Camera");
+            MakeDirs(JoinPath(src, "2026"));
+            auto put = [&](const std::string& rel, const std::string& data) {
+                std::string p = JoinPath(src, rel);
+                std::ofstream(fs::u8path(p), std::ios::binary) << data;
+                fs::last_write_time(fs::u8path(p), fs::file_time_type::clock::now() - std::chrono::minutes(5));  // (not still being written)
+            };
+            put("a.jpg", "photo one");
+            put("2026/b.jpg", "photo two");
+            put(".pending-x.jpg", "not yet");
+            {
+                auto l = A->Lock();
+                A->settings.folderSyncs.push_back({"fs1", src, A2->settings.deviceId, true});
+            }
+            A->FolderSyncTick(true);
+            std::string dst = JoinPath(A2->settings.downloadDir, "Camera");
+            CHECK(WaitFor([&] { return FileExists(JoinPath(dst, "a.jpg")) && FileExists(JoinPath(dst, "2026/b.jpg")); }, 8000), "the folder's files arrive");
+            CHECK(!FileExists(JoinPath(dst, ".pending-x.jpg")), "hidden ones don't");
+            CHECK(WaitFor([&] { A->FolderSyncTick(); return A->FolderSyncStatus("fs1") == "2|0"; }, 5000), "remembered as sent");
+            put("c.jpg", "photo three");
+            A->FolderSyncTick(true);
+            CHECK(WaitFor([&] { return FileExists(JoinPath(dst, "c.jpg")); }, 8000), "a new one follows");
+            CHECK(WaitFor([&] { A->FolderSyncTick(); return A->FolderSyncStatus("fs1") == "3|0"; }, 5000), "only the new one");
+        }
         A2->Stop();
     }
     printf("[group conversations]\n");

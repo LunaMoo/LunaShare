@@ -3388,6 +3388,16 @@ void App::DrawPopups() {
             case BrowseFor::MusicFolder:
                 if (!res.empty()) music::Lib().AddFolder(res[0]);
                 break;
+            case BrowseFor::SyncFolder:
+                if (!res.empty()) {
+                    auto mine = eng.MyOtherDevices();
+                    Settings fs = eng.settings;
+                    fs.folderSyncs.push_back({RandomHex(6), res[0], mine.empty() ? "" : mine[0], true});
+                    eng.ApplySettings(fs);
+                    edit.folderSyncs = fs.folderSyncs;
+                    eng.FolderSyncSoon();
+                }
+                break;
             case BrowseFor::Movie:
                 if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;
                 break;

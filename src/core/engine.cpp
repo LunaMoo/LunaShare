@@ -2120,6 +2120,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             t->batch = j.value("batch", (uint64_t)tid);
             t->batchName = j.value("batchName", t->name);
             t->batchCount = j.value("batchCount", 1);
+            t->sync = j.value("sync", false);
             t->created = NowMs();
             t->partPath = JoinPath(PartDir(), TidHex(tid) + ".part");
             t->state = peerPaused ? TState::Paused : TState::Pending;
@@ -2161,7 +2162,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 break;
             }
             KnownDevice& d = Device(c->peerId);
-            bool autoAccept = settings.autoAcceptAll || (d.trusted && settings.autoAcceptTrusted);
+            bool autoAccept = settings.autoAcceptAll || (d.trusted && settings.autoAcceptTrusted) ||
+                              (t->sync && !MyAccount().empty() && d.accountPub == MyAccount());  // (folder sync from my own device)
             if (t->state == TState::Pending && autoAccept) SendAcceptFor(t);
             else if (firstOfBatch) Emit({EventType::IncomingOffer, c->peerId, t->batchName, tid});
             MarkDirty();
@@ -2482,6 +2484,8 @@ bool Engine::SyncPop(std::string& kind, json& data) {
 void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
+    for (auto& f : settings.folderSyncs)
+        if (f.to == peer && f.on) fsSoon_ = true;  // (folder sync: its device is here)
     {  // my own device: what I keep the same everywhere
         auto dv = devices.find(peer);
         if (dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount())
@@ -2578,6 +2582,7 @@ void Engine::OfferTransfer(const std::shared_ptr<Transfer>& t, bool resumeReques
     json j = {{"tid", t->tid}, {"name", t->name}, {"rel", t->rel}, {"size", t->size}, {"sha256", t->sha256},
               {"mtime", t->mtime}, {"batch", t->batch}, {"batchName", t->batchName}, {"batchCount", t->batchCount},
               {"paused", t->state == TState::Paused}, {"resume", resumeRequest}};
+    if (t->sync) j["sync"] = true;
     if (!QueueToPeer(t->peer, Msg::FileOffer, j) && t->state == TState::Offered) t->state = TState::Interrupted;
 }
 
@@ -3011,6 +3016,7 @@ void Engine::MaintenanceLoop() {
             WatchTick();
             ListenTick();
         }
+        FolderSyncTick();
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();
         for (auto& c : toClose) CloseConn(c, "timeout");
@@ -3211,7 +3217,8 @@ uint64_t Engine::SendPaths(const std::string& peer, const std::vector<std::strin
     return SendFileList(peer, files, batchName);
 }
 
-uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pair<std::string, std::string>>& filesIn, const std::string& batchName) {
+uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pair<std::string, std::string>>& filesIn, const std::string& batchName,
+                              bool sync) {
     std::vector<std::pair<std::string, std::string>> files;
     for (auto& f : filesIn)
         if (FileExists(f.first)) files.push_back(f);
@@ -3234,6 +3241,7 @@ uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pa
         t->tid = RandomU64();
         t->batch = batch;
         t->batchName = batchName;
+        t->sync = sync;
         t->batchCount = (int)files.size();
         t->peer = device;
         t->outgoing = true;

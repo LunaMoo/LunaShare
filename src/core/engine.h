@@ -299,7 +299,21 @@ public:
     // Paths may be files or folders. Returns batch id (0 if nothing was queued).
     uint64_t SendPaths(const std::string& peer, const std::vector<std::string>& paths);
     // files with the relative path each gets at the other side ("Album/01 Song.mp3"): a folder made up on the way
-    uint64_t SendFileList(const std::string& peer, const std::vector<std::pair<std::string, std::string>>& files, const std::string& batchName);
+    uint64_t SendFileList(const std::string& peer, const std::vector<std::pair<std::string, std::string>>& files, const std::string& batchName,
+                          bool sync = false);
+    // folder sync (settings.folderSyncs): new / changed files of a folder go to my device by themselves
+    void FolderSyncTick(bool now = false);
+    void FolderSyncSoon() { fsSoon_ = true; }  // (look at the folders on the next tick - not on the caller's thread)
+    std::string FolderSyncStatus(const std::string& id);  // "sent|on the way"
+    void FolderSyncLoad();
+    void FolderSyncSave();
+    struct FsPending {
+        std::string id, rel, sig;
+    };
+    std::map<std::string, std::map<std::string, std::string>> fsIndex_;  // folder sync: id -> file -> "size:mtime" sent
+    std::map<uint64_t, FsPending> fsPending_;
+    bool fsLoaded_ = false, fsSoon_ = false;
+    int64_t fsLastScan_ = 0;
     void Accept(uint64_t tid);
     void AcceptBatch(uint64_t batch);
     void Reject(uint64_t tid);

@@ -53,6 +53,12 @@ these the same whenever they are connected to each other:
 linked device can be pasted on the others while LunaShare is open (on a phone: in front - Android doesn't let apps
 read the clipboard from the background). A device that comes online gets a clipboard copied in the last 10 minutes.
 
+*Folders sent to my devices by themselves*: pick a folder and one of your devices. New and changed files go there
+by themselves (looked at every minute and when that device comes online; a file still being written waits) - into
+its download folder, in a folder of the same name, accepted without asking because they come from your own device.
+Nothing is deleted on the other side; a file changed later arrives again as a new copy. Hidden files (starting with
+`.`) and unfinished downloads are skipped. What was sent is kept in `folder_sync.json`.
+
 Not synced: how a screen looks (theme, size), folders and ports - those belong to each device. (Message type 104
 `SyncData` `{kind, data}`, only between devices of the same account.)
 

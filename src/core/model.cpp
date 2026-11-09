@@ -60,7 +60,11 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"clipShare", s.clipShare}, {"lockHash", s.lockHash}, {"lockSalt", s.lockSalt}, {"lockLen", s.lockLen}, {"lockAfter", s.lockAfter}, {"lockBio", s.lockBio}, {"updateCheck", s.updateCheck}, {"updateLast", s.updateLast}, {"updateSeen", s.updateSeen}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"folderSyncs", [&] {
+                      json a = json::array();
+                      for (auto& f : s.folderSyncs) a.push_back({{"id", f.id}, {"path", f.path}, {"to", f.to}, {"on", f.on}});
+                      return a;
+                  }()}, {"clipShare", s.clipShare}, {"lockHash", s.lockHash}, {"lockSalt", s.lockSalt}, {"lockLen", s.lockLen}, {"lockAfter", s.lockAfter}, {"lockBio", s.lockBio}, {"updateCheck", s.updateCheck}, {"updateLast", s.updateLast}, {"updateSeen", s.updateSeen}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
         {"videoBrightness", s.videoBrightness}, {"videoContrast", s.videoContrast}, {"videoSaturation", s.videoSaturation}, {"videoGamma", s.videoGamma},
         {"videoTemperature", s.videoTemperature}, {"videoTint", s.videoTint}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
@@ -208,6 +212,12 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     }
     Get(j, "syncOwn", s.syncOwn);
     Get(j, "clipShare", s.clipShare);
+    if (j.contains("folderSyncs") && j["folderSyncs"].is_array()) {
+        s.folderSyncs.clear();
+        for (auto& f : j["folderSyncs"])
+            if (f.is_object() && s.folderSyncs.size() < 32)
+                s.folderSyncs.push_back({f.value("id", ""), f.value("path", ""), f.value("to", ""), f.value("on", true)});
+    }
     Get(j, "lockHash", s.lockHash);
     Get(j, "lockSalt", s.lockSalt);
     Get(j, "lockLen", s.lockLen);
@@ -373,7 +383,7 @@ ChatMessage MessageFromJson(const json& j) {
 }
 
 json ToJson(const Transfer& t) {
-    return {{"tid", t.tid}, {"batch", t.batch}, {"batchName", t.batchName}, {"batchCount", t.batchCount},
+    return {{"tid", t.tid}, {"sync", t.sync}, {"batch", t.batch}, {"batchName", t.batchName}, {"batchCount", t.batchCount},
             {"peer", t.peer}, {"out", t.outgoing}, {"name", t.name}, {"rel", t.rel}, {"localPath", t.localPath},
             {"partPath", t.partPath}, {"size", t.size}, {"mtime", t.mtime}, {"sha256", t.sha256},
             {"recvSha", t.recvSha}, {"state", (int)t.state}, {"pausedByPeer", t.pausedByPeer},
@@ -384,6 +394,7 @@ void TransferFromJson(const json& j, Transfer& t) {
     Get(j, "tid", t.tid);
     Get(j, "batch", t.batch);
     Get(j, "batchName", t.batchName);
+    Get(j, "sync", t.sync);
     Get(j, "batchCount", t.batchCount);
     Get(j, "peer", t.peer);
     Get(j, "out", t.outgoing);
