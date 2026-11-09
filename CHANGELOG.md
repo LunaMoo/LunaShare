@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.7
 
 - **Verify a contact with QR codes** (*Devices → the person → Verify with QR codes...*): show your code, scan theirs with
   the camera - LunaShare compares the keys itself and marks them verified (or warns if they differ).
