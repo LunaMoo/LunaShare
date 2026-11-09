@@ -12,6 +12,9 @@
 #include "music.h"
 
 // where each movie was left (ui_movies.cpp): key = its path (or "lib:<id>" for a contact's file)
+bool UpdateIsNewer(const std::string& tag, const std::string& mine);  // ("v1.6.0" vs "1.5.5")
+void UpdateShutdown();
+
 namespace movpos {
 struct Mark {
     double pos = 0, dur = 0;
@@ -68,6 +71,12 @@ public:
     bool MuteItem(const std::string& key, float h, bool button = false);  // (a menu line / button: opens the choices, or turns them back on)
     void DrawMutePopup();
     void SyncTick();  // my other devices: playlists and settings
+    // a newer version on GitHub (once a day, an option; or "Check now")
+    void UpdateTick();
+    void UpdateCheckNow();
+    void DrawUpdatePopup();
+    std::string updateTag, updateUrl, updateNotes;
+    bool updateOpen = false, updateAsked = false;
     nlohmann::json AppDataExport();           // settings file: playlists, music folders, sound, movie positions
     int AppDataImport(const nlohmann::json& j);  // (returns how many playlists there are now)
     std::string muteKey;

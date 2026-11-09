@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **New version check** (Settings > About, on by default): once a day LunaShare asks GitHub about the newest release;
+  a newer one shows a window with what's new and a button to its download page (nothing downloads by itself).
+  *Check now* asks right away.
 - *Export settings* also saves the music playlists, music folders, sound settings and movie positions; *Import
   settings* brings them back (on this or another device).
 - **The same playlists and settings on all your linked devices** (Settings > Your account, on by default): music

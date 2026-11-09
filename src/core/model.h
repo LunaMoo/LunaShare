@@ -118,6 +118,9 @@ struct Settings {
     bool playerHideUi = false;        // the controls go as soon as it plays (back with a tap / click)
     bool playerOrientByAspect = false;  // Android: a tall movie plays upright, a wide one sideways
     std::map<std::string, int64_t> mutedChats;
+    bool updateCheck = true;      // ask GitHub once a day whether there's a newer version
+    int64_t updateLast = 0;       // (when it last asked)
+    std::string updateSeen;       // a new version already shown (not again)
     bool syncOwn = true;      // keep playlists and settings the same on my other devices
     int64_t prefsVer = 0;     // when the synced settings last changed here (the newer ones win)  // chat key -> silent until (ms; 0 = until turned back on)
     std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)

@@ -339,6 +339,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_archive.cpp
         src/app/ui_sleep.cpp
         src/app/ui_sync.cpp
+        src/app/update.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
         src/app/notify.cpp
@@ -367,6 +368,7 @@ if(LUNASHARE_BUILD_APP)
         set(APP_TARGET LunaShare)
         if(WIN32)
             target_sources(LunaShare PRIVATE res/lunashare.rc)
+            target_link_libraries(LunaShare PRIVATE winhttp)  # the update check
             if(MSVC)
                 target_link_options(LunaShare PRIVATE /MANIFEST:NO)  # our .rc already embeds the manifest
             endif()

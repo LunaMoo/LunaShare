@@ -686,6 +686,7 @@ int main(int argc, char** argv) {
     music::Play().Shutdown();
     music::Lib().Shutdown();
     movpos::Save(true);
+    UpdateShutdown();
     Player().Shutdown();
     Media().Shutdown();
     engine.Stop();

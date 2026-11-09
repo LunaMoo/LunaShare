@@ -290,6 +290,7 @@ void App::Frame() {
     if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing() || eng.watch.sid) busy = true;  // keep the timer / seek bar moving
     MusicTick();
     SyncTick();
+    UpdateTick();
     if (music::Play().GetNow().playing) busy = true;
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 
@@ -330,6 +331,7 @@ void App::Frame() {
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawChatHistoryPopup();
     DrawMutePopup();
+    DrawUpdatePopup();
     SleepPopup();
     DrawSleepAsk();
     DrawToasts();
@@ -3159,6 +3161,24 @@ void App::DrawSettings() {
 
     ImGui::SeparatorText(T("About"));
     ImGui::TextDisabled(T("LunaShare %s  -  %s  -  protocol v%d"), LUNASHARE_VERSION, PlatformName(), kProtocolVersion);
+    {
+        Settings us = eng.settings;
+        if (ImGui::Checkbox(T("Check for a new version once a day"), &us.updateCheck)) {
+            eng.ApplySettings(us);
+            edit.updateCheck = us.updateCheck;
+        }
+        ImGui::SameLine();
+        ui::HelpMarker(T("Asks GitHub (where LunaShare is published) about the newest release - nothing else is sent, and nothing is "
+                         "downloaded by itself: a newer version shows a window with a button to its download page."));
+        if (ImGui::Button(T("Check now"), ImVec2(0, h))) {
+            updateAsked = true;
+            UpdateCheckNow();
+        }
+        if (!updateTag.empty() && UpdateIsNewer(updateTag, LUNASHARE_VERSION)) {
+            ImGui::SameLine();
+            if (ImGui::Button(TF("Get %s", updateTag.c_str()).c_str(), ImVec2(0, h))) SDL_OpenURL(updateUrl.c_str());
+        }
+    }
     ImGui::TextDisabled(T("Settings folder: %s"), (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());
     ImGui::TextDisabled("%s", T("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts."));
     ImGui::TextDisabled("%s", T("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact)."));

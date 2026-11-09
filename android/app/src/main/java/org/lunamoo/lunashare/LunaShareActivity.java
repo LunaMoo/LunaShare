@@ -293,6 +293,29 @@ public class LunaShareActivity extends SDLActivity {
     }
 
     /** Media volume 0..1 (the movie player's swipe on the right). */
+    // the update check (from a native background thread): the body, or null
+    public static String httpsGet(String url) {
+        try {
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(15000);
+            c.setRequestProperty("User-Agent", "LunaShare");
+            c.setRequestProperty("Accept", "application/vnd.github+json");
+            if (c.getResponseCode() != 200) return null;
+            try (java.io.InputStream in = c.getInputStream()) {
+                java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+                byte[] b = new byte[8192];
+                int n;
+                while ((n = in.read(b)) > 0 && o.size() < (1 << 20)) o.write(b, 0, n);
+                return o.toString("UTF-8");
+            } finally {
+                c.disconnect();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public static float mediaVolume() {
         LunaShareActivity a = self;
         if (a == null) return -1;

@@ -301,6 +301,22 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.moviePip = [](bool allowed, int w, int h) { CallV("moviePip", "(ZII)V", (jboolean)allowed, (jint)w, (jint)h); };
     b.enterPip = []() { CallV("enterPip", "()V"); };
     b.inPip = []() { return CallZ("inPictureInPicture", "()Z"); };
+    b.httpsGet = [](const std::string& url, std::string& body) -> bool {
+        static jmethodID m = M("httpsGet", "(Ljava/lang/String;)Ljava/lang/String;");
+        if (!m) return false;
+        JNIEnv* env = Env();
+        jstring u = env->NewStringUTF(url.c_str());
+        jstring r = (jstring)env->CallStaticObjectMethod(g_cls, m, u);
+        env->DeleteLocalRef(u);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return false;
+        }
+        if (!r) return false;
+        body = JStr(env, r);
+        env->DeleteLocalRef(r);
+        return true;
+    };
     b.isMetered = []() -> bool {
         if (!g_notify) return false;
         JNIEnv* e = Env();

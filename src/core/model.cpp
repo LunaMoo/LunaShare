@@ -60,7 +60,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"updateCheck", s.updateCheck}, {"updateLast", s.updateLast}, {"updateSeen", s.updateSeen}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
         {"videoBrightness", s.videoBrightness}, {"videoContrast", s.videoContrast}, {"videoSaturation", s.videoSaturation}, {"videoGamma", s.videoGamma},
         {"videoTemperature", s.videoTemperature}, {"videoTint", s.videoTint}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
@@ -207,6 +207,9 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
             if (v.is_number_integer() && s.mutedChats.size() < 1000) s.mutedChats[k] = v.get<int64_t>();
     }
     Get(j, "syncOwn", s.syncOwn);
+    Get(j, "updateCheck", s.updateCheck);
+    Get(j, "updateLast", s.updateLast);
+    Get(j, "updateSeen", s.updateSeen);
     Get(j, "prefsVer", s.prefsVer);
     Get(j, "watchAllowSave", s.watchAllowSave);
     Get(j, "videoBrightness", s.videoBrightness);

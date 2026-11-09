@@ -2359,6 +2359,13 @@ void Engine::SyncPush(const std::string& kind, const json& data) {
         if (auto c = ReadyConn(d)) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
 }
 
+void Engine::SetUpdateState(int64_t last, const std::string& seen) {
+    auto lk = Lock();
+    settings.updateLast = last;
+    settings.updateSeen = seen;
+    MarkDirty();
+}
+
 void Engine::SetPrefsVer(int64_t ver) {
     auto lk = Lock();
     settings.prefsVer = ver;
@@ -3521,6 +3528,8 @@ void Engine::ApplySettings(const Settings& s) {
     settings.profileVer = old.profileVer;
     settings.mutedChats = old.mutedChats;  // only MuteChat changes these (the settings page keeps an older copy)
     settings.prefsVer = old.prefsVer;
+    settings.updateLast = old.updateLast;
+    settings.updateSeen = old.updateSeen;
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);
     if (settings.tcpPort != old.tcpPort && running_) restartListener_ = true;
