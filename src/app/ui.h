@@ -65,6 +65,7 @@ public:
     // a chat's notifications: off for a while / for good, or back on
     bool MuteItem(const std::string& key, float h, bool button = false);  // (a menu line / button: opens the choices, or turns them back on)
     void DrawMutePopup();
+    void SyncTick();  // my other devices: playlists and settings
     std::string muteKey;
     bool muteOpen = false;
     void DrawHistoryAskBanner(const std::string& peer);

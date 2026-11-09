@@ -54,6 +54,17 @@ void App::DrawAccountSettings(float fieldW, float h) {
         openLinkPick = true;
         linkTarget.clear();
     }
+    {
+        Settings s = eng.settings;
+        if (ImGui::Checkbox(T("The same playlists and settings on my devices"), &s.syncOwn)) {
+            eng.ApplySettings(s);
+            edit.syncOwn = s.syncOwn;
+        }
+        ImGui::SameLine();
+        ui::HelpMarker(T("Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's "
+                         "options, silent chats and the language follow you to your other linked devices. A playlist changed on two "
+                         "devices: the later change counts. Songs are found by their name and tags, wherever they are on each device."));
+    }
     if (!eng.settings.accountBackedUp) {
         ImGui::PushTextWrapPos(0);
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1),

@@ -117,7 +117,9 @@ struct Settings {
     float subtitleScale = 1.0f;       // subtitle text size (0.5 .. 2.5)      // at the end of a movie, the next one in its folder
     bool playerHideUi = false;        // the controls go as soon as it plays (back with a tap / click)
     bool playerOrientByAspect = false;  // Android: a tall movie plays upright, a wide one sideways
-    std::map<std::string, int64_t> mutedChats;  // chat key -> silent until (ms; 0 = until turned back on)
+    std::map<std::string, int64_t> mutedChats;
+    bool syncOwn = true;      // keep playlists and settings the same on my other devices
+    int64_t prefsVer = 0;     // when the synced settings last changed here (the newer ones win)  // chat key -> silent until (ms; 0 = until turned back on)
     std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)
     bool watchAllowSave = true;
     // the movie player's picture: brightness -0.5..0.5, contrast / saturation / gamma 1 = unchanged, colour temperature and

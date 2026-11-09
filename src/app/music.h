@@ -13,6 +13,8 @@
 #include <thread>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 struct LspPlayer;
 struct LspModule;
 
@@ -34,7 +36,8 @@ struct Track {
 
 struct Playlist {
     std::string id, name;
-    std::vector<std::string> paths;
+    std::vector<std::string> paths;  // (a song from another device not found here: "sync:" + what it is, until it is)
+    int64_t mod = 0;                 // last change (ms) - syncing with my other devices: the newer one wins
 };
 
 enum Repeat { RepeatOff = 0, RepeatAll = 1, RepeatOne = 2 };
@@ -53,6 +56,8 @@ struct Sound {
     int remixFade = 6;          // seconds one flows into the next
     bool level = false;         // even out the volume between songs (ReplayGain / measured)
 };
+nlohmann::json SoundToJson(const Sound& s);
+Sound SoundFromJson(const nlohmann::json& j);
 struct EqPreset {
     const char* name;
     float g[kEqBands];
@@ -116,6 +121,17 @@ public:
     void AddToPlaylist(const std::string& id, const std::vector<std::string>& paths);
     void SetPlaylistPaths(const std::string& id, const std::vector<std::string>& paths);
 
+    // my other devices: the playlists in a form that doesn't depend on where the songs are (artist, title, file
+    // name, size), and merging theirs (each playlist: the newer one; deleted ones stay deleted)
+    nlohmann::json SyncJson();
+    struct MergeResult {
+        bool changed = false;  // something here changed
+        bool behind = false;   // they lack something newer from here
+    };
+    MergeResult SyncMerge(const nlohmann::json& j);
+    bool ResolveSynced();  // songs that weren't here before (after a scan): into the playlists
+    uint64_t PlaylistsVersion() const { return plVersion_; }
+
     void Save();
     std::string StatePath() const { return statePath_; }
 
@@ -138,6 +154,11 @@ private:
     std::vector<std::string> folders_, implicit_;
     std::map<std::string, Track> tracks_;  // path -> track
     std::vector<Playlist> playlists_;
+    std::map<std::string, int64_t> gone_;  // deleted playlists (id -> when), so a device that missed it doesn't bring them back
+    std::atomic<uint64_t> plVersion_{1};
+    void Touch(Playlist& p);
+    nlohmann::json Describe(const std::string& path);  // (lock held)
+    std::string Resolve(const nlohmann::json& d);        // (lock held) a song here for that description, or "sync:..."
     bool dirty_ = false;
 };
 

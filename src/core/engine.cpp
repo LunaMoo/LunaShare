@@ -1897,6 +1897,17 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             Queue(c, Msg::ChatEditAck, ack);
             break;
         }
+        case Msg::SyncData: {
+            auto dv = devices.find(c->peerId);
+            if (!settings.syncOwn || dv == devices.end() || MyAccount().empty() || dv->second.accountPub != MyAccount()) break;  // (mine only)
+            std::string kind = j.value("kind", "");
+            if (kind.empty() || kind.size() > 32 || !j.contains("data")) break;
+            for (auto it = syncIn_.begin(); it != syncIn_.end();)  // (an older one of the same kind isn't needed any more)
+                it = it->first == kind ? syncIn_.erase(it) : it + 1;
+            if (syncIn_.size() < 16) syncIn_.push_back({kind, j["data"]});
+            MarkDirty();
+            break;
+        }
         case Msg::ChatEditAck: {
             std::string mid = j.value("mid", "");
             auto dv = devices.find(c->peerId);
@@ -2340,9 +2351,43 @@ void Engine::HandleData(const std::shared_ptr<Connection>& c, const Frame& f) {
     }
 }
 
+void Engine::SyncPush(const std::string& kind, const json& data) {
+    auto lk = Lock();
+    if (!settings.syncOwn) return;
+    syncOut_[kind] = data;
+    for (auto& d : MyOtherDevices())
+        if (auto c = ReadyConn(d)) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
+}
+
+void Engine::SetPrefsVer(int64_t ver) {
+    auto lk = Lock();
+    settings.prefsVer = ver;
+    MarkDirty();
+}
+
+void Engine::SetMutedChats(const std::map<std::string, int64_t>& m) {
+    auto lk = Lock();
+    settings.mutedChats = m;
+    MarkDirty();
+}
+
+bool Engine::SyncPop(std::string& kind, json& data) {
+    auto lk = Lock();
+    if (syncIn_.empty()) return false;
+    kind = syncIn_.front().first;
+    data = std::move(syncIn_.front().second);
+    syncIn_.pop_front();
+    return true;
+}
+
 void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
+    {  // my own device: what I keep the same everywhere
+        auto dv = devices.find(peer);
+        if (settings.syncOwn && dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount())
+            for (auto& [kind, data] : syncOut_) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
+    }
     if (IsContact(peer)) {  // their Shared folder (and a new source for running downloads)
         Queue(c, Msg::LibGet, json::object());
         for (auto& [id, d] : swarm) d->lastHave = 0;
@@ -3475,6 +3520,7 @@ void Engine::ApplySettings(const Settings& s) {
     settings.accountBackedUp = old.accountBackedUp;
     settings.profileVer = old.profileVer;
     settings.mutedChats = old.mutedChats;  // only MuteChat changes these (the settings page keeps an older copy)
+    settings.prefsVer = old.prefsVer;
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);
     if (settings.tcpPort != old.tcpPort && running_) restartListener_ = true;

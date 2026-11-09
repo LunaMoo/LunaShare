@@ -322,6 +322,12 @@ public:
     std::string Resolve(const std::string& key);             // best device: connected (fastest link) > online > last seen
     bool IsOnline(const std::string& key);
     std::vector<std::string> MyOtherDevices();               // devices linked to my account (not this one)
+    // my other devices: things the app keeps the same everywhere (playlists, settings). SyncPush hands mine (sent to
+    // those online now, and to the others when they come); SyncPop gives theirs, for the app to merge.
+    void SyncPush(const std::string& kind, const nlohmann::json& data);
+    bool SyncPop(std::string& kind, nlohmann::json& data);
+    void SetPrefsVer(int64_t ver);                                   // (the synced settings: when they changed)
+    void SetMutedChats(const std::map<std::string, int64_t>& m);     // (from my other device)
     std::vector<std::string> Conversations();                // every chat key the UI can list
     const KnownDevice* DeviceFor(const std::string& key);    // the best device's entry (under Lock())
     std::map<std::string, AccountInfo> accounts;             // other people's accounts (key: account key hex)
@@ -535,6 +541,8 @@ public:
 
     // helpers usable under Lock()
     std::shared_ptr<Connection> ReadyConn(const std::string& peer);
+    std::map<std::string, nlohmann::json> syncOut_;                         // kind -> mine (as last pushed)
+    std::deque<std::pair<std::string, nlohmann::json>> syncIn_;            // theirs, for the app
     bool IsConnected(const std::string& peer) { return (bool)ReadyConn(peer); }
     std::string PeerName(const std::string& peer);
     // a chat without notifications: forever (minutes 0) or for a while; minutes < 0 turns them back on

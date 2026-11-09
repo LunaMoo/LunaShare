@@ -534,6 +534,25 @@ int main() {
         A->SendChat(idB, "sent from the computer");
         CHECK(WaitFor([&] { return has(*A2, bKey, "sent from the computer", true); }, 3000), "my sent message appears on my other device");
         CHECK(WaitFor([&] { return has(*B, "@" + A->MyAccount(), "sent from the computer", false); }, 3000), "and reaches the contact");
+        // playlists / settings: to my other device only (the app merges them)
+        A->SyncPush("playlists", {{"lists", json::array({{{"id", "p1"}, {"mod", 5}}})}});
+        auto popKind = [](Engine& e, const std::string& want, json& out) {
+            std::string k;
+            json d;
+            while (e.SyncPop(k, d))
+                if (k == want) {
+                    out = d;
+                    return true;
+                }
+            return false;
+        };
+        json got;
+        CHECK(WaitFor([&] { return popKind(*A2, "playlists", got); }, 3000) && got["lists"][0]["id"] == "p1", "synced to my other device");
+        {
+            json none;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            CHECK(!popKind(*B, "playlists", none), "not to a contact");
+        }
         A2->Stop();
     }
     printf("[group conversations]\n");

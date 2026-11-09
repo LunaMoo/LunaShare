@@ -60,6 +60,7 @@ enum class Msg : uint8_t {
     // ---- chat history sent back (when it was lost here): asked for, then sent (after the other person agrees)
     ChatEdit = 102,     // {mid, text, ts[, gid] | chat (my other devices)}  a message changed by who wrote it
     ChatEditAck = 103,  // {mid[, gid]}
+    SyncData = 104,     // my own devices: {kind, data} - playlists / settings, merged by the app
     HistoryAsk = 100,   // {chat[, gid]}                                   -> the other side (or my other devices)
     HistoryData = 101,  // {chat, msgs[], files[], last, from[, declined, empty][, gid]}  in parts
     ListenAdd = 95,     // {sid, items[{iid, name, title, artist, album, dur, size}]}  listener -> host: songs of mine

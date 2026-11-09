@@ -37,6 +37,21 @@ Devices of older versions (no account) keep a conversation of their own, keyed b
    person's name and picture, contacts, other people's device lists and the conversations (newest 2000 messages each).
 5. The new device reconnects everywhere; contacts learn about it from its certificate and the pushed device list.
 
+## The same playlists and settings everywhere
+
+*Settings > Your account > The same playlists and settings on my devices* (on by default). Linked devices keep
+these the same whenever they are connected to each other:
+
+- music playlists - each one separately: the later change wins, a deleted one stays deleted. Songs are matched by
+  file name and size, then by artist and title, so they're found wherever they are on each device; a song that isn't
+  on a device stays in the playlist (hidden) and shows up once it's there.
+- the sound settings (equalizer, transitions, remix, volume levelling), the movie player's options (autoplay, next,
+  hiding the controls, rotation, small window, subtitle size), silent chats and the language - as one piece, the
+  later change wins.
+
+Not synced: how a screen looks (theme, size), folders and ports - those belong to each device. (Message type 104
+`SyncData` `{kind, data}`, only between devices of the same account.)
+
 ## Recovery
 
 * **Recovery phrase**: the 32-byte account key as 24 words (BIP-39 English word list, 8-bit SHA-256 checksum). Restoring

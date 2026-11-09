@@ -289,6 +289,7 @@ void App::Frame() {
         if (cv.unread && !eng.ChatMuted(peer)) unread += cv.unread;
     if (Media().Recording() || Media().VideoMessageOpen() || Player().Playing() || eng.watch.sid) busy = true;  // keep the timer / seek bar moving
     MusicTick();
+    SyncTick();
     if (music::Play().GetNow().playing) busy = true;
     windowTitle = unread ? "LunaShare (" + std::to_string(unread) + ")" : "LunaShare";
 

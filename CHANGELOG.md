@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The same playlists and settings on all your linked devices** (Settings > Your account, on by default): music
+  playlists (each one: the later change wins; songs are found by name and tags wherever they are), the sound
+  settings, the movie player's options, silent chats and the language.
 - Chat: **silence a chat's notifications** for 1 hour / 8 hours / a day / a week or until turned back on (a chat's
   menu - long press / right click in the list - or *Chat history*). New messages are only counted, in grey, and
   don't count in the window title; calls still ring.

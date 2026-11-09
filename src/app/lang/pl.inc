@@ -1036,3 +1036,5 @@
 {"For a day", "Na dobę"},
 {"For a week", "Na tydzień"},
 {"Until I turn them back on", "Do czasu, aż je włączę"},
+{"The same playlists and settings on my devices", "Te same playlisty i ustawienia na moich urządzeniach"},
+{"Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's options, silent chats and the language follow you to your other linked devices. A playlist changed on two devices: the later change counts. Songs are found by their name and tags, wherever they are on each device.", "Playlisty muzyczne, ustawienia dźwięku (korektor, przejścia, remiks, wyrównywanie głośności), opcje odtwarzacza filmów, wyciszone czaty i język idą za Tobą na inne połączone urządzenia. Playlista zmieniona na dwóch urządzeniach: liczy się późniejsza zmiana. Utwory są odnajdywane po nazwie i tagach, gdziekolwiek leżą na danym urządzeniu."},

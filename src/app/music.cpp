@@ -98,8 +98,12 @@ void Library::Init(const std::string& configDir, const LspModule* mod) {
             pl.name = p.value("name", "");
             for (auto& x : p.value("paths", json::array()))
                 if (x.is_string()) pl.paths.push_back(x.get<std::string>());
+            pl.mod = p.value("mod", (int64_t)0);
             if (!pl.id.empty()) playlists_.push_back(pl);
         }
+        json gone = j.value("gone", json::object());
+        for (auto& [id, t] : gone.items())
+            if (t.is_number_integer()) gone_[id] = t.get<int64_t>();
     }
     th_ = std::thread([this] { ScanLoop(); });
 }
@@ -131,8 +135,8 @@ void Library::Save() {
             tr.push_back(x);
         }
         json pls = json::array();
-        for (auto& p : playlists_) pls.push_back({{"id", p.id}, {"name", p.name}, {"paths", p.paths}});
-        j = {{"v", 1}, {"folders", folders_}, {"tracks", tr}, {"playlists", pls}};
+        for (auto& p : playlists_) pls.push_back({{"id", p.id}, {"name", p.name}, {"paths", p.paths}, {"mod", p.mod}});
+        j = {{"v", 1}, {"folders", folders_}, {"tracks", tr}, {"playlists", pls}, {"gone", gone_}};
     }
     MakeDirs(dir_);
     SaveJsonFile(file_, j);
@@ -207,6 +211,7 @@ std::string Library::CreatePlaylist(const std::string& name) {
     p.name = name.empty() ? "Playlist" : name;
     {
         std::lock_guard<std::mutex> l(m_);
+        Touch(p);
         playlists_.push_back(p);
         dirty_ = true;
         version_++;
@@ -219,7 +224,10 @@ void Library::RenamePlaylist(const std::string& id, const std::string& name) {
     {
         std::lock_guard<std::mutex> l(m_);
         for (auto& p : playlists_)
-            if (p.id == id) p.name = name;
+            if (p.id == id) {
+                p.name = name;
+                Touch(p);
+            }
         dirty_ = true;
         version_++;
     }
@@ -230,6 +238,8 @@ void Library::DeletePlaylist(const std::string& id) {
     {
         std::lock_guard<std::mutex> l(m_);
         playlists_.erase(std::remove_if(playlists_.begin(), playlists_.end(), [&](const Playlist& p) { return p.id == id; }), playlists_.end());
+        gone_[id] = NowMs();
+        plVersion_++;
         dirty_ = true;
         version_++;
     }
@@ -240,7 +250,10 @@ void Library::AddToPlaylist(const std::string& id, const std::vector<std::string
     {
         std::lock_guard<std::mutex> l(m_);
         for (auto& p : playlists_)
-            if (p.id == id) p.paths.insert(p.paths.end(), paths.begin(), paths.end());
+            if (p.id == id) {
+                p.paths.insert(p.paths.end(), paths.begin(), paths.end());
+                Touch(p);
+            }
         dirty_ = true;
         version_++;
     }
@@ -251,11 +264,185 @@ void Library::SetPlaylistPaths(const std::string& id, const std::vector<std::str
     {
         std::lock_guard<std::mutex> l(m_);
         for (auto& p : playlists_)
-            if (p.id == id) p.paths = paths;
+            if (p.id == id) {
+                p.paths = paths;
+                Touch(p);
+            }
         dirty_ = true;
         version_++;
     }
     Save();
+}
+
+json SoundToJson(const Sound& s) {
+    json eq = json::array();
+    for (float g : s.eq) eq.push_back(g);
+    return {{"eqOn", s.eqOn}, {"eq", eq}, {"preamp", s.preamp}, {"preset", s.preset}, {"crossfade", s.crossfade},
+            {"remix", s.remix}, {"remixLen", s.remixLen}, {"remixFade", s.remixFade}, {"level", s.level}};
+}
+
+Sound SoundFromJson(const json& s) {
+    Sound r;
+    if (!s.is_object()) return r;
+    r.eqOn = s.value("eqOn", false);
+    json eq = s.value("eq", json::array());
+    for (int k = 0; k < kEqBands && k < (int)eq.size(); k++)
+        if (eq[(size_t)k].is_number()) r.eq[k] = std::clamp(eq[(size_t)k].get<float>(), -12.0f, 12.0f);
+    r.preamp = std::clamp(s.value("preamp", 0.0f), -12.0f, 6.0f);
+    r.preset = s.value("preset", "Flat");
+    r.crossfade = std::clamp(s.value("crossfade", 0), 0, 12);
+    r.remix = s.value("remix", false);
+    r.remixLen = std::clamp(s.value("remixLen", 45), 15, 180);
+    r.remixFade = std::clamp(s.value("remixFade", 6), 1, 12);
+    r.level = s.value("level", false);
+    return r;
+}
+
+void Library::Touch(Playlist& p) {
+    p.mod = std::max(NowMs(), p.mod + 1);
+    plVersion_++;
+}
+
+static std::string Lc(std::string s) {
+    for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+    return s;
+}
+
+json Library::Describe(const std::string& path) {
+    if (path.rfind("sync:", 0) == 0) {  // (from another device, not found here: passed on as it came)
+        json d = json::parse(path.substr(5), nullptr, false);
+        return d.is_object() ? d : json::object();
+    }
+    json d = {{"f", BaseName(path)}};
+    auto it = tracks_.find(path);
+    if (it != tracks_.end()) {
+        if (!it->second.title.empty()) d["t"] = it->second.title;
+        if (!it->second.artist.empty()) d["a"] = it->second.artist;
+        if (it->second.size) d["s"] = it->second.size;
+    }
+    return d;
+}
+
+std::string Library::Resolve(const json& d) {
+    std::string f = d.value("f", ""), t = Lc(d.value("t", "")), a = Lc(d.value("a", ""));
+    int64_t s = d.value("s", (int64_t)0);
+    const Track *byTag = nullptr, *byName = nullptr, *byNameSize = nullptr;
+    for (auto& [p, x] : tracks_) {
+        if (!t.empty() && Lc(x.title) == t && Lc(x.artist) == a && !byTag) byTag = &x;
+        if (!f.empty() && BaseName(p) == f) {
+            if (s && x.size == s && !byNameSize) byNameSize = &x;
+            if (!byName) byName = &x;
+        }
+    }
+    if (byNameSize) return byNameSize->path;
+    if (byTag) return byTag->path;
+    if (byName) return byName->path;
+    return "sync:" + d.dump();
+}
+
+json Library::SyncJson() {
+    std::lock_guard<std::mutex> l(m_);
+    std::vector<const Playlist*> v;
+    for (auto& p : playlists_) v.push_back(&p);
+    std::sort(v.begin(), v.end(), [](const Playlist* a, const Playlist* b) { return a->id < b->id; });  // (the same on every device)
+    json lists = json::array();
+    for (auto* p : v) {
+        json items = json::array();
+        for (auto& path : p->paths) items.push_back(Describe(path));
+        lists.push_back({{"id", p->id}, {"name", p->name}, {"mod", p->mod}, {"items", items}});
+    }
+    return {{"lists", lists}, {"gone", gone_}};
+}
+
+Library::MergeResult Library::SyncMerge(const json& j) {
+    MergeResult r;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        std::map<std::string, int64_t> theirGone;
+        json gone = j.value("gone", json::object());
+        for (auto& [id, t] : gone.items())
+            if (t.is_number_integer()) theirGone[id] = t.get<int64_t>();
+        std::set<std::string> theirs;
+        for (auto& x : j.value("lists", json::array())) {
+            if (!x.is_object()) continue;
+            std::string id = x.value("id", "");
+            int64_t mod = x.value("mod", (int64_t)0);
+            if (id.empty() || id.size() > 64) continue;
+            theirs.insert(id);
+            auto g = gone_.find(id);
+            if (g != gone_.end() && g->second >= mod) {  // deleted here after their last change
+                r.behind = true;
+                continue;
+            }
+            Playlist* mine = nullptr;
+            for (auto& p : playlists_)
+                if (p.id == id) mine = &p;
+            if (mine && mine->mod >= mod) {
+                if (mine->mod > mod) r.behind = true;
+                continue;
+            }
+            Playlist p;
+            p.id = id;
+            p.name = x.value("name", std::string("Playlist")).substr(0, 200);
+            p.mod = mod;
+            for (auto& d : x.value("items", json::array()))
+                if (d.is_object() && p.paths.size() < 20000) p.paths.push_back(Resolve(d));
+            if (mine) *mine = p;
+            else playlists_.push_back(p);
+            if (g != gone_.end()) gone_.erase(g);  // (changed there after it was deleted here: it's back)
+            r.changed = true;
+        }
+        for (auto& [id, t] : theirGone) {  // deleted there
+            auto it = std::find_if(playlists_.begin(), playlists_.end(), [&](const Playlist& p) { return p.id == id; });
+            if (it != playlists_.end()) {
+                if (it->mod <= t) {
+                    playlists_.erase(it);
+                    r.changed = true;
+                } else {
+                    r.behind = true;  // changed here after: they get it back
+                }
+            }
+            if (!gone_.count(id) || gone_[id] < t) {
+                gone_[id] = t;
+                r.changed = true;
+            }
+        }
+        for (auto& p : playlists_)  // one they don't have at all
+            if (!theirs.count(p.id) && !(theirGone.count(p.id) && theirGone[p.id] >= p.mod)) r.behind = true;
+        for (auto& [id, t] : gone_)
+            if (!theirGone.count(id) || theirGone[id] < t) r.behind = true;
+        if (r.changed) {
+            dirty_ = true;
+            version_++;
+            plVersion_++;
+        }
+    }
+    if (r.changed) Save();
+    return r;
+}
+
+bool Library::ResolveSynced() {
+    bool any = false;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        for (auto& p : playlists_)
+            for (auto& path : p.paths)
+                if (path.rfind("sync:", 0) == 0) {
+                    json d = json::parse(path.substr(5), nullptr, false);
+                    if (!d.is_object()) continue;
+                    std::string r = Resolve(d);
+                    if (r.rfind("sync:", 0) != 0) {
+                        path = r;  // (not a change of the playlist: it's the same song, found now)
+                        any = true;
+                    }
+                }
+        if (any) {
+            dirty_ = true;
+            version_++;
+        }
+    }
+    if (any) Save();
+    return any;
 }
 
 // an embedded cover is kept once per picture (an album's tracks usually carry the same one)
@@ -1322,19 +1509,7 @@ void Player::LoadState(const std::string& path) {
     shuffle_ = j.value("shuffle", false);
     savedPos_ = j.value("pos", 0.0);
     json s = j.value("sound", json::object());
-    if (s.is_object()) {
-        snd_.eqOn = s.value("eqOn", false);
-        json eq = s.value("eq", json::array());
-        for (int k = 0; k < kEqBands && k < (int)eq.size(); k++)
-            if (eq[(size_t)k].is_number()) snd_.eq[k] = std::clamp(eq[(size_t)k].get<float>(), -12.0f, 12.0f);
-        snd_.preamp = std::clamp(s.value("preamp", 0.0f), -12.0f, 6.0f);
-        snd_.preset = s.value("preset", "Flat");
-        snd_.crossfade = std::clamp(s.value("crossfade", 0), 0, 12);
-        snd_.remix = s.value("remix", false);
-        snd_.remixLen = std::clamp(s.value("remixLen", 45), 15, 180);
-        snd_.remixFade = std::clamp(s.value("remixFade", 6), 1, 12);
-        snd_.level = s.value("level", false);
-    }
+    if (s.is_object()) snd_ = SoundFromJson(s);
     UpdateEq();
 }
 
@@ -1343,11 +1518,8 @@ void Player::SaveState() {
     json j;
     {
         std::lock_guard<std::mutex> l(m_);
-        json eq = json::array();
-        for (float g : snd_.eq) eq.push_back(g);
         j = {{"queue", queue_}, {"order", order_}, {"at", at_}, {"repeat", repeat_}, {"shuffle", shuffle_}, {"pos", savedPos_},
-             {"sound", {{"eqOn", snd_.eqOn}, {"eq", eq}, {"preamp", snd_.preamp}, {"preset", snd_.preset}, {"crossfade", snd_.crossfade},
-                        {"remix", snd_.remix}, {"remixLen", snd_.remixLen}, {"remixFade", snd_.remixFade}, {"level", snd_.level}}}};
+             {"sound", SoundToJson(snd_)}};
         lastSave_ = (int64_t)SDL_GetTicks64();
     }
     SaveJsonFile(statePath_, j);
