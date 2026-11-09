@@ -3174,6 +3174,31 @@ void App::DrawSettings() {
         changed |= ImGui::Checkbox(T("Automatically accept files from trusted devices"), &edit.autoAcceptTrusted);
         changed |= ImGui::Checkbox(T("Automatically accept files from everyone"), &edit.autoAcceptAll);
         ui::HelpMarker(T("Anyone on your network could send you files without asking. Only enable on networks you trust."));
+        ImGui::BeginDisabled(!edit.autoAcceptTrusted && !edit.autoAcceptAll);
+        ImGui::Indent();
+        {
+            const int sizes[] = {0, 10, 50, 100, 500, 1024, 4096};
+            auto name = [](int mb) {
+                return mb == 0 ? std::string(T("any size")) : mb >= 1024 ? TF("up to %d GB", mb / 1024) : TF("up to %d MB", mb);
+            };
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(T("Without asking:"));
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
+            if (ImGui::BeginCombo("##aamax", name(edit.autoAcceptMaxMB).c_str())) {
+                for (int mb : sizes)
+                    if (ImGui::Selectable(name(mb).c_str(), edit.autoAcceptMaxMB == mb)) {
+                        edit.autoAcceptMaxMB = mb;
+                        changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            ui::HelpMarker(T("A bigger file asks first, even from a trusted device."));
+            if (Bridge().isMetered) changed |= ImGui::Checkbox(T("On mobile data, always ask first"), &edit.autoAcceptNotMetered);
+        }
+        ImGui::Unindent();
+        ImGui::EndDisabled();
         changed |= ImGui::Checkbox(T("Resume interrupted transfers automatically"), &edit.autoResume);
 
         ImGui::SeparatorText(T("Network"));

@@ -2162,8 +2162,11 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 break;
             }
             KnownDevice& d = Device(c->peerId);
-            bool autoAccept = settings.autoAcceptAll || (d.trusted && settings.autoAcceptTrusted) ||
-                              (t->sync && !MyAccount().empty() && d.accountPub == MyAccount());  // (folder sync from my own device)
+            bool autoAccept = settings.autoAcceptAll || (d.trusted && settings.autoAcceptTrusted);
+            // the rules for taking files without asking: not too big, not on mobile data
+            if (autoAccept && settings.autoAcceptMaxMB > 0 && t->size > (int64_t)settings.autoAcceptMaxMB * 1024 * 1024) autoAccept = false;
+            if (autoAccept && settings.autoAcceptNotMetered && Bridge().isMetered && Bridge().isMetered()) autoAccept = false;
+            autoAccept |= t->sync && !MyAccount().empty() && d.accountPub == MyAccount();  // (folder sync from my own device)
             if (t->state == TState::Pending && autoAccept) SendAcceptFor(t);
             else if (firstOfBatch) Emit({EventType::IncomingOffer, c->peerId, t->batchName, tid});
             MarkDirty();

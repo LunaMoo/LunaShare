@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Rules for taking files without asking** (Settings > Advanced > Receiving): only up to a size (10 MB ... 4 GB),
+  and on phones optionally always asking on mobile data.
+
 - **Folders sent to your devices by themselves** (Settings > Your account): e.g. the phone's camera folder - new and
   changed files go to your computer without asking, every minute and when it comes online.
 

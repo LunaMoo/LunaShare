@@ -374,6 +374,31 @@ int main() {
         CHECK(!A->EditMessage(idB, theirs, "hacked"), "cannot change their message");
     }
 
+    // rules for taking files without asking: a bigger one asks first
+    {
+        std::string big = JoinPath(A->ConfigPath(), "big.bin");
+        WriteRandomFile(big, 2 * 1024 * 1024 + 7, 77);
+        B->settings.autoAcceptMaxMB = 1;
+        uint64_t batch = A->SendPaths(idB, {big});
+        auto stateAtB = [&]() {
+            auto l = B->Lock();
+            for (auto& [tid, t] : B->transfers)
+                if (!t->outgoing && t->name == "big.bin") return (int)t->state;
+            return -1;
+        };
+        CHECK(WaitFor([&] { return stateAtB() == (int)TState::Pending; }, 5000), "a file over the limit waits to be accepted");
+        {
+            std::vector<uint64_t> tids;
+            {
+                auto l = A->Lock();
+                for (auto& [tid, t] : A->transfers)
+                    if (t->batch == batch) tids.push_back(tid);
+            }
+            for (auto t : tids) A->Cancel(t);
+        }
+        B->settings.autoAcceptMaxMB = 0;
+    }
+
     // forwarded: marked as such on the other side
     A->SendChat(idB, "passed on", "", {}, true);
     CHECK(WaitFor([&] {

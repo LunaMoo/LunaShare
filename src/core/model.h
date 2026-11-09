@@ -69,6 +69,8 @@ struct Settings {
     bool autoConnect = true;
     bool autoAcceptTrusted = true;
     bool autoAcceptAll = false;
+    int autoAcceptMaxMB = 0;            // bigger files ask first (0 = any size)
+    bool autoAcceptNotMetered = false;  // on mobile data everything asks first
     bool autoResume = true;
     bool bluetooth = false;
     int btChannel = 12;

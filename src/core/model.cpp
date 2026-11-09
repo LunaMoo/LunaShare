@@ -52,7 +52,7 @@ json ToJson(const Settings& s, bool withIdentity) {
     json j = {
         {"displayName", s.displayName}, {"downloadDir", s.downloadDir}, {"tcpPort", s.tcpPort},
         {"discovery", s.discovery}, {"mdns", s.mdns}, {"broadcast", s.broadcast}, {"autoConnect", s.autoConnect}, {"autoAcceptTrusted", s.autoAcceptTrusted},
-        {"autoAcceptAll", s.autoAcceptAll}, {"autoResume", s.autoResume}, {"bluetooth", s.bluetooth},
+        {"autoAcceptAll", s.autoAcceptAll}, {"autoAcceptMaxMB", s.autoAcceptMaxMB}, {"autoAcceptNotMetered", s.autoAcceptNotMetered}, {"autoResume", s.autoResume}, {"bluetooth", s.bluetooth},
         {"btChannel", s.btChannel}, {"wanEnabled", s.wanEnabled}, {"wanServer", s.wanServer}, {"wanRoom", s.wanRoom},
         {"wanPassword", s.wanPassword}, {"wanNatPmp", s.wanNatPmp}, {"wanLocalPort", s.wanLocalPort},
         {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
@@ -107,6 +107,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "autoConnect", s.autoConnect);
     Get(j, "autoAcceptTrusted", s.autoAcceptTrusted);
     Get(j, "autoAcceptAll", s.autoAcceptAll);
+    Get(j, "autoAcceptMaxMB", s.autoAcceptMaxMB);
+    Get(j, "autoAcceptNotMetered", s.autoAcceptNotMetered);
     Get(j, "autoResume", s.autoResume);
     Get(j, "bluetooth", s.bluetooth);
     Get(j, "btChannel", s.btChannel);
