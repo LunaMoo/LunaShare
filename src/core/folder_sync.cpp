@@ -83,7 +83,6 @@ void Engine::FolderSyncTick(bool force) {
         std::error_code ec;
         fs::path root = fs::u8path(f.path);
         if (!fs::is_directory(root, ec)) continue;
-        int64_t nowWall = NowMs();
         for (auto it = fs::recursive_directory_iterator(root, fs::directory_options::skip_permission_denied, ec);
              !ec && it != fs::recursive_directory_iterator() && files.size() < 20000; it.increment(ec)) {
             std::string name = it->path().filename().u8string();
@@ -94,7 +93,8 @@ void Engine::FolderSyncTick(bool force) {
             if (!it->is_regular_file(ec)) continue;
             std::string abs = it->path().u8string();
             int64_t size = FileSize(abs), mt = FileMTime(abs);
-            if (size < 0 || nowWall - mt * 1000 < 10000) continue;  // (still being written)
+            auto age = fs::file_time_type::clock::now() - it->last_write_time(ec);  // (the file clock's own epoch: it differs per system)
+            if (size < 0 || ec || age < std::chrono::seconds(10)) continue;            // (still being written)
             std::string rel = fs::relative(it->path(), root, ec).generic_u8string();
             if (ec || rel.empty()) continue;
             files.push_back({rel, abs, std::to_string(size) + ":" + std::to_string(mt)});
