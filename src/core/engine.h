@@ -409,8 +409,10 @@ public:
 
     Settings GetSettings();
     void ApplySettings(const Settings& s);  // restarts listeners if needed
-    bool ExportSettings(const std::string& path, bool includeHistory, bool includeIdentity, std::string* err);
-    bool ImportSettings(const std::string& path, bool importIdentity, std::string* err);
+    // appData: the app's own part (playlists, sound, movie positions) - kept in the file as it is
+    bool ExportSettings(const std::string& path, bool includeHistory, bool includeIdentity, std::string* err,
+                        const nlohmann::json& appData = nlohmann::json());
+    bool ImportSettings(const std::string& path, bool importIdentity, std::string* err, nlohmann::json* appData = nullptr);
 
     void BtRefresh(bool inquiry);  // async
     void SendWifiCreds(const std::string& peer, const std::string& ssid, const std::string& pass);

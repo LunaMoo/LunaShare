@@ -3538,12 +3538,13 @@ void Engine::ApplySettings(const Settings& s) {
     MarkDirty();
 }
 
-bool Engine::ExportSettings(const std::string& path, bool includeHistory, bool includeIdentity, std::string* err) {
+bool Engine::ExportSettings(const std::string& path, bool includeHistory, bool includeIdentity, std::string* err, const json& appData) {
     json j;
     {
         auto lk = Lock();
         j = {{"app", kAppId}, {"type", "settings-export"}, {"version", 1}, {"exported", NowMs()},
              {"from", settings.displayName}, {"settings", ToJson(settings, includeIdentity)}};
+        if (appData.is_object()) j["appData"] = appData;
         j["devices"] = json::array();
         for (auto& [id, d] : devices) j["devices"].push_back(ToJson(d));
         if (includeHistory) {
@@ -3565,12 +3566,13 @@ bool Engine::ExportSettings(const std::string& path, bool includeHistory, bool i
     return true;
 }
 
-bool Engine::ImportSettings(const std::string& path, bool importIdentity, std::string* err) {
+bool Engine::ImportSettings(const std::string& path, bool importIdentity, std::string* err, json* appData) {
     json j;
     if (!LoadJsonFile(path, j) || !j.is_object() || j.value("app", "") != kAppId) {
         if (err) *err = "Not a LunaShare settings file";
         return false;
     }
+    if (appData) *appData = j.value("appData", json::object());
     Settings s = GetSettings();
     std::string keepDl = s.downloadDir;
     FromJson(j.value("settings", json::object()), s, importIdentity && j["settings"].contains("deviceId"));

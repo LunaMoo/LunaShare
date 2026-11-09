@@ -23,6 +23,8 @@ bool Get(const std::string& key, Mark& m);
 void Set(const std::string& key, double pos, double dur);  // (near the end: watched, from the start next time)
 void Forget(const std::string& key);
 void Save(bool force = false);
+nlohmann::json Export();               // (settings backup)
+void Import(const nlohmann::json& j);  // (newer marks win)
 }  // namespace movpos
 
 // file names in a natural order ("Episode 2" before "Episode 10") - ui_watch.cpp
@@ -66,6 +68,8 @@ public:
     bool MuteItem(const std::string& key, float h, bool button = false);  // (a menu line / button: opens the choices, or turns them back on)
     void DrawMutePopup();
     void SyncTick();  // my other devices: playlists and settings
+    nlohmann::json AppDataExport();           // settings file: playlists, music folders, sound, movie positions
+    int AppDataImport(const nlohmann::json& j);  // (returns how many playlists there are now)
     std::string muteKey;
     bool muteOpen = false;
     void DrawHistoryAskBanner(const std::string& peer);

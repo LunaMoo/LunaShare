@@ -1361,9 +1361,11 @@ int main() {
     A->SetTrusted(idB, true);
     std::string exp = JoinPath(Root(), "export/lunashare-settings.json");
     std::string err;
-    CHECK(A->ExportSettings(exp, true, false, &err), "export: %s", err.c_str());
+    CHECK(A->ExportSettings(exp, true, false, &err, json{{"music", {{"folders", {"/m"}}}}}), "export: %s", err.c_str());
     auto C = MakeEngine("carol", 48130, false, false);
-    CHECK(C->ImportSettings(exp, false, &err), "import: %s", err.c_str());
+    json appData;
+    CHECK(C->ImportSettings(exp, false, &err, &appData), "import: %s", err.c_str());
+    CHECK(appData["music"]["folders"][0] == "/m", "the app's part comes back");
     {
         auto lk = C->Lock();
         CHECK(C->devices.count(idB) && C->devices[idB].customName == "Bob's phone" && C->devices[idB].trusted, "custom name imported");

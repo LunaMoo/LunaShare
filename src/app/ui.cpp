@@ -3138,7 +3138,8 @@ void App::DrawSettings() {
 
         ImGui::SeparatorText(T("Backup / move to another device"));
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", T("Exports all settings plus your list of known devices with their nicknames, trust and block state."));
+        ImGui::TextDisabled("%s", T("Exports all settings plus your list of known devices with their nicknames, trust and block state, the "
+                                    "music playlists, folders and sound settings, and where you stopped in movies."));
         ImGui::PopTextWrapPos();
         ImGui::Checkbox(T("Include chat & shared files history"), &exportHistory);
         ImGui::Checkbox(T("Include this device's identity (only for restoring THIS device)"), &exportIdentity);
@@ -3249,7 +3250,7 @@ void App::DrawPopups() {
                 s.downloadDir = res[0];
                 break;
             case BrowseFor::Export:
-                if (eng.ExportSettings(res[0], exportHistory, exportIdentity, &err)) infoMessage = T("Settings exported to\n") + res[0];
+                if (eng.ExportSettings(res[0], exportHistory, exportIdentity, &err, AppDataExport())) infoMessage = T("Settings exported to\n") + res[0];
                 else infoMessage = T("Export failed: ") + err;
                 openInfo = true;
                 break;
@@ -3273,7 +3274,14 @@ void App::DrawPopups() {
                 }
                 break;
             case BrowseFor::Import:
-                if (eng.ImportSettings(res[0], importIdentity, &err)) { infoMessage = T("Settings imported from\n") + res[0]; styleGeneration++; s = eng.settings; s.lastBrowseDir = browser.lastDir; }
+                if (json ad; eng.ImportSettings(res[0], importIdentity, &err, &ad)) {
+                    infoMessage = T("Settings imported from\n") + res[0];
+                    int n = AppDataImport(ad);
+                    if (n > 0) infoMessage += "\n" + TF("Playlists: %d", n);
+                    styleGeneration++;
+                    s = eng.settings;
+                    s.lastBrowseDir = browser.lastDir;
+                }
                 else infoMessage = T("Import failed: ") + err;
                 openInfo = true;
                 break;

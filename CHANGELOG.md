@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- *Export settings* also saves the music playlists, music folders, sound settings and movie positions; *Import
+  settings* brings them back (on this or another device).
 - **The same playlists and settings on all your linked devices** (Settings > Your account, on by default): music
   playlists (each one: the later change wins; songs are found by name and tags wherever they are), the sound
   settings, the movie player's options, silent chats and the language.

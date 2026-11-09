@@ -115,6 +115,31 @@ void Forget(const std::string& key) {
     g_dirty = true;
 }
 
+json Export() {
+    std::lock_guard<std::mutex> l(g_m);
+    json j = json::object();
+    for (auto& [k, m] : g_marks) j[k] = {{"pos", m.pos}, {"dur", m.dur}, {"watched", m.watched}, {"at", m.at}};
+    return j;
+}
+
+void Import(const json& j) {
+    if (!j.is_object()) return;
+    std::lock_guard<std::mutex> l(g_m);
+    for (auto& [k, v] : j.items()) {
+        if (!v.is_object() || g_marks.size() > 3000) continue;
+        Mark m;
+        m.pos = v.value("pos", 0.0);
+        m.dur = v.value("dur", 0.0);
+        m.watched = v.value("watched", false);
+        m.at = v.value("at", (int64_t)0);
+        auto it = g_marks.find(k);
+        if (it == g_marks.end() || it->second.at < m.at) {
+            g_marks[k] = m;
+            g_dirty = true;
+        }
+    }
+}
+
 void Save(bool force) {
     std::lock_guard<std::mutex> l(g_m);
     if (!g_dirty || g_path.empty() || (!force && SteadyMs() - g_saved < 10000)) return;

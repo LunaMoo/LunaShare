@@ -1,6 +1,7 @@
 // My other devices: the same playlists and settings everywhere.
 // Playlists merge one by one (the newer change wins, deleted ones stay deleted); the synced settings go as one piece
 // (the newer one wins). Each side sends again only when the other lacks something newer, so it settles.
+#include <algorithm>
 #include <cmath>
 
 #include "i18n.h"
@@ -49,6 +50,34 @@ static void PrefsApply(Engine& eng, const json& p) {
 }
 
 static json PlaylistsMsg() { return music::Lib().SyncJson(); }
+
+json App::AppDataExport() {
+    return {{"music", {{"playlists", music::Lib().SyncJson()}, {"folders", music::Lib().Folders()},
+                       {"sound", music::SoundToJson(music::Play().GetSound())}}},
+            {"moviePositions", movpos::Export()}};
+}
+
+int App::AppDataImport(const json& j) {
+    if (!j.is_object()) return 0;
+    json m = j.value("music", json::object());
+    if (m.contains("playlists")) {
+        // (an exported set has its own change times: anything newer here stays; a list deleted in the file isn't
+        // a reason to delete it here)
+        json pl = m["playlists"];
+        pl.erase("gone");
+        music::Lib().SyncMerge(pl);
+    }
+    std::vector<std::string> have = music::Lib().Folders();
+    for (auto& f : m.value("folders", json::array()))
+        if (f.is_string() && IsDirectory(f.get<std::string>()) && std::find(have.begin(), have.end(), f.get<std::string>()) == have.end())
+            music::Lib().AddFolder(f.get<std::string>());
+    if (m.contains("sound")) music::Play().SetSound(music::SoundFromJson(m["sound"]));
+    if (j.contains("moviePositions")) {
+        movpos::Import(j["moviePositions"]);
+        movpos::Save(true);
+    }
+    return (int)music::Lib().Playlists().size();
+}
 
 void App::SyncTick() {
     // (engine lock held by the frame)

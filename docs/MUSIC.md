@@ -46,6 +46,13 @@ if nobody answers, it stops. The button shows how long is left.
 In a playlist, drag a song to another place (on a computer), or use its menu (right click / long press): *Move up*,
 *Move down*, *Move to the top*, *Move to the bottom*, *Remove from this playlist*.
 
+## Keeping playlists
+
+Playlists follow you to your other linked devices (see [ACCOUNTS.md](ACCOUNTS.md)). *Settings > Export settings...*
+also saves them - with the music folders, the sound settings and where you stopped in movies - and *Import
+settings...* brings them back (a playlist that is newer on the device stays as it is; songs are found by name and
+tags, so the file works on another device too).
+
 ## Sound
 
 *Sound...* (next to *Folders...* on a computer; under the song on a phone's player) holds:
