@@ -327,7 +327,8 @@ public:
     void SyncPush(const std::string& kind, const nlohmann::json& data);
     bool SyncPop(std::string& kind, nlohmann::json& data);
     void SetPrefsVer(int64_t ver);
-    void SetUpdateState(int64_t last, const std::string& seen);    // (the update check)                                   // (the synced settings: when they changed)
+    void SetUpdateState(int64_t last, const std::string& seen);    // (the update check)
+    void SetLock(const std::string& hash, const std::string& salt, int len);  // app lock: the PIN ("" = off)                                   // (the synced settings: when they changed)
     void SetMutedChats(const std::map<std::string, int64_t>& m);     // (from my other device)
     std::vector<std::string> Conversations();                // every chat key the UI can list
     const KnownDevice* DeviceFor(const std::string& key);    // the best device's entry (under Lock())

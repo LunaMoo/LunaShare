@@ -2359,6 +2359,14 @@ void Engine::SyncPush(const std::string& kind, const json& data) {
         if (auto c = ReadyConn(d)) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
 }
 
+void Engine::SetLock(const std::string& hash, const std::string& salt, int len) {
+    auto lk = Lock();
+    settings.lockHash = hash;
+    settings.lockSalt = salt;
+    settings.lockLen = len;
+    MarkDirty();
+}
+
 void Engine::SetUpdateState(int64_t last, const std::string& seen) {
     auto lk = Lock();
     settings.updateLast = last;
@@ -3529,6 +3537,9 @@ void Engine::ApplySettings(const Settings& s) {
     settings.mutedChats = old.mutedChats;  // only MuteChat changes these (the settings page keeps an older copy)
     settings.prefsVer = old.prefsVer;
     settings.updateLast = old.updateLast;
+    settings.lockHash = old.lockHash;  // only SetLock changes the PIN
+    settings.lockSalt = old.lockSalt;
+    settings.lockLen = old.lockLen;
     settings.updateSeen = old.updateSeen;
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);

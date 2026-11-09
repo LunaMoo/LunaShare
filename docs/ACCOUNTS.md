@@ -52,6 +52,17 @@ these the same whenever they are connected to each other:
 Not synced: how a screen looks (theme, size), folders and ports - those belong to each device. (Message type 104
 `SyncData` `{kind, data}`, only between devices of the same account.)
 
+## App lock
+
+*Settings > App lock > Set a PIN...* (4 - 12 digits): LunaShare asks for it when it starts and when you come back
+to it - right away, or after 1 / 5 / 15 / 60 minutes away. On Android 10+ the fingerprint / face can unlock it too.
+While it's locked, messages and files keep arriving, notifications say only *New message*, an incoming call can
+still be answered, and on Android the app switcher shows no preview (and screenshots are blocked). Five wrong PINs
+make it wait 30 s (then longer). *Forgot the PIN?* - the account's recovery phrase opens it and turns the lock off.
+
+It keeps out someone holding your unlocked device; it doesn't encrypt the files on it. The PIN is stored salted
+and hashed (20 000 rounds of SHA-256).
+
 ## Recovery
 
 * **Recovery phrase**: the 32-byte account key as 24 words (BIP-39 English word list, 8-bit SHA-256 checksum). Restoring

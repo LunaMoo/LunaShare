@@ -301,6 +301,18 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.moviePip = [](bool allowed, int w, int h) { CallV("moviePip", "(ZII)V", (jboolean)allowed, (jint)w, (jint)h); };
     b.enterPip = []() { CallV("enterPip", "()V"); };
     b.inPip = []() { return CallZ("inPictureInPicture", "()Z"); };
+    b.biometricAvailable = []() { return CallZ("biometricAvailable", "()Z"); };
+    b.biometricAsk = [](const std::string& title, const std::string& cancel) {
+        static jmethodID m = M("biometricAsk", "(Ljava/lang/String;Ljava/lang/String;)V");
+        if (!m) return;
+        JNIEnv* env = Env();
+        jstring t = env->NewStringUTF(title.c_str()), c = env->NewStringUTF(cancel.c_str());
+        env->CallStaticVoidMethod(g_cls, m, t, c);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(t);
+        env->DeleteLocalRef(c);
+    };
+    b.secureWindow = [](bool on) { CallV("secureWindow", "(Z)V", (jboolean)on); };
     b.httpsGet = [](const std::string& url, std::string& body) -> bool {
         static jmethodID m = M("httpsGet", "(Ljava/lang/String;)Ljava/lang/String;");
         if (!m) return false;
@@ -363,7 +375,7 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnInte
         if (g_engine) g_engine->EndCall("declined");
         return;
     }
-    notify::Push({what == "ANSWER" ? "answer" : what == "CALL" ? "call" : "open", key});
+    notify::Push({what == "ANSWER" ? "answer" : what == "CALL" ? "call" : what == "UNLOCK" ? "unlock" : "open", key});
 }
 
 // the music notification, lock screen, headset buttons, audio focus (see MusicService.java)

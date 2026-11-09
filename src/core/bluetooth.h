@@ -57,7 +57,10 @@ struct HostBridge {
     std::function<void(bool allowed, int w, int h)> moviePip;  // Android: leaving the app keeps the movie in a small window
     std::function<void()> enterPip;
     std::function<bool()> inPip;
-    std::function<bool(const std::string& url, std::string& body)> httpsGet;  // Android: a small HTTPS GET (any thread)
+    std::function<bool(const std::string& url, std::string& body)> httpsGet;
+    std::function<bool()> biometricAvailable;                                         // Android: fingerprint / face set up
+    std::function<void(const std::string& title, const std::string& cancel)> biometricAsk;  // success: notify action "unlock"
+    std::function<void(bool on)> secureWindow;  // Android: no screenshots / app switcher preview (the app lock is on)  // Android: a small HTTPS GET (any thread)
     // borderless: a window that leaves one pixel of the screen uncovered (Windows: then neither Windows nor the
     // graphics driver treat it as a full-screen game, so no Auto HDR / RTX HDR)
     std::function<void(bool on, bool borderless)> setFullscreen;

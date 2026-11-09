@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **App lock** (Settings > App lock): a PIN when LunaShare starts and when you come back to it (right away or after
+  a few minutes away); on Android also the fingerprint / face. Notifications then don't show message text, and the
+  Android app switcher shows no preview. Forgot the PIN? The account's recovery phrase opens it.
 - **New version check** (Settings > About, on by default): once a day LunaShare asks GitHub about the newest release;
   a newer one shows a window with what's new and a button to its download page (nothing downloads by itself).
   *Check now* asks right away.

@@ -49,12 +49,16 @@ void Attach(ls::Engine* eng) {
             case ls::EventType::ChatReceived: {
                 if (!g_bg || eng->ChatMuted(e.peer)) return;
                 std::string text = e.text.size() > 300 ? e.text.substr(0, 297) + "..." : e.text;
+                if (!eng->settings.lockHash.empty()) text = T("New message");  // (the app lock: no text outside the app)
                 if (b.notifyMessage) b.notifyMessage(e.peer, eng->PeerName(e.peer), text, eng->AvatarPath(e.peer));
                 else if (g_tray) g_tray(eng->PeerName(e.peer), text);
                 break;
             }
             case ls::EventType::ChatReaction:
-                if (g_bg && b.notifyMessage && !eng->ChatMuted(e.peer)) b.notifyMessage(e.peer, eng->PeerName(e.peer), TF("reacted %s", e.text.c_str()) + "  " + e.a, eng->AvatarPath(e.peer));
+                if (g_bg && b.notifyMessage && !eng->ChatMuted(e.peer))
+                    b.notifyMessage(e.peer, eng->PeerName(e.peer),
+                                    eng->settings.lockHash.empty() ? TF("reacted %s", e.text.c_str()) + "  " + e.a : std::string(T("New reaction")),
+                                    eng->AvatarPath(e.peer));
                 break;
             case ls::EventType::CallIncoming: {
                 if (!g_bg) return;

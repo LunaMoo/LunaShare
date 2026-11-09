@@ -118,6 +118,12 @@ struct Settings {
     bool playerHideUi = false;        // the controls go as soon as it plays (back with a tap / click)
     bool playerOrientByAspect = false;  // Android: a tall movie plays upright, a wide one sideways
     std::map<std::string, int64_t> mutedChats;
+    // app lock: a PIN (and on phones the fingerprint) before the app shows anything. Keeps out someone holding the
+    // unlocked device - the files themselves aren't encrypted by it.
+    std::string lockHash, lockSalt;  // the PIN, salted and hashed many times ("" = no lock)
+    int lockLen = 0;                 // (its length: the keypad checks as soon as it's typed)
+    int lockAfter = 0;               // minutes away (in the background) before it asks again
+    bool lockBio = true;             // phones: the fingerprint / face too
     bool updateCheck = true;      // ask GitHub once a day whether there's a newer version
     int64_t updateLast = 0;       // (when it last asked)
     std::string updateSeen;       // a new version already shown (not again)

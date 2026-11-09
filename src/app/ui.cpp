@@ -104,8 +104,12 @@ void App::Frame() {
             SelectPeer(eng.call.peer);
             if (IsMobileLayout()) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
             else { tab = Tab::Chat; tabForce = true; }
+        } else if (a.what == "unlock") {  // (the fingerprint)
+            locked = false;
+            lockWrong = 0;
         }
     }
+    LockTick();
     ui::Metrics& m = ui::M();
     m.mobile = IsMobileLayout();
     m.rowH = ImGui::GetFrameHeight() * (m.mobile ? 1.9f : 1.0f);
@@ -304,6 +308,11 @@ void App::Frame() {
     ImGui::Begin("##main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar(2);
+    if (locked) {  // nothing else until the PIN
+        DrawLockScreen();
+        ImGui::End();
+        return;
+    }
     DrawCallBar();
     if (m.mobile) DrawMobile();
     else DrawDesktop();
@@ -332,6 +341,7 @@ void App::Frame() {
     DrawChatHistoryPopup();
     DrawMutePopup();
     DrawUpdatePopup();
+    DrawLockSetPopup();
     SleepPopup();
     DrawSleepAsk();
     DrawToasts();
@@ -2913,6 +2923,7 @@ void App::DrawSettings() {
     if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
 
     DrawAccountSettings(fieldW, h);
+    DrawLockSettings(h);
 
     ImGui::SeparatorText(T("Internet"));
     if (edit.wanFromInvite) {

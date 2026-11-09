@@ -293,6 +293,47 @@ public class LunaShareActivity extends SDLActivity {
     }
 
     /** Media volume 0..1 (the movie player's swipe on the right). */
+    // app lock: fingerprint / face (Android 10+), a success unlocks
+    public static boolean biometricAvailable() {
+        LunaShareActivity a = self;
+        if (a == null || Build.VERSION.SDK_INT < 29) return false;
+        try {
+            android.hardware.biometrics.BiometricManager bm = a.getSystemService(android.hardware.biometrics.BiometricManager.class);
+            if (bm == null) return false;
+            int r = Build.VERSION.SDK_INT >= 30 ? bm.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                                                : bm.canAuthenticate();
+            return r == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+    public static void biometricAsk(final String title, final String cancel) {
+        final LunaShareActivity a = self;
+        if (a == null || Build.VERSION.SDK_INT < 29) return;
+        a.runOnUiThread(() -> {
+            try {
+                android.hardware.biometrics.BiometricPrompt p = new android.hardware.biometrics.BiometricPrompt.Builder(a)
+                    .setTitle(title)
+                    .setNegativeButton(cancel, a.getMainExecutor(), (d, w) -> {})
+                    .build();
+                p.authenticate(new android.os.CancellationSignal(), a.getMainExecutor(),
+                    new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                        @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult r) {
+                            try { nativeOnIntent("UNLOCK", ""); } catch (Throwable ignored) {}
+                        }
+                    });
+            } catch (Throwable ignored) {}
+        });
+    }
+    public static void secureWindow(final boolean on) {
+        final LunaShareActivity a = self;
+        if (a == null) return;
+        a.runOnUiThread(() -> {
+            if (on) a.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+            else a.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        });
+    }
+
     // the update check (from a native background thread): the body, or null
     public static String httpsGet(String url) {
         try {

@@ -14,6 +14,7 @@
 // where each movie was left (ui_movies.cpp): key = its path (or "lib:<id>" for a contact's file)
 bool UpdateIsNewer(const std::string& tag, const std::string& mine);  // ("v1.6.0" vs "1.5.5")
 void UpdateShutdown();
+bool LockOn(const ls::Settings& s);
 
 namespace movpos {
 struct Mark {
@@ -73,6 +74,18 @@ public:
     void SyncTick();  // my other devices: playlists and settings
     // a newer version on GitHub (once a day, an option; or "Check now")
     void UpdateTick();
+    // app lock (PIN / fingerprint)
+    void LockTick();
+    void LockNow();
+    void UnlockWith(const std::string& pin);
+    void DrawLockScreen();
+    void DrawLockSettings(float h);
+    void DrawLockSetPopup();
+    bool locked = false, lockInit = false, lockWasBg = false, lockSecure = false, lockBioAsked = false, lockForgot = false, lockSetOpen = false;
+    int64_t lockBgSince = 0, lockWaitUntil = 0;
+    int lockWrong = 0;
+    float lockShake = 0;
+    std::string lockEntry, lockPhraseBuf, lockNew1, lockNew2, lockSetErr;
     void UpdateCheckNow();
     void DrawUpdatePopup();
     std::string updateTag, updateUrl, updateNotes;
