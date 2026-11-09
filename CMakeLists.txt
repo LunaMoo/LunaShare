@@ -81,7 +81,21 @@ if(LUNASHARE_BUILD_VOICE)
     set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(opus GIT_REPOSITORY https://github.com/xiph/opus.git GIT_TAG v1.5.2 GIT_SHALLOW TRUE)
     FetchContent_Declare(speexdsp GIT_REPOSITORY https://github.com/xiph/speexdsp.git GIT_TAG SpeexDSP-1.2.1 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
-    FetchContent_MakeAvailable(opus speexdsp)
+    # RNNoise (a small neural network) for noise suppression: v0.1.1 carries its model in the source
+    FetchContent_Declare(rnnoise GIT_REPOSITORY https://github.com/xiph/rnnoise.git GIT_TAG v0.1.1 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+    FetchContent_MakeAvailable(opus speexdsp rnnoise)
+    add_library(lunashare_rnnoise STATIC
+        ${rnnoise_SOURCE_DIR}/src/denoise.c ${rnnoise_SOURCE_DIR}/src/rnn.c ${rnnoise_SOURCE_DIR}/src/rnn_data.c
+        ${rnnoise_SOURCE_DIR}/src/pitch.c ${rnnoise_SOURCE_DIR}/src/kiss_fft.c ${rnnoise_SOURCE_DIR}/src/celt_lpc.c)
+    target_include_directories(lunashare_rnnoise PUBLIC ${rnnoise_SOURCE_DIR}/include)
+    set_target_properties(lunashare_rnnoise PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(MSVC)
+        target_compile_options(lunashare_rnnoise PRIVATE /w)
+        target_compile_definitions(lunashare_rnnoise PRIVATE _USE_MATH_DEFINES)
+    else()
+        target_compile_options(lunashare_rnnoise PRIVATE -w)
+        target_link_libraries(lunashare_rnnoise PUBLIC m)
+    endif()
     file(WRITE ${CMAKE_BINARY_DIR}/speexdsp_cfg/speexdsp_config_types.h
         "#ifndef __SPEEX_TYPES_H__\n#define __SPEEX_TYPES_H__\n#include <stdint.h>\ntypedef int16_t spx_int16_t;\ntypedef uint16_t spx_uint16_t;\ntypedef int32_t spx_int32_t;\ntypedef uint32_t spx_uint32_t;\n#endif\n")
     set(SPEEXDSP_SOURCES
@@ -100,7 +114,7 @@ if(LUNASHARE_BUILD_VOICE)
     set_target_properties(lunashare_media PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
     target_include_directories(lunashare_media PRIVATE src/media_api)
-    target_link_libraries(lunashare_media PRIVATE opus lunashare_speexdsp Threads::Threads)
+    target_link_libraries(lunashare_media PRIVATE opus lunashare_speexdsp lunashare_rnnoise Threads::Threads)
     if(WIN32 AND NOT MSVC)
         target_link_options(lunashare_media PRIVATE -static)
     elseif(APPLE)
@@ -111,7 +125,7 @@ if(LUNASHARE_BUILD_VOICE)
 
     add_library(lunashare_voice_static STATIC modules/voice/voice.cpp)  # same code, for tests
     target_include_directories(lunashare_voice_static PUBLIC src/media_api)
-    target_link_libraries(lunashare_voice_static PUBLIC opus lunashare_speexdsp Threads::Threads)
+    target_link_libraries(lunashare_voice_static PUBLIC opus lunashare_speexdsp lunashare_rnnoise Threads::Threads)
 endif()
 
 # ---------------------------------------------------------------- optional video module

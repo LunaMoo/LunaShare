@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Calls and voice messages: **better noise suppression** - RNNoise (a small neural network) now removes background noise such as fans, keyboards and traffic, and keeps voices natural (*Settings → Calls → Noise suppression*).
 - Calls: **share your screen** (Windows, Linux/X11) - *Screen (share it)* in the call's camera list.
 
 - Movies: **chapters** (marks on the seek bar, a list to jump to) and **repeating a part (A-B)**.

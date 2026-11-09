@@ -20,6 +20,8 @@
 #include <speex/speex_echo.h>
 #include <speex/speex_preprocess.h>
 
+#include "rnnoise.h"
+
 #include "lunashare_media.h"
 
 #ifdef _WIN32
@@ -112,6 +114,7 @@ struct Voice {
     OpusEncoder* enc = nullptr;
     SpeexEchoState* echo = nullptr;
     SpeexPreprocessState* pre = nullptr;
+    DenoiseState* rnn = nullptr;  // noise suppression (RNNoise: voices stay natural, steady and changing noise both go)
     Leveler leveler;
     std::vector<int16_t> capBuf;
     uint16_t seqOut = 0;
@@ -146,10 +149,21 @@ float Level(const int16_t* p, int n) {
     return (float)std::clamp((db + 60.0) / 60.0, 0.0, 1.0);
 }
 
+// RNNoise on a 20 ms frame (two of its 10 ms frames; it wants 48 kHz floats in the 16-bit range)
+void Denoise(DenoiseState* st, int16_t* p, int n) {
+    if (!st) return;
+    float f[480];
+    for (int k = 0; k + 480 <= n; k += 480) {
+        for (int i = 0; i < 480; i++) f[i] = p[k + i];
+        rnnoise_process_frame(st, f, f);
+        for (int i = 0; i < 480; i++) p[k + i] = (int16_t)std::clamp(f[i], -32768.0f, 32767.0f);
+    }
+}
+
 void ApplySettingsLocked() {
     if (g.enc) opus_encoder_ctl(g.enc, OPUS_SET_BITRATE(std::clamp(g.settings.bitrate, 6000, 128000)));
     if (g.pre) {
-        int on = g.settings.noise_suppress ? 1 : 0;
+        int on = 0;  // (speexdsp's own denoiser stays off: RNNoise does it)
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_DENOISE, &on);
         int suppress = -18;  // gentler than speexdsp's default: strong suppression sounds metallic / "radio-like"
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &suppress);
@@ -166,9 +180,11 @@ void FreeLocked() {
     g.streams.clear();
     if (g.echo) speex_echo_state_destroy(g.echo);
     if (g.pre) speex_preprocess_state_destroy(g.pre);
+    if (g.rnn) rnnoise_destroy(g.rnn);
     g.enc = nullptr;
     g.echo = nullptr;
     g.pre = nullptr;
+    g.rnn = nullptr;
 }
 
 int Start(const LsmHost* host, const LsmSettings* s) {
@@ -188,6 +204,7 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     int rate = kRate;
     speex_echo_ctl(g.echo, SPEEX_ECHO_SET_SAMPLING_RATE, &rate);
     g.pre = speex_preprocess_state_init(kFrame, kRate);
+    g.rnn = rnnoise_create(nullptr);
     ApplySettingsLocked();
     g.capBuf.clear();
     g.seqOut = 0;
@@ -198,7 +215,7 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     g.bytesOut = 0;
     g.farHold = 0;
     g.running = true;
-    Log("voice started (Opus 16 kHz, speexdsp AEC/NS)");
+    Log("voice started (Opus 48 kHz, speexdsp AEC, RNNoise)");
     return 0;
 }
 
@@ -216,6 +233,7 @@ void EncodeFrameLocked(int16_t* frame) {
     } else {
         memcpy(clean, frame, sizeof(clean));
     }
+    if (g.settings.noise_suppress) Denoise(g.rnn, clean, kFrame);
     if (g.pre) speex_preprocess_run(g.pre, clean);
     if (g.farHold > 0) g.farHold--;
     if (g.spkLevel > 0.3f) g.farHold = 15;  // the speaker played something above -42 dBFS in the last 300 ms
@@ -433,6 +451,7 @@ struct Recorder {
     std::string path;
     OpusEncoder* enc = nullptr;
     SpeexPreprocessState* pre = nullptr;
+    DenoiseState* rnn = nullptr;  // noise suppression (RNNoise: voices stay natural, steady and changing noise both go)
     Leveler leveler;
     std::vector<int16_t> buf;
     std::vector<uint8_t> page;       // packets of the page being filled
@@ -509,10 +528,12 @@ bool RecOpen(int bitrate) {
     opus_encoder_ctl(rec.enc, OPUS_GET_LOOKAHEAD(&look));
     rec.preSkip = look * (kOpusRate / kRate);  // in 48 kHz samples
     rec.pre = speex_preprocess_state_init(kFrame, kRate);
-    int on = 1, sup = -18;
+    if (rec.rnn) rnnoise_destroy(rec.rnn);
+    rec.rnn = rnnoise_create(nullptr);
+    int off = 0, on = 1, sup = -18;  // (RNNoise does the denoising, speexdsp the auto gain)
     float lvl = 20000;
     rec.leveler.Reset();
-    speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_DENOISE, &on);
+    speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_DENOISE, &off);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, &sup);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_AGC, &on);
     speex_preprocess_ctl(rec.pre, SPEEX_PREPROCESS_SET_AGC_LEVEL, &lvl);
@@ -577,6 +598,7 @@ void RecPush(const int16_t* pcm, int n) {
         int16_t frame[kFrame];
         memcpy(frame, &rec.buf[off], sizeof(frame));
         off += kFrame;
+        Denoise(rec.rnn, frame, kFrame);
         speex_preprocess_run(rec.pre, frame);
         rec.leveler.Run(frame, kFrame);
         rec.level = rec.level * 0.7f + Level(frame, kFrame) * 0.3f;
@@ -614,6 +636,8 @@ double RecStop(int keep) {
     rec.enc = nullptr;
     speex_preprocess_state_destroy(rec.pre);
     rec.pre = nullptr;
+    if (rec.rnn) rnnoise_destroy(rec.rnn);
+    rec.rnn = nullptr;
     double s = rec.seconds;
     if (file && !keep) RemoveUtf8(rec.path.c_str());
     return s;

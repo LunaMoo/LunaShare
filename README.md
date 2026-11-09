@@ -175,7 +175,7 @@ after receiving, so you know it arrived intact.
 - One-to-one and group calls (see **Groups** above).
 - The call button sits in the chat header. It's only shown when **both** devices have the module, since each device announces its capabilities.
 - Calls go peer-to-peer over the same encrypted connection as chat (LAN, hotspot, internet/KCP, and in principle Bluetooth, though there it can be choppy).
-- Audio: Opus (48 kHz fullband, 16–128 kbit/s, default 48, in-band FEC), an adaptive jitter buffer with loss concealment, and SpeexDSP for echo cancellation, noise suppression and auto gain.
+- Audio: Opus (48 kHz fullband, 16–128 kbit/s, default 48, in-band FEC), an adaptive jitter buffer with loss concealment, SpeexDSP for echo cancellation and auto gain, and RNNoise for noise suppression.
 - During a call, file transfers to that device are throttled so they don't cause audio stutter.
 - Call bar: timer, mic/speaker levels, link stats (loss, jitter, delay), and buttons for mute, speaker (phones) and hang up. Incoming calls get a ringtone and a full-screen answer screen on phones.
 - Calls are logged in the chat (*Outgoing call – 2:31*, *Missed call*, …).
@@ -270,12 +270,12 @@ cmake --build build --config Release
   plays video and the usual sound formats only.
   On Android 11+ the app asks for *All files access* so it can send any file and save to `Download/LunaShare`.
 - Options: `-DLUNASHARE_GL_API=GL3|GLES2|GLES3`, `-DLUNASHARE_SYSTEM_SDL=ON`, `-DLUNASHARE_BUILD_APP=OFF` (engine + tests only),
-  `-DLUNASHARE_BUILD_VOICE=OFF` (skip the voice module, along with Opus and SpeexDSP), `-DLUNASHARE_BUILD_VIDEO=OFF` (skip the video module),
+  `-DLUNASHARE_BUILD_VOICE=OFF` (skip the voice module, along with Opus, SpeexDSP and RNNoise), `-DLUNASHARE_BUILD_VIDEO=OFF` (skip the video module),
   `-DLUNASHARE_VIDEO_TEST_MODULE=ON` (development: a video module with a test-pattern camera on systems without a real backend).
 - The modules (voice, video, player, emoji) build next to the executable. To ship them, put them next to `LunaShare.exe`
   or in a `modules/` folder, together with the FFmpeg libraries for the player and video modules. `./build/lunashare_voice_tests` checks the audio pipeline
   (packet loss, jitter, echo cancellation), and `./build/lunashare_video_tests` checks the video core (keyframe recovery after loss, bitrate adaptation on a slow link).
-- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`.
+- Offline builds: pass `-DFETCHCONTENT_SOURCE_DIR_<NAME>=/path` for `IMGUI`, `SDL2`, `NLOHMANN_JSON`, `QRCODEGEN`, `STB`, `MONOCYPHER`, `KCP`, `OPUS`, `SPEEXDSP`, `RNNOISE`.
 
 The GitHub Actions workflow builds Windows, Linux, the Android APK and the OPNsense plugin (FreeBSD) on every push and
 uploads them as artifacts.
@@ -312,7 +312,7 @@ src/app/         SDL2 + Dear ImGui front end
   i18n.cpp, lang/  translations
   android_bridge.cpp  JNI glue to android/.../LunaShareActivity.java
 src/media_api/   the C ABIs between the app and the modules
-modules/voice/   voice (lunashare_media): Opus + SpeexDSP + jitter buffer + mixing
+modules/voice/   voice (lunashare_media): Opus + SpeexDSP + RNNoise + jitter buffer + mixing
 modules/video/   video (lunashare_video): Media Foundation (Windows), V4L2 + FFmpeg (Linux), Camera2 + MediaCodec (Android)
 modules/vcam/    Windows 11 virtual camera (lunashare_vcam.dll, loaded by the camera Frame Server)
 modules/player/  player (lunashare_player): FFmpeg (Windows/Linux), MediaCodec + FFmpeg (Android); subtitles
@@ -352,7 +352,7 @@ tests/           engine, voice, video and player tests
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
 QR Code generator (MIT), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
-and in the voice module Opus (BSD-3-Clause) and SpeexDSP (BSD-3-Clause).
+and in the voice module Opus (BSD-3-Clause), SpeexDSP (BSD-3-Clause) and RNNoise (BSD-3-Clause).
 
 FFmpeg: the Windows and Android builds use LGPL builds; on Linux the bundled FFmpeg includes x264 and is therefore
 GPL-2.0-or-later (compatible with LunaShare's GPL-3.0); dav1d is BSD-2-Clause, libva is MIT. Their license files are
