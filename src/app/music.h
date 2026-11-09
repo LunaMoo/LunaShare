@@ -31,6 +31,9 @@ struct Track {
     // time it played through (gainSet: known)
     float gain = 0;
     bool gainSet = false, gainTag = false;
+    bool fav = false;        // a favourite (the heart)
+    int plays = 0;           // how many times it played (at least half of it, or a minute)
+    int64_t lastPlayed = 0;  // (ms)
     const std::string& AlbumArtist() const { return albumArtist.empty() ? artist : albumArtist; }
 };
 
@@ -129,7 +132,9 @@ public:
         bool behind = false;   // they lack something newer from here
     };
     MergeResult SyncMerge(const nlohmann::json& j);
-    bool ResolveSynced();  // songs that weren't here before (after a scan): into the playlists
+    bool ResolveSynced();
+    void SetFavourite(const std::string& path, bool on);
+    void CountPlay(const std::string& path);  // songs that weren't here before (after a scan): into the playlists
     uint64_t PlaylistsVersion() const { return plVersion_; }
 
     void Save();

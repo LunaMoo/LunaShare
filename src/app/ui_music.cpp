@@ -166,6 +166,11 @@ void App::MusicTrackMenu(const std::string& path, const std::string& playlistId,
     }
     if (ImGui::Selectable(T("Send to..."), false, 0, ImVec2(0, h))) MusicSend({path}, "");
     if (ImGui::Selectable(T("Select"), false, 0, ImVec2(0, h))) musicSel.insert(path);
+    if (const music::Track* t = MusicTrack(path)) {
+        if (ImGui::Selectable(t->fav ? T("Remove from favourites") : T("Add to favourites"), false, 0, ImVec2(0, h)))
+            music::Lib().SetFavourite(path, !t->fav);
+        if (t->plays) ImGui::TextDisabled("%s", TF("Played %d times", t->plays).c_str());
+    }
     if (!playlistId.empty() && playlistId[0] != '#') {  // its place in the playlist
         ImGui::Separator();
         int n = (int)musicListShown.size();
@@ -283,6 +288,7 @@ void App::MusicTrackList(const std::vector<const music::Track*>& list, const std
             if (showAlbum && !t->album.empty()) sub += (sub.empty() ? "" : "  ·  ") + t->album;
             dl->AddText(nullptr, 0, ImVec2(x, p.y + rowH * 0.5f + 1), ImGui::GetColorU32(ImGuiCol_TextDisabled), sub.c_str(), nullptr, 0, &clipR);
             dl->AddText(ImVec2(right - dw - 4, p.y + (rowH - lh) * 0.5f), ImGui::GetColorU32(ImGuiCol_TextDisabled), d.c_str());
+            if (t->fav) ui::DrawIcon(dl, Icon::Star, ImVec2(right - dw - 4 - lh * 0.7f, p.y + rowH * 0.5f), lh * 0.75f, IM_COL32(240, 200, 60, 255));
             ImGui::PopID();
         }
 }
@@ -439,6 +445,7 @@ void App::DrawMusicNow(bool big) {
     }
     ImVec2 c0(p.x + (w - cs) * 0.5f, p.y), c1(c0.x + cs, c0.y + cs);
     ImGui::SetCursorScreenPos(c0);
+    ImGui::SetNextItemAllowOverlap();  // (the star on it is a button of its own)
     ImGui::InvisibleButton("##mcover", ImVec2(cs, cs));  // (a tap: the lyrics / the cover)
     if (ImGui::IsItemDeactivated() && !musicLyrics.empty() && std::fabs(ImGui::GetMouseDragDelta(0, 0).y) < 6) musicLyricsOn = !musicLyricsOn;
     if (!musicLyrics.empty() && musicLyricsOn) {
@@ -452,6 +459,16 @@ void App::DrawMusicNow(bool big) {
             ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(q.x - 6, q.y - 3), ImVec2(c1.x - 6, c1.y - 6), IM_COL32(0, 0, 0, 170), 6);
             ImGui::GetWindowDrawList()->AddText(q, IM_COL32(255, 255, 255, 235), lt);
         }
+    }
+    if (const music::Track* ft = n.external ? nullptr : MusicTrack(n.path)) {  // a favourite: the star in the corner
+        float s = std::max(ImGui::GetFontSize() * 1.6f, cs * 0.12f);
+        ImVec2 sp(c0.x + 6, c0.y + 6);
+        ImGui::SetCursorScreenPos(sp);
+        if (ImGui::InvisibleButton("##mfav", ImVec2(s, s))) music::Lib().SetFavourite(ft->path, !ft->fav);
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", ft->fav ? T("Remove from favourites") : T("Add to favourites"));
+        ImDrawList* fdl = ImGui::GetWindowDrawList();
+        fdl->AddCircleFilled(ImVec2(sp.x + s * 0.5f, sp.y + s * 0.5f), s * 0.5f, IM_COL32(0, 0, 0, 140));
+        ui::DrawIcon(fdl, Icon::Star, ImVec2(sp.x + s * 0.5f, sp.y + s * 0.5f), s * 0.6f, ft->fav ? IM_COL32(240, 200, 60, 255) : IM_COL32(255, 255, 255, 120));
     }
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y));
     ImGui::Dummy(ImVec2(w, cs + 6));
@@ -829,10 +846,10 @@ void App::DrawMusic() {
     ImGui::InputTextWithHint("##msearch", T("search"), &musicSearch);
     if (musicView == 0 && musicGroup.empty()) {
         ImGui::SameLine();
-        const char* sorts[] = {T("Title"), T("Artist"), T("Album"), T("Recently added")};
+        const char* sorts[] = {T("Title"), T("Artist"), T("Album"), T("Recently added"), T("Most played")};
         ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 9);
         if (ImGui::BeginCombo("##msort", sorts[musicSort])) {
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 5; i++)
                 if (ImGui::Selectable(sorts[i], musicSort == i, 0, ImVec2(0, h))) musicSort = i;
             ImGui::EndCombo();
         }
@@ -995,7 +1012,31 @@ void App::DrawMusic() {
         char kind = musicGroup[0];
         std::string key = musicGroup.substr(2);
         std::string playlistId, sendFolder;
-        if (kind == 'p') {
+        if (kind == 's') {  // the lists made by themselves
+            std::string title;
+            for (auto& t : musicTracks)
+                if (match(t) && (key == "fav" ? t.fav : key == "top" ? t.plays > 0 : key == "recent" ? t.lastPlayed > 0 : true)) list.push_back(&t);
+            if (key == "fav") {
+                title = T("Favourites");
+                std::sort(list.begin(), list.end(), [](auto* a, auto* b) { return Low(a->title) < Low(b->title); });
+            } else if (key == "top") {
+                title = T("Most played");
+                std::sort(list.begin(), list.end(), [](auto* a, auto* b) { return a->plays > b->plays; });
+                if (list.size() > 100) list.resize(100);
+            } else if (key == "recent") {
+                title = T("Played lately");
+                std::sort(list.begin(), list.end(), [](auto* a, auto* b) { return a->lastPlayed > b->lastPlayed; });
+                if (list.size() > 100) list.resize(100);
+            } else {
+                title = T("Recently added");
+                std::sort(list.begin(), list.end(), [](auto* a, auto* b) { return a->added > b->added; });
+                if (list.size() > 100) list.resize(100);
+            }
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.2f);
+            ImGui::TextUnformatted(title.c_str());
+            ImGui::PopFont();
+            sendFolder = title;
+        } else if (kind == 'p') {
             for (auto& pl : music::Lib().Playlists())
                 if (pl.id == key) {
                     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.2f);
@@ -1043,6 +1084,7 @@ void App::DrawMusic() {
                 case 1: if (Low(a->artist) != Low(b->artist)) return Low(a->artist) < Low(b->artist); break;
                 case 2: if (Low(a->album) != Low(b->album)) return Low(a->album) < Low(b->album); return AlbumOrder(a, b);
                 case 3: if (a->added != b->added) return a->added > b->added; break;
+                case 4: if (a->plays != b->plays) return a->plays > b->plays; break;
                 default: break;
             }
             return Low(a->title) < Low(b->title);
@@ -1054,6 +1096,36 @@ void App::DrawMusic() {
             musicAddPaths.clear();
             std::string id = music::Lib().CreatePlaylist(TF("Playlist %d", (int)music::Lib().Playlists().size() + 1));
             musicGroup = "p:" + id;
+        }
+        {  // the lists made by themselves: favourites, most played, played lately, recently added
+            int fav = 0, top = 0, recent = 0;
+            for (auto& t : musicTracks) {
+                fav += t.fav;
+                top += t.plays > 0;
+                recent += t.lastPlayed > 0;
+            }
+            struct Smart {
+                const char* key;
+                std::string name;
+                int n;
+            } smart[] = {{"fav", T("Favourites"), fav}, {"top", T("Most played"), std::min(top, 100)},
+                         {"recent", T("Played lately"), std::min(recent, 100)}, {"new", T("Recently added"), std::min((int)musicTracks.size(), 100)}};
+            for (auto& s : smart) {
+                if (s.n == 0) continue;
+                ImGui::PushID(s.key);
+                ImVec2 p = ImGui::GetCursorScreenPos();
+                if (ImGui::Selectable("##sm", false, 0, ImVec2(0, rowH))) musicGroup = std::string("s:") + s.key;
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                dl->AddRectFilled(ImVec2(p.x + 4, p.y + 4), ImVec2(p.x + rowH - 4, p.y + rowH - 4), ImGui::GetColorU32(ImGuiCol_FrameBgActive), 4);
+                ui::DrawIcon(dl, std::string(s.key) == "fav" ? Icon::Star : std::string(s.key) == "new" ? Icon::Plus : Icon::Play,
+                             ImVec2(p.x + rowH * 0.5f, p.y + rowH * 0.5f), rowH * 0.4f,
+                             std::string(s.key) == "fav" ? IM_COL32(240, 200, 60, 255) : ImGui::GetColorU32(ImGuiCol_Text));
+                float lh = ImGui::GetTextLineHeight();
+                dl->AddText(ImVec2(p.x + rowH + 6, p.y + rowH * 0.5f - lh - 1), ImGui::GetColorU32(ImGuiCol_Text), s.name.c_str());
+                dl->AddText(ImVec2(p.x + rowH + 6, p.y + rowH * 0.5f + 1), ImGui::GetColorU32(ImGuiCol_TextDisabled), TF("%d songs", s.n).c_str());
+                ImGui::PopID();
+            }
+            ImGui::Separator();
         }
         std::map<std::string, std::vector<const music::Track*>> g;
         std::map<std::string, std::string> ids;

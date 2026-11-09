@@ -89,6 +89,9 @@ void Library::Init(const std::string& configDir, const LspModule* mod) {
             x.gainSet = t.contains("gn");
             x.gain = t.value("gn", 0.0f);
             x.gainTag = t.value("gt", false);
+            x.fav = t.value("fv", false);
+            x.plays = t.value("pc", 0);
+            x.lastPlayed = t.value("lp", (int64_t)0);
             if (!x.path.empty()) tracks_[x.path] = x;
         }
         for (auto& p : j.value("playlists", json::array())) {
@@ -132,6 +135,9 @@ void Library::Save() {
                 x["gn"] = t.gain;
                 if (t.gainTag) x["gt"] = true;
             }
+            if (t.fav) x["fv"] = true;
+            if (t.plays) x["pc"] = t.plays;
+            if (t.lastPlayed) x["lp"] = t.lastPlayed;
             tr.push_back(x);
         }
         json pls = json::array();
@@ -506,6 +512,31 @@ void Library::ReadTags(Track& t) {
     }
 }
 
+void Library::SetFavourite(const std::string& path, bool on) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        auto it = tracks_.find(path);
+        if (it == tracks_.end() || it->second.fav == on) return;
+        it->second.fav = on;
+        dirty_ = true;
+        version_++;
+    }
+    Save();
+}
+
+void Library::CountPlay(const std::string& path) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        auto it = tracks_.find(path);
+        if (it == tracks_.end()) return;
+        it->second.plays++;
+        it->second.lastPlayed = NowMs();
+        dirty_ = true;
+        version_++;
+    }
+    Save();
+}
+
 bool Library::GainFor(const std::string& path, float& gain) {
     std::lock_guard<std::mutex> l(m_);
     auto it = tracks_.find(path);
@@ -586,6 +617,11 @@ void Library::ScanLoop() {
                 if (quit_) return;
                 auto it = tracks_.find(t.path);
                 t.added = it != tracks_.end() && it->second.added ? it->second.added : now;
+                if (it != tracks_.end()) {  // (a changed file: still the same song for the heart and the counts)
+                    t.fav = it->second.fav;
+                    t.plays = it->second.plays;
+                    t.lastPlayed = it->second.lastPlayed;
+                }
                 tracks_[t.path] = t;
                 dirty_ = true;
                 if (i % 25 == 24 || i + 1 == todo.size()) version_++;  // (the list shows them as they come)

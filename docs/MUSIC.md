@@ -46,6 +46,13 @@ if nobody answers, it stops. The button shows how long is left.
 In a playlist, drag a song to another place (on a computer), or use its menu (right click / long press): *Move up*,
 *Move down*, *Move to the top*, *Move to the bottom*, *Remove from this playlist*.
 
+## Favourites and the lists that make themselves
+
+The star on the cover (now playing) or *Add to favourites* in a song's menu marks a favourite (a star in the
+lists). A song counts as played once half of it (or a minute) was heard; its menu shows how often. *Playlists*
+starts with lists that keep themselves up to date: *Favourites*, *Most played*, *Played lately* and *Recently added*
+(100 songs each at most). *Songs* can also be sorted by *Most played*.
+
 ## Keeping playlists
 
 Playlists follow you to your other linked devices (see [ACCOUNTS.md](ACCOUNTS.md)). *Settings > Export settings...*

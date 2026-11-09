@@ -200,6 +200,8 @@ void App::Frame() {
         if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
         if (a == "movies") { tab = Tab::Movies; screen = MScreen::Movies; }
         if (a == "music" || a == "musicnow") { tab = Tab::Music; screen = MScreen::Music; musicNowShown = a == "musicnow"; }
+        if (const char* mv = getenv("LUNASHARE_MUSICVIEW")) musicView = std::clamp(atoi(mv), 0, 5);  // dev: songs .. playlists
+        if (const char* mg = getenv("LUNASHARE_MUSICGROUP")) musicGroup = mg;
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
         autoSel = nullptr;
@@ -379,6 +381,32 @@ void App::MusicTick() {
     music::Play().SetInterrupted(interrupt);
     MusicExternalTick();
     SleepTick();
+    {  // a play counts once at least half of it (or a minute) was heard
+        auto now = music::Play().GetNow();
+        static std::string playing;
+        static double heard = 0, lastPos = -1;
+        static bool counted = false;
+        if (!now.active || now.external || now.path != playing) {
+            playing = now.active && !now.external ? now.path : "";
+            heard = 0;
+            lastPos = now.pos;
+            counted = false;
+        } else if (now.playing) {
+            double d = now.pos - lastPos;
+            if (d > 0 && d < 2) heard += d;  // (a jump forward doesn't count as heard)
+            lastPos = now.pos;
+            if (!counted && heard >= std::min(60.0, std::max(5.0, now.dur * 0.5))) {
+                counted = true;
+                music::Lib().CountPlay(playing);
+            }
+            if (now.pos < 1 && heard > 5) {  // (started again: repeat one)
+                heard = 0;
+                counted = false;
+            }
+        } else {
+            lastPos = now.pos;
+        }
+    }
     music::MediaKeys(music::Play().GetNow().active);
 }
 

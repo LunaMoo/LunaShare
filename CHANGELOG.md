@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Music: **favourites** (the star on the cover or in a song's menu), **play counts**, and lists that keep
+  themselves up to date - Favourites, Most played, Played lately, Recently added.
+
 - **Send photos smaller** (Settings > Advanced > Sending): photos go as a JPEG at most 2048 px wide (e.g. 9.8 MB ->
   1.3 MB), without their location data. Videos still go as they are.
 
