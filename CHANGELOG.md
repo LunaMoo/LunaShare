@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Movie player on phones: a double tap on the left / right third goes 10 s back / on; a swipe up or down changes the
+  screen's brightness (left half) or the volume (right half). Previous / next sit next to play / pause on phones.
 - Movies continue where you left them (alone, or as the host) - "Continued from 12:34" with *From the start* for a
   moment; the Movies tab shows how far each one was watched, and a tick on the ones seen to the end.
 

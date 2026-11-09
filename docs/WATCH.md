@@ -31,6 +31,12 @@ slider to put it back, *Reset picture* for all. (Done on the graphics card, wher
   contact's Shared folder it was started from). Watching together, the host's switch takes everyone along: their
   player goes straight on to the next movie.
 
+## Gestures (phones)
+
+- Double tap the left / right third of the picture: 10 seconds back / on (for everyone, watching together).
+- Swipe up / down on the left half: the screen's brightness (only while the movie shows); on the right half: the
+  volume.
+
 ## Where you left it
 
 A movie you open again (alone, or as the host) continues where you stopped - "Continued from 12:34", with *From the

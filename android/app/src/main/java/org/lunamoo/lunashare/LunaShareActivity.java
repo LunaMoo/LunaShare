@@ -237,6 +237,32 @@ public class LunaShareActivity extends SDLActivity {
         return kbFraction;
     }
 
+    /** Media volume 0..1 (the movie player's swipe on the right). */
+    public static float mediaVolume() {
+        LunaShareActivity a = self;
+        if (a == null) return -1;
+        android.media.AudioManager am = (android.media.AudioManager)a.getSystemService(AUDIO_SERVICE);
+        int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+        return max > 0 ? (float)am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) / max : -1;
+    }
+    public static void setMediaVolume(float v) {
+        LunaShareActivity a = self;
+        if (a == null) return;
+        android.media.AudioManager am = (android.media.AudioManager)a.getSystemService(AUDIO_SERVICE);
+        int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+        am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, Math.round(Math.max(0f, Math.min(1f, v)) * max), 0);
+    }
+    /** This window's brightness 0..1 (< 0: back to the system's) - the swipe on the left. */
+    public static void setScreenBrightness(final float v) {
+        ui(() -> {
+            LunaShareActivity a = self;
+            if (a == null) return;
+            android.view.WindowManager.LayoutParams lp = a.getWindow().getAttributes();
+            lp.screenBrightness = v < 0 ? android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE : Math.max(0.01f, Math.min(1f, v));
+            a.getWindow().setAttributes(lp);
+        });
+    }
+
     /** While a movie shows: a tall movie upright, a wide one sideways (the "by the movie's shape" option). */
     public static void movieOrientation(final boolean portrait) {
         ui(() -> {

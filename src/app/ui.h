@@ -193,6 +193,11 @@ private:
     uint64_t watchHideSid = 0;
     int watchOrient = -1;             // Android, by the movie's shape: 0 sideways, 1 upright (-1 not set)
     int64_t watchNextAt = 0;
+    // phone gestures: double tap a side = 10 s back / on, a swipe up / down = brightness (left) / volume (right)
+    int watchGesture = 0;             // 0 none, 1 brightness, 2 volume
+    float watchGestureStart = 0, watchGestureVal = 0, watchBrightness = -1;
+    int64_t watchFlashAt = 0;
+    std::string watchFlash;
     double watchResumedFrom = 0;      // (continued from where it was left: shown for a moment, with "from the start")
     int64_t watchResumedAt = 0, watchPosSaved = 0;
     std::string watchPosKey;

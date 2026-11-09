@@ -982,3 +982,5 @@
 {"Turn the screen by the movie's shape (tall: upright)", "Zmień położenie ze względu na proporcje (wysoki film: pionowo)"},
 {"Continued from %s", "Wznowiono od %s"},
 {"From the start", "Od początku"},
+{"Volume %d%%", "Głośność %d%%"},
+{"Brightness %d%%", "Jasność %d%%"},

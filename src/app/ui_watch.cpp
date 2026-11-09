@@ -37,6 +37,10 @@ void App::WatchSync() {
         watchMovie = movie;
         if (ui::M().mobile && Bridge().movieMode) Bridge().movieMode(movie);
         watchOrient = -1;
+        if (!movie && watchBrightness >= 0 && Bridge().setScreenBrightness) {  // (the system's brightness again)
+            Bridge().setScreenBrightness(-1);
+            watchBrightness = -1;
+        }
         if (!movie && watchFullscreen && Bridge().setFullscreen) {
             watchFullscreen = false;
             Bridge().setFullscreen(false, false);
@@ -621,6 +625,7 @@ void App::DrawWatch() {
     ImGui::SetCursorScreenPos(a);
     ImGui::SetNextItemAllowOverlap();  // (the controls lie on top of it and take their own clicks)
     ImGui::InvisibleButton("##screen", ImVec2(b.x - a.x, b.y - a.y));
+    bool screenHeld = ImGui::IsItemActive();
     bool tapped = ImGui::IsItemClicked() && controls && !tapToShow && wereShown;
     // the middle of the screen (with the controls showing): play / pause
     ImVec2 mid((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
@@ -663,6 +668,55 @@ void App::DrawWatch() {
             ImVec2 ts = ImGui::CalcTextSize(m.c_str());
             dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y + r * 1.8f), IM_COL32(255, 220, 140, 255), m.c_str());
         }
+    }
+    if (mobile && open) {  // ---- gestures
+        // a double tap on the left / right third: 10 s back / on
+        if (dbl && !w.hold && (mp.x < a.x + (b.x - a.x) / 3 || mp.x > b.x - (b.x - a.x) / 3)) {
+            bool fwd = mp.x > mid.x;
+            double p = w.Target(now) + (fwd ? 10 : -10);
+            double d = Player().Duration();
+            if (d > 0) p = std::min(p, d - 0.5);
+            eng.WatchControl(w.playing, std::max(0.0, p));
+            watchFlash = fwd ? "+10 s" : "-10 s";
+            watchFlashAt = now;
+        }
+        // a swipe up / down: brightness on the left half, volume on the right
+        ImVec2 dd = ImGui::GetMouseDragDelta(0, 0);
+        bool onScreen = screenHeld;
+        if (onScreen && !watchGesture && std::fabs(dd.y) > bh * 0.5f && std::fabs(dd.y) > std::fabs(dd.x) * 1.5f) {
+            bool right = io.MouseClickedPos[0].x > mid.x;
+            if (right && Bridge().mediaVolume && Bridge().mediaVolume() >= 0) {
+                watchGesture = 2;
+                watchGestureStart = Bridge().mediaVolume();
+            } else if (!right && Bridge().setScreenBrightness) {
+                watchGesture = 1;
+                watchGestureStart = watchBrightness >= 0 ? watchBrightness : 0.5f;
+            }
+        }
+        if (watchGesture && onScreen) {
+            float v = std::clamp(watchGestureStart - dd.y / ((b.y - a.y) * 0.7f), 0.0f, 1.0f);
+            if (std::fabs(v - watchGestureVal) > 0.005f) {
+                watchGestureVal = v;
+                if (watchGesture == 2) Bridge().setMediaVolume(v);
+                else {
+                    watchBrightness = v;
+                    Bridge().setScreenBrightness(v);
+                }
+            }
+            watchFlash = TF(watchGesture == 2 ? T("Volume %d%%") : T("Brightness %d%%"), (int)std::lround(v * 100));
+            watchFlashAt = now;
+            watchActive = 0;  // (the controls make way)
+        }
+        if (!onScreen) watchGesture = 0;
+    }
+    if (!watchFlash.empty() && now - watchFlashAt < 700) {  // what the gesture did, in the middle
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.6f);
+        ImVec2 ts = ImGui::CalcTextSize(watchFlash.c_str());
+        ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f - midR * 1.3f);
+        dl->AddRectFilled(ImVec2(c.x - ts.x * 0.5f - 14, c.y - ts.y * 0.5f - 8), ImVec2(c.x + ts.x * 0.5f + 14, c.y + ts.y * 0.5f + 8),
+                          IM_COL32(0, 0, 0, 170), 10);
+        dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32(255, 255, 255, 240), watchFlash.c_str());
+        ImGui::PopFont();
     }
     bool fullscreenKey = !mobile && (ImGui::IsKeyPressed(ImGuiKey_F, false) || dbl);
     if (fullscreenKey && Bridge().setFullscreen) {
@@ -707,7 +761,8 @@ void App::DrawWatch() {
         float sz = bh * 1.3f;
         for (int d : {-1, 1}) {
             if (WatchNeighbor(d) < 0) continue;
-            ImVec2 c(d < 0 ? a.x + pad + sz * 0.5f : b.x - pad - sz * 0.5f, (a.y + b.y) * 0.5f);
+            // (on a phone next to play / pause, as the sides are for double taps)
+            ImVec2 c = mobile ? ImVec2(mid.x + d * midR * 1.9f, mid.y) : ImVec2(d < 0 ? a.x + pad + sz * 0.5f : b.x - pad - sz * 0.5f, (a.y + b.y) * 0.5f);
             ImGui::SetCursorScreenPos(ImVec2(c.x - sz * 0.5f, c.y - sz * 0.5f));
             ImGui::PushID(d);
             bool hit = ImGui::InvisibleButton("##wstep", ImVec2(sz, sz));

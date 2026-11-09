@@ -288,6 +288,16 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.moveToBack = [] { CallV("moveToBack", "()V"); };
     b.movieMode = [](bool on) { CallV("movieMode", "(Z)V", (jboolean)on); };
     b.movieOrientation = [](bool portrait) { CallV("movieOrientation", "(Z)V", (jboolean)portrait); };
+    b.mediaVolume = []() -> float {
+        static jmethodID m = M("mediaVolume", "()F");
+        if (!m) return -1.0f;
+        JNIEnv* env = Env();
+        jfloat f = env->CallStaticFloatMethod(g_cls, m);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return -1.0f; }
+        return f;
+    };
+    b.setMediaVolume = [](float v) { CallV("setMediaVolume", "(F)V", (jfloat)v); };
+    b.setScreenBrightness = [](float v) { CallV("setScreenBrightness", "(F)V", (jfloat)v); };
     b.isMetered = []() -> bool {
         if (!g_notify) return false;
         JNIEnv* e = Env();
