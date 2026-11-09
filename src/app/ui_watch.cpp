@@ -356,6 +356,10 @@ void App::WatchTracksPopup() {
         ch |= ImGui::Checkbox(T("Play the next one automatically (in the folder)"), &s.playerAutoNext);
         ch |= ImGui::Checkbox(T("Hide the controls while playing (a tap brings them back)"), &s.playerHideUi);
         if (IsMobilePlatform()) ch |= ImGui::Checkbox(T("Turn the screen by the movie's shape (tall: upright)"), &s.playerOrientByAspect);
+        if (ImGui::Button(SleepLabel().c_str(), ImVec2(mobile ? -1 : 0, h))) {
+            sleepOpen = true;
+            ImGui::CloseCurrentPopup();
+        }
         if (Bridge().moviePip) {
             ch |= ImGui::Checkbox(T("Keep playing in a small window when leaving the app"), &s.playerPip);
             if (ImGui::Button(T("Small window now"), ImVec2(mobile ? -1 : 0, h)) && Bridge().enterPip) {

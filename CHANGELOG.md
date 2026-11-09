@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Sleep timer** (music player and movie player): in 5 - 120 minutes, at the end of this song or of this movie, the
+  music and the movie stop. A minute before, a window asks: +5 / +15 / +30 min, *Stop now* or *Turn the timer off*
+  (unanswered, it stops).
 - Music: songs in a playlist can be put in another order - drag them (computer), or *Move up / down / to the top /
   to the bottom* in a song's menu (long press on a phone).
 - Android: **picture in picture** - leaving the app (home button / gesture) while a movie plays keeps it playing in a

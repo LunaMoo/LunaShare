@@ -49,6 +49,16 @@ public:
     // the typed text shown again just above the on-screen keyboard (the field itself may be under it); tapping it
     // moves the cursor. main.cpp keeps the taps inside mirrorRect away from ImGui (they'd end the typing)
     void DrawTextMirror();
+    // the sleep timer (ui_sleep.cpp): mode -1 off, 0 at sleepAt, 1 after this song, 2 after this movie
+    void SleepSet(int minutes, int mode);
+    void SleepStopAll();
+    void SleepTick();
+    std::string SleepLabel();
+    void SleepPopup();
+    void DrawSleepAsk();
+    int sleepMode = -1;
+    int64_t sleepAt = 0;
+    bool sleepAsked = false, sleepAskOpen = false, sleepOpen = false;
     // chat history: archives, clearing, restoring, asking for it back (ui_archive.cpp)
     void OpenChatHistory(const std::string& peer);
     void DrawChatHistoryPopup();

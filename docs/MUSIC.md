@@ -28,6 +28,13 @@
   pause and next; tapping it opens the player.
 - Music pauses on its own for a movie, a chat video or voice message, a call or a recording, and goes on afterwards.
 
+## Sleep timer
+
+*Sleep timer* (under the player on a phone, in the bar on a computer; in the movie player's menu too): in 5, 15, 30,
+45, 60, 90 or 120 minutes, at the end of this song, or at the end of this movie - the music and the movie stop. A
+minute before, a window asks whether to give it longer (+5 / +15 / +30 min), stop right away, or turn the timer off;
+if nobody answers, it stops. The button shows how long is left.
+
 ## Playlist order
 
 In a playlist, drag a song to another place (on a computer), or use its menu (right click / long press): *Move up*,

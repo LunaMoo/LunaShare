@@ -151,6 +151,8 @@ public:
     void SetRepeat(int r);
     void SetShuffle(bool on);
     void SetVolume(float v);      // ducking (0..1)
+    void SetStopAfterCurrent(bool on) { stopAfter_ = on; }  // the sleep timer: stop when this song ends
+    bool StopAfterCurrent() const { return stopAfter_; }
     Sound GetSound();
     void SetSound(const Sound& s);
     // a movie / call / chat audio is on: music pauses, and goes on afterwards
@@ -192,6 +194,7 @@ private:
     void CloseLocked();
     // transitions (m_ held): the next song starts while this one fades out
     int NextIndex();
+    std::atomic<bool> stopAfter_{false};
     double PickFrag(double dur) const;  // remix: a random start for a song's part
     double FragStart(double dur) const;
     double fragA_ = 0, fragB_ = 0;      // remix: where the playing / the incoming song's part starts

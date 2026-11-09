@@ -123,6 +123,12 @@ void App::Frame() {
                 break;
             }
     }
+    static bool devSleep = getenv("LUNASHARE_SLEEPTEST") != nullptr;  // dev: the sleep timer's question (screenshots)
+    if (devSleep && ImGui::GetFrameCount() > 30) {
+        devSleep = false;
+        SleepSet(1, 0);
+        sleepAt = SteadyMs() + 45000;
+    }
     static bool devHist = getenv("LUNASHARE_OPENHIST") != nullptr;  // dev: the chat history window (screenshots)
     if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 200) {
         devHist = false;
@@ -302,6 +308,8 @@ void App::Frame() {
     if (watchShown) DrawWatch();
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawChatHistoryPopup();
+    SleepPopup();
+    DrawSleepAsk();
     DrawToasts();
     DrawTextMirror();
     if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
@@ -327,6 +335,7 @@ void App::MusicTick() {
     bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
     music::Play().SetInterrupted(interrupt);
     MusicExternalTick();
+    SleepTick();
     music::MediaKeys(music::Play().GetNow().active);
 }
 

@@ -37,6 +37,13 @@ In the sound / subtitles / picture menu: *Speed* 0.5x, 0.75x, 1x, 1.25x, 1.5x, 2
 watching together it's everyone's speed. Under the subtitles: *-0.5 s* / *+0.5 s* when they're out of step with the
 voices (this device, this movie) and the subtitles' text size (remembered).
 
+## Sleep timer
+
+*Sleep timer* (in the movie player's menu, and in the music player): in 5, 15, 30,
+45, 60, 90 or 120 minutes, at the end of this song, or at the end of this movie - the music and the movie stop. A
+minute before, a window asks whether to give it longer (+5 / +15 / +30 min), stop right away, or turn the timer off;
+if nobody answers, it stops. The button shows how long is left.
+
 ## Picture in picture (Android)
 
 Leaving the app while a movie plays (the home button or gesture) keeps it going in a small window you can move

@@ -1159,9 +1159,10 @@ void Player::Loop() {
             if (p_ && playing_ && !pn_ && dur_ > 0 && fade > 0) {
                 double pos = mod_->position(p_), end = FragEnd(dur_);
                 if (pos >= end - fade && pos < dur_ - 0.05) {
-                    int n = NextIndex();
+                    int n = stopAfter_ ? -1 : NextIndex();  // (the sleep timer: this song is the last)
                     if (n >= 0) StartFade(n, fade);
                     else if (snd_.remix && pos >= end) {  // the list ended: stop at the end of the part
+                        stopAfter_ = false;
                         playing_ = wantPlay_ = false;
                         mod_->set_playing(p_, 0);
                         if (dev_) SDL_PauseAudioDevice(dev_, 1);
@@ -1169,7 +1170,12 @@ void Player::Loop() {
                     }
                 }
             }
-            if (p_ && !pn_ && mod_->state(p_) == LSP_ENDED && playing_) {
+            if (p_ && !pn_ && mod_->state(p_) == LSP_ENDED && playing_ && stopAfter_) {  // the sleep timer: done
+                stopAfter_ = false;
+                playing_ = wantPlay_ = false;
+                if (dev_) SDL_PauseAudioDevice(dev_, 1);
+                changed = true;
+            } else if (p_ && !pn_ && mod_->state(p_) == LSP_ENDED && playing_) {
                 int n = at_ + 1;
                 if (repeat_ == RepeatOne) n = at_;
                 else if (n >= (int)order_.size()) n = repeat_ == RepeatAll ? 0 : -1;

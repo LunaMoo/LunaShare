@@ -337,6 +337,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_listen.cpp
         src/app/ui_movies.cpp
         src/app/ui_archive.cpp
+        src/app/ui_sleep.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
         src/app/notify.cpp

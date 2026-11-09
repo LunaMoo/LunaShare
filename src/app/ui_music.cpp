@@ -457,7 +457,9 @@ void App::DrawMusicNow(bool big) {
         if (ImGui::Button(T("Stop"), ImVec2(aw, ah))) music::Play().Stop();
         ImGui::SameLine();
         if (ImGui::Button(T("Sound..."), ImVec2(aw, ah))) musicSoundOpen = true;
-        if (ImGui::Button(T("Listen together..."), ImVec2(-1, ah))) musicListenOpen = true;
+        if (ImGui::Button(T("Listen together..."), ImVec2((ImGui::GetContentRegionAvail().x - sp) / 2, ah))) musicListenOpen = true;
+        ImGui::SameLine();
+        if (ImGui::Button(SleepLabel().c_str(), ImVec2(-1, ah))) sleepOpen = true;
         // the queue
         ImGui::SeparatorText(TF("Queue (%d)", n.count).c_str());
         auto q = music::Play().Queue();
@@ -719,6 +721,8 @@ void App::DrawMusic() {
         if (ui::IconTextButton(T("Folders..."), Icon::Folder)) ImGui::OpenPopup("##mfolders");
         ImGui::SameLine();
         if (ImGui::Button(T("Sound..."))) musicSoundOpen = true;
+        ImGui::SameLine();
+        if (ImGui::Button(SleepLabel().c_str())) sleepOpen = true;
         if (!eng.listen.sid) {
             ImGui::SameLine();
             if (ImGui::Button(T("Listen together..."))) musicListenOpen = true;
