@@ -779,6 +779,12 @@ void App::MusicSoundPopup() {
     if (s.remix) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
     ch |= ImGui::SliderInt("##xf", &s.crossfade, 0, 12, s.crossfade ? T("smooth transition: %d s") : T("smooth transition: off"));
+    if (s.crossfade == 0) {
+        ch |= ImGui::Checkbox(T("No gap between songs"), &s.gapless);
+        ImGui::SameLine();
+        ui::HelpMarker(T("The next song is ready a few seconds early and starts the very moment this one ends - albums recorded "
+                         "as one piece (live, mixes) play on without a click."));
+    }
     if (s.remix) ImGui::EndDisabled();
     ch |= ImGui::Checkbox(T("Remix: only a part of every song"), &s.remix);
     ImGui::TextDisabled("%s", T("skips the beginnings and ends, flowing from part to part"));

@@ -80,6 +80,13 @@ tags, so the file works on another device too).
 
 All of it is kept with the player's state in `music_state.json`.
 
+## No gap between songs
+
+With no smooth transition set, *No gap between songs* (on by default, in *Sound...*) opens the next song three
+seconds before this one ends; the moment this one runs out, the next one continues in the same piece of sound - live
+albums and mixes play through without a click. (Changing what's next - shuffle, the queue - drops the prepared song
+and the usual way goes on.)
+
 ## Listening together
 
 *Listen together...* (next to *Sound...*; on a phone under the player, or next to *Music folders...*) picks a person or

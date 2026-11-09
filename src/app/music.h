@@ -58,6 +58,7 @@ struct Sound {
     int remixLen = 45;          // seconds of each song
     int remixFade = 6;          // seconds one flows into the next
     bool level = false;         // even out the volume between songs (ReplayGain / measured)
+    bool gapless = true;        // no gap between songs (without a transition: the next one is ready before)
 };
 nlohmann::json SoundToJson(const Sound& s);
 Sound SoundFromJson(const nlohmann::json& j);
@@ -257,6 +258,7 @@ private:
     int nextAt_ = -1;
     double nextDur_ = 0;
     int64_t fadeTotal_ = 0, fadePos_ = 0;  // frames (pm_)
+    bool gapless_ = false;                 // pn_ is the next song waiting to go on the moment this one ends (pm_)
     std::atomic<bool> fadeDone_{false};
     Sound snd_;
     // equalizer (pm_): peaking filters per band, both channels

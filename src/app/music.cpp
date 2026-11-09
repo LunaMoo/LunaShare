@@ -284,7 +284,7 @@ json SoundToJson(const Sound& s) {
     json eq = json::array();
     for (float g : s.eq) eq.push_back(g);
     return {{"eqOn", s.eqOn}, {"eq", eq}, {"preamp", s.preamp}, {"preset", s.preset}, {"crossfade", s.crossfade},
-            {"remix", s.remix}, {"remixLen", s.remixLen}, {"remixFade", s.remixFade}, {"level", s.level}};
+            {"remix", s.remix}, {"remixLen", s.remixLen}, {"remixFade", s.remixFade}, {"level", s.level}, {"gapless", s.gapless}};
 }
 
 Sound SoundFromJson(const json& s) {
@@ -301,6 +301,7 @@ Sound SoundFromJson(const json& s) {
     r.remixLen = std::clamp(s.value("remixLen", 45), 15, 180);
     r.remixFade = std::clamp(s.value("remixFade", 6), 1, 12);
     r.level = s.value("level", false);
+    r.gapless = s.value("gapless", true);
     return r;
 }
 
@@ -814,8 +815,23 @@ void Player::AudioCb(void* u, uint8_t* stream, int len) {
     bool level = self->snd_.level;
     if (level && self->gainA_ != 1.0f)
         for (int i = 0; i < frames * 2; i++) out[i] *= self->gainA_;
-    // a transition: the next song comes in while this one goes (equal power, so the loudness stays even)
-    if (self->pn_) {
+    // no gap: the next song goes on in this very buffer, right where this one ran out (its silence at the end
+    // read as zeros: what's left of the buffer after the last sound is the next song's)
+    if (self->pn_ && self->gapless_) {
+        if (self->mod_->state(self->p_) == LSP_ENDED) {
+            int k = frames;
+            while (k > 0 && out[(k - 1) * 2] == 0.0f && out[(k - 1) * 2 + 1] == 0.0f) k--;
+            int rest = frames - k;
+            if (rest > 0) {
+                auto& b = self->mixBuf_;
+                if ((int)b.size() < rest * 2) b.resize((size_t)rest * 2);
+                self->mod_->read_audio(self->pn_, b.data(), rest);
+                float gb = level ? self->gainB_ : 1.0f;
+                for (int i = 0; i < rest * 2; i++) out[k * 2 + i] = b[(size_t)i] * gb;
+            }
+            self->fadeDone_ = true;  // (the player's thread makes it the current song)
+        }
+    } else if (self->pn_) {  // a transition: the next song comes in while this one goes (equal power, so the loudness stays even)
         auto& b = self->mixBuf_;
         if ((int)b.size() < frames * 2) b.resize((size_t)frames * 2);
         self->mod_->read_audio(self->pn_, b.data(), frames);
@@ -969,7 +985,8 @@ void Player::StartFade(int next, double seconds) {
     gainB_ = g;
     nextAt_ = next;
     nextDur_ = info.duration;
-    fadeTotal_ = std::max<int64_t>(1, (int64_t)(seconds * 48000));
+    gapless_ = seconds <= 0;
+    fadeTotal_ = gapless_ ? 0 : std::max<int64_t>(1, (int64_t)(seconds * 48000));
     fadePos_ = 0;
     fadeDone_ = false;
 }
@@ -985,6 +1002,7 @@ void Player::FinishFade() {
         pn_ = nullptr;
         gainA_ = gainB_;
         fadeDone_ = false;
+        gapless_ = false;
         msSum_ = 0;
         msN_ = 0;
     }
@@ -1003,6 +1021,7 @@ void Player::CancelFade() {
         q = pn_;
         pn_ = nullptr;
         fadeDone_ = false;
+        gapless_ = false;
     }
     if (q) mod_->close(q);
     nextAt_ = -1;
@@ -1468,6 +1487,15 @@ void Player::Loop() {
             if (fadeDone_) {  // the next song has fully taken over
                 FinishFade();
                 changed = true;
+            }
+            // no gap: the next song opened a little before, waiting to go on (dropped if what's next changed)
+            if (pn_ && gapless_ && (NextIndex() != nextAt_ || stopAfter_ || snd_.crossfade > 0 || snd_.remix || !snd_.gapless)) CancelFade();
+            if (p_ && playing_ && !pn_ && dur_ > 0 && snd_.gapless && !snd_.remix && snd_.crossfade == 0 && !stopAfter_) {
+                double pos = mod_->position(p_);
+                if (pos >= dur_ - 3.0 && pos < dur_ - 0.05) {
+                    int n = NextIndex();
+                    if (n >= 0) StartFade(n, 0);
+                }
             }
             // smooth transitions / remix: start the next one before this one ends
             double fade = snd_.remix ? snd_.remixFade : snd_.crossfade;

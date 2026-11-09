@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Music: **no gap between songs** (on by default when there's no smooth transition) - live albums and mixes play
+  through without a click.
+
 - Music: **favourites** (the star on the cover or in a song's menu), **play counts**, and lists that keep
   themselves up to date - Favourites, Most played, Played lately, Recently added.
 

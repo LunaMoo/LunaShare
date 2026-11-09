@@ -1143,3 +1143,5 @@
 {"Most played", "Najczęściej słuchane"},
 {"Favourites", "Ulubione"},
 {"Played lately", "Ostatnio słuchane"},
+{"No gap between songs", "Bez przerw między utworami"},
+{"The next song is ready a few seconds early and starts the very moment this one ends - albums recorded as one piece (live, mixes) play on without a click.", "Następny utwór jest gotowy kilka sekund wcześniej i zaczyna się dokładnie w chwili, gdy ten się kończy - albumy nagrane w jednym ciągu (koncerty, miksy) grają dalej bez trzasku."},
