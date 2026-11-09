@@ -18,6 +18,14 @@ How it works:
   anything about groups.
 - Devices known only through a group are not listed as contacts. Writing to such a person directly makes them one.
 
+## Polls
+
+The chart button left of the typing field (in a group, while nothing is typed): a question, 2 - 12 answers, *Several
+answers allowed* or not. The poll is a message (`poll: {q, o, m}`; older versions get it as text with the answers
+numbered). Tapping an answer chooses it (again: takes it back); everyone sees the counts and who chose what. Each
+person's answers travel as `ChatVote` (106, `{mid, o, ts}`), the latest wins, and they're sent again to whoever
+missed them when they connect.
+
 ## @mentions
 
 Type `@` and the start of someone's name: the people in the group who match show above the typing field; a tap

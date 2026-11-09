@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Groups: **polls** - the chart button next to the typing field (while it's empty): a question, 2 - 12 answers, one
+  or several allowed. Everyone sees how many chose what (and who - hover, or *Who?* on phones); a tap changes your
+  answer. Older versions see the poll as text.
+
 - Chat: **pin** messages in a chat (for everyone in it - a bar on top goes to them) and **star** messages for
   yourself (*Starred messages* in *Chat history* lists them from all chats).
 

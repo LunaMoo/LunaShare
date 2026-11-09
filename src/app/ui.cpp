@@ -150,7 +150,11 @@ void App::Frame() {
     static bool devHist = getenv("LUNASHARE_OPENHIST") != nullptr;  // dev: the chat history window (screenshots)
     if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 3) {
         devHist = false;
-        if (std::string(getenv("LUNASHARE_OPENHIST")) == "starred") {
+        if (std::string(getenv("LUNASHARE_OPENHIST")) == "poll") {
+            OpenPollNew(selectedPeer);
+            pollQ = "Sunday lunch?";
+            pollOpts = {"12:00", "14:00", ""};
+        } else if (std::string(getenv("LUNASHARE_OPENHIST")) == "starred") {
             starredOpen = true;
         } else if (std::string(getenv("LUNASHARE_OPENHIST")) == "mute") {
             muteKey = selectedPeer;
@@ -343,6 +347,7 @@ void App::Frame() {
     DrawChatHistoryPopup();
     DrawMutePopup();
     DrawStarredPopup();
+    DrawPollNewPopup();
     DrawUpdatePopup();
     DrawLockSetPopup();
     SleepPopup();
@@ -1430,6 +1435,22 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SameLine();
         emojiW = bw + ImGui::GetStyle().ItemSpacing.x;
     }
+    if (Engine::IsGroupKey(peer) && chatInput.empty() && editMid.empty()) {  // groups: a poll (while nothing is typed)
+        float bw = mobile ? inputH * 0.9f : inputH * 0.8f;
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::Button("##pollbtn", ImVec2(bw, inputH))) OpenPollNew(peer);
+        if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("New poll..."));
+        // three bars of a chart
+        ImDrawList* pdl = ImGui::GetWindowDrawList();
+        float s = std::min(bw, inputH) * 0.42f, cx = p.x + bw * 0.5f, by = p.y + inputH * 0.5f + s * 0.5f;
+        ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+        float bwid = s * 0.24f;
+        pdl->AddRectFilled(ImVec2(cx - s * 0.5f, by - s * 0.55f), ImVec2(cx - s * 0.5f + bwid, by), col);
+        pdl->AddRectFilled(ImVec2(cx - bwid * 0.5f, by - s), ImVec2(cx + bwid * 0.5f, by), col);
+        pdl->AddRectFilled(ImVec2(cx + s * 0.5f - bwid, by - s * 0.75f), ImVec2(cx + s * 0.5f, by), col);
+        ImGui::SameLine();
+        emojiW += bw + ImGui::GetStyle().ItemSpacing.x;
+    }
     if (focusInput) {
         ImGui::SetKeyboardFocusHere();
         focusInput = false;
@@ -1776,7 +1797,7 @@ void App::DrawMessages(const std::string& peer) {
             }
         }
         float x0 = ImGui::GetCursorPosX();
-        if (m.kind == MsgKind::Files) {
+        if (m.kind == MsgKind::Files || !m.pollQ.empty()) {
             float w = mobile ? avail * 0.97f : std::min(maxW, ImGui::GetFontSize() * 26.0f);
             ImGui::SetCursorPosX(m.outgoing ? x0 + avail - w : x0);
             ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -1785,7 +1806,8 @@ void App::DrawMessages(const std::string& peer) {
             ImGui::BeginGroup();
             ImGui::Dummy(ImVec2(w, pad * 0.3f));
             ImGui::Indent(pad);
-            DrawBatchCard(peer, m, w - pad * 2);
+            if (!m.pollQ.empty()) DrawPollCard(peer, m, w - pad * 2);
+            else DrawBatchCard(peer, m, w - pad * 2);
             ImGui::Unindent(pad);
             ImGui::Dummy(ImVec2(w, pad * 0.3f));
             ImGui::EndGroup();
@@ -1978,7 +2000,7 @@ void App::DrawMessages(const std::string& peer) {
                 selMsgs.clear();
                 selectionMode = false;
             }
-            if (m.outgoing && m.kind == MsgKind::Text && ImGui::Selectable(T("Change..."), false, 0, ImVec2(0, h))) {
+            if (m.outgoing && m.kind == MsgKind::Text && m.pollQ.empty() && ImGui::Selectable(T("Change..."), false, 0, ImVec2(0, h))) {
                 editMid = m.mid;
                 replyMid.clear();
                 chatInput = Emoji().Display(m.text);

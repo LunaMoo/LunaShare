@@ -151,6 +151,13 @@ private:
     std::string reactMid;
     bool openReactPick = false, openReactMore = false;
     void DrawBatchCard(const std::string& peer, const ls::ChatMessage& m, float width);
+    // polls: the card in the chat (tap an answer), and making one
+    void DrawPollCard(const std::string& peer, const ls::ChatMessage& m, float width);
+    void OpenPollNew(const std::string& peer);
+    void DrawPollNewPopup();
+    std::string pollPeer, pollQ;
+    std::vector<std::string> pollOpts;
+    bool pollMulti = false, pollOpen = false;
     void DrawTransferRow(const std::shared_ptr<ls::Transfer>& t, bool compact);
     void DrawTransferActions(const std::shared_ptr<ls::Transfer>& t);
     void DrawTransfers();
