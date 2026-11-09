@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <map>
 #include <thread>
 
 #include "i18n.h"
@@ -15,6 +16,7 @@
 #include "ui_widgets.h"
 
 using namespace ls;
+using json = nlohmann::json;
 using ui::Icon;
 
 namespace {
@@ -53,6 +55,76 @@ void Walk(const std::string& dir, int depth, std::vector<MovieFile>& out) {
     }
 }
 }  // namespace
+
+// ---------------------------------------------------------------- where each movie was left
+
+namespace movpos {
+static std::mutex g_m;
+static std::map<std::string, Mark> g_marks;
+static std::string g_path;
+static bool g_dirty = false;
+static int64_t g_saved = 0;
+
+void Init(const std::string& configDir) {
+    std::lock_guard<std::mutex> l(g_m);
+    g_path = JoinPath(configDir, "movie_positions.json");
+    json j;
+    if (!LoadJsonFile(g_path, j) || !j.is_object()) return;
+    for (auto& [k, v] : j.items()) {
+        if (!v.is_object()) continue;
+        Mark m;
+        m.pos = v.value("pos", 0.0);
+        m.dur = v.value("dur", 0.0);
+        m.watched = v.value("watched", false);
+        m.at = v.value("at", (int64_t)0);
+        g_marks[k] = m;
+    }
+}
+
+bool Get(const std::string& key, Mark& m) {
+    std::lock_guard<std::mutex> l(g_m);
+    auto it = g_marks.find(key);
+    if (it == g_marks.end()) return false;
+    m = it->second;
+    return true;
+}
+
+void Set(const std::string& key, double pos, double dur) {
+    if (key.empty() || dur <= 0) return;
+    std::lock_guard<std::mutex> l(g_m);
+    Mark& m = g_marks[key];
+    bool end = pos >= dur * 0.95 || (dur > 600 && dur - pos < 60);  // (the credits: seen it)
+    if (end) {
+        m.watched = true;
+        m.pos = 0;
+    } else if (pos > 5) {
+        m.pos = pos;
+    }
+    m.dur = dur;
+    m.at = NowMs();
+    g_dirty = true;
+    if (g_marks.size() > 3000) {  // (the oldest go)
+        auto old = std::min_element(g_marks.begin(), g_marks.end(), [](auto& a, auto& b) { return a.second.at < b.second.at; });
+        g_marks.erase(old);
+    }
+}
+
+void Forget(const std::string& key) {
+    std::lock_guard<std::mutex> l(g_m);
+    g_marks.erase(key);
+    g_dirty = true;
+}
+
+void Save(bool force) {
+    std::lock_guard<std::mutex> l(g_m);
+    if (!g_dirty || g_path.empty() || (!force && SteadyMs() - g_saved < 10000)) return;
+    json j = json::object();
+    for (auto& [k, m] : g_marks) j[k] = {{"pos", m.pos}, {"dur", m.dur}, {"watched", m.watched}, {"at", m.at}};
+    SaveJsonFile(g_path, j);
+    g_dirty = false;
+    g_saved = SteadyMs();
+}
+}  // namespace movpos
 
 // the folders: mine, plus received files and the system's Videos folder
 static std::vector<std::string> MovieFolders(const Settings& s) {
@@ -248,6 +320,20 @@ void App::DrawMovies() {
                 ImVec2 tp(b.x - ts.x - 6, b.y - ts.y - 4);
                 dl->AddRectFilled(ImVec2(tp.x - 3, tp.y - 1), ImVec2(b.x - 3, b.y - 3), IM_COL32(0, 0, 0, 170), 4);
                 dl->AddText(tp, IM_COL32(255, 255, 255, 235), t);
+            }
+            movpos::Mark mk;
+            if (movpos::Get(f.path, mk)) {  // how far it was watched / seen it
+                if (mk.watched) {
+                    float r = ch * 0.13f;
+                    ImVec2 cc(a.x + r + 6, a.y + r + 6);
+                    dl->AddCircleFilled(cc, r, IM_COL32(40, 150, 90, 235));
+                    ui::DrawIcon(dl, Icon::Check, cc, r * 1.6f, IM_COL32(255, 255, 255, 255));
+                }
+                if (mk.pos > 0 && mk.dur > 0) {
+                    float fr = (float)std::min(1.0, mk.pos / mk.dur);
+                    dl->AddRectFilled(ImVec2(a.x, b.y - 4), ImVec2(b.x, b.y), IM_COL32(0, 0, 0, 150));
+                    dl->AddRectFilled(ImVec2(a.x, b.y - 4), ImVec2(a.x + (b.x - a.x) * fr, b.y), IM_COL32(230, 70, 70, 255));
+                }
             }
             if (eng.watch.sid && eng.watch.host.empty() && eng.watch.path == f.path)  // (the one that's on)
                 dl->AddRect(a, b, ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 6.0f, ImDrawFlags_None, 3.0f);

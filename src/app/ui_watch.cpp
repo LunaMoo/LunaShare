@@ -49,6 +49,10 @@ void App::WatchSync() {
         if (Bridge().keepAwake) Bridge().keepAwake(awake);
     }
     if (!w.sid) {
+        if (!watchPosKey.empty()) {
+            movpos::Save(true);
+            watchPosKey.clear();
+        }
         if (!watchOpened.empty()) {
             if (Player().IsCurrent(watchOpened) || Player().OpenState() == PlayerHost::Opening::Busy) Player().Stop();
             watchOpened.clear();
@@ -61,6 +65,15 @@ void App::WatchSync() {
     std::string cur = lib ? "lib:" + w.libId : host ? w.path : id;
     if (watchOpened != cur) {  // a new session: open its movie (paused)
         watchOpened = cur;
+        watchResumedFrom = 0;
+        // where it was left last time (mine to choose: alone, or the host)
+        watchPosKey = lib ? "lib:" + w.libId : host ? w.path : "";
+        movpos::Mark mk;
+        if (!watchPosKey.empty() && movpos::Get(watchPosKey, mk) && mk.pos > 10 && !mk.watched && (mk.dur <= 0 || mk.pos < mk.dur * 0.95)) {
+            eng.WatchControl(w.playing, mk.pos);
+            watchResumedFrom = mk.pos;
+            watchResumedAt = SteadyMs();
+        }
         watchFailed = false;
         watchLastSeek = 0;
         watchSubsAdded.clear();
@@ -131,6 +144,11 @@ void App::WatchSync() {
     int64_t now = SteadyMs();
     double target = w.Target(now);
     double dur = Player().Duration();
+    if (!watchPosKey.empty() && dur > 0 && now - watchPosSaved > 2000) {  // (remembered as it goes)
+        watchPosSaved = now;
+        movpos::Set(watchPosKey, std::max(0.0, target), dur);
+        movpos::Save();
+    }
     // Android: upright for a tall movie, sideways for a wide one (once its size is known)
     if (eng.settings.playerOrientByAspect && ui::M().mobile && Bridge().movieOrientation) {
         const LspInfo& inf = Player().Info();
@@ -664,6 +682,27 @@ void App::DrawWatch() {
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) eng.WatchControl(playing, std::max(0.0, pos - 10));
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) eng.WatchControl(playing, dur > 0 ? std::min(dur - 1, pos + 10) : pos + 10);
 
+    if (watchResumedFrom > 0 && now - watchResumedAt < 8000) {  // "continued from 12:34 - from the start"
+        int r = (int)watchResumedFrom;
+        char tbuf[32];
+        if (r >= 3600) snprintf(tbuf, sizeof tbuf, "%d:%02d:%02d", r / 3600, r / 60 % 60, r % 60);
+        else snprintf(tbuf, sizeof tbuf, "%d:%02d", r / 60, r % 60);
+        std::string msg = TF("Continued from %s", tbuf);
+        const char* bl = T("From the start");
+        ImVec2 ms = ImGui::CalcTextSize(msg.c_str()), bs2 = ImGui::CalcTextSize(bl);
+        float ph = ImGui::GetStyle().FramePadding.y, pw = ImGui::GetStyle().FramePadding.x;
+        float bwid = bs2.x + pw * 2 + (mobile ? bh * 0.3f : 0), hgt = std::max(ms.y, bs2.y) + ph * 2 + (mobile ? bh * 0.25f : 0);
+        float wtot = ms.x + pw * 3 + bwid;
+        ImVec2 o((a.x + b.x - wtot) * 0.5f, a.y + bh * 1.6f);
+        dl->AddRectFilled(o, ImVec2(o.x + wtot, o.y + hgt), IM_COL32(20, 20, 26, 215), hgt * 0.5f);
+        dl->AddText(ImVec2(o.x + pw * 1.5f, o.y + (hgt - ms.y) * 0.5f), IM_COL32(235, 235, 240, 255), msg.c_str());
+        ImGui::SetCursorScreenPos(ImVec2(o.x + ms.x + pw * 2.5f, o.y + 2));
+        if (ImGui::Button(bl, ImVec2(bwid - pw, hgt - 4))) {
+            eng.WatchControl(w.playing, 0);
+            watchResumedFrom = 0;
+            if (!watchPosKey.empty()) movpos::Forget(watchPosKey);
+        }
+    }
     if (controls) {  // ---- < and >: the previous / next movie in the folder
         float sz = bh * 1.3f;
         for (int d : {-1, 1}) {

@@ -11,6 +11,20 @@
 #include "imgui.h"
 #include "music.h"
 
+// where each movie was left (ui_movies.cpp): key = its path (or "lib:<id>" for a contact's file)
+namespace movpos {
+struct Mark {
+    double pos = 0, dur = 0;
+    bool watched = false;
+    int64_t at = 0;
+};
+void Init(const std::string& configDir);
+bool Get(const std::string& key, Mark& m);
+void Set(const std::string& key, double pos, double dur);  // (near the end: watched, from the start next time)
+void Forget(const std::string& key);
+void Save(bool force = false);
+}  // namespace movpos
+
 // file names in a natural order ("Episode 2" before "Episode 10") - ui_watch.cpp
 bool NaturalLess(const std::string& a, const std::string& b);
 
@@ -179,6 +193,9 @@ private:
     uint64_t watchHideSid = 0;
     int watchOrient = -1;             // Android, by the movie's shape: 0 sideways, 1 upright (-1 not set)
     int64_t watchNextAt = 0;
+    double watchResumedFrom = 0;      // (continued from where it was left: shown for a moment, with "from the start")
+    int64_t watchResumedAt = 0, watchPosSaved = 0;
+    std::string watchPosKey;
     bool watchFullscreen = false, watchMovie = false, watchAwake = false, watchDevSub = false;
     std::set<std::string> watchSubsAdded;
     bool watchSubFollow = true;       // viewer: subtitles as the host has them (until picking others)

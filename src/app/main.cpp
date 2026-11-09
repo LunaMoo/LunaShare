@@ -390,6 +390,7 @@ int main(int argc, char** argv) {
         return out;
     };
     music::Lib().Init(engine.ConfigPath(), Player().Module());
+    movpos::Init(engine.ConfigPath());
     music::Play().Init(Player().Module(), &music::Lib());
     music::Play().LoadState(music::Lib().StatePath());
     music::Play().onChange = [] {
@@ -684,6 +685,7 @@ int main(int argc, char** argv) {
     music::Play().onChange = nullptr;
     music::Play().Shutdown();
     music::Lib().Shutdown();
+    movpos::Save(true);
     Player().Shutdown();
     Media().Shutdown();
     engine.Stop();

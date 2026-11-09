@@ -31,6 +31,13 @@ slider to put it back, *Reset picture* for all. (Done on the graphics card, wher
   contact's Shared folder it was started from). Watching together, the host's switch takes everyone along: their
   player goes straight on to the next movie.
 
+## Where you left it
+
+A movie you open again (alone, or as the host) continues where you stopped - "Continued from 12:34", with *From the
+start* for a few seconds. Played to the end (95 %, or the last minute of a long one), it's marked as seen and starts
+from the beginning next time. The Movies tab shows a red bar for how far each movie got and a tick on those seen.
+(Kept in `movie_positions.json` in the settings folder.)
+
 ## Autoplay and play / pause
 
 Options in the player's sound / subtitles / picture menu, remembered for every movie:

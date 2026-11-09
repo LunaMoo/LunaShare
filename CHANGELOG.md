@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Movies continue where you left them (alone, or as the host) - "Continued from 12:34" with *From the start* for a
+  moment; the Movies tab shows how far each one was watched, and a tick on the ones seen to the end.
+
 ## 1.5.5
 
 - Movie player options (in the sound / subtitles / picture menu, remembered for every movie):
