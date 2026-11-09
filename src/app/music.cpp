@@ -86,6 +86,9 @@ void Library::Init(const std::string& configDir, const LspModule* mod) {
             x.size = t.value("s", (int64_t)0);
             x.mtime = t.value("m", (int64_t)0);
             x.added = t.value("ad", (int64_t)0);
+            x.gainSet = t.contains("gn");
+            x.gain = t.value("gn", 0.0f);
+            x.gainTag = t.value("gt", false);
             if (!x.path.empty()) tracks_[x.path] = x;
         }
         for (auto& p : j.value("playlists", json::array())) {
@@ -118,9 +121,15 @@ void Library::Save() {
         if (!dirty_) return;
         dirty_ = false;
         json tr = json::array();
-        for (auto& [p, t] : tracks_)
-            tr.push_back({{"p", t.path}, {"t", t.title}, {"a", t.artist}, {"al", t.album}, {"aa", t.albumArtist}, {"g", t.genre}, {"y", t.year},
-                          {"c", t.cover}, {"n", t.number}, {"d", t.disc}, {"du", t.duration}, {"s", t.size}, {"m", t.mtime}, {"ad", t.added}});
+        for (auto& [p, t] : tracks_) {
+            json x = {{"p", t.path}, {"t", t.title}, {"a", t.artist}, {"al", t.album}, {"aa", t.albumArtist}, {"g", t.genre}, {"y", t.year},
+                      {"c", t.cover}, {"n", t.number}, {"d", t.disc}, {"du", t.duration}, {"s", t.size}, {"m", t.mtime}, {"ad", t.added}};
+            if (t.gainSet) {
+                x["gn"] = t.gain;
+                if (t.gainTag) x["gt"] = true;
+            }
+            tr.push_back(x);
+        }
         json pls = json::array();
         for (auto& p : playlists_) pls.push_back({{"id", p.id}, {"name", p.name}, {"paths", p.paths}});
         j = {{"v", 1}, {"folders", folders_}, {"tracks", tr}, {"playlists", pls}};
@@ -304,6 +313,30 @@ void Library::ReadTags(Track& t) {
         if (n > 0 && n < 1000) t.number = n;
     }
     t.cover = CoverFor(t.path, cov.data.empty() ? nullptr : cov.data.data(), (int)cov.data.size());
+    if (ok && tg.has_track_gain) {  // ReplayGain from the file
+        t.gain = (float)tg.track_gain;
+        t.gainSet = t.gainTag = true;
+    }
+}
+
+bool Library::GainFor(const std::string& path, float& gain) {
+    std::lock_guard<std::mutex> l(m_);
+    auto it = tracks_.find(path);
+    if (it == tracks_.end() || !it->second.gainSet) return false;
+    gain = it->second.gain;
+    return true;
+}
+
+void Library::SetMeasuredGain(const std::string& path, float gain) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        auto it = tracks_.find(path);
+        if (it == tracks_.end() || it->second.gainTag) return;
+        it->second.gain = gain;
+        it->second.gainSet = true;
+        dirty_ = true;
+    }
+    Save();
 }
 
 void Library::ScanLoop() {
@@ -549,11 +582,22 @@ void Player::AudioCb(void* u, uint8_t* stream, int len) {
     std::lock_guard<std::mutex> l(self->pm_);
     if (self->p_) self->mod_->read_audio(self->p_, out, frames);
     else memset(stream, 0, (size_t)len);
+    if (self->p_ && !self->pn_) {  // (how loud it is: for levelling it next time)
+        double s = 0;
+        for (int i = 0; i < frames * 2; i++) s += (double)out[i] * out[i];
+        self->msSum_ += s;
+        self->msN_ += frames * 2;
+    }
+    bool level = self->snd_.level;
+    if (level && self->gainA_ != 1.0f)
+        for (int i = 0; i < frames * 2; i++) out[i] *= self->gainA_;
     // a transition: the next song comes in while this one goes (equal power, so the loudness stays even)
     if (self->pn_) {
         auto& b = self->mixBuf_;
         if ((int)b.size() < frames * 2) b.resize((size_t)frames * 2);
         self->mod_->read_audio(self->pn_, b.data(), frames);
+        if (level && self->gainB_ != 1.0f)
+            for (int i = 0; i < frames * 2; i++) b[(size_t)i] *= self->gainB_;
         double total = (double)std::max<int64_t>(1, self->fadeTotal_);
         for (int i = 0; i < frames; i++) {
             double t = std::min(1.0, (double)(self->fadePos_ + i) / total);
@@ -564,6 +608,11 @@ void Player::AudioCb(void* u, uint8_t* stream, int len) {
         self->fadePos_ += frames;
         if (self->fadePos_ >= self->fadeTotal_) self->fadeDone_ = true;
     }
+    if (level && !self->eqActive_)  // (louder songs: a soft limit instead of clipping)
+        for (int i = 0; i < frames * 2; i++) {
+            float a = std::fabs(out[i]);
+            if (a > 0.9f) out[i] = (out[i] > 0 ? 1 : -1) * (0.9f + 0.1f * std::tanh((a - 0.9f) * 10.0f));
+        }
     // equalizer: ten peaking filters (RBJ biquads, transposed direct form II), then a soft limit
     if (self->eqActive_) {
         float g = self->eqGain_;
@@ -653,6 +702,32 @@ int Player::NextIndex() {
     return n;
 }
 
+// volume levelling: what to multiply the song by (1 when off or not known yet)
+float Player::LevelFor(const std::string& path) {
+    float g = 0;
+    if (!lib_ || !lib_->GainFor(path, g)) return 1.0f;
+    return std::pow(10.0f, std::clamp(g, -15.0f, 9.0f) / 20.0f);
+}
+
+// the song measured while it played (from its start, at least 30 s): how much quieter / louder than the target
+void Player::MeasureDone() {
+    double sum;
+    int64_t n;
+    {
+        std::lock_guard<std::mutex> l(pm_);
+        sum = msSum_;
+        n = msN_;
+        msSum_ = 0;
+        msN_ = 0;
+    }
+    std::string path;
+    path.swap(measPath_);
+    if (path.empty() || n < 48000 * 2 * 30 || sum <= 0 || !lib_) return;
+    double rms = 10 * std::log10(sum / (double)n);  // dBFS
+    const double target = -16.0;                    // (about where ReplayGain puts music)
+    lib_->SetMeasuredGain(path, (float)std::clamp(target - rms, -15.0, 9.0));
+}
+
 void Player::StartFade(int next, double seconds) {
     const std::string& path = queue_[(size_t)order_[(size_t)next]];
     LspInfo info{};
@@ -664,8 +739,11 @@ void Player::StartFade(int next, double seconds) {
     fragB_ = PickFrag(info.duration);
     if (fragB_ > 0) mod_->seek(q, fragB_);
     mod_->set_playing(q, playing_ ? 1 : 0);
+    float g = LevelFor(path);
+    measNext_ = snd_.remix ? "" : path;  // (a remix part isn't the whole song)
     std::lock_guard<std::mutex> l(pm_);
     pn_ = q;
+    gainB_ = g;
     nextAt_ = next;
     nextDur_ = info.duration;
     fadeTotal_ = std::max<int64_t>(1, (int64_t)(seconds * 48000));
@@ -675,14 +753,19 @@ void Player::StartFade(int next, double seconds) {
 
 void Player::FinishFade() {
     LspPlayer* old;
+    MeasureDone();
     {
         std::lock_guard<std::mutex> l(pm_);
         if (!pn_) return;
         old = p_;
         p_ = pn_;
         pn_ = nullptr;
+        gainA_ = gainB_;
         fadeDone_ = false;
+        msSum_ = 0;
+        msN_ = 0;
     }
+    measPath_ = measNext_;
     if (old) mod_->close(old);
     at_ = nextAt_;
     dur_ = nextDur_;
@@ -722,16 +805,20 @@ void Player::CloseLocked() {
 bool Player::OpenAt(int index, double pos) {
     if (index < 0 || index >= (int)order_.size()) return false;
     CancelFade();
+    MeasureDone();
     at_ = index;
     const std::string& path = queue_[(size_t)order_[(size_t)index]];
     LspInfo info{};
     LspPlayer* p = mod_->open(path.c_str(), 48000, 2, &info);
+    float g = LevelFor(path);
     {
         std::lock_guard<std::mutex> l(pm_);
         LspPlayer* old = p_;
         p_ = p;
+        gainA_ = g;
         if (old) mod_->close(old);
     }
+    measPath_ = pos > 1 ? "" : path;  // (measured only when played from the start)
     dur_ = info.duration;
     if (!p) return false;
     if (!dev_) {
@@ -1077,9 +1164,11 @@ void Player::Loop() {
                 double target = exPos_ + (exPlay_ ? (double)((int64_t)SDL_GetTicks64() - exAt_) / 1000.0 : 0.0);
                 if (target > 0.5) mod_->seek(q, target);
                 mod_->set_playing(q, playing_ ? 1 : 0);
+                float lg = src.path.empty() ? 1.0f : LevelFor(src.path);
                 {
                     std::lock_guard<std::mutex> g(pm_);
                     pn_ = q;
+                    gainB_ = lg;
                     fadeTotal_ = std::max<int64_t>(1, (int64_t)(src.fade * 48000));
                     fadePos_ = 0;
                     fadeDone_ = false;
@@ -1093,10 +1182,12 @@ void Player::Loop() {
             } else if (ext_ && ex_.id == src.id && q) {
                 LspPlayer* old;
                 if (pn_) CancelFade();
+                float lg = src.path.empty() ? 1.0f : LevelFor(src.path);
                 {
                     std::lock_guard<std::mutex> g(pm_);
                     old = p_;
                     p_ = q;
+                    gainA_ = lg;
                 }
                 if (exStream_) exStream_->stop = true;
                 if (exStreamOld_) exStreamOld_->stop = true;
@@ -1139,6 +1230,7 @@ void Player::Loop() {
                     old = p_;
                     p_ = pn_;
                     pn_ = nullptr;
+                    gainA_ = gainB_;
                     fadeDone_ = false;
                 }
                 if (exStreamOld_) exStreamOld_->stop = true;
@@ -1176,6 +1268,7 @@ void Player::Loop() {
                 if (dev_) SDL_PauseAudioDevice(dev_, 1);
                 changed = true;
             } else if (p_ && !pn_ && mod_->state(p_) == LSP_ENDED && playing_) {
+                MeasureDone();
                 int n = at_ + 1;
                 if (repeat_ == RepeatOne) n = at_;
                 else if (n >= (int)order_.size()) n = repeat_ == RepeatAll ? 0 : -1;
@@ -1240,6 +1333,7 @@ void Player::LoadState(const std::string& path) {
         snd_.remix = s.value("remix", false);
         snd_.remixLen = std::clamp(s.value("remixLen", 45), 15, 180);
         snd_.remixFade = std::clamp(s.value("remixFade", 6), 1, 12);
+        snd_.level = s.value("level", false);
     }
     UpdateEq();
 }
@@ -1253,7 +1347,7 @@ void Player::SaveState() {
         for (float g : snd_.eq) eq.push_back(g);
         j = {{"queue", queue_}, {"order", order_}, {"at", at_}, {"repeat", repeat_}, {"shuffle", shuffle_}, {"pos", savedPos_},
              {"sound", {{"eqOn", snd_.eqOn}, {"eq", eq}, {"preamp", snd_.preamp}, {"preset", snd_.preset}, {"crossfade", snd_.crossfade},
-                        {"remix", snd_.remix}, {"remixLen", snd_.remixLen}, {"remixFade", snd_.remixFade}}}};
+                        {"remix", snd_.remix}, {"remixLen", snd_.remixLen}, {"remixFade", snd_.remixFade}, {"level", snd_.level}}}};
         lastSave_ = (int64_t)SDL_GetTicks64();
     }
     SaveJsonFile(statePath_, j);

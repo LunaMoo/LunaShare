@@ -53,6 +53,9 @@ In a playlist, drag a song to another place (on a computer), or use its menu (ri
 - **Equalizer:** ten bands from 31 Hz to 16 kHz (±12 dB) with presets (Flat, Bass boost, Treble boost, Vocal, Rock,
   Pop, Jazz, Classical, Electronic, Loudness) and a preamp. Moving a band makes it *Custom*; double-click a band to
   set it back to 0. Loud peaks are rounded off instead of clipping.
+- **Even out the volume between songs**: uses a song's ReplayGain (track gain) tag; a song without one is measured
+  the first time it plays through from the start (at least 30 s) and is levelled from the next time on (kept in the
+  library). Raised songs get a soft limit instead of clipping.
 - **Smooth transition** (0-12 s): the next song starts while this one fades out (an equal-power crossfade, so the
   loudness stays even). It follows repeat and shuffle; with repeat off the last song simply ends.
 - **Remix:** only a part of every song plays - the chosen length (30, 45, 60 or 90 s) from a random place, but always

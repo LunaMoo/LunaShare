@@ -718,6 +718,11 @@ void App::MusicSoundPopup() {
     ch |= ImGui::SliderFloat("##pre", &s.preamp, -12, 6, T("preamp %+.1f dB"));
     if (!s.eqOn) ImGui::EndDisabled();
 
+    ImGui::SeparatorText(T("Volume"));
+    ch |= ImGui::Checkbox(T("Even out the volume between songs"), &s.level);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextDisabled("%s", T("Uses the songs' ReplayGain; songs without it are measured the first time they play through."));
+    ImGui::PopTextWrapPos();
     ImGui::SeparatorText(T("Transitions"));
     if (eng.listen.sid) {  // listening together: the transitions are everyone's
         ImGui::TextDisabled("%s", T("listening together: for everyone"));

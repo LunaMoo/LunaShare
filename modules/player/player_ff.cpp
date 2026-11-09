@@ -700,6 +700,18 @@ bool ReadTags(const std::string& path, LspTags* out, LspCoverFn cover, void* use
     get("disc", ds, sizeof(ds));
     out->track = atoi(tr);  // ("3/12" -> 3)
     out->disc = atoi(ds);
+    char rg[64] = {0};  // ReplayGain: "-6.54 dB"
+    get("REPLAYGAIN_TRACK_GAIN", rg, sizeof(rg));
+    if (rg[0]) {
+        out->track_gain = atof(rg);
+        out->has_track_gain = 1;
+    }
+    rg[0] = 0;
+    get("REPLAYGAIN_ALBUM_GAIN", rg, sizeof(rg));
+    if (rg[0]) {
+        out->album_gain = atof(rg);
+        out->has_album_gain = 1;
+    }
     if (fmt->duration > 0) out->duration = (double)fmt->duration / AV_TIME_BASE;
     bool audio = false;
     for (unsigned i = 0; i < fmt->nb_streams; i++) {

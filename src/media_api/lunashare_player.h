@@ -85,6 +85,9 @@ typedef struct LspTags {
     char title[256], artist[256], album[256], album_artist[256], genre[128], date[32];
     int track, disc;     /* 0 = unknown */
     double duration;     /* seconds */
+    /* since version 5: ReplayGain (dB to apply), when the file has it */
+    int has_track_gain, has_album_gain;
+    double track_gain, album_gain;
 } LspTags;
 /* the picture inside the file (album cover), as it is stored: JPEG or PNG bytes */
 typedef void (*LspCoverFn)(void* user, const uint8_t* data, int size);

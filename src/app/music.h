@@ -25,6 +25,10 @@ struct Track {
     int number = 0, disc = 0;
     double duration = 0;
     int64_t size = 0, mtime = 0, added = 0;
+    // volume levelling: dB to bring it to the others' loudness - from its ReplayGain tag, or measured the first
+    // time it played through (gainSet: known)
+    float gain = 0;
+    bool gainSet = false, gainTag = false;
     const std::string& AlbumArtist() const { return albumArtist.empty() ? artist : albumArtist; }
 };
 
@@ -47,6 +51,7 @@ struct Sound {
     bool remix = false;
     int remixLen = 45;          // seconds of each song
     int remixFade = 6;          // seconds one flows into the next
+    bool level = false;         // even out the volume between songs (ReplayGain / measured)
 };
 struct EqPreset {
     const char* name;
@@ -103,6 +108,8 @@ public:
     bool Find(const std::string& path, Track& out);
 
     std::vector<Playlist> Playlists();
+    bool GainFor(const std::string& path, float& gain);       // volume levelling: known?
+    void SetMeasuredGain(const std::string& path, float gain);  // (not over a ReplayGain tag)
     std::string CreatePlaylist(const std::string& name);
     void RenamePlaylist(const std::string& id, const std::string& name);
     void DeletePlaylist(const std::string& id);
@@ -207,6 +214,13 @@ private:
     static void AudioCb(void* u, uint8_t* stream, int len);
     const LspModule* mod_ = nullptr;
     Library* lib_ = nullptr;
+    // volume levelling: the gain of the playing / incoming song (linear), and the playing one measured as it plays
+    float gainA_ = 1, gainB_ = 1;
+    double msSum_ = 0;
+    int64_t msN_ = 0;
+    std::string measPath_, measNext_;
+    float LevelFor(const std::string& path);   // (m_ held)
+    void MeasureDone();                        // (m_ held) the measured song: its loudness into the library
     std::mutex m_;      // state
     std::mutex pm_;     // the decoder, between this and the audio callback
     std::thread th_;

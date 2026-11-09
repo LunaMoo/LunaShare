@@ -1010,3 +1010,6 @@
 {"The sleep timer. Longer?", "Wyłącznik czasowy. Wydłużyć?"},
 {"Stop now", "Zatrzymaj teraz"},
 {"Lyrics", "Tekst"},
+{"Volume", "Głośność"},
+{"Even out the volume between songs", "Wyrównuj głośność między utworami"},
+{"Uses the songs' ReplayGain; songs without it are measured the first time they play through.", "Korzysta z ReplayGain utworów; utwory bez niego są mierzone, gdy pierwszy raz zagrają do końca."},

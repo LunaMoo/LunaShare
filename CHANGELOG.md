@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Music: **Even out the volume between songs** (in *Sound...*): ReplayGain tags when songs have them; songs without
+  are measured the first time they play through from the start, and are levelled from then on. Louder songs get a
+  soft limit instead of clipping.
 - Music: **lyrics** from a `.lrc` file next to the song (`song.mp3` + `song.lrc`) - the line being sung in the middle,
   moving along with the song (untimed lyrics scroll by hand). Shown in the cover's place; a tap switches between the
   two.
