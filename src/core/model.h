@@ -69,6 +69,7 @@ struct Settings {
     bool autoConnect = true;
     bool autoAcceptTrusted = true;
     bool autoAcceptAll = false;
+    bool photosSmaller = false;          // photos are sent made smaller (2048 px, JPEG; without their location data)
     int autoAcceptMaxMB = 0;            // bigger files ask first (0 = any size)
     bool autoAcceptNotMetered = false;  // on mobile data everything asks first
     bool autoResume = true;

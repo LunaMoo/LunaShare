@@ -337,6 +337,8 @@ private:
     std::string selectedPeer;
     std::string chatInput;
     std::vector<std::string> pendingForward;  // messages' text to pass on (with pendingSend: their files)
+    // sending files from the app: photos made smaller first when that's on (on a thread), then SendPaths
+    void SendFilesUI(const std::string& peer, const std::vector<std::string>& paths);
     void ForwardMessages(const std::string& peer, const std::vector<std::string>& mids);
     void DrawPinnedBar(const std::string& peer);  // the chat's pinned messages (a tap goes there, the next tap to the next)
     void DrawStarredPopup();                      // all starred messages

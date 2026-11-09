@@ -5,12 +5,31 @@
 #include <vector>
 
 #include "image_cache.h"
+#include "platform.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
 #include "stb_image_write.h"
 
 static void Append(void* ctx, void* data, int size) { ((std::string*)ctx)->append((const char*)data, (size_t)size); }
+
+bool MakeSmallerJpeg(const std::string& path, int maxSide, const std::string& outPath) {
+    std::vector<unsigned char> px;
+    int w = 0, h = 0;
+    if (!DecodeImageFile(path, maxSide, px, w, h) || w <= 0 || h <= 0) return false;
+    std::vector<unsigned char> rgb((size_t)w * h * 3);
+    for (size_t i = 0, n = (size_t)w * h; i < n; i++) {  // (on white where it was see-through)
+        unsigned a = px[i * 4 + 3];
+        for (int c = 0; c < 3; c++) rgb[i * 3 + c] = (unsigned char)((px[i * 4 + c] * a + 255 * (255 - a)) / 255);
+    }
+    std::string jpeg;
+    if (!stbi_write_jpg_to_func(Append, &jpeg, w, h, 3, rgb.data(), 85)) return false;
+    FILE* f = ls::OpenFile(outPath, "wb");
+    if (!f) return false;
+    bool ok = fwrite(jpeg.data(), 1, jpeg.size(), f) == jpeg.size();
+    fclose(f);
+    return ok;
+}
 
 bool MakeAvatarJpeg(const std::string& path, float cx, float cy, float zoom, std::string& jpeg, std::string* err) {
     std::vector<unsigned char> src;

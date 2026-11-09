@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Send photos smaller** (Settings > Advanced > Sending): photos go as a JPEG at most 2048 px wide (e.g. 9.8 MB ->
+  1.3 MB), without their location data. Videos still go as they are.
+
 - **Rules for taking files without asking** (Settings > Advanced > Receiving): only up to a size (10 MB ... 4 GB),
   and on phones optionally always asking on mobile data.
 

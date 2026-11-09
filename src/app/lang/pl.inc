@@ -1132,3 +1132,8 @@
 {"Without asking:", "Bez pytania:"},
 {"A bigger file asks first, even from a trusted device.", "Większy plik najpierw pyta, nawet od zaufanego urządzenia."},
 {"On mobile data, always ask first", "Na danych komórkowych zawsze najpierw pytaj"},
+{"Photos", "Zdjęcia"},
+{"Making the photos smaller...", "Zmniejszanie zdjęć..."},
+{"Sending", "Wysyłanie"},
+{"Send photos smaller", "Wysyłaj zdjęcia zmniejszone"},
+{"Photos (JPEG, PNG) over 0.7 MB go as a JPEG at most 2048 pixels wide - a few times smaller, still sharp on a screen. Their EXIF data (camera, location) isn't copied. Videos and other files go as they are.", "Zdjęcia (JPEG, PNG) większe niż 0,7 MB idą jako JPEG o szerokości najwyżej 2048 pikseli - kilka razy mniejsze, nadal ostre na ekranie. Ich dane EXIF (aparat, lokalizacja) nie są kopiowane. Filmy i inne pliki idą bez zmian."},

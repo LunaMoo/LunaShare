@@ -4,6 +4,7 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <cmath>
 #include <cstring>
 
@@ -526,13 +527,56 @@ void App::SelectPeer(const std::string& peer) {
     if (!eng.IsConnected(selectedPeer)) eng.ConnectPeer(selectedPeer);
 }
 
+void App::SendFilesUI(const std::string& peer, const std::vector<std::string>& paths) {
+    if (!eng.settings.photosSmaller) {
+        eng.SendPaths(peer, paths);
+        return;
+    }
+    auto isPhoto = [](const std::string& p) {
+        std::string e = p.size() > 5 ? p.substr(p.find_last_of('.') == std::string::npos ? p.size() : p.find_last_of('.')) : "";
+        for (auto& c : e) c = (char)std::tolower((unsigned char)c);
+        return (e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".bmp") && !IsDirectory(p) && FileSize(p) > 700 * 1024;
+    };
+    if (std::none_of(paths.begin(), paths.end(), isPhoto)) {
+        eng.SendPaths(peer, paths);
+        return;
+    }
+    toasts.push_back({EventType::Info, T("Photos"), T("Making the photos smaller..."), "", 0, 2.0f});
+    std::string dir = JoinPath(eng.ConfigPath(), "smaller");
+    Engine* e = &eng;
+    std::thread([e, peer, paths, dir, isPhoto] {
+        std::vector<std::string> out;
+        {  // (made-smaller copies from over a month ago: long sent)
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            for (auto& d : fs::directory_iterator(fs::u8path(dir), ec))
+                if (d.is_directory(ec) && fs::file_time_type::clock::now() - d.last_write_time(ec) > std::chrono::hours(24 * 30)) fs::remove_all(d.path(), ec);
+        }
+        std::string sub = JoinPath(dir, RandomHex(6));  // (a folder per sending: the names stay the same)
+        for (auto& p : paths) {
+            if (isPhoto(p)) {
+                MakeDirs(sub);
+                std::string base = BaseName(p);
+                std::string q = JoinPath(sub, base.substr(0, base.find_last_of('.')) + ".jpg");
+                if (MakeSmallerJpeg(p, 2048, q) && FileSize(q) > 0 && FileSize(q) < FileSize(p)) {
+                    out.push_back(q);
+                    continue;
+                }
+                RemoveFile(q);
+            }
+            out.push_back(p);  // (not smaller after all, or not a photo: as it is)
+        }
+        e->SendPaths(peer, out);
+    }).detach();
+}
+
 void App::OnDrop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
     auto lk = eng.Lock();
     bool chatVisible = !selectedPeer.empty() && !Engine::IsGroupKey(selectedPeer) &&
                        ((!ui::M().mobile && tab == Tab::Chat) || (ui::M().mobile && screen == MScreen::Chat));
     if (chatVisible) {
-        eng.SendPaths(selectedPeer, paths);
+        SendFilesUI(selectedPeer, paths);
         scrollToBottom = true;
     } else {
         OpenSendTo(paths);
@@ -3200,6 +3244,11 @@ void App::DrawSettings() {
         ImGui::Unindent();
         ImGui::EndDisabled();
         changed |= ImGui::Checkbox(T("Resume interrupted transfers automatically"), &edit.autoResume);
+        ImGui::SeparatorText(T("Sending"));
+        changed |= ImGui::Checkbox(T("Send photos smaller"), &edit.photosSmaller);
+        ImGui::SameLine();
+        ui::HelpMarker(T("Photos (JPEG, PNG) over 0.7 MB go as a JPEG at most 2048 pixels wide - a few times smaller, still sharp on "
+                         "a screen. Their EXIF data (camera, location) isn't copied. Videos and other files go as they are."));
 
         ImGui::SeparatorText(T("Network"));
         changed |= ImGui::Checkbox(T("Find devices on the local network"), &edit.discovery);
@@ -3391,7 +3440,7 @@ void App::DrawPopups() {
         std::string err;
         switch (browseFor) {
             case BrowseFor::SendFiles:
-                if (!selectedPeer.empty()) { eng.SendPaths(selectedPeer, res); scrollToBottom = true; }
+                if (!selectedPeer.empty()) { SendFilesUI(selectedPeer, res); scrollToBottom = true; }
                 else OpenSendTo(res);
                 break;
             case BrowseFor::WatchSubs: {
@@ -3520,7 +3569,7 @@ void App::DrawPopups() {
             if (const Group* g = eng.GroupOf(p); g && g->left) continue;
             if (DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0)) {
                 for (auto& t : pendingForward) eng.SendChat(p, t, "", {}, true);
-                if (!pendingSend.empty()) eng.SendPaths(p, pendingSend);
+                if (!pendingSend.empty()) SendFilesUI(p, pendingSend);
                 pendingForward.clear();
                 SelectPeer(p);
                 if (mobile) { backStack.clear(); backStack.push_back(MScreen::Home); screen = MScreen::Chat; }
