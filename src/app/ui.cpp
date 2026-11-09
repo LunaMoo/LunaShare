@@ -129,6 +129,13 @@ void App::Frame() {
         SleepSet(1, 0);
         sleepAt = SteadyMs() + 45000;
     }
+    static const char* devSearch = getenv("LUNASHARE_SEARCH");  // dev: search (screenshots)
+    if (devSearch && !selectedPeer.empty() && ImGui::GetFrameCount() > 200) {
+        searchOn = true;
+        searchText = devSearch;
+        searchAll = true;
+        devSearch = nullptr;
+    }
     static bool devHist = getenv("LUNASHARE_OPENHIST") != nullptr;  // dev: the chat history window (screenshots)
     if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 200) {
         devHist = false;
@@ -1120,7 +1127,7 @@ void App::DrawChat(const std::string& peer) {
         bool videoable = callable && Media().VideoAvailable();
         bool webcam = !grp && WebcamButtonShown(peer);
         bool watchable = Player().Available() && !(grp && grp->left);
-        int nb = (grp ? 2 : 4) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
+        int nb = (grp ? 3 : 5) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (webcam) {
             WebcamButton(peer, bw);
@@ -1138,6 +1145,8 @@ void App::DrawChat(const std::string& peer) {
             if (ui::IconButton("watch", Icon::Play, T("Watch a movie together"), bw)) OpenWatchPicker(peer);
             ImGui::SameLine();
         }
+        if (ui::IconButton("chatsearch", Icon::ZoomIn, T("Search messages"), bw)) OpenChatSearch();
+        ImGui::SameLine();
         if (ui::IconButton("chathist", Icon::History, T("Chat history: archive, clear, restore"), bw)) OpenChatHistory(peer);
         ImGui::SameLine();
         if (grp) {
@@ -1201,6 +1210,7 @@ void App::DrawChat(const std::string& peer) {
         float availY = ImGui::GetContentRegionAvail().y;
         pickerH = mobile ? availY * 0.5f : std::min(ImGui::GetFontSize() * 17, availY * 0.5f);
     }
+    DrawChatSearch(peer);
     ImGui::BeginChild("messages", ImVec2(0, -(inputH + pickerH + ImGui::GetStyle().ItemSpacing.y * (emojiOpen ? 3 : 2))), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
@@ -1557,9 +1567,23 @@ void App::DrawMessages(const std::string& peer) {
     std::string theirName = eng.PeerName(peer);
     int64_t lastDay = -1;
 
+    int64_t nowMs = SteadyMs();
     for (int i = 0; i < (int)cv.messages.size(); i++) {
         ChatMessage& m = cv.messages[(size_t)i];
         ImGui::PushID(m.mid.c_str());
+        if (!searchJump.empty() && m.mid == searchJump) {  // (a search result: here, lit up for a moment)
+            ImGui::SetScrollHereY(0.3f);
+            searchJump.clear();
+            searchFlash = m.mid;
+            searchFlashAt = nowMs;
+            scrollToBottom = false;
+        }
+        if (m.mid == searchFlash && nowMs - searchFlashAt < 2200) {
+            float a = 1.0f - (float)(nowMs - searchFlashAt) / 2200.0f;
+            ImVec2 sp0 = ImGui::GetCursorScreenPos();
+            float lh = ImGui::GetTextLineHeightWithSpacing() * 2.6f;
+            dl->AddRectFilled(ImVec2(sp0.x - 4, sp0.y - 2), ImVec2(sp0.x + avail + 4, sp0.y + lh), IM_COL32(255, 200, 60, (int)(70 * a)), 6);
+        }
         // day separator
         int64_t day = m.ts / 86400000;
         if (day != lastDay) {

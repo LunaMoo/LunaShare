@@ -63,6 +63,13 @@ public:
     void OpenChatHistory(const std::string& peer);
     void DrawChatHistoryPopup();
     void DrawHistoryAskBanner(const std::string& peer);
+    // search in a chat / all chats (ui_archive.cpp)
+    void DrawChatSearch(const std::string& peer);
+    void OpenChatSearch() { searchOn = true; searchFocus = true; }
+    bool searchOn = false, searchFocus = false, searchAll = false;
+    std::string searchText, searchJump, searchFlash, searchFor;
+    int searchAt = -1;
+    int64_t searchFlashAt = 0;
     std::string histPeer;
     bool histOpen = false, histClear = false, histKeep = true, histAll = false;
     std::string histConfirmDelete;

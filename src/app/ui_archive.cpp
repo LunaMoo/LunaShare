@@ -6,6 +6,7 @@
 #include "emoji_host.h"
 #include "i18n.h"
 #include "imgui.h"
+#include "imgui_stdlib.h"
 #include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
@@ -36,6 +37,10 @@ void App::DrawChatHistoryPopup() {
     std::string name = Emoji().Display(eng.PeerName(histPeer));
     ImGui::TextUnformatted(TF("Chat history - %s", name.c_str()).c_str());
     ImGui::Separator();
+    if (ui::IconTextButton(T("Search messages"), Icon::ZoomIn, ImVec2(mobile ? -1 : 0, h))) {
+        OpenChatSearch();
+        ImGui::CloseCurrentPopup();
+    }
     auto it = eng.chats.find(histPeer);
     int count = it == eng.chats.end() ? 0 : (int)it->second.messages.size();
 
@@ -136,4 +141,127 @@ void App::DrawHistoryAskBanner(const std::string& peer) {
     ImGui::EndChild();
     ImGui::PopStyleColor();
     if (send || no) eng.AnswerHistoryAsk(dev, key, send);
+}
+
+// ---------------------------------------------------------------- searching messages
+
+static std::string Fold(const std::string& s) {  // (lower case: ASCII, and Polish letters)
+    std::string o;
+    o.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) {
+            o += (char)tolower(c);
+            continue;
+        }
+        if (i + 1 < s.size()) {
+            unsigned char d = (unsigned char)s[i + 1];
+            static const unsigned char up[][2] = {{0xC4, 0x84}, {0xC4, 0x86}, {0xC4, 0x98}, {0xC5, 0x81}, {0xC5, 0x83},
+                                                  {0xC3, 0x93}, {0xC5, 0x9A}, {0xC5, 0xB9}, {0xC5, 0xBB}};
+            bool low = false;
+            for (auto& u : up)
+                if (c == u[0] && d == u[1]) {
+                    o += (char)c;
+                    o += (char)(d + (c == 0xC3 ? 0x20 : 1));  // Ó -> ó, Ą -> ą ...
+                    low = true;
+                }
+            if (low) {
+                i++;
+                continue;
+            }
+        }
+        o += (char)c;
+    }
+    return o;
+}
+
+void App::DrawChatSearch(const std::string& peer) {
+    if (!searchOn) return;
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.75f : 0;
+    if (searchFor != peer) {  // (another chat: from the end again)
+        searchFor = peer;
+        searchAt = -1;
+    }
+    // what matches: this chat's messages (newest last)
+    std::string q = Fold(searchText);
+    std::vector<int> hits;
+    auto it = eng.chats.find(peer);
+    if (!q.empty() && it != eng.chats.end())
+        for (int i = 0; i < (int)it->second.messages.size(); i++) {
+            const ChatMessage& m = it->second.messages[(size_t)i];
+            if (m.kind != MsgKind::System && Fold(m.text).find(q) != std::string::npos) hits.push_back(i);
+        }
+    float bw = mobile ? h : ImGui::GetFrameHeight();
+    float right = bw * 3 + ImGui::GetStyle().ItemSpacing.x * 4 + ImGui::CalcTextSize("000 / 000").x;
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - right);
+    if (searchFocus) {
+        ImGui::SetKeyboardFocusHere();
+        searchFocus = false;
+    }
+    bool enter = ImGui::InputTextWithHint("##csearch", T("search in this chat"), &searchText, ImGuiInputTextFlags_EnterReturnsTrue);
+    if (ImGui::IsItemEdited()) searchAt = -1;
+    auto go = [&](int k) {
+        if (hits.empty()) return;
+        searchAt = (k % (int)hits.size() + (int)hits.size()) % (int)hits.size();
+        searchJump = it->second.messages[(size_t)hits[(size_t)searchAt]].mid;
+    };
+    if (enter) go(searchAt < 0 ? (int)hits.size() - 1 : searchAt - 1);  // (Enter: the next one back in time)
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    if (hits.empty()) ImGui::TextDisabled("%s", q.empty() ? "" : "0");
+    else ImGui::TextDisabled("%d / %d", searchAt < 0 ? 0 : searchAt + 1, (int)hits.size());
+    ImGui::SameLine();
+    if (ui::IconButton("srup", Icon::Up, T("Earlier"), bw)) go(searchAt < 0 ? (int)hits.size() - 1 : searchAt - 1);
+    ImGui::SameLine();
+    if (ui::IconButton("srdn", Icon::Down, T("Later"), bw)) go(searchAt < 0 ? 0 : searchAt + 1);
+    ImGui::SameLine();
+    if (ui::IconButton("srx", Icon::Cancel, T("Close"), bw) || (!mobile && ImGui::IsKeyPressed(ImGuiKey_Escape))) {
+        searchOn = false;
+        searchText.clear();
+    }
+    // all chats: a list of what's found elsewhere
+    ImGui::Checkbox(T("in all chats"), &searchAll);
+    if (searchAll && !q.empty()) {
+        struct Hit {
+            std::string key, mid, text;
+            int64_t ts;
+        };
+        std::vector<Hit> all;
+        for (auto& [key, cv] : eng.chats)
+            for (auto& m : cv.messages)
+                if (m.kind != MsgKind::System && Fold(m.text).find(q) != std::string::npos) all.push_back({key, m.mid, m.text, m.ts});
+        std::sort(all.begin(), all.end(), [](const Hit& a, const Hit& b) { return a.ts > b.ts; });
+        if (all.size() > 200) all.resize(200);
+        float lh = (mobile ? ui::M().rowH * 1.1f : ImGui::GetTextLineHeightWithSpacing() * 2.2f);
+        ImGui::BeginChild("##allhits", ImVec2(0, std::min(lh * (float)std::max<size_t>(1, all.size()) + ImGui::GetStyle().WindowPadding.y * 2,
+                                                          ImGui::GetContentRegionAvail().y * 0.45f)),
+                          ImGuiChildFlags_Borders);
+        if (mobile) ui::TouchScroll();
+        if (all.empty()) ImGui::TextDisabled("%s", T("Nothing found."));
+        for (size_t i = 0; i < all.size(); i++) {
+            ImGui::PushID((int)i);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            if (ImGui::Selectable("##hit", false, 0, ImVec2(0, lh - ImGui::GetStyle().ItemSpacing.y))) {
+                selectedPeer = all[i].key;
+                if (mobile && screen != MScreen::Chat) {
+                    backStack.push_back(screen);
+                    screen = MScreen::Chat;
+                }
+                searchJump = all[i].mid;
+                searchAll = false;
+            }
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            std::string head = Emoji().Display(eng.PeerName(all[i].key)) + "  -  " + FormatTime(all[i].ts);
+            std::string t = all[i].text;
+            for (auto& c : t)
+                if (c == '\n') c = ' ';
+            ImVec4 clip(p.x, p.y, p.x + ImGui::GetContentRegionAvail().x, p.y + lh);
+            dl->AddText(nullptr, 0, ImVec2(p.x + 4, p.y + 2), ImGui::GetColorU32(ImGuiCol_TextDisabled), head.c_str(), nullptr, 0, &clip);
+            dl->AddText(nullptr, 0, ImVec2(p.x + 4, p.y + 2 + ImGui::GetTextLineHeight()), ImGui::GetColorU32(ImGuiCol_Text),
+                        Emoji().Display(t).c_str(), nullptr, 0, &clip);
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
 }

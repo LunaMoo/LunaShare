@@ -5,6 +5,13 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Searching
+
+The magnifier in a chat's header (on a phone: *Search messages* in the chat's history window) opens a search bar:
+type, then *Enter* or the arrows go through the matches from the newest back, jumping to each message and lighting
+it up for a moment. *in all chats* lists what's found in every chat (newest first); tap one to open it there.
+Letters are matched without minding upper / lower case (Polish letters too).
+
 ## Chat history: archive, clear, restore
 
 The clock button in a chat's header opens *Chat history*:

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Chat: **search messages** (the magnifier in a chat's header; on phones in *Chat history*): in this chat with
+  earlier / later and a jump to the message (lit up for a moment), or in all chats as a list.
 - Music: **Even out the volume between songs** (in *Sound...*): ReplayGain tags when songs have them; songs without
   are measured the first time they play through from the start, and are levelled from then on. Louder songs get a
   soft limit instead of clipping.
