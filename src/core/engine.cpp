@@ -1706,6 +1706,15 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.edited = j.value("edited", (int64_t)0);
                 m.delivered = true;
                 m.readSent = false;
+                bool me = false;
+                if (IsGroupKey(key)) {
+                    for (auto& x : j.value("men", json::array()))
+                        if (x.is_string() && m.mentions.size() < 64) {
+                            m.mentions.push_back(x.get<std::string>());
+                            me |= !MyAccount().empty() && x.get<std::string>() == MyAccount();
+                        }
+                    if (me) cv.mentioned = true;
+                }
                 if (IsGroupKey(key)) m.from = ChatKey(c->peerId);
                 else
                     for (auto& d : DevicesOf(key)) devices[d].viaGroup = false;
@@ -1719,7 +1728,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                         for (auto& d : std::vector<std::string>(msg.pendingTo)) QueueChatTo(d, key, msg);
                         break;
                     }
-                Emit({EventType::ChatReceived, key, m.text});
+                Emit({EventType::ChatReceived, key, m.text, 0, me ? "mention" : ""});
                 MarkDirty();
             }
             Queue(c, Msg::ChatAck, KeyField(key, {{"mid", mid}}));
@@ -1754,6 +1763,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.replyTo = j.value("re", "");
                 m.replyText = j.value("ret", "").substr(0, 400);
                 m.edited = j.value("edited", (int64_t)0);
+                for (auto& x : j.value("men", json::array()))
+                    if (x.is_string() && m.mentions.size() < 64) m.mentions.push_back(x.get<std::string>());
                 m.delivered = true;
                 cv.messages.push_back(m);
                 std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
@@ -2929,7 +2940,7 @@ void Engine::StartBtServer() {
 
 // ============================================================================ public actions
 
-void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo) {
+void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo, const std::vector<std::string>& mentions) {
     if (text.empty()) return;
     auto lk = Lock();
     const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
@@ -2938,6 +2949,9 @@ void Engine::SendChat(const std::string& peerArg, const std::string& text, const
     m.outgoing = true;
     m.ts = NowMs();
     m.text = text;
+    if (IsGroupKey(peerArg))
+        for (auto& a : mentions)
+            if (m.mentions.size() < 64) m.mentions.push_back(a);
     if (!replyTo.empty()) {  // an answer: which message, and the start of it (in case the other side doesn't have it)
         auto ch = chats.find(peer);
         if (ch != chats.end())
@@ -2975,6 +2989,7 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
         j["re"] = m.replyTo;
         j["ret"] = m.replyText;
     }
+    if (!m.mentions.empty()) j["men"] = m.mentions;
     if (m.edited) j["edited"] = m.edited;
     if (auto c = ReadyConn(device)) {
         Queue(c, type, j);
@@ -3484,6 +3499,7 @@ void Engine::MarkRead(const std::string& peerArg) {
     if (it == chats.end()) return;
     Conversation& cv = it->second;
     cv.unread = 0;
+    cv.mentioned = false;
     if (!cv.readPending) return;
     cv.readPending = false;
     // read receipts: to the person's devices, and to my own so they clear the conversation too

@@ -30,6 +30,7 @@ public:
     static int InputCallback(ImGuiInputTextCallbackData* d);
     int InputCursor() const { return inputCursor_; }  // byte offset of the cursor when the box was last active
     void SetInputCursor(int c) { inputCursor_ = c; }
+    void CursorToEnd() { cursorEnd_ = true; }  // (the next time the box is active: after the text put in it)
 
     // Picker panel (fills the given size). Returns true and sets *picked (display form) when an emoji was chosen.
     bool DrawPicker(ImVec2 size, std::string* picked);
@@ -55,6 +56,7 @@ private:
     std::unordered_map<std::string, uint32_t> ids_;
     std::unordered_map<std::string, std::string> cache_;
     int inputCursor_ = -1;
+    bool cursorEnd_ = false;
     // picker state
     std::string search_;
     int scrollToGroup_ = -1;

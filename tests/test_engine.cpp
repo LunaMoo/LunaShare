@@ -614,6 +614,24 @@ int main() {
                 if (m.text == "hi from carol" && m.theirReaction == "\xe2\x9d\xa4") return true;
             return false;
         }, 3000), "reactions in the group");
+        // @mentions: the named one gets told (through a silent chat too)
+        B->MarkRead(gk);
+        C->MarkRead(gk);
+        A->SendChat(gk, "@bob look at this", "", {B->MyAccount()});
+        CHECK(WaitFor([&] {
+            auto l = B->Lock();
+            return B->chats[gk].mentioned && B->chats[gk].messages.back().mentions.size() == 1;
+        }, 3000), "the one @named sees it");
+        CHECK(WaitFor([&] { return gHas(*C, "@bob look at this", aKey); }, 3000), "the others get it too");
+        {
+            auto l = C->Lock();
+            CHECK(!C->chats[gk].mentioned, "not as a mention");
+        }
+        B->MarkRead(gk);
+        {
+            auto l = B->Lock();
+            CHECK(!B->chats[gk].mentioned, "read: no more @");
+        }
         // ---- group call (directly between the devices)
         printf("[group calls: directly]\n");
         {

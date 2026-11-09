@@ -18,6 +18,12 @@ How it works:
   anything about groups.
 - Devices known only through a group are not listed as contacts. Writing to such a person directly makes them one.
 
+## @mentions
+
+Type `@` and the start of someone's name: the people in the group who match show above the typing field; a tap
+puts their name in. The message carries who was named (`men`: their account keys). The one named gets a
+notification even if the group is silent, the unread count shows `@`, and the message has an outline.
+
 ## Group calls
 
 The phone and camera buttons in a group call everybody in it. Whoever answers joins; the call goes on as long as

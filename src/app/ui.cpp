@@ -384,7 +384,7 @@ void App::PullEvents() {
         switch (e.type) {
             case EventType::ChatReceived:
                 if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat)) continue;
-                if (eng.ChatMuted(e.peer)) continue;  // (silent: only the unread count)
+                if (eng.ChatMuted(e.peer) && e.a != "mention") continue;  // (silent: only the unread count; an @mention still shows)
                 t.title = who;
                 t.text = e.text.size() > 120 ? e.text.substr(0, 117) + "..." : e.text;
                 wantAttention = true;
@@ -755,12 +755,13 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         float w = (p1.x - tx - pad) * (float)((double)tDone / (double)tSize);
         dl->AddRectFilled(ImVec2(tx, p1.y - 3), ImVec2(tx + w, p1.y - 1), ui::ColAccent());
     }
+    bool mentioned = cv != eng.chats.end() && cv->second.mentioned && unread > 0;
     if (unread > 0) {
-        std::string u = std::to_string(unread);
+        std::string u = (mentioned ? "@ " : "") + std::to_string(unread);  // (an @mention: red even when silent)
         ImVec2 us = ImGui::CalcTextSize(u.c_str());
         float bw = std::max(us.x + 10, textH);
         ImVec2 b0(p1.x - pad - bw, cy - textH * 0.5f);
-        dl->AddRectFilled(b0, ImVec2(b0.x + bw, b0.y + textH), muted ? IM_COL32(110, 110, 120, 255) : ui::ColErr(), textH * 0.5f);
+        dl->AddRectFilled(b0, ImVec2(b0.x + bw, b0.y + textH), muted && !mentioned ? IM_COL32(110, 110, 120, 255) : ui::ColErr(), textH * 0.5f);
         dl->AddText(ImVec2(b0.x + (bw - us.x) * 0.5f, b0.y), IM_COL32_WHITE, u.c_str());
     }
     if (rightClick) ImGui::OpenPopup(grp ? "groupctx" : "peerctx");
@@ -1266,12 +1267,46 @@ void App::DrawChat(const std::string& peer) {
         if (const char* r = getenv("LUNASHARE_REPLYTO")) replyMid = r;  // dev: answering this message (screenshots)
     }
     float stripH = (!replyMid.empty() || !editMid.empty()) ? ImGui::GetFrameHeightWithSpacing() + (mobile ? ui::M().rowH * 0.2f : 0) : 0;
+    // a group: "@" + the start of a name suggests the people in it
+    std::vector<std::pair<std::string, std::string>> menMatch;  // account, name
+    size_t menAt = std::string::npos;
+    if (Engine::IsGroupKey(peer)) {
+        size_t at = chatInput.rfind('@');
+        if (at != std::string::npos && (at == 0 || chatInput[at - 1] == ' ' || chatInput[at - 1] == '\n') &&
+            chatInput.find_first_of(" \n", at) == std::string::npos && chatInput.size() - at <= 32) {
+            std::string pre = chatInput.substr(at + 1);
+            for (auto& c : pre) c = (char)std::tolower((unsigned char)c);
+            if (const Group* g = eng.GroupOf(peer))
+                for (auto& mbr : g->members) {
+                    if (mbr.acc == eng.MyAccount() || menMatch.size() >= 6) continue;
+                    std::string nm = Emoji().Display(eng.PeerName("@" + mbr.acc)), low = nm;
+                    for (auto& c : low) c = (char)std::tolower((unsigned char)c);
+                    if (low.rfind(pre, 0) == 0) menMatch.push_back({mbr.acc, nm});
+                }
+            if (!menMatch.empty()) menAt = at;
+        }
+    }
+    float menH = menMatch.empty() ? 0 : (mobile ? ui::M().rowH * 0.8f : ImGui::GetFrameHeight()) + ImGui::GetStyle().ItemSpacing.y;
+    stripH += menH;
     ImGui::BeginChild("messages", ImVec2(0, -(inputH + pickerH + stripH + ImGui::GetStyle().ItemSpacing.y * (emojiOpen ? 3 : 2))), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
     DrawReactionPopups(peer);
     ImGui::EndChild();
     ImGui::Separator();
+    if (menH > 0) {  // @ + a name: the people it could be
+        for (size_t i = 0; i < menMatch.size(); i++) {
+            if (i) ImGui::SameLine();
+            ImGui::PushID((int)i);
+            if (ImGui::Button(("@" + menMatch[i].second).c_str(), ImVec2(0, menH - ImGui::GetStyle().ItemSpacing.y))) {
+                chatInput = chatInput.substr(0, menAt) + "@" + menMatch[i].second + " ";
+                focusInput = true;
+                Emoji().CursorToEnd();
+            }
+            ImGui::PopID();
+        }
+        stripH -= menH;
+    }
     if (stripH > 0) {  // answering / changing a message: which one, and x to stop
         const ChatMessage* q = nullptr;
         auto ch = eng.chats.find(peer);
@@ -1421,7 +1456,12 @@ void App::DrawChat(const std::string& peer) {
             if (!editMid.empty()) {
                 eng.EditMessage(peer, editMid, Emoji().Restore(t));
             } else {
-                eng.SendChat(peer, Emoji().Restore(t), replyMid);
+                std::vector<std::string> men;  // (the people still @named in what's sent)
+                if (const Group* g = eng.GroupOf(peer))
+                    for (auto& mbr : g->members)
+                        if (mbr.acc != eng.MyAccount() && t.find("@" + Emoji().Display(eng.PeerName("@" + mbr.acc))) != std::string::npos)
+                            men.push_back(mbr.acc);
+                eng.SendChat(peer, Emoji().Restore(t), replyMid, men);
                 scrollToBottom = true;
             }
         }
@@ -1832,6 +1872,8 @@ void App::DrawMessages(const std::string& peer) {
                                           m.outgoing && !sel ? 0.55f : 1.0f);
             if (hovered && !sel) bg = ImGui::GetColorU32(m.outgoing ? ImGuiCol_ButtonActive : ImGuiCol_FrameBgHovered, m.outgoing ? 0.7f : 1.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), bg, pad);
+            if (!m.outgoing && std::find(m.mentions.begin(), m.mentions.end(), eng.MyAccount()) != m.mentions.end())  // @me: an outline
+                dl->AddRect(p0, ImVec2(p0.x + bw, p0.y + bh), ui::ColWarn(), pad, 0, 2.0f);
             if (qh > 0) {  // the message it answers
                 ImVec2 q0(p0.x + pad * 0.6f, p0.y + pad * 0.5f), q1(p0.x + bw - pad * 0.6f, p0.y + pad * 0.3f + qh);
                 bool qhov = ImGui::IsMouseHoveringRect(q0, q1);
@@ -1900,6 +1942,7 @@ void App::DrawMessages(const std::string& peer) {
                 replyMid.clear();
                 chatInput = Emoji().Display(m.text);
                 focusInput = true;
+                Emoji().CursorToEnd();
                 selMsgs.clear();
                 selectionMode = false;
             }

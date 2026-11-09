@@ -47,8 +47,10 @@ void Attach(ls::Engine* eng) {
         auto& b = ls::Bridge();
         switch (e.type) {
             case ls::EventType::ChatReceived: {
-                if (!g_bg || eng->ChatMuted(e.peer)) return;
+                bool mention = e.a == "mention";
+                if (!g_bg || (eng->ChatMuted(e.peer) && !mention)) return;  // (an @mention gets through a silent chat)
                 std::string text = e.text.size() > 300 ? e.text.substr(0, 297) + "..." : e.text;
+                if (mention) text = std::string(T("(mentioned you)")) + " " + text;
                 if (!eng->settings.lockHash.empty()) text = T("New message");  // (the app lock: no text outside the app)
                 if (b.notifyMessage) b.notifyMessage(e.peer, eng->PeerName(e.peer), text, eng->AvatarPath(e.peer));
                 else if (g_tray) g_tray(eng->PeerName(e.peer), text);

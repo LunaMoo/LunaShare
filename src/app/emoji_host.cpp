@@ -208,6 +208,10 @@ int EmojiHost::EmojiOnly(const std::string& text) {
 int EmojiHost::InputCallback(ImGuiInputTextCallbackData* d) {
     EmojiHost& e = Emoji();
     if (d->EventFlag == ImGuiInputTextFlags_CallbackAlways) {
+        if (e.cursorEnd_) {
+            e.cursorEnd_ = false;
+            d->CursorPos = d->SelectionStart = d->SelectionEnd = d->BufTextLen;
+        }
         e.inputCursor_ = d->CursorPos;
     } else if (d->EventFlag == ImGuiInputTextFlags_CallbackEdit && e.mod_) {
         // typed / pasted emoji (phone keyboards send whole sequences) become single glyphs

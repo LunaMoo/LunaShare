@@ -195,6 +195,7 @@ struct ChatMessage {
     std::string replyTo, replyText;         // an answer to that message (its id, and the start of its text)
     int64_t edited = 0;                     // when it was last changed (0 = never)
     bool editPending = false;               // outgoing: the change hasn't reached the other side yet
+    std::vector<std::string> mentions;      // groups: the people @named in it (account keys)
 };
 
 struct Conversation {
@@ -203,6 +204,7 @@ struct Conversation {
     int unread = 0;
     std::vector<std::string> pendingDeletes;  // "delete for everyone" not yet confirmed by the other device
     bool readPending = false;                 // incoming messages whose read receipt wasn't sent yet
+    bool mentioned = false;                   // an unread message @names me (until read)
 };
 
 enum class TState : int {

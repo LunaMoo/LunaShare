@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Groups: **@mentions** - typing @ and the start of a name suggests the people in the group. The one named gets a
+  notification even when the group is silent, an "@" on the unread count and an outline on the message.
+
 - Chat: **drafts** - text typed and not sent stays in its chat (also after closing the app); the list shows
   *Draft: ...* under the name.
 
