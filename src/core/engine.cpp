@@ -1886,6 +1886,26 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             Queue(c, Msg::ChatDeleteAck, KeyField(key, {{"mids", mids}}));
             break;
         }
+        case Msg::ChatPin: {
+            std::string mid = j.value("mid", "");
+            int64_t ts = j.value("ts", (int64_t)0);
+            auto dv = devices.find(c->peerId);
+            bool mine = dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount();
+            std::string key = mine && j.contains("chat") ? j.value("chat", "") : FrameKey(c, j);
+            auto it = chats.find(key);
+            if (it == chats.end() || mid.empty()) break;
+            for (auto& m : it->second.messages)
+                if (m.mid == mid) {
+                    if (ts > m.pinTs && ts <= NowMs() + 86400000LL) {
+                        m.pinned = j.value("on", false);
+                        m.pinTs = ts;
+                        Emit({EventType::Info, key, ""});
+                        MarkDirty();
+                    }
+                    break;
+                }
+            break;
+        }
         case Msg::ChatEdit: {
             // a message changed by who wrote it (or, from my other device, one of mine)
             std::string mid = j.value("mid", ""), text = j.value("text", "");
@@ -2433,7 +2453,15 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
         for (auto& m : it->second.messages) {
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
             if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}});
+            if (m.pinTs) Queue(c, Msg::ChatPin, {{"mid", m.mid}, {"on", m.pinned}, {"ts", m.pinTs}});  // (whoever missed it; the later wins)
         }
+    }
+    {  // my own device: the pins of every chat
+        auto dv = devices.find(peer);
+        if (dv != devices.end() && !MyAccount().empty() && dv->second.accountPub == MyAccount())
+            for (auto& [key, cv] : chats)
+                for (auto& m : cv.messages)
+                    if (m.pinTs) Queue(c, Msg::ChatPin, {{"chat", key}, {"mid", m.mid}, {"on", m.pinned}, {"ts", m.pinTs}});
     }
     // watching together: someone of that conversation (or one of my devices) came online - they're invited too
     if (watch.sid && watch.host.empty() && watch.libId.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), peer) == watchViewers_.end()) {
@@ -2470,6 +2498,7 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             for (auto& m : gc->second.messages) {
                 if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}, {"gid", gid}});
                 if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}, {"gid", gid}});
+                if (m.pinTs) Queue(c, Msg::ChatPin, {{"mid", m.mid}, {"on", m.pinned}, {"ts", m.pinTs}, {"gid", gid}});
             }
         }
     }
@@ -3047,7 +3076,7 @@ bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
     switch (type) {
         case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
         case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: case Msg::GroupInfo: break;
-        case Msg::ChatEdit: case Msg::ChatEditAck: break;
+        case Msg::ChatEdit: case Msg::ChatEditAck: case Msg::ChatPin: break;
         case Msg::CallInvite: case Msg::CallEnd: break;  // (group calls; a call with one person needs a connection)
         default: return true;  // nothing else travels by mail
     }
@@ -3456,6 +3485,34 @@ void Engine::DeleteMessages(const std::string& peerArg, const std::vector<std::s
         for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, KeyField(peer, {{"mids", remote}}));
     }
     MarkDirty();
+}
+
+void Engine::PinMessage(const std::string& peerArg, const std::string& mid, bool on) {
+    auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
+    auto it = chats.find(peer);
+    if (it == chats.end()) return;
+    for (auto& m : it->second.messages)
+        if (m.mid == mid && m.kind != MsgKind::System) {
+            m.pinned = on;
+            m.pinTs = std::max(NowMs(), m.pinTs + 1);
+            for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatPin, KeyField(peer, {{"mid", mid}, {"on", on}, {"ts", m.pinTs}}));
+            for (auto& d : MyOtherDevices()) QueueToPeer(d, Msg::ChatPin, {{"chat", peer}, {"mid", mid}, {"on", on}, {"ts", m.pinTs}});
+            MarkDirty();
+            return;
+        }
+}
+
+void Engine::StarMessage(const std::string& peerArg, const std::string& mid, bool on) {
+    auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
+    auto it = chats.find(peer);
+    if (it == chats.end()) return;
+    for (auto& m : it->second.messages)
+        if (m.mid == mid) {
+            m.starred = on;
+            MarkDirty();
+        }
 }
 
 bool Engine::EditMessage(const std::string& peerArg, const std::string& mid, const std::string& text) {

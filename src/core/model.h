@@ -197,6 +197,9 @@ struct ChatMessage {
     bool editPending = false;               // outgoing: the change hasn't reached the other side yet
     std::vector<std::string> mentions;      // groups: the people @named in it (account keys)
     bool forwarded = false;                 // passed on from another chat
+    bool pinned = false;                    // pinned in its chat (for everyone in it)
+    int64_t pinTs = 0;                      // when it was (un)pinned - the later change wins
+    bool starred = false;                   // kept in "Starred messages" (only for me)
 };
 
 struct Conversation {

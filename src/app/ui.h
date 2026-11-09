@@ -14,6 +14,7 @@
 // where each movie was left (ui_movies.cpp): key = its path (or "lib:<id>" for a contact's file)
 bool UpdateIsNewer(const std::string& tag, const std::string& mine);  // ("v1.6.0" vs "1.5.5")
 void UpdateShutdown();
+void DrawPin(ImDrawList* dl, ImVec2 c, float size, ImU32 col);  // a pushpin mark
 bool LockOn(const ls::Settings& s);
 
 namespace movpos {
@@ -328,6 +329,10 @@ private:
     std::string chatInput;
     std::vector<std::string> pendingForward;  // messages' text to pass on (with pendingSend: their files)
     void ForwardMessages(const std::string& peer, const std::vector<std::string>& mids);
+    void DrawPinnedBar(const std::string& peer);  // the chat's pinned messages (a tap goes there, the next tap to the next)
+    void DrawStarredPopup();                      // all starred messages
+    int pinIdx = 0;
+    bool starredOpen = false;
     bool focusInput = false;
     size_t lastMsgCount = 0;
     std::string lastMsgPeer;

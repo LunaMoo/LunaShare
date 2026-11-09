@@ -290,6 +290,11 @@ json ToJson(const ChatMessage& m) {
     if (!m.readSent) j["readPending"] = true;
     if (!m.mentions.empty()) j["men"] = m.mentions;
     if (m.forwarded) j["fwd"] = true;
+    if (m.pinTs) {
+        j["pin"] = m.pinned;
+        j["pinTs"] = m.pinTs;
+    }
+    if (m.starred) j["star"] = true;
     if (!m.replyTo.empty()) {
         j["re"] = m.replyTo;
         j["ret"] = m.replyText;
@@ -325,6 +330,9 @@ ChatMessage MessageFromJson(const json& j) {
     m.readSent = !rp;
     Get(j, "re", m.replyTo);
     Get(j, "fwd", m.forwarded);
+    Get(j, "pin", m.pinned);
+    Get(j, "pinTs", m.pinTs);
+    Get(j, "star", m.starred);
     for (auto& x : j.value("men", json::array()))
         if (x.is_string() && m.mentions.size() < 64) m.mentions.push_back(x.get<std::string>());
     Get(j, "ret", m.replyText);

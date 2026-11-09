@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Chat: **pin** messages in a chat (for everyone in it - a bar on top goes to them) and **star** messages for
+  yourself (*Starred messages* in *Chat history* lists them from all chats).
+
 - Chat: **forward** messages and their files to another chat (a message's menu, or *Forward* with several
   selected); they arrive marked *forwarded*. (Files go to people, text also to groups.)
 

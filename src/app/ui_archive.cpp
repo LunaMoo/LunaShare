@@ -20,6 +20,116 @@ void App::OpenChatHistory(const std::string& peer) {
     histConfirmDelete.clear();
 }
 
+void DrawPin(ImDrawList* dl, ImVec2 c, float s, ImU32 col) {
+    // a round head, the pin under it going down-left
+    ImVec2 head(c.x + s * 0.15f, c.y - s * 0.15f);
+    dl->AddLine(ImVec2(head.x - s * 0.1f, head.y + s * 0.1f), ImVec2(c.x - s * 0.4f, c.y + s * 0.4f), col, std::max(1.0f, s * 0.12f));
+    dl->AddCircleFilled(head, s * 0.28f, col);
+}
+
+static std::string OneLine(std::string s, size_t max) {
+    for (auto& c : s)
+        if (c == '\n' || c == '\r') c = ' ';
+    if (s.size() > max) {
+        s.resize(max);
+        while (!s.empty() && ((unsigned char)s.back() & 0xC0) == 0x80) s.pop_back();
+        if (!s.empty() && ((unsigned char)s.back() & 0x80)) s.pop_back();
+        s += "...";
+    }
+    return s;
+}
+
+void App::DrawPinnedBar(const std::string& peer) {
+    auto it = eng.chats.find(peer);
+    if (it == eng.chats.end()) return;
+    std::vector<const ChatMessage*> pins;
+    for (auto& m : it->second.messages)
+        if (m.pinned) pins.push_back(&m);
+    if (pins.empty()) return;
+    std::sort(pins.begin(), pins.end(), [](auto* a, auto* b) { return a->pinTs > b->pinTs; });  // (the newest first)
+    if (pinIdx >= (int)pins.size()) pinIdx = 0;
+    const ChatMessage& m = *pins[(size_t)pinIdx];
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.75f : ImGui::GetFrameHeight();
+    float xw = h;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float w = ImGui::GetContentRegionAvail().x - xw - ImGui::GetStyle().ItemSpacing.x;
+    std::string what = m.kind == MsgKind::Files ? std::string(T("files")) : Emoji().Display(m.text);
+    std::string line = OneLine(what, 120) + (pins.size() > 1 ? "   (" + std::to_string(pinIdx + 1) + "/" + std::to_string(pins.size()) + ")" : "");
+    if (ImGui::InvisibleButton("##pinbar", ImVec2(w, h))) {
+        searchJump = m.mid;  // there, and the next one next time
+        pinIdx = (pinIdx + 1) % (int)pins.size();
+    }
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(ImGui::IsItemHovered() ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), 4);
+    DrawPin(dl, ImVec2(p.x + h * 0.5f, p.y + h * 0.5f), ImGui::GetFontSize() * 0.8f, ui::ColAccent());
+    ImVec4 clip(p.x, p.y, p.x + w - 4, p.y + h);
+    dl->AddText(nullptr, 0, ImVec2(p.x + h, p.y + (h - ImGui::GetTextLineHeight()) * 0.5f), ImGui::GetColorU32(ImGuiCol_Text), line.c_str(), nullptr, 0, &clip);
+    ImGui::SameLine();
+    if (ui::IconButton("unpin", ui::Icon::Cancel, T("Unpin"), xw)) eng.PinMessage(peer, m.mid, false);
+}
+
+void App::DrawStarredPopup() {
+    if (starredOpen) {
+        ImGui::OpenPopup("##starred");
+        starredOpen = false;
+    }
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    float ww = mobile ? vp->WorkSize.x * 0.96f : ImGui::GetFontSize() * 32;
+    ImGui::SetNextWindowSize(ImVec2(ww, std::min(vp->WorkSize.y * 0.85f, ImGui::GetFontSize() * 30)), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("##starred", nullptr, ImGuiWindowFlags_NoTitleBar)) return;
+    ImGui::TextUnformatted(T("Starred messages"));
+    ImGui::Separator();
+    struct Item {
+        std::string key;
+        const ChatMessage* m;
+    };
+    std::vector<Item> items;
+    for (auto& [key, cv] : eng.chats)
+        for (auto& m : cv.messages)
+            if (m.starred) items.push_back({key, &m});
+    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.m->ts > b.m->ts; });
+    ImGui::BeginChild("##stl", ImVec2(0, -(mobile ? ui::M().rowH : ImGui::GetFrameHeightWithSpacing() * 1.2f)), ImGuiChildFlags_Borders);
+    if (mobile) ui::TouchScroll();
+    if (items.empty()) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("%s", T("Nothing starred yet - Star in a message's menu keeps it here."));
+        ImGui::PopTextWrapPos();
+    }
+    for (size_t i = 0; i < items.size(); i++) {
+        auto& it = items[i];
+        ImGui::PushID((int)i);
+        std::string who = it.m->outgoing ? T("You") : Emoji().Display(eng.PeerName(it.m->from.empty() ? it.key : it.m->from));
+        std::string head = Emoji().Display(eng.PeerName(it.key)) + "  -  " + who + "  -  " + FormatTime(it.m->ts);
+        std::string body = it.m->kind == MsgKind::Files ? std::string(T("files")) : OneLine(Emoji().Display(it.m->text), 200);
+        float rh = ImGui::GetTextLineHeightWithSpacing() * 2 + (mobile ? 8 : 2);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        if (ImGui::Selectable("##st", false, 0, ImVec2(0, rh))) {  // to that chat, at the message
+            SelectPeer(it.key);
+            if (mobile) {
+                backStack = {MScreen::Home};
+                screen = MScreen::Chat;
+            } else {
+                tab = Tab::Chat;
+                tabForce = true;
+            }
+            searchJump = it.m->mid;
+            ImGui::CloseCurrentPopup();
+        }
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec4 clip(p.x, p.y, p.x + ImGui::GetContentRegionAvail().x, p.y + rh);
+        dl->AddText(nullptr, 0, ImVec2(p.x + 4, p.y + 1), ImGui::GetColorU32(ImGuiCol_TextDisabled), head.c_str(), nullptr, 0, &clip);
+        dl->AddText(nullptr, 0, ImVec2(p.x + 4, p.y + 1 + ImGui::GetTextLineHeightWithSpacing()), ImGui::GetColorU32(ImGuiCol_Text), body.c_str(), nullptr, 0, &clip);
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    if (ImGui::Button(T("Close"), ImVec2(mobile ? -1 : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 bool App::MuteItem(const std::string& key, float h, bool button) {
     auto item = [&](const std::string& l) {
         return button ? ui::IconTextButton(l.c_str(), Icon::Speaker, ImVec2(ui::M().mobile ? -1 : 0, h)) : ImGui::Selectable(l.c_str(), false, 0, ImVec2(0, h));
@@ -88,6 +198,10 @@ void App::DrawChatHistoryPopup() {
         ImGui::CloseCurrentPopup();
     }
     if (MuteItem(histPeer, h, true)) ImGui::CloseCurrentPopup();
+    if (ui::IconTextButton(T("Starred messages"), ui::Icon::Star, ImVec2(mobile ? -1 : 0, h))) {
+        starredOpen = true;
+        ImGui::CloseCurrentPopup();
+    }
     auto it = eng.chats.find(histPeer);
     int count = it == eng.chats.end() ? 0 : (int)it->second.messages.size();
 

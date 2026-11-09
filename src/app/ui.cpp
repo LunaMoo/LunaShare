@@ -150,7 +150,9 @@ void App::Frame() {
     static bool devHist = getenv("LUNASHARE_OPENHIST") != nullptr;  // dev: the chat history window (screenshots)
     if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 3) {
         devHist = false;
-        if (std::string(getenv("LUNASHARE_OPENHIST")) == "mute") {
+        if (std::string(getenv("LUNASHARE_OPENHIST")) == "starred") {
+            starredOpen = true;
+        } else if (std::string(getenv("LUNASHARE_OPENHIST")) == "mute") {
             muteKey = selectedPeer;
             muteOpen = true;
         } else {
@@ -340,6 +342,7 @@ void App::Frame() {
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
     DrawChatHistoryPopup();
     DrawMutePopup();
+    DrawStarredPopup();
     DrawUpdatePopup();
     DrawLockSetPopup();
     SleepPopup();
@@ -1243,6 +1246,7 @@ void App::DrawChat(const std::string& peer) {
     DrawWatchBanner(peer);
     DrawListenBanner(peer);
     DrawHistoryAskBanner(peer);
+    DrawPinnedBar(peer);
     // selection toolbar
     if (!selMsgs.empty()) {
         float h = mobile ? ui::M().rowH : 0;
@@ -1816,7 +1820,8 @@ void App::DrawMessages(const std::string& peer) {
             float textSize = ImGui::GetFontSize() * (bigEmoji == 1 ? 2.6f : bigEmoji ? 2.0f : 1.0f);
             ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(textSize, FLT_MAX, wrap, shown.c_str());
             const char* state = m.read ? T("read") : m.delivered ? T("delivered") : !m.mailedTo.empty() ? T("waiting on the server") : T("queued");
-            std::string meta = (m.forwarded ? std::string(T("forwarded")) + "  " : std::string()) +
+            std::string meta = std::string(m.starred || m.pinned ? (m.starred && m.pinned ? "          " : "      ") : "") +  // (room for the marks)
+                               (m.forwarded ? std::string(T("forwarded")) + "  " : std::string()) +
                                (m.edited ? std::string(T("changed")) + "  " : std::string()) + FormatTime(m.ts, false) +
                                (m.outgoing ? std::string("  ") + state : std::string());
             ImVec2 ms = ImGui::CalcTextSize(meta.c_str());
@@ -1947,8 +1952,16 @@ void App::DrawMessages(const std::string& peer) {
             }
             ImU32 metaCol = m.outgoing && !m.delivered && m.mailedTo.empty() ? ui::ColWarn()
                           : m.outgoing && m.read ? IM_COL32(90, 170, 255, 255) : ui::ColMuted();
-            dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale,
-                        ImVec2(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + qh + ts.y + pad * 0.2f), metaCol, meta.c_str());
+            ImVec2 mp(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + qh + ts.y + pad * 0.2f);
+            dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale, mp, metaCol, meta.c_str());
+            {  // starred / pinned: small marks in front of the time
+                float isz = ImGui::GetFontSize() * smallScale, ix = mp.x + isz * 0.55f, iy = mp.y + isz * 0.55f;
+                if (m.starred) {
+                    ui::DrawIcon(dl, ui::Icon::Star, ImVec2(ix, iy), isz, IM_COL32(240, 200, 60, 255));
+                    ix += isz * 1.3f;
+                }
+                if (m.pinned) DrawPin(dl, ImVec2(ix, iy), isz, metaCol);
+            }
             ReactHoverButton(m, p0, ImVec2(p0.x + bw, p0.y + bh));
             DrawReactions(peer, m, p0, ImVec2(p0.x + bw, p0.y + bh));
             ImGui::Dummy(ImVec2(0, pad * 0.15f));
@@ -2000,6 +2013,10 @@ void App::DrawMessages(const std::string& peer) {
             if (selMsgs.size() > 1 && ImGui::Selectable(TF("Delete %d selected...", (int)selMsgs.size()).c_str(), false, 0, ImVec2(0, h)))
                 AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
             if (m.kind != MsgKind::System && ImGui::Selectable(T("Forward..."), false, 0, ImVec2(0, h))) ForwardMessages(peer, {m.mid});
+            if (m.kind != MsgKind::System && ImGui::Selectable(m.pinned ? T("Unpin") : T("Pin in this chat"), false, 0, ImVec2(0, h)))
+                eng.PinMessage(peer, m.mid, !m.pinned);
+            if (ImGui::Selectable(m.starred ? T("Remove the star") : T("Star (keep in Starred messages)"), false, 0, ImVec2(0, h)))
+                eng.StarMessage(peer, m.mid, !m.starred);
             if (selMsgs.size() > 1 && ImGui::Selectable(TF("Forward %d selected...", (int)selMsgs.size()).c_str(), false, 0, ImVec2(0, h)))
                 ForwardMessages(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
             ImGui::EndPopup();

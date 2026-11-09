@@ -5,6 +5,13 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Pinned and starred
+
+*Pin in this chat* (a message's menu) pins it for everyone in the chat: a bar under the chat's name shows it, a
+tap goes there (with several: the next tap to the next one), x unpins. The latest pin / unpin wins; whoever missed it
+gets it when they connect (message type 105 `ChatPin`). *Star* is only yours: *Chat history > Starred messages*
+lists the starred messages of all chats, a tap opens the chat at that message.
+
 ## Forwarding
 
 *Forward...* in a message's menu (or *Forward* in the toolbar with several selected) opens the chat list: the text

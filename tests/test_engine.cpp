@@ -382,6 +382,31 @@ int main() {
         return m.text == "passed on" && m.forwarded;
     }, 3000), "forwarded mark arrives");
 
+    // pinned for both, starred only here
+    {
+        std::string pm;
+        {
+            auto l = A->Lock();
+            pm = A->chats[A->ChatKey(idB)].messages.back().mid;
+        }
+        A->PinMessage(idB, pm, true);
+        A->StarMessage(idB, pm, true);
+        auto pinnedOn = [&](Engine& e, const std::string& key, bool want) {
+            auto l = e.Lock();
+            for (auto& m : e.chats[key].messages)
+                if (m.mid == pm) return m.pinned == want;
+            return false;
+        };
+        CHECK(WaitFor([&] { return pinnedOn(*B, B->ChatKey(idA), true); }, 3000), "pinned for the other side");
+        {
+            auto l = B->Lock();
+            for (auto& m : B->chats[B->ChatKey(idA)].messages)
+                if (m.mid == pm) CHECK(!m.starred, "a star stays mine");
+        }
+        B->PinMessage(idA, pm, false);
+        CHECK(WaitFor([&] { return pinnedOn(*A, A->ChatKey(idB), false); }, 3000), "unpinned by the other side");
+    }
+
     // ------------------------------------------------------------ silent chats
     printf("[silent chats]\n");
     {
