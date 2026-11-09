@@ -31,6 +31,12 @@ slider to put it back, *Reset picture* for all. (Done on the graphics card, wher
   contact's Shared folder it was started from). Watching together, the host's switch takes everyone along: their
   player goes straight on to the next movie.
 
+## Speed and subtitles
+
+In the sound / subtitles / picture menu: *Speed* 0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x - the sound keeps its pitch, and
+watching together it's everyone's speed. Under the subtitles: *-0.5 s* / *+0.5 s* when they're out of step with the
+voices (this device, this movie) and the subtitles' text size (remembered).
+
 ## Gestures (phones)
 
 - Double tap the left / right third of the picture: 10 seconds back / on (for everyone, watching together).

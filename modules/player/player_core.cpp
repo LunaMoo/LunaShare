@@ -365,6 +365,78 @@ struct LspPlayer {
     lsp::SubEvent shownSub;
     const lsp::SubEvent* lastSub = nullptr;
     int subSerial = 0;
+    double subDelay = 0;
+    // speed: WSOLA time stretch of the audio ring (the pitch stays; the clock runs at the speed - it counts the
+    // input the stretch takes)
+    double speed = 1.0;
+    static constexpr int kWin = 1024, kHop = 512, kSearch = 240;  // frames (at 48 kHz: 21 ms window)
+    std::vector<float> olaPrev;   // the second half of the last piece, fading out
+    bool olaHave = false;
+    double inPos = 0;             // where the next piece would start (frames into the ring), by the speed
+    long prevNat = 0;             // where the last piece went on naturally (the next piece should look like it)
+    std::vector<float> stretched; // made, not yet given out
+    size_t stretchedAt = 0;
+
+    void StretchReset() {
+        olaHave = false;
+        inPos = 0;
+        prevNat = 0;
+        stretched.clear();
+        stretchedAt = 0;
+    }
+
+    // one more hop of stretched sound; false = not enough in the ring yet
+    bool StretchStep() {
+        const int ch = channels;
+        long frames = (long)(audio.size() / (size_t)ch);
+        long base = (long)inPos;
+        if (base + kSearch + kWin > frames) return false;
+        long best = base;
+        if (olaHave) {  // the piece around where the speed says that best continues the last one
+            double bestC = -1e30;
+            long lo = std::max(0L, base - kSearch), hi = base + kSearch;
+            for (long s = lo; s <= hi; s += 2) {
+                double c = 0;
+                for (int i = 0; i < kHop; i += 4) {
+                    size_t ia = (size_t)(s + i) * ch, ib = (size_t)(prevNat + i) * ch;
+                    float xa = 0, xb = 0;
+                    for (int k = 0; k < ch; k++) {
+                        xa += audio[ia + k];
+                        xb += audio[ib + k];
+                    }
+                    c += (double)xa * xb;
+                }
+                if (c > bestC) {
+                    bestC = c;
+                    best = s;
+                }
+            }
+        }
+        if (olaPrev.size() != (size_t)kHop * ch) olaPrev.assign((size_t)kHop * ch, 0.0f);
+        size_t o = stretched.size();
+        stretched.resize(o + (size_t)kHop * ch);
+        for (int i = 0; i < kHop; i++) {
+            float w = (float)i / kHop;  // (a linear cross-fade: the two halves add up to one)
+            for (int k = 0; k < ch; k++) {
+                float x = audio[(size_t)(best + i) * ch + k];
+                stretched[o + (size_t)i * ch + k] = olaHave ? olaPrev[(size_t)i * ch + k] * (1 - w) + x * w : x * w;
+            }
+        }
+        for (int i = 0; i < kHop; i++)
+            for (int k = 0; k < ch; k++) olaPrev[(size_t)i * ch + k] = audio[(size_t)(best + kHop + i) * ch + k];
+        olaHave = true;
+        prevNat = best + kHop;
+        inPos += kHop * speed;
+        // what's behind us goes (and the clock moves by it)
+        long drop = std::min((long)inPos - kSearch, prevNat);
+        if (drop > 0) {
+            audio.erase(audio.begin(), audio.begin() + (ptrdiff_t)((size_t)drop * ch));
+            audioPts += (double)drop / rate;
+            inPos -= (double)drop;
+            prevNat -= drop;
+        }
+        return true;
+    }
 
     const lsp::SubEvent* ActiveSubLocked(double pos) {
         const std::vector<lsp::SubEvent>* list = nullptr;
@@ -394,7 +466,7 @@ struct LspPlayer {
 
     double PositionLocked() {
         if (info.has_audio && audioPtsSet) return audioPts;
-        if (clockRunning) return clockBase + (lsp::NowSec() - clockStart);
+        if (clockRunning) return clockBase + (lsp::NowSec() - clockStart) * speed;
         return clockBase;
     }
 
@@ -629,7 +701,7 @@ void ApiSetPlaying(LspPlayer* p, int playing) {
         }
         p->state = LSP_PLAYING;
     } else {
-        if (p->clockRunning) p->clockBase += NowSec() - p->clockStart;
+        if (p->clockRunning) p->clockBase += (NowSec() - p->clockStart) * p->speed;
         p->clockRunning = false;
         if (st == LSP_PLAYING) p->state = LSP_PAUSED;
     }
@@ -644,6 +716,7 @@ void ApiSeek(LspPlayer* p, double t) {
     p->frames.clear();
     p->audioPts = t;
     p->audioPtsSet = false;
+    p->StretchReset();
     p->clockBase = t;
     p->clockStart = NowSec();
     if (p->state == LSP_ENDED) p->state = LSP_PAUSED;
@@ -658,7 +731,20 @@ void ApiReadAudio(LspPlayer* p, float* out, int n) {
     }
     std::lock_guard<std::mutex> l(p->m);
     size_t got = 0;
-    if (p->state == LSP_PLAYING && p->seekTo < 0) {
+    if (p->state == LSP_PLAYING && p->seekTo < 0 && p->speed != 1.0) {  // faster / slower, the pitch kept
+        while (got < want) {
+            if (p->stretchedAt >= p->stretched.size()) {
+                p->stretched.clear();
+                p->stretchedAt = 0;
+                if (!p->StretchStep()) break;
+            }
+            size_t k = std::min(want - got, p->stretched.size() - p->stretchedAt);
+            std::copy(p->stretched.begin() + (ptrdiff_t)p->stretchedAt, p->stretched.begin() + (ptrdiff_t)(p->stretchedAt + k), out + got);
+            p->stretchedAt += k;
+            got += k;
+        }
+        if (got < want && p->eof && (p->frames.empty() || !p->info.has_video)) p->state = LSP_ENDED;
+    } else if (p->state == LSP_PLAYING && p->seekTo < 0) {
         got = std::min(want, p->audio.size());
         std::copy(p->audio.begin(), p->audio.begin() + (ptrdiff_t)got, out);
         p->audio.erase(p->audio.begin(), p->audio.begin() + (ptrdiff_t)got);
@@ -781,7 +867,7 @@ int ApiAddSubtitles(LspPlayer* p, const char* path) {
 int ApiSubtitle(LspPlayer* p, LspSubtitle* out) {
     if (!p) return 0;
     std::lock_guard<std::mutex> l(p->m);
-    const SubEvent* e = p->ActiveSubLocked(p->PositionLocked());
+    const SubEvent* e = p->ActiveSubLocked(p->PositionLocked() - p->subDelay);
     if (e != p->lastSub || (!e && !p->shownSub.Empty())) {
         p->lastSub = e;
         p->shownSub = e ? *e : SubEvent();
@@ -812,9 +898,29 @@ int ApiTags(const char* path, LspTags* out, LspCoverFn cover, void* user) {
 #endif
 }
 
-const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.3", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
+void ApiSetSpeed(LspPlayer* p, double speed) {
+    if (!p) return;
+    std::lock_guard<std::mutex> l(p->m);
+    speed = std::clamp(speed, 0.25, 4.0);
+    if (std::fabs(speed - 1.0) < 0.001) speed = 1.0;
+    if (speed == p->speed) return;
+    if (p->clockRunning) {  // (files without sound: the wall clock - up to now at the old speed)
+        p->clockBase += (NowSec() - p->clockStart) * p->speed;
+        p->clockStart = NowSec();
+    }
+    p->speed = speed;
+    p->StretchReset();
+}
+
+void ApiSetSubDelay(LspPlayer* p, double s) {
+    if (!p) return;
+    std::lock_guard<std::mutex> l(p->m);
+    p->subDelay = std::clamp(s, -600.0, 600.0);
+}
+
+const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.4", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
                            ApiSeek, ApiReadAudio, ApiVideoFrame, ApiPosition, ApiState, ApiOpenStream,
-                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags};
+                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags, ApiSetSpeed, ApiSetSubDelay};
 
 }  // namespace
 }  // namespace lsp

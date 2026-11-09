@@ -175,7 +175,8 @@ struct WatchInfo {
     std::string libId;         // streamed from a contact's Shared folder (content id): played here, not shared on
     bool saving = false;       // keeping a copy (viewer / library stream)
     bool allowSave = true;     // the host lets viewers keep a copy
-    double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 : 0); }
+    double speed = 1.0;        // playback speed (everyone's)
+    double Target(int64_t now) const { return pos + (playing && !hold ? (double)(now - at) / 1000.0 * speed : 0); }
 };
 struct WatchInviteInfo {
     uint64_t sid = 0;
@@ -461,6 +462,7 @@ public:
     bool LibStreamSaved(const std::string& id);
     double LibStreamLoaded(const std::string& id);  // play a file from a contact's Shared folder while it comes
     void WatchSetLoop(bool on);
+    void WatchSetSpeed(double speed);  // 0.25 .. 4, for everyone watching
     // host: another movie (the next / previous one in its folder) - the people watching come along to it
     uint64_t WatchSwitch(const std::string& path);
     bool WatchFollowing() const { return watchFollow_ != 0; }  // viewer: about to come along to the host's next movie

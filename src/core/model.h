@@ -112,7 +112,8 @@ struct Settings {
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
     bool playerLoop = false;
     bool playerAutoplay = false;
-    bool playerAutoNext = false;      // at the end of a movie, the next one in its folder
+    bool playerAutoNext = false;
+    float subtitleScale = 1.0f;       // subtitle text size (0.5 .. 2.5)      // at the end of a movie, the next one in its folder
     bool playerHideUi = false;        // the controls go as soon as it plays (back with a tap / click)
     bool playerOrientByAspect = false;  // Android: a tall movie plays upright, a wide one sideways
     std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)

@@ -69,6 +69,7 @@ void App::WatchSync() {
     std::string cur = lib ? "lib:" + w.libId : host ? w.path : id;
     if (watchOpened != cur) {  // a new session: open its movie (paused)
         watchOpened = cur;
+        watchSubDelay = 0;
         watchResumedFrom = 0;
         // where it was left last time (mine to choose: alone, or the host)
         watchPosKey = lib ? "lib:" + w.libId : host ? w.path : "";
@@ -183,6 +184,8 @@ void App::WatchSync() {
         watchLastSeek = now;
         return;
     }
+    if (std::fabs(Player().Speed() - w.speed) > 0.001) Player().SetSpeed(w.speed);  // (everyone's speed)
+    if (std::fabs(Player().SubDelay() - watchSubDelay) > 0.001) Player().SetSubDelay(watchSubDelay);  // (mine)
     if (dur > 0) target = std::min(target, dur - 0.05);
     bool play = w.playing && !w.hold && !(dur > 0 && target >= dur - 0.1);
     if (play != Player().Playing()) Player().SetPlaying(play);
@@ -400,6 +403,39 @@ void App::WatchTracksPopup() {
         }
         ImGui::EndDisabled();
     }
+    {  // subtitles: later / sooner (this movie), size (remembered)
+        float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 3) / 4 : 0;
+        if (ImGui::Button("-0.5 s##sd", ImVec2(bw, h))) watchSubDelay -= 0.5;
+        ImGui::SameLine();
+        if (ImGui::Button("+0.5 s##sd", ImVec2(bw, h))) watchSubDelay += 0.5;
+        ImGui::SameLine();
+        if (ImGui::Button((T("Reset") + std::string("##sd")).c_str(), ImVec2(bw, h))) watchSubDelay = 0;
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("%s", watchSubDelay == 0 ? T("in time") : TF(watchSubDelay > 0 ? T("%.1f s later") : T("%.1f s sooner"), std::fabs(watchSubDelay)).c_str());
+        Settings st = eng.GetSettings();
+        float sc = st.subtitleScale * 100;
+        ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 14);
+        if (ImGui::SliderFloat("##subsize", &sc, 50, 250, T("text size: %.0f%%"))) {
+            st.subtitleScale = sc / 100;
+            eng.ApplySettings(st);
+            edit.subtitleScale = st.subtitleScale;
+        }
+    }
+    {  // speed (everyone's, watching together)
+        ImGui::SeparatorText(T("Speed"));
+        const double sp[] = {0.5, 0.75, 1.0, 1.25, 1.5, 2.0};
+        float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 5) / 6 : 0;
+        for (int i = 0; i < 6; i++) {
+            if (i) ImGui::SameLine();
+            char lb[16];
+            snprintf(lb, sizeof lb, "%gx", sp[i]);
+            bool on = std::fabs(eng.watch.speed - sp[i]) < 0.001;
+            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(lb, ImVec2(bw, h))) eng.WatchSetSpeed(sp[i]);
+            if (on) ImGui::PopStyleColor();
+        }
+    }
     {  // the picture: brightness, contrast, colour... (this device only, remembered)
         ImGui::SeparatorText(T("Picture"));
         Settings st = eng.GetSettings();
@@ -464,7 +500,7 @@ void App::WatchTracksPopup() {
 }
 
 // subtitles over the picture (fit: where the picture is drawn)
-static void DrawSubtitles(ImDrawList* dl, ImVec2 fit0, ImVec2 fit1, float bottomLimit) {
+static void DrawSubtitles(ImDrawList* dl, ImVec2 fit0, ImVec2 fit1, float bottomLimit, float scale) {
     const auto& s = Player().Subtitle();
     float vh = fit1.y - fit0.y, vw = fit1.x - fit0.x;
     if (s.tex && s.sw > 0) {
@@ -479,7 +515,7 @@ static void DrawSubtitles(ImDrawList* dl, ImVec2 fit0, ImVec2 fit1, float bottom
     }
     if (s.text.empty()) return;
     ImFont* f = ImGui::GetFont();
-    float fs = std::clamp(vh / 15.0f, ImGui::GetFontSize() * 1.15f, ImGui::GetFontSize() * 3.2f);
+    float fs = std::clamp(vh / 15.0f, ImGui::GetFontSize() * 1.15f, ImGui::GetFontSize() * 3.2f) * scale;
     float wrap = vw * 0.9f;
     // line by line, centred, bottom up
     std::vector<std::string> lines;
@@ -656,7 +692,7 @@ void App::DrawWatch() {
         dl->AddText(ImVec2((a.x + b.x - ts.x) * 0.5f, (a.y + b.y - ts.y) * 0.5f), IM_COL32(220, 220, 220, 255), msg);
     }
     float barH = bh + ImGui::GetTextLineHeight() + sp * 3;
-    if (open) DrawSubtitles(dl, fit0, fit1, controls ? b.y - barH - sp : b.y);
+    if (open) DrawSubtitles(dl, fit0, fit1, controls ? b.y - barH - sp : b.y, eng.settings.subtitleScale);
     if (open && w.hold) {  // a spinner while someone loads
         ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
         float r = ImGui::GetFontSize() * 1.2f, t = (float)ImGui::GetTime() * 6;

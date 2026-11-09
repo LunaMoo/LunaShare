@@ -263,6 +263,8 @@ bool PlayerHost::Play(const std::string& path) {
         }
         cur_ = path;
         info_ = info;
+        speed_ = 1.0;
+        subDelay_ = 0.0;
         Media().ClearPlayerVideo();
     }
     // the clock runs on the audio device even for silent videos, so it stays open while playing
@@ -312,11 +314,25 @@ PlayerHost::Opening PlayerHost::OpenState() {
             opened_ = nullptr;
             cur_ = openingId_;
             info_ = openedInfo_;
+            speed_ = 1.0;
+            subDelay_ = 0.0;
             Media().ClearPlayerVideo();
             if (!OpenAudio()) SDL_Log("player: no audio device");
         }
     }
     return s;
+}
+
+void PlayerHost::SetSpeed(double s) {
+    if (!p_ || mod_->api_version < 5 || !mod_->set_speed) return;
+    mod_->set_speed(p_, s);
+    speed_ = s;
+}
+
+void PlayerHost::SetSubDelay(double s) {
+    if (!p_ || mod_->api_version < 5 || !mod_->set_sub_delay) return;
+    mod_->set_sub_delay(p_, s);
+    subDelay_ = s;
 }
 
 void PlayerHost::SetPlaying(bool on) {

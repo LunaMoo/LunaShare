@@ -51,6 +51,11 @@ public:
     enum class Opening { None, Busy, Failed, Ready };
     Opening OpenState();
     void SetPlaying(bool on);
+    // speed (the sound keeps its pitch) and a subtitle delay - of what's open now (a new file starts at 1x / 0)
+    void SetSpeed(double s);
+    double Speed() const { return p_ ? speed_ : 1.0; }
+    void SetSubDelay(double s);
+    double SubDelay() const { return p_ ? subDelay_ : 0.0; }
     // chats: start again at the end (not for watching together / the movie player: their clock decides)
     void SetLoop(bool on) { loop_ = on; }
     bool Loop() const { return loop_; }
@@ -73,6 +78,7 @@ public:
     int State() const;
 
 private:
+    double speed_ = 1.0, subDelay_ = 0.0;
     void Worker();
     bool OpenAudio();
     void CloseAudio();

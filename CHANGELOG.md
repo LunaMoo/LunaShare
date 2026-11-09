@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Movie player: **speed** 0.5x - 2x (the sound keeps its pitch; watching together, it's everyone's), subtitles
+  **later / sooner** in half-second steps (this movie) and their **text size** (remembered). The player module API
+  is version 5 (set_speed, set_sub_delay).
 - Movie player on phones: a double tap on the left / right third goes 10 s back / on; a swipe up or down changes the
   screen's brightness (left half) or the volume (right half). Previous / next sit next to play / pause on phones.
 - Movies continue where you left them (alone, or as the host) - "Continued from 12:34" with *From the start* for a

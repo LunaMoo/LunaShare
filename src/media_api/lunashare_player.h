@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSP_API_VERSION 4
+#define LSP_API_VERSION 5
 
 #if defined(_WIN32)
 #define LSP_EXPORT __declspec(dllexport)
@@ -117,6 +117,10 @@ typedef struct LspModule {
     int (*subtitle)(LspPlayer* p, LspSubtitle* out);
     /* --- since version 4: tags and cover of an audio file (any thread); 0 = can't read it */
     int (*tags)(const char* path_utf8, LspTags* out, LspCoverFn cover, void* user);
+    /* --- since version 5: playback speed (0.25 .. 4; the sound keeps its pitch) and a subtitle delay in seconds
+       (positive: the subtitles come later) */
+    void (*set_speed)(LspPlayer* p, double speed);
+    void (*set_sub_delay)(LspPlayer* p, double seconds);
 } LspModule;
 
 typedef const LspModule* (*LspGetModuleFn)(void);

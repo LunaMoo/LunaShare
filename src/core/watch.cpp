@@ -229,6 +229,19 @@ void Engine::WatchSetLoop(bool on) {
     else QueueToPeer(watch.host, Msg::WatchCtl, {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.Target(SteadyMs())}, {"loop", on}});
 }
 
+void Engine::WatchSetSpeed(double speed) {
+    auto lk = Lock();
+    if (!watch.sid) return;
+    int64_t now = SteadyMs();
+    watch.pos = watch.Target(now);  // (the clock so far at the old speed)
+    watch.at = now;
+    watch.speed = std::clamp(speed, 0.25, 4.0);
+    if (watch.host.empty()) WatchBroadcast();
+    else
+        QueueToPeer(watch.host, Msg::WatchCtl,
+                    {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.pos}, {"loop", watch.loop}, {"speed", watch.speed}});
+}
+
 void Engine::WatchSave() {
     auto lk = Lock();
     if (!watch.sid || watch.saving) return;
@@ -527,7 +540,7 @@ json Engine::WatchStateJson() {
     json people = json::array({settings.displayName});
     for (auto& d : watchViewers_) people.push_back(PeerName(ChatKey(d)));
     return {{"sid", watch.sid}, {"playing", watch.playing}, {"pos", watch.Target(now)}, {"hold", watch.hold},
-            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"loop", watch.loop}, {"save", watch.allowSave}, {"ver", ++watchVer_}};
+            {"wait", watch.waitFor}, {"people", people}, {"hsub", watch.hostSub}, {"loop", watch.loop}, {"save", watch.allowSave}, {"speed", watch.speed}, {"ver", ++watchVer_}};
 }
 
 void Engine::WatchBroadcast() {
@@ -713,6 +726,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.playing = j.value("playing", false);
             watch.at = now;
             if (j.contains("loop")) watch.loop = j.value("loop", false);
+            if (j.contains("speed")) watch.speed = std::clamp(j.value("speed", 1.0), 0.25, 4.0);
             WatchBroadcast();
             break;
         }
@@ -739,6 +753,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.waitFor = j.value("wait", "");
             watch.hostSub = j.value("hsub", "");
             watch.loop = j.value("loop", false);
+            watch.speed = std::clamp(j.value("speed", 1.0), 0.25, 4.0);
             watch.allowSave = j.value("save", true);
             if (!watch.allowSave && watch.saving) {  // the host turned saving off
                 if (auto wc = WatchCacheNow()) {
