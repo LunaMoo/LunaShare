@@ -283,7 +283,7 @@ public:
 
     // ---- actions (thread-safe; do not call while holding Lock() unless noted)
     void SendChat(const std::string& peer, const std::string& text, const std::string& replyTo = "",
-                  const std::vector<std::string>& mentions = {});  // mentions: groups, the @named people (account keys)
+                  const std::vector<std::string>& mentions = {}, bool forwarded = false);  // mentions: groups, the @named people (account keys)
     bool EditMessage(const std::string& peer, const std::string& mid, const std::string& text);  // my own text messages
     // Paths may be files or folders. Returns batch id (0 if nothing was queued).
     uint64_t SendPaths(const std::string& peer, const std::vector<std::string>& paths);

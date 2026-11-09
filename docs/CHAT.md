@@ -5,6 +5,12 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Forwarding
+
+*Forward...* in a message's menu (or *Forward* in the toolbar with several selected) opens the chat list: the text
+goes as new messages marked *forwarded*, the files (when they're on this device) as a new transfer. Groups get
+text only.
+
 ## Drafts
 
 Text you typed and didn't send stays in its chat when you switch to another one or close LunaShare (kept in

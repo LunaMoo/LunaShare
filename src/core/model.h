@@ -196,6 +196,7 @@ struct ChatMessage {
     int64_t edited = 0;                     // when it was last changed (0 = never)
     bool editPending = false;               // outgoing: the change hasn't reached the other side yet
     std::vector<std::string> mentions;      // groups: the people @named in it (account keys)
+    bool forwarded = false;                 // passed on from another chat
 };
 
 struct Conversation {

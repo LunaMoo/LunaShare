@@ -533,6 +533,31 @@ void App::OnDrop(const std::vector<std::string>& paths) {
 
 void App::OpenSendTo(const std::vector<std::string>& paths) {
     pendingSend = paths;
+    pendingForward.clear();
+    openSendTo = true;
+}
+
+// passing messages on to another chat: their text, and the files they brought (when they're here)
+void App::ForwardMessages(const std::string& peer, const std::vector<std::string>& mids) {
+    std::vector<std::string> texts, paths;
+    auto it = eng.chats.find(peer);
+    if (it == eng.chats.end()) return;
+    for (auto& m : it->second.messages) {
+        if (std::find(mids.begin(), mids.end(), m.mid) == mids.end() || m.kind == MsgKind::System) continue;
+        if (m.kind == MsgKind::Text && !m.text.empty()) texts.push_back(m.text);
+        if (m.kind == MsgKind::Files)
+            for (auto tid : m.tids) {
+                auto t = eng.transfers.find(tid);
+                if (t != eng.transfers.end() && t->second->state == TState::Completed && FileExists(t->second->localPath))
+                    paths.push_back(t->second->localPath);
+            }
+    }
+    if (texts.empty() && paths.empty()) {
+        toasts.push_back({EventType::Error, T("Forward"), T("Nothing to forward (the files aren't on this device)."), "", 0, 3.0f});
+        return;
+    }
+    pendingSend = paths;
+    pendingForward = texts;
     openSendTo = true;
 }
 
@@ -1228,6 +1253,8 @@ void App::DrawChat(const std::string& peer) {
         ImGui::SameLine();
         if (ImGui::Button(T("Delete"), ImVec2(0, h))) AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
         ImGui::SameLine();
+        if (ImGui::Button(T("Forward"), ImVec2(0, h))) ForwardMessages(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
+        ImGui::SameLine();
         if (ImGui::Button(T("Select all"), ImVec2(0, h))) {
             auto it = eng.chats.find(peer);
             if (it != eng.chats.end())
@@ -1789,7 +1816,8 @@ void App::DrawMessages(const std::string& peer) {
             float textSize = ImGui::GetFontSize() * (bigEmoji == 1 ? 2.6f : bigEmoji ? 2.0f : 1.0f);
             ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(textSize, FLT_MAX, wrap, shown.c_str());
             const char* state = m.read ? T("read") : m.delivered ? T("delivered") : !m.mailedTo.empty() ? T("waiting on the server") : T("queued");
-            std::string meta = (m.edited ? std::string(T("changed")) + "  " : std::string()) + FormatTime(m.ts, false) +
+            std::string meta = (m.forwarded ? std::string(T("forwarded")) + "  " : std::string()) +
+                               (m.edited ? std::string(T("changed")) + "  " : std::string()) + FormatTime(m.ts, false) +
                                (m.outgoing ? std::string("  ") + state : std::string());
             ImVec2 ms = ImGui::CalcTextSize(meta.c_str());
             float smallScale = 0.8f;
@@ -1971,16 +1999,9 @@ void App::DrawMessages(const std::string& peer) {
             if (ImGui::Selectable(T("Delete..."), false, 0, ImVec2(0, h))) AskDelete(peer, {m.mid});
             if (selMsgs.size() > 1 && ImGui::Selectable(TF("Delete %d selected...", (int)selMsgs.size()).c_str(), false, 0, ImVec2(0, h)))
                 AskDelete(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
-            if (m.kind == MsgKind::Files) {
-                if (ImGui::Selectable(T("Share these files with..."), false, 0, ImVec2(0, h))) {
-                    std::vector<std::string> paths;
-                    for (auto tid : m.tids) {
-                        auto t = eng.transfers.find(tid);
-                        if (t != eng.transfers.end() && FileExists(t->second->localPath) && t->second->state == TState::Completed) paths.push_back(t->second->localPath);
-                    }
-                    if (!paths.empty()) OpenSendTo(paths);
-                }
-            }
+            if (m.kind != MsgKind::System && ImGui::Selectable(T("Forward..."), false, 0, ImVec2(0, h))) ForwardMessages(peer, {m.mid});
+            if (selMsgs.size() > 1 && ImGui::Selectable(TF("Forward %d selected...", (int)selMsgs.size()).c_str(), false, 0, ImVec2(0, h)))
+                ForwardMessages(peer, std::vector<std::string>(selMsgs.begin(), selMsgs.end()));
             ImGui::EndPopup();
         }
         ImGui::PopID();
@@ -3389,7 +3410,23 @@ void App::DrawPopups() {
     if (ImGui::BeginPopupModal(T("Send to device"), nullptr, ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
         int64_t total = 0;
         for (auto& p : pendingSend) total += IsDirectory(p) ? 0 : std::max<int64_t>(0, FileSize(p));
-        ImGui::Text(T("%d item(s)%s"), (int)pendingSend.size(), total ? ("  -  " + FormatBytes((double)total)).c_str() : "");
+        if (!pendingForward.empty()) {
+            ImGui::TextUnformatted(TF("Forward %d message(s)", (int)pendingForward.size()).c_str());
+            for (size_t i = 0; i < pendingForward.size() && i < 3; i++) {
+                std::string s = Emoji().Display(pendingForward[i]);
+                if (s.size() > 60) {
+                    s.resize(60);
+                    while (!s.empty() && ((unsigned char)s.back() & 0xC0) == 0x80) s.pop_back();
+                    if (!s.empty() && ((unsigned char)s.back() & 0x80)) s.pop_back();
+                    s += "...";
+                }
+                for (auto& c : s)
+                    if (c == '\n') c = ' ';
+                ImGui::BulletText("%s", s.c_str());
+            }
+        }
+        if (!pendingSend.empty() || pendingForward.empty())
+            ImGui::Text(T("%d item(s)%s"), (int)pendingSend.size(), total ? ("  -  " + FormatBytes((double)total)).c_str() : "");
         for (size_t i = 0; i < pendingSend.size() && i < 5; i++) ImGui::BulletText("%s", BaseName(pendingSend[i]).c_str());
         if (pendingSend.size() > 5) ImGui::TextDisabled(T("... and %d more"), (int)pendingSend.size() - 5);
         ImGui::Separator();
@@ -3400,8 +3437,12 @@ void App::DrawPopups() {
         for (auto& p : peers) {
             const KnownDevice* d = eng.DeviceFor(p);
             if (d && d->blocked) continue;
+            if (Engine::IsGroupKey(p) && !pendingSend.empty()) continue;  // (files go to people, not to groups)
+            if (const Group* g = eng.GroupOf(p); g && g->left) continue;
             if (DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0)) {
-                eng.SendPaths(p, pendingSend);
+                for (auto& t : pendingForward) eng.SendChat(p, t, "", {}, true);
+                if (!pendingSend.empty()) eng.SendPaths(p, pendingSend);
+                pendingForward.clear();
                 SelectPeer(p);
                 if (mobile) { backStack.clear(); backStack.push_back(MScreen::Home); screen = MScreen::Chat; }
                 else { tab = Tab::Chat; tabForce = true; }
@@ -3413,6 +3454,7 @@ void App::DrawPopups() {
         ImGui::EndChild();
         if (ImGui::Button(T("Cancel"), ImVec2(mobile ? -1 : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             pendingSend.clear();
+            pendingForward.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

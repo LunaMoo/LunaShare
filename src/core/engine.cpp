@@ -1704,6 +1704,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.replyTo = j.value("re", "");
                 m.replyText = j.value("ret", "").substr(0, 400);
                 m.edited = j.value("edited", (int64_t)0);
+                m.forwarded = j.value("fwd", false);
                 m.delivered = true;
                 m.readSent = false;
                 bool me = false;
@@ -1763,6 +1764,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.replyTo = j.value("re", "");
                 m.replyText = j.value("ret", "").substr(0, 400);
                 m.edited = j.value("edited", (int64_t)0);
+                m.forwarded = j.value("fwd", false);
                 for (auto& x : j.value("men", json::array()))
                     if (x.is_string() && m.mentions.size() < 64) m.mentions.push_back(x.get<std::string>());
                 m.delivered = true;
@@ -2940,7 +2942,8 @@ void Engine::StartBtServer() {
 
 // ============================================================================ public actions
 
-void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo, const std::vector<std::string>& mentions) {
+void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo, const std::vector<std::string>& mentions,
+                      bool forwarded) {
     if (text.empty()) return;
     auto lk = Lock();
     const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
@@ -2949,6 +2952,7 @@ void Engine::SendChat(const std::string& peerArg, const std::string& text, const
     m.outgoing = true;
     m.ts = NowMs();
     m.text = text;
+    m.forwarded = forwarded;
     if (IsGroupKey(peerArg))
         for (auto& a : mentions)
             if (m.mentions.size() < 64) m.mentions.push_back(a);
@@ -2990,6 +2994,7 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
         j["ret"] = m.replyText;
     }
     if (!m.mentions.empty()) j["men"] = m.mentions;
+    if (m.forwarded) j["fwd"] = true;
     if (m.edited) j["edited"] = m.edited;
     if (auto c = ReadyConn(device)) {
         Queue(c, type, j);

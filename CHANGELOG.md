@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Chat: **forward** messages and their files to another chat (a message's menu, or *Forward* with several
+  selected); they arrive marked *forwarded*. (Files go to people, text also to groups.)
+
 - Groups: **@mentions** - typing @ and the start of a name suggests the people in the group. The one named gets a
   notification even when the group is silent, an "@" on the unread count and an outline on the message.
 

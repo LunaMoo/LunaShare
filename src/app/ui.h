@@ -326,6 +326,8 @@ private:
     std::vector<MScreen> backStack;
     std::string selectedPeer;
     std::string chatInput;
+    std::vector<std::string> pendingForward;  // messages' text to pass on (with pendingSend: their files)
+    void ForwardMessages(const std::string& peer, const std::vector<std::string>& mids);
     bool focusInput = false;
     size_t lastMsgCount = 0;
     std::string lastMsgPeer;

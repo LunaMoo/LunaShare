@@ -374,6 +374,14 @@ int main() {
         CHECK(!A->EditMessage(idB, theirs, "hacked"), "cannot change their message");
     }
 
+    // forwarded: marked as such on the other side
+    A->SendChat(idB, "passed on", "", {}, true);
+    CHECK(WaitFor([&] {
+        auto l = B->Lock();
+        auto& m = B->chats[B->ChatKey(idA)].messages.back();
+        return m.text == "passed on" && m.forwarded;
+    }, 3000), "forwarded mark arrives");
+
     // ------------------------------------------------------------ silent chats
     printf("[silent chats]\n");
     {
