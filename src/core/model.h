@@ -113,6 +113,7 @@ struct Settings {
     bool playerLoop = false;
     bool playerAutoplay = false;
     bool playerAutoNext = false;
+    bool playerPip = true;            // Android: picture in picture when leaving the app during a movie
     float subtitleScale = 1.0f;       // subtitle text size (0.5 .. 2.5)      // at the end of a movie, the next one in its folder
     bool playerHideUi = false;        // the controls go as soon as it plays (back with a tap / click)
     bool playerOrientByAspect = false;  // Android: a tall movie plays upright, a wide one sideways

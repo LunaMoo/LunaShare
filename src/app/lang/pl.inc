@@ -990,3 +990,5 @@
 {"%.1f s sooner", "%.1f s wcześniej"},
 {"text size: %.0f%%", "rozmiar tekstu: %.0f%%"},
 {"Speed", "Prędkość"},
+{"Keep playing in a small window when leaving the app", "Odtwarzaj dalej w małym oknie po wyjściu z aplikacji"},
+{"Small window now", "Małe okno teraz"},

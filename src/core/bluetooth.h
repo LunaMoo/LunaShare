@@ -54,6 +54,9 @@ struct HostBridge {
     std::function<float()> mediaVolume;                 // Android: the media volume 0..1
     std::function<void(float)> setMediaVolume;
     std::function<void(float)> setScreenBrightness;     // Android: this window's brightness 0..1 (< 0: the system's)
+    std::function<void(bool allowed, int w, int h)> moviePip;  // Android: leaving the app keeps the movie in a small window
+    std::function<void()> enterPip;
+    std::function<bool()> inPip;
     // borderless: a window that leaves one pixel of the screen uncovered (Windows: then neither Windows nor the
     // graphics driver treat it as a full-screen game, so no Auto HDR / RTX HDR)
     std::function<void(bool on, bool borderless)> setFullscreen;

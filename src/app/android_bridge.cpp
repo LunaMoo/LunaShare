@@ -298,6 +298,9 @@ void AndroidBridgeInit(ls::Engine* engine) {
     };
     b.setMediaVolume = [](float v) { CallV("setMediaVolume", "(F)V", (jfloat)v); };
     b.setScreenBrightness = [](float v) { CallV("setScreenBrightness", "(F)V", (jfloat)v); };
+    b.moviePip = [](bool allowed, int w, int h) { CallV("moviePip", "(ZII)V", (jboolean)allowed, (jint)w, (jint)h); };
+    b.enterPip = []() { CallV("enterPip", "()V"); };
+    b.inPip = []() { return CallZ("inPictureInPicture", "()Z"); };
     b.isMetered = []() -> bool {
         if (!g_notify) return false;
         JNIEnv* e = Env();

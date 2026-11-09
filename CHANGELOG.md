@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Android: **picture in picture** - leaving the app (home button / gesture) while a movie plays keeps it playing in a
+  small window (Android 8+; an option, on by default), or *Small window now* in the player's menu.
 - Movie player: **speed** 0.5x - 2x (the sound keeps its pitch; watching together, it's everyone's), subtitles
   **later / sooner** in half-second steps (this movie) and their **text size** (remembered). The player module API
   is version 5 (set_speed, set_sub_delay).

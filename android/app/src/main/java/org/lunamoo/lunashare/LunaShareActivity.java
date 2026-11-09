@@ -237,6 +237,61 @@ public class LunaShareActivity extends SDLActivity {
         return kbFraction;
     }
 
+    // ---- picture in picture: a movie playing goes on in a small window when the app is left
+    private static volatile boolean pipAllowed = false, inPip = false;
+    private static volatile int pipW = 16, pipH = 9;
+
+    private static android.app.PictureInPictureParams pipParams() {
+        float r = pipH > 0 ? (float)pipW / pipH : 16f / 9f;
+        r = Math.max(1f / 2.3f, Math.min(2.3f, r));  // (what Android takes)
+        android.app.PictureInPictureParams.Builder b = new android.app.PictureInPictureParams.Builder()
+            .setAspectRatio(new android.util.Rational(Math.round(r * 1000), 1000));
+        if (Build.VERSION.SDK_INT >= 31) b.setAutoEnterEnabled(pipAllowed).setSeamlessResizeEnabled(true);
+        return b.build();
+    }
+
+    /** Whether leaving the app now keeps the movie going in a small window, and the movie's shape. */
+    public static void moviePip(final boolean allowed, final int w, final int h) {
+        pipAllowed = allowed;
+        if (w > 0 && h > 0) {
+            pipW = w;
+            pipH = h;
+        }
+        if (Build.VERSION.SDK_INT < 26) return;
+        ui(() -> {
+            LunaShareActivity a = self;
+            if (a == null) return;
+            try { a.setPictureInPictureParams(pipParams()); } catch (Exception e) { }
+        });
+    }
+
+    /** The picture-in-picture button. */
+    public static void enterPip() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        ui(() -> {
+            LunaShareActivity a = self;
+            if (a == null) return;
+            try { a.enterPictureInPictureMode(pipParams()); } catch (Exception e) { }
+        });
+    }
+
+    public static boolean inPictureInPicture() { return inPip; }
+
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        // (Android 12+ enters by itself - setAutoEnterEnabled)
+        if (pipAllowed && Build.VERSION.SDK_INT >= 26 && Build.VERSION.SDK_INT < 31) {
+            try { enterPictureInPictureMode(pipParams()); } catch (Exception e) { }
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean in, android.content.res.Configuration c) {
+        super.onPictureInPictureModeChanged(in, c);
+        inPip = in;
+    }
+
     /** Media volume 0..1 (the movie player's swipe on the right). */
     public static float mediaVolume() {
         LunaShareActivity a = self;

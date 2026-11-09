@@ -37,6 +37,12 @@ In the sound / subtitles / picture menu: *Speed* 0.5x, 0.75x, 1x, 1.25x, 1.5x, 2
 watching together it's everyone's speed. Under the subtitles: *-0.5 s* / *+0.5 s* when they're out of step with the
 voices (this device, this movie) and the subtitles' text size (remembered).
 
+## Picture in picture (Android)
+
+Leaving the app while a movie plays (the home button or gesture) keeps it going in a small window you can move
+around - Android 8 and newer. Tap it to come back full screen. *Keep playing in a small window when leaving the app*
+in the player's menu turns it off; *Small window now* goes there at once.
+
 ## Gestures (phones)
 
 - Double tap the left / right third of the picture: 10 seconds back / on (for everyone, watching together).

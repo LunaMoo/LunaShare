@@ -47,6 +47,16 @@ void App::WatchSync() {
         }
         watchActive = SteadyMs();
     }
+    if (Bridge().moviePip) {  // Android: leaving the app during a playing movie keeps it in a small window
+        const LspInfo& inf = Player().Info();
+        int vw = inf.width > 0 ? inf.width : 16, vh = inf.height > 0 ? inf.height : 9;
+        int st = movie && w.playing && eng.settings.playerPip ? (vw * 10000 + vh) : 0;
+        if (st != watchPipState) {
+            watchPipState = st;
+            Bridge().moviePip(st != 0, vw, vh);
+        }
+    }
+    watchInPip = Bridge().inPip && movie && Bridge().inPip();
     bool awake = w.sid && w.playing;
     if (awake != watchAwake) {
         watchAwake = awake;
@@ -346,12 +356,20 @@ void App::WatchTracksPopup() {
         ch |= ImGui::Checkbox(T("Play the next one automatically (in the folder)"), &s.playerAutoNext);
         ch |= ImGui::Checkbox(T("Hide the controls while playing (a tap brings them back)"), &s.playerHideUi);
         if (IsMobilePlatform()) ch |= ImGui::Checkbox(T("Turn the screen by the movie's shape (tall: upright)"), &s.playerOrientByAspect);
+        if (Bridge().moviePip) {
+            ch |= ImGui::Checkbox(T("Keep playing in a small window when leaving the app"), &s.playerPip);
+            if (ImGui::Button(T("Small window now"), ImVec2(mobile ? -1 : 0, h)) && Bridge().enterPip) {
+                ImGui::CloseCurrentPopup();
+                Bridge().enterPip();
+            }
+        }
         if (ch) {
             eng.ApplySettings(s);
             edit.playerAutoplay = s.playerAutoplay;
             edit.playerAutoNext = s.playerAutoNext;
             edit.playerHideUi = s.playerHideUi;
             edit.playerOrientByAspect = s.playerOrientByAspect;
+            edit.playerPip = s.playerPip;
         }
     }
     auto tracks = Player().Tracks();
@@ -692,6 +710,12 @@ void App::DrawWatch() {
         dl->AddText(ImVec2((a.x + b.x - ts.x) * 0.5f, (a.y + b.y - ts.y) * 0.5f), IM_COL32(220, 220, 220, 255), msg);
     }
     float barH = bh + ImGui::GetTextLineHeight() + sp * 3;
+    if (watchInPip) {  // picture in picture: only the picture (and the subtitles)
+        if (open) DrawSubtitles(dl, fit0, fit1, b.y, eng.settings.subtitleScale * 0.7f);
+        watchActive = 0;
+        ImGui::End();
+        return;
+    }
     if (open) DrawSubtitles(dl, fit0, fit1, controls ? b.y - barH - sp : b.y, eng.settings.subtitleScale);
     if (open && w.hold) {  // a spinner while someone loads
         ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
