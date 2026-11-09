@@ -823,6 +823,12 @@ int main() {
             pm = m.mid;
             return m.pollQ == "Sunday lunch?" && m.pollOpts.size() == 3;
         }, 3000), "the poll arrives");
+        CHECK(WaitFor([&] {  // (carol votes too: she must have it first)
+            auto l = C->Lock();
+            for (auto& m : C->chats[gk].messages)
+                if (m.mid == pm) return true;
+            return false;
+        }, 3000), "the poll reaches carol");
         B->Vote(gk, pm, {1});
         C->Vote(gk, pm, {1, 2});  // (one answer only: the first counts)
         auto votesOn = [&](Engine& e, const std::string& who, int want) {
