@@ -705,6 +705,20 @@ int main() {
             A->WatchSetAllowSave(true);
             CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
         }
+        {  // the host goes on to another movie: the viewer comes along
+            std::string movie2 = JoinPath(Root(), "src/movie2.bin");
+            WriteRandomFile(movie2, 3 << 20, 78);
+            uint64_t s5 = A->StartWatch(bob, movie);
+            CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watchInvites.empty() && B->watchInvites.back().sid == s5; }, 3000) && B->JoinWatch(s5),
+                  "watching");
+            CHECK(WaitFor([&] { auto l = A->Lock(); return A->watch.people.size() == 2; }, 3000), "together");
+            uint64_t s6 = A->WatchSwitch(movie2);
+            CHECK(s6 && s6 != s5, "the next movie");
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == s6 && B->watch.name == "movie2.bin"; }, 3000), "the viewer comes along");
+            CHECK(WaitFor([&] { auto l = A->Lock(); return A->watch.people.size() == 2; }, 3000), "still together");
+            A->LeaveWatch();
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
+        }
         // the movie player: alone first, then someone is added
         uint64_t sid2 = A->StartWatch("", movie);
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -875,6 +889,41 @@ int main() {
             auto l = A->Lock();
             CHECK(A->listen.sid == 0, "ended");
         }
+    }
+
+    printf("[chat archives, history sent back]\n");
+    {
+        std::string bk = A->ChatKey(idB);
+        auto texts = [&](Engine& e, const std::string& key) {
+            auto l = e.Lock();
+            std::vector<std::pair<std::string, bool>> v;
+            for (auto& m : e.chats[key].messages)
+                if (m.kind == MsgKind::Text) v.push_back({m.text, m.outgoing});
+            return v;
+        };
+        auto before = texts(*A, bk);
+        CHECK(!before.empty(), "a chat to archive (%d)", (int)before.size());
+        std::string path = A->ArchiveChat(bk, true, false);
+        CHECK(!path.empty() && FileExists(path), "archived");
+        CHECK(texts(*A, bk).empty(), "and cleared");
+        auto list = A->ChatArchives(bk);
+        CHECK(list.size() == 1 && list[0].path == path && list[0].count >= (int)before.size(), "listed");
+        CHECK(A->RestoreChatArchive(path) >= (int)before.size(), "restored");
+        CHECK(texts(*A, bk) == before, "the same messages, the same sides");
+        CHECK(A->RestoreChatArchive(path) == 0, "restoring again adds nothing");
+        CHECK(A->DeleteChatArchive(path) && A->ChatArchives(bk).empty(), "archive deleted");
+        // lost both: Bob sends it back (after agreeing)
+        A->ClearChat(bk);
+        A->AskHistory(bk);
+        std::string ak = B->ChatKey(idA);
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->historyAsks.empty() && B->historyAsks.back().key == ak; }, 3000), "Bob is asked");
+        B->AnswerHistoryAsk(idA, ak, true);
+        CHECK(WaitFor([&] { return texts(*A, bk).size() >= before.size(); }, 5000), "the history comes back");
+        auto back = texts(*A, bk);
+        bool same = true;
+        for (auto& t : before)
+            if (std::find(back.begin(), back.end(), t) == back.end()) same = false;
+        CHECK(same, "with the right sides (mine are mine)");
     }
 
     printf("[accounts: recovery phrase, backup, removing a device]\n");

@@ -2128,6 +2128,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::ListenAdd:
             if (!c->mailbox) HandleListen(c, f.type, j);
             break;
+        case Msg::HistoryAsk: case Msg::HistoryData:
+            if (!c->mailbox) HandleHistory(c, f.type, j);
+            break;
         case Msg::CallInvite: {
             uint64_t id = j.value("call", (uint64_t)0);
             if (j.contains("gid")) {

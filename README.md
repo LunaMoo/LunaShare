@@ -49,6 +49,10 @@ after receiving, so you know it arrived intact.
 - Pick the sound track and subtitles (from the movie, from files next to it, or any file you choose); the host's
   subtitles are offered to everyone. Full screen with controls that hide by themselves; phones turn to landscape.
 
+**Chats** (see [docs/CHAT.md](docs/CHAT.md))
+- Links open in the browser. Chat history: archive (compressed) and clear, restore, or ask the other side to send it
+  back if you lost it.
+
 **Music player** (see [docs/MUSIC.md](docs/MUSIC.md))
 - Your music folders and everything you receive, with tags and covers; songs, artists, albums, genres, folders and
   your own playlists; repeat, shuffle, a mini player everywhere.
@@ -285,6 +289,7 @@ src/core/        engine (no UI dependencies)
   groups.cpp       group chats          group_calls.cpp  group voice/video calls (direct or through the server)
   watch.cpp        watch together       library.cpp      shared folders, multi-source downloads
   listen.cpp       listening together (shared music queue, songs streamed from each device)
+  chat_archive.cpp chat archives, history sent back
   protocol.*       framing: [u32 len][u8 type][payload]  (JSON control frames, binary data frames)
   crypto.*         handshake, frame encryption, identity and account keys, safety numbers
   hash.*           SHA-256, CRC-32

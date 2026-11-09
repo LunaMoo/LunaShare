@@ -1,7 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.5.4
 
+- **Chat history** (the clock button in a chat's header), see docs/CHAT.md:
+  - archive a chat (compressed, on this device) and optionally clear it - keeping yesterday's and today's messages
+    if you like; files aren't copied, the messages keep their links, so files still on the disk open from a
+    restored chat like before;
+  - a list of the archives (of this chat or all of them): restore (only what the chat doesn't have) or delete;
+  - lost both? Ask the other side (and your other devices) to send the history back - they're asked first.
+- Links in messages (`https://...`, `www....`) are links: a tap opens them in the browser.
+- **Movies** tab (a *Movie player* screen on phones): the videos in your folders (received files and Videos always
+  included) as pictures with their length, by folder; search, sort, *Open a file...*. The Library's *Movie player*
+  button goes there.
+- Movie player: **<** and **>** on the sides go to the previous / next movie in the folder (or in the contact's
+  Shared folder it came from); watching together, everyone comes along to the next one.
 - Listening together: smooth transitions and remix work too (set in *Sound...*, for everyone) - the same part of
   every song and the same blend into the next one for everybody.
 - Listening together: shuffle and repeat work (for everyone - anyone can switch them): repeat the song or the whole

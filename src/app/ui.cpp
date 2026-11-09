@@ -123,6 +123,11 @@ void App::Frame() {
                 break;
             }
     }
+    static bool devHist = getenv("LUNASHARE_OPENHIST") != nullptr;  // dev: the chat history window (screenshots)
+    if (devHist && !selectedPeer.empty() && ImGui::GetFrameCount() > 200) {
+        devHist = false;
+        OpenChatHistory(selectedPeer);
+    }
     static const char* devMovie = getenv("LUNASHARE_MOVIE");  // dev: open a movie in the movie player (screenshots)
     if (devMovie && ImGui::GetFrameCount() == 20 && eng.StartWatch("", devMovie)) watchShown = true;
     static const char* autoWatch = getenv("LUNASHARE_AUTOWATCH");  // dev: join the first movie invitation (screenshots)
@@ -154,6 +159,7 @@ void App::Frame() {
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
         if (getenv("LUNASHARE_OPENSOUND")) musicSoundOpen = true;
         if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
+        if (a == "movies") { tab = Tab::Movies; screen = MScreen::Movies; }
         if (a == "music" || a == "musicnow") { tab = Tab::Music; screen = MScreen::Music; musicNowShown = a == "musicnow"; }
         if (a == "home") screen = MScreen::Home;
         tabForce = true;
@@ -292,6 +298,7 @@ void App::Frame() {
     if (m.mobile && videoFull && VideoVisible()) DrawVideoOverlay();
     if (watchShown) DrawWatch();
     if (camPanel) DrawCameraPanel();  // call settings: sound always, camera while it is on
+    DrawChatHistoryPopup();
     DrawToasts();
     DrawTextMirror();
     if (Media().MicTesting() && ImGui::GetFrameCount() - settingsShownFrame > 2) Media().StopMicTest();
@@ -350,6 +357,7 @@ void App::PullEvents() {
                 break;
             case EventType::TransferDone:
                 if (music::Library::IsAudioPath(e.text)) music::Lib().Rescan();  // (received music joins the library)
+                if (PlayerHost::IsVideoPath(e.text)) movieRescanWanted = true;  // (and movies the Movies tab)
                 if (eng.ChatKey(e.peer) == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !ui::M().mobile) continue;
                 t.title = T("Transfer complete (verified)");
                 t.text = e.text + (who.empty() ? "" : "  -  " + who);
@@ -752,6 +760,7 @@ void App::DrawDesktop() {
         item(tl.c_str(), Tab::Transfers);
         item(T("History"), Tab::History);
         item(T("Library"), Tab::Library);
+        item(T("Movies"), Tab::Movies);
         item(T("Music"), Tab::Music);
         item(T("Devices"), Tab::Devices);
         item(T("Connect"), Tab::Nearby);
@@ -777,6 +786,7 @@ void App::DrawDesktop() {
         case Tab::History: DrawHistory(); break;
         case Tab::Library: DrawLibrary(); break;
         case Tab::Music: DrawMusic(); break;
+        case Tab::Movies: DrawMovies(); break;
         case Tab::Devices: DrawDevices(); break;
         case Tab::Nearby: DrawNearby(); break;
         case Tab::Settings: DrawSettings(); break;
@@ -863,6 +873,7 @@ void App::DrawMobile() {
         case MScreen::History: title = T("Shared files"); break;
         case MScreen::Library: title = T("Library"); break;
         case MScreen::Music: title = T("Music"); break;
+        case MScreen::Movies: title = T("Movies"); break;
         case MScreen::Nearby: title = T("Connect"); break;
         case MScreen::Settings: title = T("Settings"); break;
         case MScreen::Devices: title = T("Device"); break;
@@ -874,7 +885,7 @@ void App::DrawMobile() {
     bool videoable = callable && Media().VideoAvailable();
     bool webcam = chatScreen && !groupChat && WebcamButtonShown(selectedPeer);
     bool watchable = chatScreen && Player().Available();
-    int nb = chatScreen ? 1 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0) : 0;
+    int nb = chatScreen ? 2 + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0) : 0;
     float sp = ImGui::GetStyle().ItemSpacing.x;
     float rowEnd = ImGui::GetContentRegionMax().x;
     float titleX = ImGui::GetCursorPosX();
@@ -924,6 +935,8 @@ void App::DrawMobile() {
             if (ui::IconButton("watch", Icon::Play, nullptr, hb)) OpenWatchPicker(selectedPeer);
             ImGui::SameLine();
         }
+        if (ui::IconButton("chathist", Icon::History, nullptr, hb)) OpenChatHistory(selectedPeer);
+        ImGui::SameLine();
         if (groupChat) GroupButtons(selectedPeer, hb);
         else if (ui::IconButton("attach", Icon::Attach, nullptr, hb)) {
             browseFor = BrowseFor::SendFiles;
@@ -944,6 +957,7 @@ void App::DrawMobile() {
         case MScreen::History: DrawHistory(); break;
         case MScreen::Library: DrawLibrary(); break;
         case MScreen::Music: DrawMusic(); break;
+        case MScreen::Movies: DrawMovies(); break;
         case MScreen::Nearby: DrawNearby(); break;
         case MScreen::Settings: DrawSettings(); break;
         case MScreen::Devices:
@@ -982,7 +996,7 @@ void App::DrawMobileHome() {
         if (ui::BigButton(T("New group"), Icon::Users)) OpenNewGroup();
         if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Link)) ImGui::OpenPopup("##invites");
     }
-    if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMoviePlayer();
+    if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMovies();
     if (Player().Available() && ui::BigButton(T("Music player"), Icon::Speaker)) {
         backStack.push_back(screen);
         screen = MScreen::Music;
@@ -1094,7 +1108,7 @@ void App::DrawChat(const std::string& peer) {
         bool videoable = callable && Media().VideoAvailable();
         bool webcam = !grp && WebcamButtonShown(peer);
         bool watchable = Player().Available() && !(grp && grp->left);
-        int nb = (grp ? 1 : 3) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
+        int nb = (grp ? 2 : 4) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (webcam) {
             WebcamButton(peer, bw);
@@ -1112,6 +1126,8 @@ void App::DrawChat(const std::string& peer) {
             if (ui::IconButton("watch", Icon::Play, T("Watch a movie together"), bw)) OpenWatchPicker(peer);
             ImGui::SameLine();
         }
+        if (ui::IconButton("chathist", Icon::History, T("Chat history: archive, clear, restore"), bw)) OpenChatHistory(peer);
+        ImGui::SameLine();
         if (grp) {
             GroupButtons(peer, bw);
         } else {
@@ -1133,6 +1149,7 @@ void App::DrawChat(const std::string& peer) {
 
     DrawWatchBanner(peer);
     DrawListenBanner(peer);
+    DrawHistoryAskBanner(peer);
     // selection toolbar
     if (!selMsgs.empty()) {
         float h = mobile ? ui::M().rowH : 0;
@@ -1431,6 +1448,79 @@ void App::DrawDeleteConfirm(const std::string& peer) {
     ImGui::EndPopup();
 }
 
+// ---------------------------------------------------------------- links in messages
+
+struct TextLink {
+    size_t a, b;      // bytes in the text
+    std::string url;  // (www. gets https://)
+};
+
+// http://..., https://... and www.... (to the next space; a full stop or a bracket at the very end isn't part of it)
+static std::vector<TextLink> FindLinks(const std::string& s) {
+    std::vector<TextLink> out;
+    auto low = [&](size_t i) { return (char)tolower((unsigned char)s[i]); };
+    auto at = [&](size_t i, const char* w) {
+        for (size_t k = 0; w[k]; k++)
+            if (i + k >= s.size() || low(i + k) != w[k]) return false;
+        return true;
+    };
+    for (size_t i = 0; i < s.size(); i++) {
+        if (i > 0 && !isspace((unsigned char)s[i - 1]) && s[i - 1] != '(' && s[i - 1] != '<' && s[i - 1] != '"' && s[i - 1] != '\'') continue;
+        bool http = at(i, "http://") || at(i, "https://");
+        bool www = !http && at(i, "www.");
+        if (!http && !www) continue;
+        size_t e = i;
+        while (e < s.size() && !isspace((unsigned char)s[e]) && s[e] != '"' && s[e] != '<' && s[e] != '>') e++;
+        while (e > i && strchr(".,;:!?)'", s[e - 1])) {
+            if (s[e - 1] == ')' && std::count(s.begin() + (long)i, s.begin() + (long)e, '(') >= std::count(s.begin() + (long)i, s.begin() + (long)e, ')'))
+                break;  // (a bracket that belongs to it: wikipedia/Foo_(bar))
+            e--;
+        }
+        size_t minLen = http ? (at(i, "https://") ? 9 : 8) : 5;
+        if (e - i < minLen) continue;
+        std::string u = s.substr(i, e - i);
+        out.push_back({i, e, www ? "https://" + u : u});
+        i = e;
+    }
+    return out;
+}
+
+// where each character of a wrapped text lands (the same way ImFont::RenderText wraps)
+struct TextGlyph {
+    size_t off, end;
+    float x, y, w;
+};
+static std::vector<TextGlyph> LayoutText(ImFont* font, float size, const char* text, const char* text_end, float wrap) {
+    std::vector<TextGlyph> g;
+    const char* s = text;
+    float x = 0, y = 0, lh = size;
+    const char* eol = nullptr;
+    while (s < text_end) {
+        if (!eol) eol = ImFontCalcWordWrapPositionEx(font, size, s, text_end, wrap - x);
+        if (s >= eol) {
+            x = 0;
+            y += lh;
+            eol = nullptr;
+            s = ImTextCalcWordWrapNextLineStart(s, text_end);
+            continue;
+        }
+        unsigned int c = (unsigned int)*s;
+        int n = c < 0x80 ? 1 : ImTextCharFromUtf8(&c, s, text_end);
+        if (n <= 0) n = 1;
+        if (c == '\n') {
+            x = 0;
+            y += lh;
+            s += n;
+            continue;
+        }
+        float w = font->CalcTextSizeA(size, FLT_MAX, 0, s, s + n).x;
+        g.push_back({(size_t)(s - text), (size_t)(s - text + n), x, y, w});
+        x += w;
+        s += n;
+    }
+    return g;
+}
+
 void App::DrawMessages(const std::string& peer) {
     auto it = eng.chats.find(peer);
     if (it == eng.chats.end() || it->second.messages.empty()) {
@@ -1541,12 +1631,33 @@ void App::DrawMessages(const std::string& peer) {
             float bh = ts.y + ms.y * smallScale + pad * 1.6f;
             ImGui::SetCursorPosX(m.outgoing ? x0 + avail - bw : x0);
             ImVec2 p0 = ImGui::GetCursorScreenPos();
+            // links: where they are (to draw them as links and open the one tapped)
+            std::vector<TextLink> links = bigEmoji ? std::vector<TextLink>() : FindLinks(shown);
+            std::vector<TextGlyph> glyphs;
+            int linkHover = -1;
+            ImVec2 tp(p0.x + pad, p0.y + pad * 0.7f);
+            if (!links.empty()) {
+                glyphs = LayoutText(ImGui::GetFont(), textSize, shown.c_str(), shown.c_str() + shown.size(), wrap);
+                ImVec2 mp = io.MousePos;
+                for (auto& gl : glyphs)
+                    if (mp.x >= tp.x + gl.x && mp.x < tp.x + gl.x + gl.w && mp.y >= tp.y + gl.y && mp.y < tp.y + gl.y + textSize)
+                        for (size_t k = 0; k < links.size(); k++)
+                            if (gl.off >= links[k].a && gl.off < links[k].b) linkHover = (int)k;
+            }
             ImGui::InvisibleButton("##msg", ImVec2(bw, bh), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+            if (linkHover >= 0 && ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                if (!mobile) ImGui::SetTooltip("%s", links[(size_t)linkHover].url.c_str());
+            }
+            bool linkTap = linkHover >= 0 && ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(0) && !io.KeyCtrl && !io.KeyShift &&
+                           !selectionMode && std::abs(ImGui::GetMouseDragDelta(0, 0).x) < 8 && std::abs(ImGui::GetMouseDragDelta(0, 0).y) < 8 &&
+                           io.MouseDownDurationPrev[0] < 0.5f;
+            if (linkTap) SDL_OpenURL(links[(size_t)linkHover].url.c_str());  // (the system's browser)
             bool hovered = ImGui::IsItemHovered();
             bool longPress = mobile && ImGui::IsItemActive() && io.MouseDownDuration[0] > 0.55f && ImGui::GetMouseDragDelta(0).y == 0 &&
                              ImGui::GetMouseDragDelta(0).x == 0;
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) || (ImGui::IsItemDeactivated() && false)) {}
-            if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(0) && !longPress) {
+            if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(0) && !longPress && !linkTap) {
                 if (io.KeyShift && lastSelIndex >= 0) {
                     int a = std::min(lastSelIndex, i), b = std::max(lastSelIndex, i);
                     for (int k = a; k <= b; k++) selMsgs.insert(cv.messages[(size_t)k].mid);
@@ -1579,7 +1690,34 @@ void App::DrawMessages(const std::string& peer) {
                                           m.outgoing && !sel ? 0.55f : 1.0f);
             if (hovered && !sel) bg = ImGui::GetColorU32(m.outgoing ? ImGuiCol_ButtonActive : ImGuiCol_FrameBgHovered, m.outgoing ? 0.7f : 1.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), bg, pad);
-            dl->AddText(ImGui::GetFont(), textSize, ImVec2(p0.x + pad, p0.y + pad * 0.7f), ImGui::GetColorU32(ImGuiCol_Text), shown.c_str(), nullptr, wrap);
+            if (glyphs.empty()) {
+                dl->AddText(ImGui::GetFont(), textSize, tp, ImGui::GetColorU32(ImGuiCol_Text), shown.c_str(), nullptr, wrap);
+            } else {  // with links: run by run, links coloured and underlined
+                ImU32 tc = ImGui::GetColorU32(ImGuiCol_Text), lc = IM_COL32(110, 175, 255, 255), lch = IM_COL32(160, 205, 255, 255);
+                size_t k = 0;
+                while (k < glyphs.size()) {
+                    int li = -1;
+                    for (size_t q = 0; q < links.size(); q++)
+                        if (glyphs[k].off >= links[q].a && glyphs[k].off < links[q].b) li = (int)q;
+                    size_t e = k + 1;
+                    while (e < glyphs.size() && glyphs[e].y == glyphs[k].y) {
+                        int lj = -1;
+                        for (size_t q = 0; q < links.size(); q++)
+                            if (glyphs[e].off >= links[q].a && glyphs[e].off < links[q].b) lj = (int)q;
+                        if (lj != li) break;
+                        e++;
+                    }
+                    const TextGlyph &g0 = glyphs[k], &g1 = glyphs[e - 1];
+                    ImVec2 rp(tp.x + g0.x, tp.y + g0.y);
+                    ImU32 col = li < 0 ? tc : li == linkHover ? lch : lc;
+                    dl->AddText(ImGui::GetFont(), textSize, rp, col, shown.c_str() + g0.off, shown.c_str() + g1.end);
+                    if (li >= 0) {
+                        float uy = rp.y + textSize - 1;
+                        dl->AddLine(ImVec2(rp.x, uy), ImVec2(tp.x + g1.x + g1.w, uy), col, 1.0f);
+                    }
+                    k = e;
+                }
+            }
             ImU32 metaCol = m.outgoing && !m.delivered && m.mailedTo.empty() ? ui::ColWarn()
                           : m.outgoing && m.read ? IM_COL32(90, 170, 255, 255) : ui::ColMuted();
             dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale,
@@ -2952,6 +3090,14 @@ void App::DrawPopups() {
                 break;
             case BrowseFor::Movie:
                 if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;
+                break;
+            case BrowseFor::MovieFolder:
+                if (!res.empty() && std::find(s.movieFolders.begin(), s.movieFolders.end(), res[0]) == s.movieFolders.end()) {
+                    s.movieFolders.push_back(res[0]);
+                    edit.movieFolders = s.movieFolders;
+                    movieRescanWanted = true;
+                    movieScanned = false;
+                }
                 break;
             case BrowseFor::DownloadDir:
                 edit.downloadDir = res[0];

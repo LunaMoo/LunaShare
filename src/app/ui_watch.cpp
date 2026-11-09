@@ -153,6 +153,16 @@ void App::OpenMoviePlayer() {
     browser.Open(FileBrowser::Mode::OpenFile, T("Movie player"), browser.lastDir);
 }
 
+void App::OpenMovies() {
+    if (ui::M().mobile) {
+        if (screen != MScreen::Movies) backStack.push_back(screen);
+        screen = MScreen::Movies;
+    } else {
+        tab = Tab::Movies;
+        tabForce = true;
+    }
+}
+
 void App::ToggleLoop() {
     Settings s = eng.GetSettings();
     s.playerLoop = !s.playerLoop;
@@ -444,10 +454,75 @@ static void DrawSubtitles(ImDrawList* dl, ImVec2 fit0, ImVec2 fit1, float bottom
     }
 }
 
+// file names in a natural order ("Episode 2" before "Episode 10")
+bool NaturalLess(const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (isdigit((unsigned char)a[i]) && isdigit((unsigned char)b[j])) {
+            size_t i2 = i, j2 = j;
+            while (i2 < a.size() && a[i2] == '0') i2++;
+            while (j2 < b.size() && b[j2] == '0') j2++;
+            size_t ie = i2, je = j2;
+            while (ie < a.size() && isdigit((unsigned char)a[ie])) ie++;
+            while (je < b.size() && isdigit((unsigned char)b[je])) je++;
+            if (ie - i2 != je - j2) return ie - i2 < je - j2;
+            int c = a.compare(i2, ie - i2, b, j2, je - j2);
+            if (c) return c < 0;
+            i = ie;
+            j = je;
+            continue;
+        }
+        int ca = tolower((unsigned char)a[i]), cb = tolower((unsigned char)b[j]);
+        if (ca != cb) return ca < cb;
+        i++;
+        j++;
+    }
+    return a.size() - i < b.size() - j;
+}
+
+int App::WatchNeighbor(int dir) {
+    const WatchInfo& w = eng.watch;
+    if (!w.libId.empty()) {  // from a contact's Shared folder: the list it was started from
+        int at = -1;
+        for (int i = 0; i < (int)watchLibList.size(); i++)
+            if (watchLibList[(size_t)i].id == w.libId) at = i;
+        int n = at + dir;
+        return at >= 0 && n >= 0 && n < (int)watchLibList.size() ? n : -1;
+    }
+    if (!w.host.empty() || w.path.empty()) return -1;  // (a viewer: the host chooses)
+    std::string dir0 = DirName(w.path);
+    if (dir0 != watchDirOf) {  // (the folder, once)
+        watchDirOf = dir0;
+        watchDirList.clear();
+        for (auto& e : ListDir(dir0))
+            if (!e.isDir && PlayerHost::IsVideoPath(e.name)) watchDirList.push_back(e.name);
+        std::sort(watchDirList.begin(), watchDirList.end(), NaturalLess);
+    }
+    std::string me = BaseName(w.path);
+    for (int i = 0; i < (int)watchDirList.size(); i++)
+        if (watchDirList[(size_t)i] == me) {
+            int n = i + dir;
+            return n >= 0 && n < (int)watchDirList.size() ? n : -1;
+        }
+    return -1;
+}
+
+void App::WatchStep(int dir) {
+    int n = WatchNeighbor(dir);
+    if (n < 0) return;
+    watchFailed = false;
+    if (!eng.watch.libId.empty()) {
+        eng.StartLibraryWatch(watchLibList[(size_t)n]);
+        return;
+    }
+    eng.WatchSwitch(JoinPath(watchDirOf, watchDirList[(size_t)n]));
+}
+
 // the movie, full window: the picture fills it, the controls lie on top and hide after a few seconds
 void App::DrawWatch() {
     const WatchInfo& w = eng.watch;
     if (!w.sid) {
+        if (eng.WatchFollowing()) return;  // (the host went on to the next movie: it comes in a moment)
         watchShown = false;
         return;
     }
@@ -550,6 +625,24 @@ void App::DrawWatch() {
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) eng.WatchControl(playing, std::max(0.0, pos - 10));
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) eng.WatchControl(playing, dur > 0 ? std::min(dur - 1, pos + 10) : pos + 10);
 
+    if (controls) {  // ---- < and >: the previous / next movie in the folder
+        float sz = bh * 1.3f;
+        for (int d : {-1, 1}) {
+            if (WatchNeighbor(d) < 0) continue;
+            ImVec2 c(d < 0 ? a.x + pad + sz * 0.5f : b.x - pad - sz * 0.5f, (a.y + b.y) * 0.5f);
+            ImGui::SetCursorScreenPos(ImVec2(c.x - sz * 0.5f, c.y - sz * 0.5f));
+            ImGui::PushID(d);
+            bool hit = ImGui::InvisibleButton("##wstep", ImVec2(sz, sz));
+            bool hov = ImGui::IsItemHovered();
+            if (hov) ImGui::SetTooltip("%s", d < 0 ? T("Previous movie in the folder") : T("Next movie in the folder"));
+            ImGui::PopID();
+            dl->AddCircleFilled(c, sz * 0.5f, IM_COL32(0, 0, 0, hov ? 170 : 125));
+            float s2 = sz * 0.17f;
+            ImVec2 pts[3] = {ImVec2(c.x + s2 * 0.5f * d * -1, c.y - s2), ImVec2(c.x + s2 * 0.5f * d, c.y), ImVec2(c.x + s2 * 0.5f * d * -1, c.y + s2)};
+            dl->AddPolyline(pts, 3, IM_COL32(255, 255, 255, 230), 0, std::max(2.5f, sz * 0.06f));
+            if (hit) WatchStep(d);
+        }
+    }
     if (controls) {
         // ---- top: back, title, who's watching, leave
         dl->AddRectFilledMultiColor(a, ImVec2(b.x, a.y + bh * 2.2f), IM_COL32(0, 0, 0, 170), IM_COL32(0, 0, 0, 170), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));

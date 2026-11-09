@@ -39,7 +39,7 @@ void App::DrawLibrary() {
     if (mobile) ui::TouchScroll();
     DrawWatchResume();
     if (Player().Available()) {
-        if (ui::IconTextButton(T("Movie player..."), Icon::Play, ImVec2(mobile ? -1 : 0, h))) OpenMoviePlayer();
+        if (ui::IconTextButton(T("Movie player"), Icon::Play, ImVec2(mobile ? -1 : 0, h))) OpenMovies();
         if (!mobile) {
             ImGui::SameLine();
             ImGui::TextDisabled("%s", T("Play a movie here - you can add people to watch with you afterwards."));
@@ -211,7 +211,16 @@ void App::DrawLibrary() {
                     }
                     if (!mobile) ImGui::SameLine();
                 } else if (Player().Available() && Player().Playable(f.rel)) {  // watch it while it comes
-                    if (ui::IconTextButton(T("Play"), Icon::Play, ImVec2(mobile ? -1 : 0, h)) && eng.StartLibraryWatch(f)) watchShown = true;
+                    if (ui::IconTextButton(T("Play"), Icon::Play, ImVec2(mobile ? -1 : 0, h)) && eng.StartLibraryWatch(f)) {
+                        watchShown = true;
+                        watchLibList.clear();  // (previous / next: the videos of that folder)
+                        std::string dir = DirName(f.rel);
+                        std::vector<LibFile> v;
+                        for (auto& g : files)
+                            if (Player().Playable(g.rel) && !music::Library::IsAudioPath(g.rel) && DirName(g.rel) == dir) v.push_back(g);
+                        std::sort(v.begin(), v.end(), [](const LibFile& x, const LibFile& y) { return x.rel < y.rel; });
+                        watchLibList = v;
+                    }
                     if (!mobile) ImGui::SameLine();
                 }
                 if (eng.HaveShared(f.id)) {

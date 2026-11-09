@@ -117,7 +117,8 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     if (size <= 0) return 0;
     if (watch.sid) LeaveWatch();
     watch = WatchInfo();
-    watch.sid = RandomU64() | 1;
+    watch.sid = watchForceSid_ ? watchForceSid_ : RandomU64() | 1;
+    watchForceSid_ = 0;
     watch.key = key;
     watch.name = BaseName(path);
     watch.path = path;
@@ -159,6 +160,22 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     for (auto& d : to) QueueToPeer(d, Msg::WatchInvite, inv);
     AddSystemMessage(key, "You started watching \"" + watch.name + "\" together.");
     return watch.sid;
+}
+
+uint64_t Engine::WatchSwitch(const std::string& path) {
+    auto lk = Lock();
+    if (!watch.sid || !watch.host.empty() || !watch.libId.empty() || FileSize(path) <= 0) return 0;
+    std::vector<std::string> keys = watchKeys;
+    bool loop = watch.loop;
+    uint64_t next = RandomU64() | 1;
+    watchEndNext_ = next;
+    LeaveWatch();  // (the viewers hear "next")
+    watchEndNext_ = 0;
+    watchForceSid_ = next;
+    uint64_t sid = StartWatch(keys.empty() ? "" : keys[0], path);
+    for (size_t i = 1; i < keys.size(); i++) WatchInviteTo(keys[i]);
+    watch.loop = loop;
+    return sid;
 }
 
 void Engine::WatchInviteTo(const std::string& key) {
@@ -456,7 +473,9 @@ void Engine::EndWatchLocked(const std::string& why) {
         for (auto& f : w.subFiles) RemoveFile(f);  // (the copies)
         if (!w.subFiles.empty()) RemoveFile(DirName(w.subFiles[0]));  // (their folder, where that works for folders)
     } else {
-        for (auto& d : watchViewers_) QueueToPeer(d, Msg::WatchLeave, {{"sid", w.sid}, {"end", true}});
+        json bye = {{"sid", w.sid}, {"end", true}};
+        if (watchEndNext_) bye["next"] = watchEndNext_;  // (switching movies: they come along)
+        for (auto& d : watchViewers_) QueueToPeer(d, Msg::WatchLeave, bye);
         auto sv = watchServed_.find(w.sid);
         if (sv != watchServed_.end() && sv->second.allowSave && !sv->second.savers.empty()) {
             sv->second.ended = true;  // someone is still saving it: the file stays open for them
@@ -554,6 +573,7 @@ void Engine::WatchControl(bool playing, double pos) {
 
 void Engine::WatchTick() {
     WatchSavesTick();
+    if (watchFollow_ && SteadyMs() - watchFollowAt_ > 15000) watchFollow_ = 0;  // (the next movie never came)
     if (!watch.sid) return;
     int64_t now = SteadyMs();
     if (watch.host.empty()) {
@@ -617,6 +637,11 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             if (w.size <= 0) return;
             watchInvites.push_back(w);
             if (watchInvites.size() > 10) watchInvites.erase(watchInvites.begin());
+            if (watchFollow_ == sid) {  // (the next movie of the one I was watching: straight in)
+                watchFollow_ = 0;
+                JoinWatch(sid);
+                break;
+            }
             std::string who = PeerName(ChatKey(dev));
             std::string text = who + " invites you to watch \"" + w.name + "\" together.";
             AddSystemMessage(key, text);
@@ -659,7 +684,18 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             if (j.value("end", false)) {
                 watchInvites.erase(std::remove_if(watchInvites.begin(), watchInvites.end(), [&](const WatchInviteInfo& w) { return w.sid == sid; }),
                                    watchInvites.end());
-                if (sid == watch.sid && dev == watch.host) EndWatchLocked(PeerName(ChatKey(dev)) + " stopped the movie.");
+                if (sid == watch.sid && dev == watch.host) {
+                    uint64_t next = j.value("next", (uint64_t)0);
+                    EndWatchLocked(next ? "" : PeerName(ChatKey(dev)) + " stopped the movie.");
+                    if (next) {  // the host went on to another movie: along to it
+                        bool have = std::any_of(watchInvites.begin(), watchInvites.end(), [&](const WatchInviteInfo& w) { return w.sid == next; });
+                        if (have) JoinWatch(next);
+                        else {
+                            watchFollow_ = next;
+                            watchFollowAt_ = SteadyMs();
+                        }
+                    }
+                }
                 return;
             }
             if (sid != watch.sid || !watch.host.empty()) return;

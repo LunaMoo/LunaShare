@@ -1,6 +1,8 @@
 // LunaShare - file sharing chat for LAN, phone hotspots and Bluetooth.
 // SDL2 + OpenGL3/GLES3 + Dear ImGui.
 #include "notify.h"
+#include "stb_image.h"
+extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, int* out_len, int quality);  // (avatar.cpp)
 #include "tray.h"
 #include <algorithm>
 #include <SDL.h>
@@ -372,6 +374,21 @@ int main(int argc, char** argv) {
     Media().Attach(&engine);
     engine.Start();
     // the music player (its own audio device and thread: it plays on in the background)
+    // chat archives are kept compressed (zlib, from stb - already here for pictures)
+    engine.compress = [](const std::string& in) -> std::string {
+        int n = 0;
+        unsigned char* z = stbi_zlib_compress((unsigned char*)in.data(), (int)in.size(), &n, 8);
+        std::string out = z && n > 0 ? std::string((const char*)z, (size_t)n) : std::string();
+        free(z);
+        return out;
+    };
+    engine.decompress = [](const std::string& in) -> std::string {
+        int n = 0;
+        char* d = stbi_zlib_decode_malloc(in.data(), (int)in.size(), &n);
+        std::string out = d && n > 0 ? std::string(d, (size_t)n) : std::string();
+        free(d);
+        return out;
+    };
     music::Lib().Init(engine.ConfigPath(), Player().Module());
     music::Play().Init(Player().Module(), &music::Lib());
     music::Play().LoadState(music::Lib().StatePath());

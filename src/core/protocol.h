@@ -57,6 +57,9 @@ enum class Msg : uint8_t {
     ListenLeave = 92,   // {sid[, end]}                           a listener leaves / the host ends it for everyone
     ListenCtl = 93,     // {sid, op, pos, iid}                    listener -> host: play/pause/seek/next/prev/jump/remove
     ListenState = 94,   // {sid, items[], at, playing, pos, people[], devs[], ver}  host -> listeners
+    // ---- chat history sent back (when it was lost here): asked for, then sent (after the other person agrees)
+    HistoryAsk = 100,   // {chat[, gid]}                                   -> the other side (or my other devices)
+    HistoryData = 101,  // {chat, msgs[], files[], last, from[, declined, empty][, gid]}  in parts
     ListenAdd = 95,     // {sid, items[{iid, name, title, artist, album, dur, size}]}  listener -> host: songs of mine
     GroupInfo = 70,   // {gid, name, creator, ver, members[{acc, name, devs[{id, pub}]}]}  to every member device
                       // (chat frames of a group carry "gid": Chat, ChatAck, ChatSync(chat="#gid", from), ChatRead(chat),

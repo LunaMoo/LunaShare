@@ -111,7 +111,8 @@ struct Settings {
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
     bool playerLoop = false;
-    bool playerAutoplay = false;  // movies start playing on their own (no need to press play)
+    bool playerAutoplay = false;
+    std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)
     bool watchAllowSave = true;
     // the movie player's picture: brightness -0.5..0.5, contrast / saturation / gamma 1 = unchanged, colour temperature and
     // tint -1..1 (warmer / cooler, green / magenta)

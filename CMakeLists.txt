@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LunaShare VERSION 1.5.3 LANGUAGES C CXX)
+project(LunaShare VERSION 1.5.4 LANGUAGES C CXX)
 add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -44,6 +44,7 @@ add_library(lunashare_core STATIC
     src/core/group_calls.cpp
     src/core/watch.cpp
     src/core/listen.cpp
+    src/core/chat_archive.cpp
     src/core/crypto.cpp
     src/core/mdns.cpp
     src/core/wan.cpp
@@ -334,6 +335,8 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_groups.cpp
         src/app/ui_watch.cpp
         src/app/ui_listen.cpp
+        src/app/ui_movies.cpp
+        src/app/ui_archive.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
         src/app/notify.cpp

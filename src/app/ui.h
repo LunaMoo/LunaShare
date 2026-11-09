@@ -11,6 +11,9 @@
 #include "imgui.h"
 #include "music.h"
 
+// file names in a natural order ("Episode 2" before "Episode 10") - ui_watch.cpp
+bool NaturalLess(const std::string& a, const std::string& b);
+
 class App {
 public:
     explicit App(ls::Engine& e);
@@ -32,6 +35,13 @@ public:
     // the typed text shown again just above the on-screen keyboard (the field itself may be under it); tapping it
     // moves the cursor. main.cpp keeps the taps inside mirrorRect away from ImGui (they'd end the typing)
     void DrawTextMirror();
+    // chat history: archives, clearing, restoring, asking for it back (ui_archive.cpp)
+    void OpenChatHistory(const std::string& peer);
+    void DrawChatHistoryPopup();
+    void DrawHistoryAskBanner(const std::string& peer);
+    std::string histPeer;
+    bool histOpen = false, histClear = false, histKeep = true, histAll = false;
+    std::string histConfirmDelete;
     float mirrorRect[4] = {0, 0, 0, 0};  // x0 y0 x1 y1 (empty: none)
     float mirrorTapX = -1, mirrorTapY = -1;
     int mirrorFirstLine = 0;
@@ -40,8 +50,8 @@ public:
     int styleGeneration = 0;
 
 private:
-    enum class Tab { Chat, Transfers, History, Library, Music, Devices, Nearby, Settings };
-    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music };
+    enum class Tab { Chat, Transfers, History, Library, Movies, Music, Devices, Nearby, Settings };
+    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music, Movies };
 
     struct Toast {
         ls::EventType type;
@@ -101,6 +111,13 @@ private:
     void DrawMusicNow(bool big);
     void DrawMusicMini();
     void MusicSoundPopup();
+    // the Movies tab (ui_movies.cpp)
+    void DrawMovies();
+    void MovieRescan();
+    void OpenMovies();                // the Movies tab / screen
+    bool movieScanned = false, movieRescanWanted = false;
+    std::string movieSearch;
+    int movieSort = 0;
     // listening together / contacts' songs (ui_listen.cpp)
     void MusicExternalTick();
     void MusicPlayLib(const std::vector<ls::LibFile>& list, int at, const std::string& who);
@@ -144,7 +161,14 @@ private:
     void WatchAddPopup();                   // host: add a person / group to the movie
     void ToggleLoop();                      // chats: videos and audio start again at the end
     bool watchShown = false, watchFailed = false;
-    bool watchFromViewer = false;  // the movie was opened from the picture viewer: leaving it reopens the viewer
+    bool watchFromViewer = false;
+    // previous / next movie: the videos in the movie's folder (or the Shared-folder list it was started from)
+    std::string watchDirOf;
+    std::vector<std::string> watchDirList;
+    std::vector<ls::LibFile> watchLibList;
+    int watchLibAt = -1;
+    int WatchNeighbor(int dir);       // index in the list of the previous (-1) / next (+1) movie, -1 = none
+    void WatchStep(int dir);  // the movie was opened from the picture viewer: leaving it reopens the viewer
     std::string watchOpened;
     int64_t watchLastSeek = 0;
     float watchDrag = -1;
@@ -240,7 +264,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

@@ -368,6 +368,28 @@ public:
     std::string SafetyNumberWith(const std::string& peer);
     void ForgetDevice(const std::string& peer);
     void ClearChat(const std::string& peer);
+    // ---- chat archives (chat_archive.cpp)
+    struct ChatArchiveInfo {
+        std::string path, peer, name;
+        int count = 0;
+        int64_t from = 0, to = 0, created = 0, bytes = 0;
+    };
+    // saves the conversation to an archive file (compressed); clear: then removes the archived messages (keepRecent:
+    // except yesterday's and today's). Returns the file, "" = failed / nothing to archive
+    std::string ArchiveChat(const std::string& key, bool clear, bool keepRecent);
+    std::vector<ChatArchiveInfo> ChatArchives(const std::string& key);  // "" = all, newest first
+    int RestoreChatArchive(const std::string& path);   // messages added (-1: can't read it)
+    bool DeleteChatArchive(const std::string& path);
+    void AskHistory(const std::string& key);           // ask the other side (and my other devices) to send it back
+    struct HistoryAsk {
+        std::string dev, key, name, chat;
+        int64_t at = 0;
+        int count = 0;
+    };
+    std::vector<HistoryAsk> historyAsks;               // someone asks me for our history (under Lock())
+    void AnswerHistoryAsk(const std::string& dev, const std::string& key, bool send);
+    // compression for archives (the app sets them; without: stored as it is)
+    std::function<std::string(const std::string&)> compress, decompress;
     // Removes messages from this conversation. forEveryone: also asks the other device to remove the ones we sent
     // (delivered as soon as it is reachable).
     void DeleteMessages(const std::string& peer, const std::vector<std::string>& mids, bool forEveryone);
@@ -439,6 +461,9 @@ public:
     bool LibStreamSaved(const std::string& id);
     double LibStreamLoaded(const std::string& id);  // play a file from a contact's Shared folder while it comes
     void WatchSetLoop(bool on);
+    // host: another movie (the next / previous one in its folder) - the people watching come along to it
+    uint64_t WatchSwitch(const std::string& path);
+    bool WatchFollowing() const { return watchFollow_ != 0; }  // viewer: about to come along to the host's next movie
     void WatchSave();                         // viewer / library stream: keep a copy of the whole movie
     void WatchSetAllowSave(bool on);          // host: may viewers keep a copy (remembered for next time)
     struct WatchSaveInfo {
@@ -658,6 +683,9 @@ private:
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
     bool watchReportedBuffering_ = false;
     bool watchSelfBuffering_ = false;             // host of a library stream: waiting for pieces
+    uint64_t watchForceSid_ = 0, watchEndNext_ = 0;  // host switching movies: the new one's id (told when the old ends)
+    uint64_t watchFollow_ = 0;                    // viewer: the host's next movie, joined when its invitation comes
+    int64_t watchFollowAt_ = 0;
     std::vector<std::thread> saveThreads_;        // copying saved movies out of the watch cache (joined in Stop)
     bool LibStreamBuffering(const std::shared_ptr<SwarmDownload>& d);
     void SaveWatchCopy(const std::shared_ptr<WatchCache>& wc);
@@ -673,6 +701,10 @@ private:
     std::vector<std::shared_ptr<WatchCache>> listenCaches_;  // others' songs coming here (watchCacheMtx_)
     int64_t listenLastBroadcast_ = 0, listenHostSeen_ = 0;
     void HandleListen(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    void HandleHistory(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    json HistoryFiles(const std::vector<ChatMessage>& msgs);
+    int MergeHistory(const std::string& key, std::vector<ChatMessage> msgs, const json& files, const std::string& remoteDev);
+    std::map<std::string, int> historyGot_;  // messages restored so far, per chat (parts of HistoryData)
     void ListenTick();
     void ListenBroadcast();
     void ListenSetPos(double pos);    // host: the clock

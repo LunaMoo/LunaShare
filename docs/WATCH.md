@@ -21,6 +21,16 @@ The ☰ menu has the picture settings: brightness, contrast, gamma, saturation, 
 tint (green - magenta). They apply to every movie on this device and are remembered; double-click or right-click a
 slider to put it back, *Reset picture* for all. (Done on the graphics card, where the picture is turned from YUV to RGB.)
 
+## The Movies tab, previous / next
+
+- *Movies* (a tab on computers; *Movie player* on a phone's main screen and in Library): the videos in your folders -
+  received files and the system's Videos folder (on Android: Movies and DCIM) always, plus any you add in *Movie
+  folders...* - as pictures from the movies with their length, by folder (natural order: "Episode 2" before
+  "Episode 10"), or all together by date / size; a search; *Open a file...* for anything else.
+- In the player, **<** and **>** on the left and right go to the previous / next movie in the same folder (or in the
+  contact's Shared folder it was started from). Watching together, the host's switch takes everyone along: their
+  player goes straight on to the next movie.
+
 ## Autoplay and play / pause
 
 - *Autoplay* (in the movie player's sound / subtitles / picture menu, remembered for every movie): a movie you open -
