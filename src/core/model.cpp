@@ -273,6 +273,12 @@ json ToJson(const ChatMessage& m) {
     if (!m.from.empty()) j["from"] = m.from;
     if (m.read) j["read"] = true;
     if (!m.readSent) j["readPending"] = true;
+    if (!m.replyTo.empty()) {
+        j["re"] = m.replyTo;
+        j["ret"] = m.replyText;
+    }
+    if (m.edited) j["edited"] = m.edited;
+    if (m.editPending) j["editPending"] = true;
     return j;
 }
 
@@ -300,6 +306,10 @@ ChatMessage MessageFromJson(const json& j) {
     bool rp = false;
     Get(j, "readPending", rp);
     m.readSent = !rp;
+    Get(j, "re", m.replyTo);
+    Get(j, "ret", m.replyText);
+    Get(j, "edited", m.edited);
+    Get(j, "editPending", m.editPending);
     return m;
 }
 

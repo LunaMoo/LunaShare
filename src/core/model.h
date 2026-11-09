@@ -180,6 +180,9 @@ struct ChatMessage {
     std::string from;                       // groups: who wrote it ("@account" key), empty = me / not a group
     bool read = false;                      // outgoing: the other person has seen it
     bool readSent = true;                   // incoming: false until we told the sender it was seen
+    std::string replyTo, replyText;         // an answer to that message (its id, and the start of its text)
+    int64_t edited = 0;                     // when it was last changed (0 = never)
+    bool editPending = false;               // outgoing: the change hasn't reached the other side yet
 };
 
 struct Conversation {

@@ -67,6 +67,7 @@ public:
     void DrawChatSearch(const std::string& peer);
     void OpenChatSearch() { searchOn = true; searchFocus = true; }
     bool searchOn = false, searchFocus = false, searchAll = false;
+    std::string replyMid, editMid, replyFor;  // answering / changing a message (in replyFor's chat)
     std::string searchText, searchJump, searchFlash, searchFor;
     int searchAt = -1;
     int64_t searchFlashAt = 0;

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Chat: **reply** to a message (in its menu - long press / right click): the answer shows the message it answers on
+  top, and a tap on that goes there. **Change** your own text messages (marked *changed*, also for the other side and
+  your other devices; a change made while they're away arrives later, like messages).
 - Chat: **search messages** (the magnifier in a chat's header; on phones in *Chat history*): in this chat with
   earlier / later and a jump to the message (lit up for a moment), or in all chats as a list.
 - Music: **Even out the volume between songs** (in *Sound...*): ReplayGain tags when songs have them; songs without

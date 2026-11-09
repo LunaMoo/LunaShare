@@ -5,6 +5,14 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Replying and changing messages
+
+A message's menu (long press on a phone, right click on a computer) has *Reply*: a strip above the typing field
+shows which message you answer (x stops). The answer carries the message it answers - who wrote it and its start -
+shown on top of it; a tap there scrolls to that message. *Change...* (your own text messages) puts the text back in
+the typing field; sending replaces it everywhere, marked *changed* next to the time. Changes reach devices that are
+away when they come back (or through the server's mailbox), and the newest change wins.
+
 ## Searching
 
 The magnifier in a chat's header (on a phone: *Search messages* in the chat's history window) opens a search bar:

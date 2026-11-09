@@ -1680,6 +1680,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.mid = mid;
                 m.ts = c->mailbox ? std::min(NowMs(), j.value("ts", NowMs())) : NowMs();  // (from the mailbox: when it was sent)
                 m.text = j.value("text", "");
+                m.replyTo = j.value("re", "");
+                m.replyText = j.value("ret", "").substr(0, 400);
+                m.edited = j.value("edited", (int64_t)0);
                 m.delivered = true;
                 m.readSent = false;
                 if (IsGroupKey(key)) m.from = ChatKey(c->peerId);
@@ -1727,6 +1730,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 m.ts = j.value("ts", NowMs());
                 m.text = j.value("text", "");
                 m.from = j.value("from", "");
+                m.replyTo = j.value("re", "");
+                m.replyText = j.value("ret", "").substr(0, 400);
+                m.edited = j.value("edited", (int64_t)0);
                 m.delivered = true;
                 cv.messages.push_back(m);
                 std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
@@ -1844,6 +1850,44 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 }
             }
             Queue(c, Msg::ChatDeleteAck, KeyField(key, {{"mids", mids}}));
+            break;
+        }
+        case Msg::ChatEdit: {
+            // a message changed by who wrote it (or, from my other device, one of mine)
+            std::string mid = j.value("mid", ""), text = j.value("text", "");
+            int64_t ts = j.value("ts", (int64_t)0);
+            auto dv = devices.find(c->peerId);
+            bool mine = dv != devices.end() && dv->second.accountPub == MyAccount();
+            std::string key = mine && j.contains("chat") ? j.value("chat", "") : FrameKey(c, j), who = ChatKey(c->peerId);
+            auto it = chats.find(key);
+            if (it != chats.end() && !mid.empty() && text.size() < 64 * 1024)
+                for (auto& m : it->second.messages) {
+                    if (m.mid != mid || m.kind != MsgKind::Text) continue;
+                    bool ok = mine ? m.outgoing : (!m.outgoing && (!IsGroupKey(key) || m.from == who));
+                    if (ok && ts > m.edited) {
+                        m.text = text;
+                        m.edited = ts;
+                        Emit({EventType::Info, key, ""});
+                        MarkDirty();
+                    }
+                    break;
+                }
+            json ack = mine ? json{{"chat", key}, {"mid", mid}} : KeyField(key, {{"mid", mid}});
+            Queue(c, Msg::ChatEditAck, ack);
+            break;
+        }
+        case Msg::ChatEditAck: {
+            std::string mid = j.value("mid", "");
+            auto dv = devices.find(c->peerId);
+            bool mine = dv != devices.end() && dv->second.accountPub == MyAccount();
+            std::string key = mine && j.contains("chat") ? j.value("chat", "") : FrameKey(c, j);
+            auto it = chats.find(key);
+            if (it != chats.end() && !IsGroupKey(key) && !mine)  // (a group: kept for the others; my devices: for the contact)
+                for (auto& m : it->second.messages)
+                    if (m.mid == mid && m.editPending) {
+                        m.editPending = false;
+                        MarkDirty();
+                    }
             break;
         }
         case Msg::ChatDeleteAck: {
@@ -2292,8 +2336,10 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             if (m.outgoing && !m.delivered && m.kind == MsgKind::Text && m.pendingTo.empty())  // (from older versions)
                 Queue(c, Msg::Chat, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
         if (!it->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", it->second.pendingDeletes}});
-        for (auto& m : it->second.messages)
+        for (auto& m : it->second.messages) {
             if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}});
+            if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}});
+        }
     }
     // watching together: someone of that conversation (or one of my devices) came online - they're invited too
     if (watch.sid && watch.host.empty() && watch.libId.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), peer) == watchViewers_.end()) {
@@ -2327,8 +2373,10 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
             auto gc = chats.find("#" + gid);
             if (gc == chats.end() || g.left) continue;
             if (!gc->second.pendingDeletes.empty()) Queue(c, Msg::ChatDelete, {{"mids", gc->second.pendingDeletes}, {"gid", gid}});
-            for (auto& m : gc->second.messages)
+            for (auto& m : gc->second.messages) {
                 if (!m.reactionSent) Queue(c, Msg::ChatReact, {{"mid", m.mid}, {"emoji", m.myReaction}, {"gid", gid}});
+                if (m.editPending && m.outgoing) Queue(c, Msg::ChatEdit, {{"mid", m.mid}, {"text", m.text}, {"ts", m.edited}, {"gid", gid}});
+            }
         }
     }
     std::vector<std::shared_ptr<Transfer>> outs;
@@ -2800,7 +2848,7 @@ void Engine::StartBtServer() {
 
 // ============================================================================ public actions
 
-void Engine::SendChat(const std::string& peerArg, const std::string& text) {
+void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo) {
     if (text.empty()) return;
     auto lk = Lock();
     const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
@@ -2809,6 +2857,17 @@ void Engine::SendChat(const std::string& peerArg, const std::string& text) {
     m.outgoing = true;
     m.ts = NowMs();
     m.text = text;
+    if (!replyTo.empty()) {  // an answer: which message, and the start of it (in case the other side doesn't have it)
+        auto ch = chats.find(peer);
+        if (ch != chats.end())
+            for (auto& q : ch->second.messages)
+                if (q.mid == replyTo) {
+                    m.replyTo = replyTo;
+                    m.replyText = q.kind == MsgKind::Files ? std::string("[files]") : q.text.substr(0, 160);
+                    while (!m.replyText.empty() && ((unsigned char)m.replyText.back() & 0xC0) == 0x80) m.replyText.pop_back();
+                    if (!m.replyText.empty() && ((unsigned char)m.replyText.back() & 0x80)) m.replyText.pop_back();
+                }
+    }
     // to every device of the person, and a copy to my other devices
     for (auto& d : DevicesOf(peer)) {
         m.pendingTo.push_back(d);
@@ -2831,6 +2890,11 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
     json j = mine ? json{{"chat", key}, {"mid", m.mid}, {"ts", m.ts}, {"text", m.text}, {"out", m.outgoing}}
                   : KeyField(key, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
     if (mine && !m.from.empty()) j["from"] = m.from;
+    if (!m.replyTo.empty()) {
+        j["re"] = m.replyTo;
+        j["ret"] = m.replyText;
+    }
+    if (m.edited) j["edited"] = m.edited;
     if (auto c = ReadyConn(device)) {
         Queue(c, type, j);
         return;
@@ -2882,6 +2946,7 @@ bool Engine::HandleMail(const std::string& id, const std::string& dataB64) {
     switch (type) {
         case Msg::Chat: case Msg::ChatAck: case Msg::ChatSync: case Msg::ChatSyncAck: case Msg::ChatDelete:
         case Msg::ChatDeleteAck: case Msg::ChatReact: case Msg::ChatReactAck: case Msg::ChatRead: case Msg::GroupInfo: break;
+        case Msg::ChatEdit: case Msg::ChatEditAck: break;
         case Msg::CallInvite: case Msg::CallEnd: break;  // (group calls; a call with one person needs a connection)
         default: return true;  // nothing else travels by mail
     }
@@ -3290,6 +3355,29 @@ void Engine::DeleteMessages(const std::string& peerArg, const std::vector<std::s
         for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatDelete, KeyField(peer, {{"mids", remote}}));
     }
     MarkDirty();
+}
+
+bool Engine::EditMessage(const std::string& peerArg, const std::string& mid, const std::string& text) {
+    if (text.empty()) return false;
+    auto lk = Lock();
+    const std::string peer = IsContactKey(peerArg) ? peerArg : ChatKey(peerArg);
+    auto it = chats.find(peer);
+    if (it == chats.end()) return false;
+    for (auto& m : it->second.messages)
+        if (m.mid == mid && m.outgoing && m.kind == MsgKind::Text) {
+            if (m.text == text) return true;
+            m.text = text;
+            m.edited = NowMs();
+            if (!m.delivered && !m.pendingTo.empty()) m.mailedTo.clear();  // (still waiting: the mailbox copy goes out changed)
+            // (also when not delivered yet: the old text may already be on its way)
+            m.editPending = true;
+            json j = KeyField(peer, {{"mid", mid}, {"text", text}, {"ts", m.edited}});
+            for (auto& d : DevicesOf(peer)) QueueToPeer(d, Msg::ChatEdit, j);
+            for (auto& d : MyOtherDevices()) QueueToPeer(d, Msg::ChatEdit, {{"chat", peer}, {"mid", mid}, {"text", text}, {"ts", m.edited}});
+            MarkDirty();
+            return true;
+        }
+    return false;
 }
 
 void Engine::React(const std::string& peerArg, const std::string& mid, const std::string& emoji) {

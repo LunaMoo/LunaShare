@@ -122,6 +122,13 @@ void App::Frame() {
                 if (m.mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
                 break;
             }
+        if (selectedPeer.empty() && std::string(autoSel) != "1")  // =<name>: that chat, also offline
+            for (auto& [id, d] : eng.devices)
+                if (d.DisplayName() == autoSel) {
+                    SelectPeer(id);
+                    if (m.mobile) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
+                    break;
+                }
     }
     static bool devSleep = getenv("LUNASHARE_SLEEPTEST") != nullptr;  // dev: the sleep timer's question (screenshots)
     if (devSleep && ImGui::GetFrameCount() > 30) {
@@ -1211,12 +1218,48 @@ void App::DrawChat(const std::string& peer) {
         pickerH = mobile ? availY * 0.5f : std::min(ImGui::GetFontSize() * 17, availY * 0.5f);
     }
     DrawChatSearch(peer);
-    ImGui::BeginChild("messages", ImVec2(0, -(inputH + pickerH + ImGui::GetStyle().ItemSpacing.y * (emojiOpen ? 3 : 2))), ImGuiChildFlags_None);
+    if (replyFor != peer) {  // (another chat: no answer / change in progress)
+        replyFor = peer;
+        if (!editMid.empty()) chatInput.clear();
+        replyMid.clear();
+        editMid.clear();
+        if (const char* r = getenv("LUNASHARE_REPLYTO")) replyMid = r;  // dev: answering this message (screenshots)
+    }
+    float stripH = (!replyMid.empty() || !editMid.empty()) ? ImGui::GetFrameHeightWithSpacing() + (mobile ? ui::M().rowH * 0.2f : 0) : 0;
+    ImGui::BeginChild("messages", ImVec2(0, -(inputH + pickerH + stripH + ImGui::GetStyle().ItemSpacing.y * (emojiOpen ? 3 : 2))), ImGuiChildFlags_None);
     if (mobile) ui::TouchScroll();
     DrawMessages(peer);
     DrawReactionPopups(peer);
     ImGui::EndChild();
     ImGui::Separator();
+    if (stripH > 0) {  // answering / changing a message: which one, and x to stop
+        const ChatMessage* q = nullptr;
+        auto ch = eng.chats.find(peer);
+        if (ch != eng.chats.end())
+            for (auto& m : ch->second.messages)
+                if (m.mid == (editMid.empty() ? replyMid : editMid)) q = &m;
+        std::string what = !q ? std::string() : q->kind == MsgKind::Files ? std::string(T("files")) : Emoji().Display(q->text);
+        for (auto& c : what)
+            if (c == '\n') c = ' ';
+        std::string who = !q ? "" : q->outgoing ? T("You") : Emoji().Display(eng.PeerName(q->from.empty() ? peer : q->from));
+        std::string head = editMid.empty() ? TF("Answering %s:", who.c_str()) : std::string(T("Changing your message:"));
+        float xw = mobile ? ui::M().rowH * 0.75f : ImGui::GetFrameHeight();
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float w = ImGui::GetContentRegionAvail().x - xw - ImGui::GetStyle().ItemSpacing.x;
+        ImDrawList* sdl = ImGui::GetWindowDrawList();
+        sdl->AddRectFilled(p, ImVec2(p.x + 3, p.y + stripH - ImGui::GetStyle().ItemSpacing.y), ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
+        ImVec4 clip(p.x, p.y, p.x + w, p.y + stripH);
+        std::string line = head + " " + what;
+        sdl->AddText(nullptr, 0, ImVec2(p.x + 10, p.y + (stripH - ImGui::GetStyle().ItemSpacing.y - ImGui::GetTextLineHeight()) * 0.5f),
+                     ImGui::GetColorU32(ImGuiCol_TextDisabled), line.c_str(), nullptr, 0, &clip);
+        ImGui::SetCursorScreenPos(ImVec2(p.x + w + ImGui::GetStyle().ItemSpacing.x, p.y));
+        if (ui::IconButton("rpx", Icon::Cancel, T("Cancel"), xw)) {
+            if (!editMid.empty()) chatInput.clear();
+            replyMid.clear();
+            editMid.clear();
+        }
+        ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + stripH));
+    }
     if (emojiOpen) {
         std::string picked;
         if (Emoji().DrawPicker(ImVec2(-1, pickerH), &picked)) {
@@ -1335,9 +1378,15 @@ void App::DrawChat(const std::string& peer) {
         std::string t = chatInput;
         while (!t.empty() && (t.back() == '\n' || t.back() == ' ')) t.pop_back();
         if (!t.empty()) {
-            eng.SendChat(peer, Emoji().Restore(t));
-            scrollToBottom = true;
+            if (!editMid.empty()) {
+                eng.EditMessage(peer, editMid, Emoji().Restore(t));
+            } else {
+                eng.SendChat(peer, Emoji().Restore(t), replyMid);
+                scrollToBottom = true;
+            }
         }
+        replyMid.clear();
+        editMid.clear();
         chatInput.clear();
         Emoji().SetInputCursor(-1);
         if (!mobile) focusInput = true;
@@ -1660,18 +1709,35 @@ void App::DrawMessages(const std::string& peer) {
             float textSize = ImGui::GetFontSize() * (bigEmoji == 1 ? 2.6f : bigEmoji ? 2.0f : 1.0f);
             ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(textSize, FLT_MAX, wrap, shown.c_str());
             const char* state = m.read ? T("read") : m.delivered ? T("delivered") : !m.mailedTo.empty() ? T("waiting on the server") : T("queued");
-            std::string meta = FormatTime(m.ts, false) + (m.outgoing ? std::string("  ") + state : std::string());
+            std::string meta = (m.edited ? std::string(T("changed")) + "  " : std::string()) + FormatTime(m.ts, false) +
+                               (m.outgoing ? std::string("  ") + state : std::string());
             ImVec2 ms = ImGui::CalcTextSize(meta.c_str());
             float smallScale = 0.8f;
-            float bw = std::max(ts.x, ms.x * smallScale) + pad * 2;
-            float bh = ts.y + ms.y * smallScale + pad * 1.6f;
+            // an answer: the message it answers, on top (who, and the start of it); a tap goes there
+            float qh = 0, qw = 0;
+            std::string qWho, qText;
+            if (!m.replyTo.empty()) {
+                const ChatMessage* q = nullptr;
+                for (auto& x : cv.messages)
+                    if (x.mid == m.replyTo) q = &x;
+                qText = q ? (q->kind == MsgKind::Files ? std::string(T("files")) : q->text) : m.replyText;
+                if (qText == "[files]") qText = T("files");
+                for (auto& c : qText)
+                    if (c == '\n') c = ' ';
+                qText = Emoji().Display(qText);
+                qWho = !q ? "" : q->outgoing ? T("You") : Emoji().Display(eng.PeerName(q->from.empty() ? peer : q->from));
+                qh = ImGui::GetTextLineHeight() * (qWho.empty() ? 1.0f : 2.0f) + pad * 0.8f;
+                qw = std::min(wrap, std::max(ImGui::CalcTextSize(qWho.c_str()).x, ImGui::CalcTextSize(qText.c_str()).x) + pad * 1.2f);
+            }
+            float bw = std::max(std::max(ts.x, qw), ms.x * smallScale) + pad * 2;
+            float bh = ts.y + ms.y * smallScale + pad * 1.6f + qh;
             ImGui::SetCursorPosX(m.outgoing ? x0 + avail - bw : x0);
             ImVec2 p0 = ImGui::GetCursorScreenPos();
             // links: where they are (to draw them as links and open the one tapped)
             std::vector<TextLink> links = bigEmoji ? std::vector<TextLink>() : FindLinks(shown);
             std::vector<TextGlyph> glyphs;
             int linkHover = -1;
-            ImVec2 tp(p0.x + pad, p0.y + pad * 0.7f);
+            ImVec2 tp(p0.x + pad, p0.y + pad * 0.7f + qh);
             if (!links.empty()) {
                 glyphs = LayoutText(ImGui::GetFont(), textSize, shown.c_str(), shown.c_str() + shown.size(), wrap);
                 ImVec2 mp = io.MousePos;
@@ -1726,6 +1792,21 @@ void App::DrawMessages(const std::string& peer) {
                                           m.outgoing && !sel ? 0.55f : 1.0f);
             if (hovered && !sel) bg = ImGui::GetColorU32(m.outgoing ? ImGuiCol_ButtonActive : ImGuiCol_FrameBgHovered, m.outgoing ? 0.7f : 1.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), bg, pad);
+            if (qh > 0) {  // the message it answers
+                ImVec2 q0(p0.x + pad * 0.6f, p0.y + pad * 0.5f), q1(p0.x + bw - pad * 0.6f, p0.y + pad * 0.3f + qh);
+                bool qhov = ImGui::IsMouseHoveringRect(q0, q1);
+                dl->AddRectFilled(q0, q1, IM_COL32(0, 0, 0, qhov ? 70 : 45), pad * 0.4f);
+                dl->AddRectFilled(q0, ImVec2(q0.x + 3, q1.y), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), pad * 0.2f);
+                ImVec4 qc(q0.x, q0.y, q1.x - 4, q1.y);
+                float ty = q0.y + pad * 0.25f;
+                if (!qWho.empty()) {
+                    dl->AddText(nullptr, 0, ImVec2(q0.x + 9, ty), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), qWho.c_str(), nullptr, 0, &qc);
+                    ty += ImGui::GetTextLineHeight();
+                }
+                dl->AddText(nullptr, 0, ImVec2(q0.x + 9, ty), ImGui::GetColorU32(ImGuiCol_TextDisabled), qText.c_str(), nullptr, 0, &qc);
+                if (qhov && ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(0) && !longPress && ImGui::GetMouseDragDelta(0, 0).y == 0 && !selectionMode)
+                    searchJump = m.replyTo;  // (there)
+            }
             if (glyphs.empty()) {
                 dl->AddText(ImGui::GetFont(), textSize, tp, ImGui::GetColorU32(ImGuiCol_Text), shown.c_str(), nullptr, wrap);
             } else {  // with links: run by run, links coloured and underlined
@@ -1757,7 +1838,7 @@ void App::DrawMessages(const std::string& peer) {
             ImU32 metaCol = m.outgoing && !m.delivered && m.mailedTo.empty() ? ui::ColWarn()
                           : m.outgoing && m.read ? IM_COL32(90, 170, 255, 255) : ui::ColMuted();
             dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * smallScale,
-                        ImVec2(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + ts.y + pad * 0.2f), metaCol, meta.c_str());
+                        ImVec2(m.outgoing ? p0.x + bw - pad - ms.x * smallScale : p0.x + pad, p0.y + pad * 0.7f + qh + ts.y + pad * 0.2f), metaCol, meta.c_str());
             ReactHoverButton(m, p0, ImVec2(p0.x + bw, p0.y + bh));
             DrawReactions(peer, m, p0, ImVec2(p0.x + bw, p0.y + bh));
             ImGui::Dummy(ImVec2(0, pad * 0.15f));
@@ -1767,6 +1848,21 @@ void App::DrawMessages(const std::string& peer) {
             float h = mobile ? ui::M().rowH * 0.85f : 0;
             if (QuickReactionRow(peer, m.mid, m.myReaction)) ImGui::CloseCurrentPopup();
             ImGui::Separator();
+            if (m.kind != MsgKind::System && ImGui::Selectable(T("Reply"), false, 0, ImVec2(0, h))) {
+                replyMid = m.mid;
+                editMid.clear();
+                focusInput = true;
+                selMsgs.clear();
+                selectionMode = false;
+            }
+            if (m.outgoing && m.kind == MsgKind::Text && ImGui::Selectable(T("Change..."), false, 0, ImVec2(0, h))) {
+                editMid = m.mid;
+                replyMid.clear();
+                chatInput = Emoji().Display(m.text);
+                focusInput = true;
+                selMsgs.clear();
+                selectionMode = false;
+            }
             if (ImGui::Selectable(T("Copy text"), false, 0, ImVec2(0, h))) {
                 std::string text = m.text;
                 if (m.kind == MsgKind::Files) {

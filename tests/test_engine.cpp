@@ -320,6 +320,60 @@ int main() {
         CHECK(kept, "delete for me stays local");
     }
 
+    // ------------------------------------------------------------ answer + change
+    printf("[reply + edit]\n");
+    A->SendChat(idB, "what time?");
+    std::string q;
+    {
+        auto l = A->Lock();
+        q = A->chats[A->ChatKey(idB)].messages.back().mid;
+    }
+    CHECK(WaitFor([&] { auto l = B->Lock(); return B->chats[B->ChatKey(idA)].messages.back().mid == q; }, 3000), "question arrives");
+    B->SendChat(idA, "at five", q);
+    CHECK(WaitFor([&] {
+        auto l = A->Lock();
+        auto& m = A->chats[A->ChatKey(idB)].messages.back();
+        return m.text == "at five" && m.replyTo == q && m.replyText == "what time?";
+    }, 3000), "answer carries what it answers");
+    CHECK(A->EditMessage(idB, q, "what time tomorrow?"), "edit own message");
+    CHECK(WaitFor([&] {
+        auto l = B->Lock();
+        for (auto& m : B->chats[B->ChatKey(idA)].messages)
+            if (m.mid == q) return m.text == "what time tomorrow?" && m.edited > 0;
+        return false;
+    }, 3000), "edit arrives");
+    CHECK(WaitFor([&] {
+        auto l = A->Lock();
+        for (auto& m : A->chats[A->ChatKey(idB)].messages)
+            if (m.mid == q) return !m.editPending;
+        return false;
+    }, 3000), "edit acknowledged");
+    // changed right away (the first text may already be on its way)
+    A->SendChat(idB, "typo hree");
+    {
+        std::string t;
+        {
+            auto l = A->Lock();
+            t = A->chats[A->ChatKey(idB)].messages.back().mid;
+        }
+        A->EditMessage(idB, t, "typo here");
+        CHECK(WaitFor([&] {
+            auto l = B->Lock();
+            for (auto& m : B->chats[B->ChatKey(idA)].messages)
+                if (m.mid == t) return m.text == "typo here";
+            return false;
+        }, 3000), "quick edit arrives");
+    }
+    {
+        std::string theirs;
+        {
+            auto l = A->Lock();
+            for (auto& m : A->chats[A->ChatKey(idB)].messages)
+                if (m.text == "at five") theirs = m.mid;
+        }
+        CHECK(!A->EditMessage(idB, theirs, "hacked"), "cannot change their message");
+    }
+
     // ------------------------------------------------------------ reactions
     printf("[reactions]\n");
     A->SendChat(idB, "react to this");

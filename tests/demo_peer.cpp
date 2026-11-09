@@ -138,6 +138,22 @@ int main(int argc, char** argv) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     e.SendChat(peer, u8"Zażółć gęślą jaźń - Polish characters work too. Long-press or right-click a message to copy it.");
     e.SendChat(peer, "Links open in your browser: www.google.pl and https://github.com/LunaMoo/LunaShare (tap them).");
+    {  // an answer, then a changed message
+        std::string q;
+        {
+            auto l = e.Lock();
+            auto& ms = e.chats[e.ChatKey(peer)].messages;
+            q = ms[ms.size() - 2].mid;
+        }
+        e.SendChat(peer, u8"Answering myself: this is how a reply looks.", q);
+        e.SendChat(peer, "This one gets changed");
+        std::string c;
+        {
+            auto l = e.Lock();
+            c = e.chats[e.ChatKey(peer)].messages.back().mid;
+        }
+        e.EditMessage(peer, c, "This one was changed afterwards");
+    }
     if (!other.empty()) e.SendPaths(peer, other);
     if (getenv("DEMO_EMOJI")) {
         e.SendChat(peer, u8"Emoji too \U0001F389 \U0001F44D\U0001F3FD family \U0001F468\u200D\U0001F469\u200D\U0001F467 flag \U0001F1F5\U0001F1F1 keycap 1\uFE0F\u20E3 and text \u00A9 stays text");

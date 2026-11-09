@@ -58,6 +58,8 @@ enum class Msg : uint8_t {
     ListenCtl = 93,     // {sid, op, pos, iid}                    listener -> host: play/pause/seek/next/prev/jump/remove
     ListenState = 94,   // {sid, items[], at, playing, pos, people[], devs[], ver}  host -> listeners
     // ---- chat history sent back (when it was lost here): asked for, then sent (after the other person agrees)
+    ChatEdit = 102,     // {mid, text, ts[, gid] | chat (my other devices)}  a message changed by who wrote it
+    ChatEditAck = 103,  // {mid[, gid]}
     HistoryAsk = 100,   // {chat[, gid]}                                   -> the other side (or my other devices)
     HistoryData = 101,  // {chat, msgs[], files[], last, from[, declined, empty][, gid]}  in parts
     ListenAdd = 95,     // {sid, items[{iid, name, title, artist, album, dur, size}]}  listener -> host: songs of mine
