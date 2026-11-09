@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.6
 
 - **App lock** (Settings > App lock): a PIN when LunaShare starts and when you come back to it (right away or after
   a few minutes away); on Android also the fingerprint / face. Notifications then don't show message text, and the
