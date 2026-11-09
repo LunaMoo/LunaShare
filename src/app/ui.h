@@ -72,6 +72,10 @@ public:
     bool MuteItem(const std::string& key, float h, bool button = false);  // (a menu line / button: opens the choices, or turns them back on)
     void DrawMutePopup();
     void SyncTick();  // my other devices: playlists and settings
+    // unsent text, per chat (kept in drafts.json)
+    std::string DraftGet(const std::string& peer);
+    void DraftSet(const std::string& peer, const std::string& text);
+    void DraftsSave();
     // a newer version on GitHub (once a day, an option; or "Check now")
     void UpdateTick();
     // app lock (PIN / fingerprint)

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Chat: **drafts** - text typed and not sent stays in its chat (also after closing the app); the list shows
+  *Draft: ...* under the name.
+
 ## 1.5.6
 
 - **App lock** (Settings > App lock): a PIN when LunaShare starts and when you come back to it (right away or after

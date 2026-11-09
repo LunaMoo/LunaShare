@@ -1076,3 +1076,4 @@
 {"PIN", "PIN"},
 {"The same PIN again", "Ten sam PIN jeszcze raz"},
 {"The two PINs differ.", "Wpisane PIN-y się różnią."},
+{"Draft", "Szkic"},

@@ -5,6 +5,11 @@
 Links in messages - `https://...`, `http://...` and `www....` - are shown as links; a tap (or click) opens them in
 the system's browser. Hovering one on a computer shows where it goes.
 
+## Drafts
+
+Text you typed and didn't send stays in its chat when you switch to another one or close LunaShare (kept in
+`drafts.json`, on this device only). The chat list shows *Draft: ...* under the name.
+
 ## Silent chats
 
 *Silence notifications...* (a chat's menu in the list - long press / right click - or the *Chat history* window):

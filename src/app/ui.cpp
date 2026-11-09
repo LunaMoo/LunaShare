@@ -708,6 +708,20 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
 
     bool muted = eng.ChatMuted(peer);
     if (muted) sub = std::string(T("silent")) + (sub.empty() ? "" : "  ") + sub;
+    if (peer != selectedPeer) {
+        std::string dr = DraftGet(peer);
+        if (!dr.empty()) {
+            if (dr.size() > 40) {
+                dr.resize(40);
+                while (!dr.empty() && ((unsigned char)dr.back() & 0xC0) == 0x80) dr.pop_back();  // (whole characters)
+                if (!dr.empty() && ((unsigned char)dr.back() & 0x80)) dr.pop_back();
+                dr += "...";
+            }
+            for (auto& c : dr)
+                if (c == '\n' || c == '\r') c = ' ';
+            sub = std::string(T("Draft")) + ": " + Emoji().Display(dr);
+        }
+    }
     int unread = 0;
     auto cv = eng.chats.find(peer);
     if (cv != eng.chats.end()) unread = cv->second.unread;
@@ -1243,9 +1257,10 @@ void App::DrawChat(const std::string& peer) {
         pickerH = mobile ? availY * 0.5f : std::min(ImGui::GetFontSize() * 17, availY * 0.5f);
     }
     DrawChatSearch(peer);
-    if (replyFor != peer) {  // (another chat: no answer / change in progress)
+    if (replyFor != peer) {  // (another chat: no answer / change in progress; its own unsent text)
+        if (!replyFor.empty() && editMid.empty()) DraftSet(replyFor, chatInput);
         replyFor = peer;
-        if (!editMid.empty()) chatInput.clear();
+        chatInput = DraftGet(peer);
         replyMid.clear();
         editMid.clear();
         if (const char* r = getenv("LUNASHARE_REPLYTO")) replyMid = r;  // dev: answering this message (screenshots)

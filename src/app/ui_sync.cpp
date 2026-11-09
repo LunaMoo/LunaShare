@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "i18n.h"
+#include "model.h"
 #include "music.h"
 #include "platform.h"
 #include "ui.h"
@@ -84,6 +85,7 @@ void App::SyncTick() {
     int64_t now = SteadyMs();
     if (now < g_nextCheck) return;
     g_nextCheck = now + 500;
+    if (!replyFor.empty() && editMid.empty() && replyFor == selectedPeer) DraftSet(replyFor, chatInput);  // (kept as it's typed)
     if (!eng.settings.syncOwn) {
         g_started = false;
         return;
@@ -134,4 +136,48 @@ void App::SyncTick() {
         eng.SetPrefsVer(std::max(NowMs(), eng.settings.prefsVer + 1));
         eng.SyncPush("prefs", {{"ver", eng.settings.prefsVer}, {"p", json::parse(p)}});
     }
+}
+
+// ---- drafts: what was typed in a chat and not sent stays there (also across restarts)
+namespace {
+std::map<std::string, std::string> g_drafts;
+bool g_draftsLoaded = false, g_draftsDirty = false;
+}  // namespace
+
+static std::string DraftsPath(Engine& eng) { return JoinPath(eng.ConfigPath(), "drafts.json"); }
+
+static void DraftsLoad(Engine& eng) {
+    if (g_draftsLoaded) return;
+    g_draftsLoaded = true;
+    json j;
+    if (LoadJsonFile(DraftsPath(eng), j) && j.is_object())
+        for (auto& [k, v] : j.items())
+            if (v.is_string()) g_drafts[k] = v.get<std::string>();
+}
+
+std::string App::DraftGet(const std::string& peer) {
+    DraftsLoad(eng);
+    auto it = g_drafts.find(peer);
+    return it == g_drafts.end() ? std::string() : it->second;
+}
+
+void App::DraftSet(const std::string& peer, const std::string& text) {
+    DraftsLoad(eng);
+    bool blank = text.find_first_not_of(" \t\r\n") == std::string::npos;
+    auto it = g_drafts.find(peer);
+    if (blank) {
+        if (it == g_drafts.end()) return;
+        g_drafts.erase(it);
+    } else {
+        if (it != g_drafts.end() && it->second == text) return;
+        g_drafts[peer] = text.substr(0, 64 * 1024);
+    }
+    g_draftsDirty = true;
+    DraftsSave();
+}
+
+void App::DraftsSave() {
+    if (!g_draftsDirty) return;
+    g_draftsDirty = false;
+    SaveJsonFile(DraftsPath(eng), json(g_drafts));
 }
