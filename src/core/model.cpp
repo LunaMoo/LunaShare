@@ -64,7 +64,7 @@ json ToJson(const Settings& s, bool withIdentity) {
                       json a = json::array();
                       for (auto& f : s.folderSyncs) a.push_back({{"id", f.id}, {"path", f.path}, {"to", f.to}, {"on", f.on}});
                       return a;
-                  }()}, {"clipShare", s.clipShare}, {"lockHash", s.lockHash}, {"lockSalt", s.lockSalt}, {"lockLen", s.lockLen}, {"lockAfter", s.lockAfter}, {"lockBio", s.lockBio}, {"updateCheck", s.updateCheck}, {"updateLast", s.updateLast}, {"updateSeen", s.updateSeen}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
+                  }()}, {"clipShare", s.clipShare}, {"lockHash", s.lockHash}, {"lockSalt", s.lockSalt}, {"histPub", s.histPub}, {"histWrap", s.histWrap}, {"lockLen", s.lockLen}, {"lockAfter", s.lockAfter}, {"lockBio", s.lockBio}, {"updateCheck", s.updateCheck}, {"updateLast", s.updateLast}, {"updateSeen", s.updateSeen}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
         {"videoBrightness", s.videoBrightness}, {"videoContrast", s.videoContrast}, {"videoSaturation", s.videoSaturation}, {"videoGamma", s.videoGamma},
         {"videoTemperature", s.videoTemperature}, {"videoTint", s.videoTint}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
@@ -223,6 +223,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     }
     Get(j, "lockHash", s.lockHash);
     Get(j, "lockSalt", s.lockSalt);
+    Get(j, "histPub", s.histPub);
+    Get(j, "histWrap", s.histWrap);
     Get(j, "lockLen", s.lockLen);
     Get(j, "lockAfter", s.lockAfter);
     Get(j, "lockBio", s.lockBio);
@@ -442,10 +444,13 @@ HistoryEntry HistoryFromJson(const json& j) {
 }
 
 bool SaveJsonFile(const std::string& path, const json& j) {
+    return SaveFileAtomic(path, j.dump(1, '\t', false, json::error_handler_t::replace));
+}
+
+bool SaveFileAtomic(const std::string& path, const std::string& s) {
     std::string tmp = path + ".tmp";
     FILE* f = OpenFile(tmp, "wb");
     if (!f) return false;
-    std::string s = j.dump(1, '\t', false, json::error_handler_t::replace);
     bool ok = fwrite(s.data(), 1, s.size(), f) == s.size();
     ok = (fclose(f) == 0) && ok;
     if (!ok) { RemoveFile(tmp); return false; }
@@ -454,14 +459,20 @@ bool SaveJsonFile(const std::string& path, const json& j) {
     return RenameFile(tmp, path);
 }
 
-bool LoadJsonFile(const std::string& path, json& j) {
+bool LoadFileBytes(const std::string& path, std::string& s) {
     FILE* f = OpenFile(path, "rb");
     if (!f) return false;
-    std::string s;
+    s.clear();
     char buf[65536];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) s.append(buf, n);
     fclose(f);
+    return true;
+}
+
+bool LoadJsonFile(const std::string& path, json& j) {
+    std::string s;
+    if (!LoadFileBytes(path, s)) return false;
     j = json::parse(s, nullptr, false);
     return !j.is_discarded();
 }

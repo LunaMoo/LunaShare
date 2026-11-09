@@ -389,6 +389,63 @@ bool OpenSealed(const Identity& me, const std::string& sealed, std::string& plai
     return r == 0;
 }
 
+void HistoryKeyPair(std::string& pubHex, std::string& secHex) {
+    uint8_t sk[32], pk[32];
+    SecureRandom(sk, 32);
+    crypto_x25519_public_key(pk, sk);
+    pubHex = ToHex(pk, 32);
+    secHex = ToHex(sk, 32);
+    crypto_wipe(sk, 32);
+}
+
+static void HistoryKey(const uint8_t shared[32], const uint8_t eph[32], const uint8_t pub[32], uint8_t key[32]) {
+    static const char ctx[] = "LunaShare history v1";
+    uint8_t buf[sizeof(ctx) + 96];
+    memcpy(buf, ctx, sizeof(ctx));
+    memcpy(buf + sizeof(ctx), shared, 32);
+    memcpy(buf + sizeof(ctx) + 32, eph, 32);
+    memcpy(buf + sizeof(ctx) + 64, pub, 32);
+    crypto_blake2b(key, 32, buf, sizeof(buf));
+    crypto_wipe(buf, sizeof(buf));
+}
+
+std::string HistorySeal(const std::string& pubHex, const std::string& plain) {
+    uint8_t pub[32], esk[32], epk[32], shared[32], key[32], nonce[24], mac[16];
+    if (!FromHex(pubHex, pub, 32)) return {};
+    SecureRandom(esk, 32);
+    crypto_x25519_public_key(epk, esk);
+    crypto_x25519(shared, esk, pub);
+    HistoryKey(shared, epk, pub, key);
+    SecureRandom(nonce, 24);
+    std::string ct(plain.size(), '\0');
+    crypto_aead_lock((uint8_t*)&ct[0], mac, key, nonce, epk, 32, (const uint8_t*)plain.data(), plain.size());
+    crypto_wipe(esk, 32);
+    crypto_wipe(shared, 32);
+    crypto_wipe(key, 32);
+    std::string out(1, '\x02');
+    out.append((const char*)epk, 32);
+    out.append((const char*)nonce, 24);
+    out.append((const char*)mac, 16);
+    return out + ct;
+}
+
+bool HistoryOpen(const std::string& secHex, const std::string& sealed, std::string& plain) {
+    if (sealed.size() < 73 || sealed[0] != 2) return false;
+    const uint8_t* p = (const uint8_t*)sealed.data();
+    uint8_t sk[32], pub[32], shared[32], key[32];
+    if (!FromHex(secHex, sk, 32)) return false;
+    crypto_x25519_public_key(pub, sk);
+    crypto_x25519(shared, sk, p + 1);
+    HistoryKey(shared, p + 1, pub, key);
+    plain.assign(sealed.size() - 73, '\0');
+    int r = crypto_aead_unlock((uint8_t*)&plain[0], p + 57, key, p + 33, p + 1, 32, p + 73, sealed.size() - 73);
+    crypto_wipe(sk, 32);
+    crypto_wipe(shared, 32);
+    crypto_wipe(key, 32);
+    if (r != 0) plain.clear();
+    return r == 0;
+}
+
 static const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 std::string KeySeal(const uint8_t key[32], const std::string& plain) {

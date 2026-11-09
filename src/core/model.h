@@ -123,8 +123,11 @@ struct Settings {
     bool playerOrientByAspect = false;  // Android: a tall movie plays upright, a wide one sideways
     std::map<std::string, int64_t> mutedChats;
     // app lock: a PIN (and on phones the fingerprint) before the app shows anything. Keeps out someone holding the
-    // unlocked device - the files themselves aren't encrypted by it.
+    // unlocked device - the files are encrypted only with histPub (below).
     std::string lockHash, lockSalt;  // the PIN, salted and hashed many times ("" = no lock)
+    // the chat history encrypted with the PIN (history.enc instead of history.json; "" = not): its public key, and
+    // the private key wrapped by the PIN (hex of PasswordEncrypt)
+    std::string histPub, histWrap;
     int lockLen = 0;                 // (its length: the keypad checks as soon as it's typed)
     int lockAfter = 0;               // minutes away (in the background) before it asks again
     bool lockBio = true;             // phones: the fingerprint / face too
@@ -312,5 +315,7 @@ HistoryEntry HistoryFromJson(const json& j);
 
 bool SaveJsonFile(const std::string& path, const json& j);
 bool LoadJsonFile(const std::string& path, json& j);
+bool SaveFileAtomic(const std::string& path, const std::string& bytes);  // (a temporary file, then renamed)
+bool LoadFileBytes(const std::string& path, std::string& bytes);
 
 }  // namespace ls

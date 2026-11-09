@@ -88,11 +88,13 @@ public:
     void DrawLockScreen();
     void DrawLockSettings(float h);
     void DrawLockSetPopup();
+    void DrawLockEncPopup();  // the PIN once more: the chat history encrypted with it
     bool locked = false, lockInit = false, lockWasBg = false, lockSecure = false, lockBioAsked = false, lockForgot = false, lockSetOpen = false;
     int64_t lockBgSince = 0, lockWaitUntil = 0;
     int lockWrong = 0;
     float lockShake = 0;
-    std::string lockEntry, lockPhraseBuf, lockNew1, lockNew2, lockSetErr;
+    std::string lockEntry, lockPhraseBuf, lockNew1, lockNew2, lockSetErr, lockEncPin, lockEncErr;
+    bool lockEncOpen = false;
     void UpdateCheckNow();
     void DrawUpdatePopup();
     std::string updateTag, updateUrl, updateNotes;

@@ -233,5 +233,9 @@ void App::DraftSet(const std::string& peer, const std::string& text) {
 void App::DraftsSave() {
     if (!g_draftsDirty) return;
     g_draftsDirty = false;
+    if (eng.HistoryEncrypted()) {
+        RemoveFile(DraftsPath(eng));  // (the chats are encrypted: drafts stay in memory only)
+        return;
+    }
     SaveJsonFile(DraftsPath(eng), json(g_drafts));
 }

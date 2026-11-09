@@ -60,6 +60,13 @@ bool PasswordDecrypt(const std::string& blob, const std::string& password, std::
 std::string SealTo(const std::string& recipientPubHex, const std::string& plain);
 bool OpenSealed(const Identity& me, const std::string& sealed, std::string& plain);
 
+// The local chat history, encrypted with the app-lock PIN: a key pair of its own. Saving needs only the public half
+// (the app also saves while still locked), reading needs the private half, which is kept wrapped by
+// PasswordEncrypt(PIN). Envelope: [u8 2][32 ephemeral X25519 public][24 nonce][16 MAC][ciphertext].
+void HistoryKeyPair(std::string& pubHex, std::string& secHex);
+std::string HistorySeal(const std::string& pubHex, const std::string& plain);
+bool HistoryOpen(const std::string& secHex, const std::string& sealed, std::string& plain);
+
 // Group calls: messages sealed with a key shared by everyone in the call (XChaCha20-Poly1305, random nonce).
 // Output: [nonce 24][mac 16][ciphertext]
 std::string KeySeal(const uint8_t key[32], const std::string& plain);

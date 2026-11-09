@@ -70,8 +70,24 @@ While it's locked, messages and files keep arriving, notifications say only *New
 still be answered, and on Android the app switcher shows no preview (and screenshots are blocked). Five wrong PINs
 make it wait 30 s (then longer). *Forgot the PIN?* - the account's recovery phrase opens it and turns the lock off.
 
-It keeps out someone holding your unlocked device; it doesn't encrypt the files on it. The PIN is stored salted
-and hashed (20 000 rounds of SHA-256).
+By itself it keeps out someone holding your unlocked device; it doesn't encrypt the files on it. The PIN is stored
+salted and hashed (20 000 rounds of SHA-256).
+
+**Encrypt the chat history with the PIN** (a switch under the lock) goes further: the messages, the list of sent and
+received files and the disappearing-message timers are saved as `history.enc` instead of `history.json`, and drafts
+are no longer written to disk. How:
+
+* The history has an X25519 key pair of its own. Every save seals the whole history to the public key (a fresh
+  ephemeral key, BLAKE2b, XChaCha20-Poly1305), so saving never needs the PIN - the app also saves while still locked.
+* The private key is kept in `settings.json` wrapped with the PIN (Argon2id, 32 MiB, 3 passes + XChaCha20-Poly1305).
+  Changing the PIN re-wraps it; turning the switch or the lock off writes a plain `history.json` again.
+* After a start the PIN itself opens it (the fingerprint can't - it doesn't give the key). Until then messages still
+  arrive; what came since the start is saved apart (`history-new.enc`, sealed the same way) and merged in when the
+  PIN is typed. (An edit, reaction or deletion that arrives in that time for an older message isn't applied.)
+* A forgotten PIN means the old history is lost: the recovery phrase still opens the app, but the history is deleted.
+* A PIN of a few digits can be guessed by someone who copied the files and lets a computer try them all (Argon2 makes
+  each try slow, but 6 digits fall in hours to days, not years). A longer PIN is safer. The identity keys and the settings aren't
+  encrypted by it.
 
 ## Recovery
 

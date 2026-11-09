@@ -1,6 +1,7 @@
 // App lock: a PIN (and on phones the fingerprint / face) before LunaShare shows anything - when it starts, and when it
 // comes back after a while in the background. Messages keep arriving meanwhile; their notifications don't show the
-// text. It keeps out someone holding the unlocked device; it doesn't encrypt the files.
+// text. It keeps out someone holding the unlocked device. Optionally the chat history is encrypted with the PIN too
+// (Engine::SetHistoryEncryption): after a start the PIN (not the fingerprint) opens it.
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -65,6 +66,10 @@ void App::UnlockWith(const std::string& pin) {
         locked = false;
         lockWrong = 0;
         lockEntry.clear();
+        if (eng.HistoryLocked() && !eng.UnlockHistory(pin)) {
+            infoMessage = T("The encrypted chat history couldn't be opened (the file is damaged?).");
+            openInfo = true;
+        }
         return;
     }
     lockWrong++;
@@ -107,6 +112,9 @@ void App::DrawLockScreen() {
         ImGui::SetCursorPosX(x0);
         ImGui::PushTextWrapPos(x0 + W);
         ImGui::TextDisabled("%s", T("Forgot the PIN? Type your account's recovery phrase (the 24 words) - the lock turns off."));
+        if (eng.HistoryLocked())
+            ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.4f, 1), "%s",
+                               T("The chat history is encrypted with the PIN: without it, the messages from before are lost."));
         ImGui::PopTextWrapPos();
         ImGui::SetCursorPosX(x0);
         ImGui::SetNextItemWidth(W);
@@ -151,6 +159,7 @@ void App::DrawLockScreen() {
     } else {
         centered(lockWrong ? T("Wrong PIN - try again") : T("Enter your PIN"), lockWrong == 0);
     }
+    if (eng.HistoryLocked() && eng.settings.lockBio && BioAvailable()) centered(T("(after a start: the PIN - it opens the chats)"), true);
     // the dots
     {
         float shake = lockShake > 0 ? std::sin(lockShake * 60) * lockShake * 20 : 0;
@@ -189,7 +198,7 @@ void App::DrawLockScreen() {
     }
     const char* keys = "123456789B0<";
     float kw = (W - ImGui::GetStyle().ItemSpacing.x * 2) / 3;
-    bool bio = eng.settings.lockBio && BioAvailable();
+    bool bio = eng.settings.lockBio && BioAvailable() && !eng.HistoryLocked();  // (the encrypted history needs the PIN itself)
     ImGui::BeginDisabled(!can);
     for (int i = 0; i < 12; i++) {
         if (i % 3 == 0) ImGui::SetCursorPosX(x0);
@@ -239,7 +248,7 @@ void App::DrawLockSettings(float h) {
     ImGui::PushTextWrapPos(0);
     ImGui::TextDisabled("%s", T("A PIN before LunaShare shows anything - when it starts and when you come back to it. Messages still "
                                 "arrive; notifications don't show their text. (It keeps out someone holding your unlocked device; the "
-                                "files themselves aren't encrypted.)"));
+                                "files are encrypted only with the option below.)"));
     ImGui::PopTextWrapPos();
     bool on = LockOn(eng.settings);
     if (!on) {
@@ -275,6 +284,21 @@ void App::DrawLockSettings(float h) {
         edit.lockAfter = s.lockAfter;
         edit.lockBio = s.lockBio;
     }
+    bool enc = eng.HistoryEncrypted();
+    if (ImGui::Checkbox(T("Encrypt the chat history with the PIN"), &enc)) {
+        if (enc) {
+            lockEncOpen = true;
+            lockEncPin.clear();
+            lockEncErr.clear();
+        } else {
+            eng.SetHistoryEncryption("");
+        }
+    }
+    ImGui::SameLine();
+    ui::HelpMarker(T("The messages are saved encrypted (Argon2 + XChaCha20): someone who copies the files can't read them without "
+                     "the PIN. After a start the PIN opens them (not the fingerprint); what arrives before is kept and added. "
+                     "Drafts then aren't saved. A forgotten PIN means the history is lost. A short PIN can be guessed by a "
+                     "patient computer - a longer one is safer."));
     if (ImGui::Button(T("Lock now"), ImVec2(0, h))) LockNow();
     ImGui::SameLine();
     if (ImGui::Button(T("Change the PIN..."), ImVec2(0, h))) {
@@ -285,6 +309,45 @@ void App::DrawLockSettings(float h) {
     }
     ImGui::SameLine();
     if (ImGui::Button(T("Turn the lock off"), ImVec2(0, h))) eng.SetLock("", "", 0);
+}
+
+void App::DrawLockEncPopup() {
+    if (lockEncOpen) {
+        ImGui::OpenPopup("##lockenc");
+        lockEncOpen = false;
+    }
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * (mobile ? 0.3f : 0.5f)), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    if (mobile) ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x * 0.9f, 0));
+    if (!ImGui::BeginPopupModal("##lockenc", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::TextUnformatted(T("Encrypt the chat history with the PIN"));
+    ImGui::TextDisabled("%s", T("Your PIN, to confirm:"));
+    auto digits = [](ImGuiInputTextCallbackData* d) { return (d->EventChar >= '0' && d->EventChar <= '9') ? 0 : 1; };
+    ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 12);
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    bool go = ImGui::InputTextWithHint("##encpin", T("PIN"), &lockEncPin,
+                                       ImGuiInputTextFlags_Password | ImGuiInputTextFlags_CallbackCharFilter | ImGuiInputTextFlags_EnterReturnsTrue, digits);
+    if (!lockEncErr.empty()) ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.4f, 1), "%s", lockEncErr.c_str());
+    go |= ImGui::Button(T("Encrypt"), ImVec2(mobile ? ImGui::GetContentRegionAvail().x * 0.5f : 0, h));
+    if (go) {
+        if (HashPin(lockEncPin, eng.settings.lockSalt) != eng.settings.lockHash) {
+            lockEncErr = T("Wrong PIN - try again");
+            lockEncPin.clear();
+        } else {
+            eng.SetHistoryEncryption(lockEncPin);
+            lockEncPin.clear();
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Cancel"), ImVec2(mobile ? -1 : 0, h))) {
+        lockEncPin.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void App::DrawLockSetPopup() {
@@ -316,7 +379,7 @@ void App::DrawLockSetPopup() {
             lockSetErr = T("The two PINs differ.");
         } else {
             std::string salt = RandomHex(16);
-            eng.SetLock(HashPin(lockNew1, salt), salt, (int)lockNew1.size());
+            eng.SetLock(HashPin(lockNew1, salt), salt, (int)lockNew1.size(), lockNew1);
             lockNew1.clear();
             lockNew2.clear();
             ImGui::CloseCurrentPopup();

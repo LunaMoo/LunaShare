@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- App lock: **encrypt the chat history with the PIN** (*Settings → App lock*). Someone who copies the files can't read
+  the messages; after a start the PIN opens them, and messages that arrive before are kept and added. See docs/ACCOUNTS.md.
 - Calls and voice messages: **better noise suppression** - RNNoise (a small neural network) now removes background noise such as fans, keyboards and traffic, and keeps voices natural (*Settings → Calls → Noise suppression*).
 - Calls: **share your screen** (Windows, Linux/X11) - *Screen (share it)* in the call's camera list.
 

@@ -206,26 +206,13 @@ void Engine::Load() {
             if (!g.id.empty()) groups[g.id] = g;
         }
     }
-    if (LoadJsonFile(JoinPath(dir, "history.json"), j)) {
-        if (j.contains("chats") && j["chats"].is_object())
-            for (auto& [peer, arr] : j["chats"].items()) {
-                Conversation& cv = chats[peer];
-                cv.peer = peer;
-                for (auto& m : arr) cv.messages.push_back(MessageFromJson(m));
-            }
-        if (j.contains("ttl") && j["ttl"].is_object())
-            for (auto& [peer, v] : j["ttl"].items())
-                if (v.is_array() && v.size() == 2 && v[0].is_number_integer() && v[1].is_number_integer()) {
-                    chats[peer].peer = peer;
-                    chats[peer].ttl = TtlChoice(v[0].get<int>());
-                    chats[peer].ttlTs = v[1].get<int64_t>();
-                }
-        if (j.contains("pendingDeletes") && j["pendingDeletes"].is_object())
-            for (auto& [peer, arr] : j["pendingDeletes"].items())
-                for (auto& mid : arr)
-                    if (mid.is_string()) chats[peer].pendingDeletes.push_back(mid.get<std::string>());
-        if (j.contains("files") && j["files"].is_array())
-            for (auto& h : j["files"]) history.push_back(HistoryFromJson(h));
+    if (!settings.histPub.empty() && FileSize(JoinPath(dir, "history.enc")) >= 0) {
+        // encrypted: opened with the PIN (UnlockHistory). What arrives until then is saved apart, to be merged.
+        historyLocked_ = true;
+        if (FileSize(JoinPath(dir, "history-new.enc")) >= 0)
+            RenameFile(JoinPath(dir, "history-new.enc"), JoinPath(dir, "history-new-" + std::to_string(NowMs()) + ".enc"));
+    } else if (LoadJsonFile(JoinPath(dir, "history.json"), j)) {
+        ApplyHistoryJson(j, false);
     }
     if (LoadJsonFile(JoinPath(dir, "swarm.json"), j)) LoadSwarm(j);
     if (LoadJsonFile(JoinPath(dir, "transfers.json"), j) && j.is_array()) {
@@ -254,6 +241,110 @@ void Engine::Load() {
             transfers[t->tid] = t;
         }
     }
+}
+
+void Engine::ApplyHistoryJson(const json& j, bool merge) {
+    if (j.contains("chats") && j["chats"].is_object())
+        for (auto& [peer, arr] : j["chats"].items()) {
+            if (!arr.is_array()) continue;
+            Conversation& cv = chats[peer];
+            cv.peer = peer;
+            std::set<std::string> have;
+            if (merge)
+                for (auto& m : cv.messages) have.insert(m.mid);
+            for (auto& m : arr) {
+                ChatMessage cm = MessageFromJson(m);
+                if (merge && !cm.mid.empty() && !have.insert(cm.mid).second) continue;
+                cv.messages.push_back(std::move(cm));
+            }
+        }
+    if (j.contains("ttl") && j["ttl"].is_object())
+        for (auto& [peer, v] : j["ttl"].items())
+            if (v.is_array() && v.size() == 2 && v[0].is_number_integer() && v[1].is_number_integer()) {
+                Conversation& cv = chats[peer];
+                cv.peer = peer;
+                if (merge && cv.ttlTs >= v[1].get<int64_t>()) continue;  // (the later change wins)
+                cv.ttl = TtlChoice(v[0].get<int>());
+                cv.ttlTs = v[1].get<int64_t>();
+            }
+    if (j.contains("pendingDeletes") && j["pendingDeletes"].is_object())
+        for (auto& [peer, arr] : j["pendingDeletes"].items())
+            for (auto& mid : arr)
+                if (mid.is_string()) {
+                    auto& pd = chats[peer].pendingDeletes;
+                    if (!merge || std::find(pd.begin(), pd.end(), mid.get<std::string>()) == pd.end()) pd.push_back(mid.get<std::string>());
+                }
+    if (j.contains("files") && j["files"].is_array())
+        for (auto& h : j["files"]) {
+            HistoryEntry e = HistoryFromJson(h);
+            if (merge && std::any_of(history.begin(), history.end(), [&](const HistoryEntry& o) { return o.tid == e.tid && o.ts == e.ts; })) continue;
+            history.push_back(e);
+        }
+}
+
+bool Engine::UnlockHistory(const std::string& pin) {
+    auto lk = Lock();
+    if (!historyLocked_) return true;
+    std::string wrap, sec, blob, plain;
+    std::vector<uint8_t> w(settings.histWrap.size() / 2);
+    if (w.empty() || !FromHex(settings.histWrap, w.data(), w.size())) return false;
+    wrap.assign((const char*)w.data(), w.size());
+    if (!PasswordDecrypt(wrap, pin, sec)) return false;
+    std::string dir = ConfigPath();
+    if (!LoadFileBytes(JoinPath(dir, "history.enc"), blob) || !HistoryOpen(sec, blob, plain)) {
+        return false;
+    }
+    json old = json::parse(plain, nullptr, false);
+    // what's in memory arrived since the start: the old history goes first, then the earlier locked sessions, then it
+    std::map<std::string, std::vector<ChatMessage>> fresh;
+    for (auto& [peer, cv] : chats) fresh[peer] = std::move(cv.messages), cv.messages.clear();
+    std::vector<HistoryEntry> freshFiles = std::move(history);
+    history.clear();
+    if (old.is_object()) ApplyHistoryJson(old, false);
+    std::vector<std::string> extra;
+    for (auto& de : ListDir(dir)) {
+        const std::string& name = de.name;
+        if (name.rfind("history-new-", 0) == 0 && name.size() > 4 && name.compare(name.size() - 4, 4, ".enc") == 0) extra.push_back(name);
+    }
+    std::sort(extra.begin(), extra.end());
+    for (auto& name : extra) {
+        std::string b, p;
+        if (LoadFileBytes(JoinPath(dir, name), b) && HistoryOpen(sec, b, p)) {
+            json jn = json::parse(p, nullptr, false);
+            if (jn.is_object()) ApplyHistoryJson(jn, true);
+        }
+    }
+    for (auto& [peer, msgs] : fresh) {
+        Conversation& cv = chats[peer];
+        std::set<std::string> have;
+        for (auto& m : cv.messages) have.insert(m.mid);
+        for (auto& m : msgs)
+            if (m.mid.empty() || have.insert(m.mid).second) cv.messages.push_back(std::move(m));
+    }
+    for (auto& e : freshFiles)
+        if (!std::any_of(history.begin(), history.end(), [&](const HistoryEntry& o) { return o.tid == e.tid && o.ts == e.ts; })) history.push_back(e);
+    histSec_ = sec;
+    historyLocked_ = false;
+    MarkDirty();
+    return true;
+}
+
+void Engine::SetHistoryEncryption(const std::string& pin) {
+    auto lk = Lock();
+    if (historyLocked_) return;
+    if (pin.empty()) {
+        settings.histPub.clear();
+        settings.histWrap.clear();
+        histSec_.clear();
+    } else {
+        std::string pub, sec;
+        HistoryKeyPair(pub, sec);
+        std::string w = PasswordEncrypt(sec, pin);
+        settings.histPub = pub;
+        settings.histWrap = ToHex((const uint8_t*)w.data(), w.size());
+        histSec_ = sec;
+    }
+    MarkDirty();
 }
 
 void Engine::Save() {
@@ -298,7 +389,27 @@ void Engine::Save() {
     std::string dir = configDir.empty() ? ConfigDir() : configDir;
     MakeDirs(dir);
     SaveJsonFile(JoinPath(dir, "settings.json"), js);
-    SaveJsonFile(JoinPath(dir, "history.json"), jh);
+    std::string histPub;
+    bool histLocked;
+    {
+        auto lk = Lock();
+        histPub = settings.histPub;
+        histLocked = historyLocked_;
+    }
+    if (histPub.empty()) {
+        if (SaveJsonFile(JoinPath(dir, "history.json"), jh)) {
+            RemoveFile(JoinPath(dir, "history.enc"));
+            for (auto& de : ListDir(dir))
+                if (de.name.rfind("history-new", 0) == 0) RemoveFile(JoinPath(dir, de.name));
+        }
+    } else if (histLocked) {
+        // (only what came since the start: the rest is in history.enc, merged when it's opened)
+        SaveFileAtomic(JoinPath(dir, "history-new.enc"), HistorySeal(histPub, jh.dump(-1, ' ', false, json::error_handler_t::replace)));
+    } else if (SaveFileAtomic(JoinPath(dir, "history.enc"), HistorySeal(histPub, jh.dump(-1, ' ', false, json::error_handler_t::replace)))) {
+        RemoveFile(JoinPath(dir, "history.json"));
+        for (auto& de : ListDir(dir))
+            if (de.name.rfind("history-new", 0) == 0) RemoveFile(JoinPath(dir, de.name));
+    }
     SaveJsonFile(JoinPath(dir, "transfers.json"), jt);
     SaveJsonFile(JoinPath(dir, "swarm.json"), SwarmJson());
 }
@@ -2448,11 +2559,24 @@ void Engine::SyncPush(const std::string& kind, const json& data) {
         if (auto c = ReadyConn(d)) Queue(c, Msg::SyncData, {{"kind", kind}, {"data", data}});
 }
 
-void Engine::SetLock(const std::string& hash, const std::string& salt, int len) {
+void Engine::SetLock(const std::string& hash, const std::string& salt, int len, const std::string& pin) {
     auto lk = Lock();
     settings.lockHash = hash;
     settings.lockSalt = salt;
     settings.lockLen = len;
+    if (hash.empty() && !settings.histPub.empty()) {
+        if (historyLocked_) {  // (opened with the recovery phrase: the PIN is forgotten, the old history can't be read)
+            std::string dir = ConfigPath();
+            RemoveFile(JoinPath(dir, "history.enc"));
+            historyLocked_ = false;
+        }
+        settings.histPub.clear();
+        settings.histWrap.clear();
+        histSec_.clear();
+    } else if (!settings.histPub.empty() && !pin.empty() && !historyLocked_ && !histSec_.empty()) {
+        std::string w = PasswordEncrypt(histSec_, pin);  // the new PIN opens it now
+        settings.histWrap = ToHex((const uint8_t*)w.data(), w.size());
+    }
     MarkDirty();
 }
 
@@ -3788,6 +3912,8 @@ void Engine::ApplySettings(const Settings& s) {
     settings.lockHash = old.lockHash;  // only SetLock changes the PIN
     settings.lockSalt = old.lockSalt;
     settings.lockLen = old.lockLen;
+    settings.histPub = old.histPub;  // only SetHistoryEncryption / SetLock change these
+    settings.histWrap = old.histWrap;
     settings.updateSeen = old.updateSeen;
     if (settings.downloadDir.empty()) settings.downloadDir = DefaultDownloadDir();
     MakeDirs(settings.downloadDir);

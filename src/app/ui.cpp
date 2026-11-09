@@ -105,7 +105,7 @@ void App::Frame() {
             SelectPeer(eng.call.peer);
             if (IsMobileLayout()) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
             else { tab = Tab::Chat; tabForce = true; }
-        } else if (a.what == "unlock") {  // (the fingerprint)
+        } else if (a.what == "unlock" && !eng.HistoryLocked()) {  // (the fingerprint; the encrypted history needs the PIN)
             locked = false;
             lockWrong = 0;
         }
@@ -353,6 +353,7 @@ void App::Frame() {
     DrawPollNewPopup();
     DrawUpdatePopup();
     DrawLockSetPopup();
+    DrawLockEncPopup();
     SleepPopup();
     DrawSleepAsk();
     DrawToasts();

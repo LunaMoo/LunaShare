@@ -247,6 +247,65 @@ static void TestMdnsPackets() {
     for (size_t cut = 0; cut < b.size(); cut += 7) Parse(b.data(), cut, bad);
 }
 
+// the chat history encrypted with the app-lock PIN: saved while locked, merged once opened
+static void TestHistoryCrypt() {
+    printf("[history encrypted with the PIN]\n");
+    std::string cfg = JoinPath(Root(), "histcrypt/config");
+    auto add = [](Engine& e, const std::string& mid, const std::string& text) {
+        auto lk = e.Lock();
+        ChatMessage m;
+        m.mid = mid;
+        m.text = text;
+        m.ts = NowMs();
+        e.chats["@x"].peer = "@x";
+        e.chats["@x"].messages.push_back(m);
+    };
+    auto texts = [](Engine& e) {
+        auto lk = e.Lock();
+        std::string r;
+        for (auto& m : e.chats["@x"].messages) r += m.text + ";";
+        return r;
+    };
+    auto has = [&](const std::string& f) { return FileSize(JoinPath(cfg, f)) >= 0; };
+    auto fileHas = [&](const std::string& f, const std::string& what) {
+        std::string b;
+        return LoadFileBytes(JoinPath(cfg, f), b) && b.find(what) != std::string::npos;
+    };
+    auto E = MakeEngine("histcrypt", 48331, false, false, false, false);
+    add(*E, "m1", "secret one");
+    E->SetHistoryEncryption("1234");
+    E->Stop();
+    CHECK(!has("history.json") && has("history.enc") && !fileHas("history.enc", "secret one"), "encrypted on disk, plain file gone");
+    E = MakeEngine("histcrypt", 48331, false, false, false, false);
+    CHECK(E->HistoryLocked() && texts(*E).empty(), "locked after a start");
+    add(*E, "m2", "secret two");
+    E->Stop();
+    CHECK(has("history-new.enc") && !fileHas("history-new.enc", "secret two"), "while locked: saved apart, encrypted");
+    E = MakeEngine("histcrypt", 48331, false, false, false, false);
+    add(*E, "m3", "secret three");
+    CHECK(!E->UnlockHistory("0000") && E->HistoryLocked(), "a wrong PIN doesn't open it");
+    CHECK(E->UnlockHistory("1234") && !E->HistoryLocked(), "the PIN opens it");
+    CHECK(texts(*E) == "secret one;secret two;secret three;", "merged in order (%s)", texts(*E).c_str());
+    E->SetLock("h", "s", 4, "5678");  // a new PIN: the key is wrapped again
+    E->Stop();
+    CHECK(!has("history-new.enc"), "merged files gone");
+    E = MakeEngine("histcrypt", 48331, false, false, false, false);
+    CHECK(!E->UnlockHistory("1234") && E->UnlockHistory("5678") && texts(*E) == "secret one;secret two;secret three;", "the new PIN opens it");
+    E->SetHistoryEncryption("");
+    E->Stop();
+    CHECK(has("history.json") && !has("history.enc") && fileHas("history.json", "secret one"), "back to a plain file");
+    E = MakeEngine("histcrypt", 48331, false, false, false, false);
+    CHECK(!E->HistoryLocked() && texts(*E).size() > 10, "plain again after a start");
+    E->SetHistoryEncryption("1111");
+    E->Stop();
+    E = MakeEngine("histcrypt", 48331, false, false, false, false);
+    add(*E, "m4", "after");
+    E->SetLock("", "", 0);  // the PIN forgotten (the recovery phrase): the old history is lost, the lock and the encryption off
+    CHECK(!E->HistoryLocked() && !E->HistoryEncrypted() && texts(*E) == "after;", "forgotten PIN: a fresh history");
+    E->Stop();
+    CHECK(!has("history.enc") && has("history.json"), "forgotten PIN: plain file");
+}
+
 int main() {
     SetMachineId("");  // engines on one test computer would all look like the same device to the server
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -254,6 +313,7 @@ int main() {
     TestCrypto();
     TestMdnsPackets();
     TestSeal();
+    TestHistoryCrypt();
     printf("root: %s\n", Root().c_str());
 
     auto A = MakeEngine("alice", 48110, false, true);
