@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.8
 
 - **Comics**: cbz, cbr, cb7 and cbt as a shelf of covers (Archives → Comics) with how far each one is read; they open
   in the viewer at the page where you stopped, manga **right to left**, natural page order. Any archive of pictures
