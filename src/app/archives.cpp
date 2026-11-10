@@ -287,6 +287,12 @@ bool Extract(const std::string& path, const std::string& dest, const std::vector
         if (type != AE_IFREG && type != 0) continue;  // (links, devices: never)
         if (archive_entry_hardlink(e)) continue;
         MakeDirs(DirName(to));
+        if (FileExists(to) || IsDirectory(to)) {  // (never over a file that's there: "name (2).ext")
+            size_t slash = to.find_last_of("/\\"), dot = to.find_last_of('.');
+            if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) dot = to.size();
+            std::string base = to.substr(0, dot), ext = to.substr(dot);
+            for (int n = 2; FileExists(to) || IsDirectory(to); n++) to = base + " (" + std::to_string(n) + ")" + ext;
+        }
         FILE* f = OpenFile(to, "wb");
         if (!f) {
             err = "can't write " + to;

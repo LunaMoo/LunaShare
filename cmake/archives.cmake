@@ -51,6 +51,7 @@ endif()
 
 # ---- xz's liblzma (7z, tar.xz, zip with lzma) - with its own CMake, only the library
 set(XZ_NLS OFF CACHE BOOL "" FORCE)
+set(XZ_SANDBOX no CACHE STRING "" FORCE)  # (only its command-line tool uses it; none is built)
 set(XZ_DOC OFF CACHE BOOL "" FORCE)
 foreach(t XZ XZDEC LZMADEC LZMAINFO SCRIPTS SYMLINKS SYMLINKS_LZMA)
     set(XZ_TOOL_${t} OFF CACHE BOOL "" FORCE)

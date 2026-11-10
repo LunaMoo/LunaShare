@@ -72,6 +72,12 @@ void SendRequest(const std::string& configDir, const std::vector<std::string>& p
 #endif
 }
 
+void ClearRequests(const std::string& configDir) {
+    std::string d = ReqDir(configDir);
+    for (auto& e : ListDir(d))
+        if (!e.isDir) RemoveFile(JoinPath(d, e.name));
+}
+
 bool Poll(const std::string& configDir, Request& r) {
     std::string d = ReqDir(configDir);
     std::vector<std::string> names;

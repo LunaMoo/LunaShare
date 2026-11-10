@@ -9,6 +9,14 @@
 - **Torrents from a phone:** a magnet link or .torrent opened on a phone is downloaded **on your computer** (the
   same account); the phone shows the progress, gets the files sent when it's done, or watches the movie from the
   computer - also before it's complete.
+- Gallery: stays fast with thousands of photos (only the rows in view are drawn; the list is worked out when
+  something changes, not every frame).
+- Archives: unpacking never writes over a file that's already there (`name (2).ext`); a file inside that LunaShare
+  doesn't show itself (a text, a PDF...) opens with the system's app instead of the send-to list; an archive handed
+  over by another app on a phone unpacks to the folder for received files, not into the app's cache; files unpacked to
+  look at are cleared at the next start.
+- Comics opened from another app on a phone keep their page between openings.
+- Starting LunaShare no longer opens a file that an earlier, already closed copy was asked to open.
 - The slideshow (and any slide between pictures) is smooth now; opening a file while a movie plays shows it right
   away.
 

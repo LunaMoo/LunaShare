@@ -17,7 +17,10 @@
 #include "image_cache.h"
 #include "imgui.h"
 #include "imgui_stdlib.h"
+#include "music.h"
 #include "platform.h"
+#include "player_host.h"
+#include "torrent_host.h"
 #include "ui.h"
 #include "ui_widgets.h"
 
@@ -146,6 +149,15 @@ std::string StemOf(const std::string& path) {
     return dot != std::string::npos && dot > 0 ? b.substr(0, dot) : b;
 }
 
+// where "unpack" offers to put things: next to the archive - unless that is a hidden place of the app's (an archive
+// opened from another app on a phone is a copy in the cache; one opened from inside another archive too): then the
+// folder for received files
+std::string UnpackDefault(Engine& eng, const std::string& archive) {
+    std::string d = DirName(archive), cfg = eng.ConfigPath();
+    if (d.compare(0, cfg.size(), cfg) == 0 || d.find("/cache/incoming") != std::string::npos) return eng.settings.downloadDir;
+    return d;
+}
+
 const char* kFormats[] = {"zip", "7z", "tar.gz", "tar.xz", "tar.zst"};
 }  // namespace
 
@@ -234,7 +246,14 @@ void App::ArchiveOpenEntry(const std::string& entry) {
             return arc::Extract(path, tmp, {entry}, pw, p, err, nullptr, parent);
         },
         [tmp, entry](App& app, bool ok, const std::string&) {
-            if (ok) app.OpenPaths({JoinPath(tmp, BaseName(entry))}, false);
+            if (!ok) return;
+            std::string p = JoinPath(tmp, BaseName(entry));
+            // what LunaShare shows itself opens here; anything else (a text, a PDF...) with the system's app for it
+            if (ImageCache::IsImagePath(p) || PlayerHost::IsVideoPath(p) || music::Library::IsAudioPath(p) || arc::IsArchivePath(p) ||
+                TorrentHost::IsTorrentSource(p))
+                app.OpenPaths({p}, false);
+            else if (Bridge().openFile) Bridge().openFile(p);
+            else OpenWithDefaultApp(p);
         });
 }
 
@@ -603,7 +622,7 @@ void App::DrawArchiveOpen() {
     float half = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f : 0;
     if (ui::IconTextButton(T("Unpack all..."), Icon::Down, ImVec2(half, h))) {
         archiveExtractOnly.clear();
-        archiveExtractTo = DirName(o.path);
+        archiveExtractTo = UnpackDefault(eng, o.path);
         archiveExtractSub = true;
         archiveExtractOpen = true;
     }
@@ -611,7 +630,7 @@ void App::DrawArchiveOpen() {
     ImGui::BeginDisabled(picked.empty());
     if (ui::IconTextButton(TF("Unpack picked (%d)...", (int)picked.size()).c_str(), Icon::Down, ImVec2(half, h))) {
         archiveExtractOnly = picked;
-        archiveExtractTo = DirName(o.path);
+        archiveExtractTo = UnpackDefault(eng, o.path);
         archiveExtractSub = false;
         archiveExtractOpen = true;
     }

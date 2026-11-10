@@ -6,6 +6,8 @@ extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, 
 #include "tray.h"
 #include <algorithm>
 #include <SDL.h>
+#include <ctime>
+#include <filesystem>
 
 #include <cstdio>
 #include <string>
@@ -274,6 +276,7 @@ int main(int argc, char** argv) {
         instance::SendRequest(ls::ConfigDir(), openPaths, openSend);
         return 0;
     }
+    if (!ls::IsMobilePlatform()) instance::ClearRequests(ls::ConfigDir());
     SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
@@ -296,6 +299,17 @@ int main(int argc, char** argv) {
         setenv("TMPDIR", tmp.c_str(), 1);
     }
 #endif
+    {
+        // files unpacked from archives to look at or to send: what was looked at goes now; what was sent stays two
+        // weeks (a transfer to someone offline may still need it)
+        std::string cache = ls::JoinPath(ls::ConfigDir(), "cache");
+        std::error_code ec;
+        std::filesystem::remove_all(std::filesystem::u8path(ls::JoinPath(cache, "open")), ec);
+        int64_t now = (int64_t)time(nullptr);
+        for (auto& e : ls::ListDir(cache))
+            if (e.isDir && e.name.compare(0, 5, "send-") == 0 && now - e.mtime > 14 * 86400)
+                std::filesystem::remove_all(std::filesystem::u8path(ls::JoinPath(cache, e.name)), ec);
+    }
 
     const char* glsl = nullptr;
 #if defined(IMGUI_IMPL_OPENGL_ES2)

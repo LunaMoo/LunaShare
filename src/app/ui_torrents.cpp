@@ -422,7 +422,7 @@ void App::DrawTorrents() {
     // totals
     if (list && !list->empty()) {
         int down = 0, up = 0;
-        for (auto& t : *list) down += t.downRate, up += t.upRate;
+        for (auto& t : *list) down += t.Complete() ? 0 : t.downRate, up += t.upRate;  // (a finished one's last speed lingers a moment)
         if (down || up) {
             ImGui::SameLine();
             ImGui::TextDisabled("   %s %s   %s %s", T("down"), Rate(down).c_str(), T("up"), Rate(up).c_str());

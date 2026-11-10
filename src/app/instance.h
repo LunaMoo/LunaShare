@@ -19,5 +19,7 @@ struct Request {
     bool send = false;  // share them (to a chat), not open them
 };
 bool Poll(const std::string& configDir, Request& r);
+// at the start of the copy that runs: requests left from a copy that ended before it took them are dropped
+void ClearRequests(const std::string& configDir);
 
 }  // namespace instance

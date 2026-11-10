@@ -1511,7 +1511,8 @@ int main() {
     std::string f3 = JoinPath(Root(), "src/big3.bin");
     WriteRandomFile(f3, SZ, 3);
     uint64_t t3 = FirstTid(*A, A->SendPaths(idB, {f3}));
-    CHECK(WaitFor([&] { auto t = GetT(*B, t3); return t && t->done.load() > SZ / 3; }, 15000), "progress");
+    // (paused early: on a slow runner the 4 seconds this file takes were sometimes over before the pause)
+    CHECK(WaitFor([&] { auto t = GetT(*B, t3); return t && t->done.load() > SZ / 8; }, 15000), "progress");
     A->Pause(t3);
     CHECK(WaitFor([&] { return StateOf(*B, t3) == TState::Paused; }, 3000), "receiver sees pause");
     std::this_thread::sleep_for(std::chrono::milliseconds(300));

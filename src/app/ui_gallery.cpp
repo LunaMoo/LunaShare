@@ -5,6 +5,7 @@
 // itself (a folder sync). Folders are looked through on a thread; the photo dates are kept in gallery_dates.json.
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <ctime>
 #include <map>
 #include <mutex>
@@ -98,6 +99,67 @@ std::string MonthOf(int64_t ms) {
 #if defined(__ANDROID__)
 const char* kCamera = "/storage/emulated/0/DCIM/Camera";
 #endif
+
+// what the tab shows, worked out when the pictures, the search or the album change - not every frame (a phone has
+// thousands of photos). UI thread only.
+struct View {
+    uint64_t ver = ~0ull;
+    std::string q, album;
+    std::vector<Pic> pics;         // (a copy of the scan at ver)
+    std::vector<const Pic*> list;  // searched / of the album, newest first
+    struct Month {
+        std::string label;
+        size_t first = 0, count = 0;
+    };
+    std::vector<Month> months;
+    struct Album {
+        std::string dir;
+        const Pic* cover = nullptr;
+        int count = 0;
+    };
+    std::vector<Album> albums;  // newest first
+};
+View g_view;
+
+void Rebuild(View& v, const std::string& q, const std::string& album) {
+    v.q = q;
+    v.album = album;
+    v.list.clear();
+    v.months.clear();
+    v.albums.clear();
+    for (auto& p : v.pics) {
+        if (!album.empty() && p.dir != album) continue;
+        if (!q.empty() && Low(p.name).find(q) == std::string::npos && Low(p.dir).find(q) == std::string::npos) continue;
+        v.list.push_back(&p);
+    }
+    std::stable_sort(v.list.begin(), v.list.end(), [](const Pic* a, const Pic* b) { return a->date > b->date; });
+    int curKey = -1;
+    std::map<std::string, size_t> at;
+    for (size_t i = 0; i < v.list.size(); i++) {
+        const Pic* p = v.list[i];
+        time_t t = (time_t)(p->date / 1000);
+        struct tm lt{};
+#ifdef _WIN32
+        localtime_s(&lt, &t);
+#else
+        localtime_r(&t, &lt);
+#endif
+        int key = lt.tm_year * 12 + lt.tm_mon;
+        if (key != curKey || v.months.empty()) {
+            curKey = key;
+            v.months.push_back({MonthOf(p->date), i, 0});
+        }
+        v.months.back().count++;
+        auto it = at.find(p->dir);
+        if (it == at.end()) {
+            at[p->dir] = v.albums.size();
+            v.albums.push_back({p->dir, p, 1});  // (the list is newest first: the newest picture is the cover)
+        } else {
+            v.albums[it->second].count++;
+        }
+    }
+    std::stable_sort(v.albums.begin(), v.albums.end(), [](const View::Album& a, const View::Album& b) { return a.cover->date > b.cover->date; });
+}
 }  // namespace
 
 // the folders: the camera and Pictures, received files, and mine
@@ -152,7 +214,7 @@ void App::GalleryRescan() {
             std::string stamp = std::to_string(p.size) + ":" + std::to_string(p.mtime);
             auto it = dates.find(p.path);
             int64_t d = 0;
-            if (it != dates.end() && it->is_array() && it->size() == 2 && (*it)[0] == stamp) {
+            if (it != dates.end() && it->is_array() && it->size() == 2 && (*it)[0] == stamp && (*it)[1].is_number_integer()) {
                 d = (*it)[1].get<int64_t>();
             } else {
                 d = PhotoDateMs(p.path);
@@ -242,11 +304,6 @@ void App::DrawGallery() {
         galleryRescanWanted = false;
         GalleryRescan();
     }
-    std::vector<Pic> pics;
-    {
-        std::lock_guard<std::mutex> l(sc.m);
-        pics = sc.pics;
-    }
     // the bar: back (from an album), by month / albums, folders, search, select
     if (!galleryAlbum.empty()) {
         if (ui::IconTextButton(T("Albums"), Icon::Back, ImVec2(0, h))) {
@@ -333,13 +390,19 @@ void App::DrawGallery() {
 
     // what's shown: searched, the album (if one is open), newest first
     std::string q = Low(gallerySearch);
-    std::vector<const Pic*> list;
-    for (auto& p : pics) {
-        if (!galleryAlbum.empty() && p.dir != galleryAlbum) continue;
-        if (!q.empty() && Low(p.name).find(q) == std::string::npos && Low(p.dir).find(q) == std::string::npos) continue;
-        list.push_back(&p);
+    {
+        bool fresh = false;
+        {
+            std::lock_guard<std::mutex> l(sc.m);
+            if (sc.ver != g_view.ver) {
+                g_view.pics = sc.pics;
+                g_view.ver = sc.ver;
+                fresh = true;
+            }
+        }
+        if (fresh || q != g_view.q || galleryAlbum != g_view.album) Rebuild(g_view, q, galleryAlbum);
     }
-    std::stable_sort(list.begin(), list.end(), [](const Pic* a, const Pic* b) { return a->date > b->date; });
+    const std::vector<const Pic*>& list = g_view.list;
 
     // picked: what to do with them
     if (gallerySelecting || !gallerySel.empty()) {
@@ -464,21 +527,8 @@ void App::DrawGallery() {
 
     if (galleryView == 1 && galleryAlbum.empty()) {
         // albums: a folder each, newest first, the newest picture on the cover
-        struct Album {
-            std::string dir;
-            const Pic* cover = nullptr;
-            int count = 0;
-        };
-        std::map<std::string, Album> albums;
-        for (auto* p : list) {
-            Album& a = albums[p->dir];
-            a.dir = p->dir;
-            a.count++;
-            if (!a.cover) a.cover = p;  // (the list is newest first)
-        }
-        std::vector<Album*> al;
-        for (auto& [d, a] : albums) al.push_back(&a);
-        std::sort(al.begin(), al.end(), [](Album* a, Album* b) { return a->cover->date > b->cover->date; });
+        std::vector<const View::Album*> al;
+        for (auto& a : g_view.albums) al.push_back(&a);
         int cols = std::max(2, (int)((avail + sp) / (ImGui::GetFontSize() * (mobile ? 8.0f : 10.0f) + sp)));
         float side = (avail - sp * (cols - 1)) / cols;
         for (size_t i = 0; i < al.size(); i++) {
@@ -488,8 +538,11 @@ void App::DrawGallery() {
             bool tapped = false, held = false;
             tile(*al[i]->cover, side, &tapped, &held);
             if (tapped) {
-                galleryAlbum = al[i]->dir;
+                galleryAlbum = al[i]->dir;  // (the view is rebuilt at the next frame: nothing of it is used after this)
                 gallerySel.clear();
+                ImGui::EndGroup();
+                ImGui::PopID();
+                break;
             }
             ImVec2 tp = ImGui::GetCursorScreenPos();
             ImVec4 clip(tp.x, tp.y, tp.x + side, tp.y + ImGui::GetTextLineHeight() * 2.2f);
@@ -503,24 +556,50 @@ void App::DrawGallery() {
         // a grid, a header per month (or the album's pictures)
         int cols = std::max(3, (int)((avail + sp) / (ImGui::GetFontSize() * (mobile ? 5.5f : 7.5f) + sp)));
         float side = (avail - sp * (cols - 1)) / cols;
-        std::string cur;
-        int col = 0;
-        for (size_t i = 0; i < list.size(); i++) {
-            std::string month = MonthOf(list[i]->date);
-            if (month != cur) {
-                cur = month;
-                if (col) ImGui::NewLine();
-                col = 0;
-                ImGui::SeparatorText(month.c_str());
+        // only the rows in view are drawn (the rest is empty space of the same height)
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(sp, sp));
+        float hH = ImGui::GetTextLineHeight() * 1.7f, rowH = side + sp;
+        float top = ImGui::GetScrollY() - ImGui::GetCursorPosY(), bottom = top + ImGui::GetWindowHeight();
+        float y = 0, skipped = 0;
+        auto flush = [&] {
+            if (skipped > 0) ImGui::Dummy(ImVec2(1, skipped - sp));
+            skipped = 0;
+        };
+        for (auto& m : g_view.months) {
+            if (y + hH + sp > top && y < bottom) {
+                flush();
+                ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::Dummy(ImVec2(avail, hH));
+                float ty = p.y + (hH - ImGui::GetTextLineHeight()) * 0.5f;
+                dl->AddText(ImVec2(p.x + 2, ty), ImGui::GetColorU32(ImGuiCol_Text), m.label.c_str());
+                float tw = ImGui::CalcTextSize(m.label.c_str()).x;
+                dl->AddLine(ImVec2(p.x + tw + 12, p.y + hH * 0.5f), ImVec2(p.x + avail, p.y + hH * 0.5f), ImGui::GetColorU32(ImGuiCol_Separator));
+            } else {
+                skipped += hH + sp;
             }
-            if (col) ImGui::SameLine(0, sp);
-            ImGui::PushID((int)i);
-            bool tapped = false, held = false;
-            tile(*list[i], side, &tapped, &held);
-            handle(list, i, tapped, held);
-            ImGui::PopID();
-            if (++col >= cols) col = 0;
+            y += hH + sp;
+            int nrows = (int)((m.count + (size_t)cols - 1) / (size_t)cols);
+            int r0 = std::clamp((int)floorf((top - y) / rowH), 0, nrows);
+            int r1 = std::clamp((int)ceilf((bottom - y) / rowH), r0, nrows);
+            skipped += (float)r0 * rowH;
+            for (int r = r0; r < r1; r++) {
+                flush();
+                for (int c = 0; c < cols; c++) {
+                    size_t i = m.first + (size_t)r * (size_t)cols + (size_t)c;
+                    if (i >= m.first + m.count) break;
+                    if (c) ImGui::SameLine(0, sp);
+                    ImGui::PushID((int)i);
+                    bool tapped = false, held = false;
+                    tile(*list[i], side, &tapped, &held);
+                    handle(list, i, tapped, held);
+                    ImGui::PopID();
+                }
+            }
+            skipped += (float)(nrows - r1) * rowH;
+            y += (float)nrows * rowH;
         }
+        flush();
+        ImGui::PopStyleVar();
     }
     ImGui::EndChild();
 }

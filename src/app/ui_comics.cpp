@@ -53,6 +53,13 @@ void SavePlaces() {
     SaveJsonFile(g_placesPath, j);
     g_placesDirty = false;
 }
+// what a comic's place is kept under: its path - but one handed over by another app on a phone is a copy in the
+// cache, in a new folder every time: its name and size then
+std::string PlaceKey(const std::string& path) {
+    if (path.find("/cache/incoming/") == std::string::npos) return path;
+    return "incoming:" + BaseName(path) + "|" + std::to_string(FileSize(path));
+}
+
 Place GetPlace(const std::string& k) {
     std::lock_guard<std::mutex> l(g_pm);
     auto it = g_places.find(k);
@@ -204,14 +211,15 @@ void App::ComicFrame() {
             if (!g_open.error.empty()) {
                 toasts.push_back({EventType::Error, T("Comics"), TF("Can't open %s: %s", BaseName(g_open.path).c_str(), g_open.error.c_str()), "", 0, 5.0f});
             } else {
-                Place pl = GetPlace(g_open.path);
+                std::string key = PlaceKey(g_open.path);
+                Place pl = GetPlace(key);
                 std::vector<std::string> caps(g_open.pages.size(), BaseName(g_open.path));
                 OpenViewerList(g_open.pages, pl.pages == (int)g_open.pages.size() ? pl.page : 0, caps);
-                viewer.comic = g_open.path;
+                viewer.comic = key;
                 viewer.rtl = pl.rtl;
                 ComicTick();
                 std::lock_guard<std::mutex> pl2(g_pm);  // (read now: first on the shelf)
-                g_places[g_open.path].at = NowMs();
+                g_places[key].at = NowMs();
                 g_placesDirty = true;
             }
         }
