@@ -129,10 +129,10 @@ void App::Frame() {
         }
     }
     LockTick();
-    if (!openPathsPending.empty() && !locked) HandleOpenPaths();
     ui::Metrics& m = ui::M();
     m.mobile = IsMobileLayout();
     m.rowH = ImGui::GetFrameHeight() * (m.mobile ? 1.9f : 1.0f);
+    if (!openPathsPending.empty() && !locked) HandleOpenPaths();
 
     // keep the settings copy in sync with what the engine has (imports, other changes)
     if (!editDirty && !ImGui::IsAnyItemActive()) edit = eng.settings;

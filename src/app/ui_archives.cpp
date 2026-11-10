@@ -440,20 +440,20 @@ void App::DrawArchives() {
     if (ImGui::RadioButton(T("Archives"), !archivesComics)) archivesComics = false;
     ImGui::SameLine();
     if (ImGui::RadioButton(T("Comics"), archivesComics)) archivesComics = true;
-    ImGui::SameLine();
-    if (ui::IconTextButton(T("Open..."), Icon::Folder, ImVec2(0, h))) {
+    if (!mobile) ImGui::SameLine();
+    float third = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f : 0;
+    if (ui::IconTextButton(T("Open..."), Icon::Folder, ImVec2(third, h))) {
         browseFor = BrowseFor::ArchiveOpen;
         browser.Open(FileBrowser::Mode::OpenFile, T("Open an archive"), browser.lastDir);
     }
     ImGui::SameLine();
-    if (ui::IconTextButton(T("Pack..."), Icon::Archive, ImVec2(0, h))) {
+    if (ui::IconTextButton(T("Pack..."), Icon::Archive, ImVec2(third, h))) {
         browseFor = BrowseFor::ArchiveInputs;
         browser.Open(FileBrowser::Mode::OpenMulti, T("Files and folders to pack"), browser.lastDir);
     }
-    if (mobile) ImGui::NewLine();
-    else ImGui::SameLine();
-    if (ui::IconTextButton(T("Folders..."), Icon::List, ImVec2(0, h))) ImGui::OpenPopup("##arcfolders");
     ImGui::SameLine();
+    if (ui::IconTextButton(T("Folders..."), Icon::List, ImVec2(third, h))) ImGui::OpenPopup("##arcfolders");
+    if (!mobile) ImGui::SameLine();
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 12);
     ImGui::InputTextWithHint("##arcsearch", T("search"), &archivesSearch);
     if (sc.busy) ImGui::TextDisabled("%s", T("looking through the folders..."));
@@ -599,7 +599,9 @@ void App::DrawArchiveOpen() {
     }
     // actions
     std::vector<std::string> picked(o.picked.begin(), o.picked.end());
-    if (ui::IconTextButton(T("Unpack all..."), Icon::Down, ImVec2(0, h))) {
+    // (phones: two a line)
+    float half = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f : 0;
+    if (ui::IconTextButton(T("Unpack all..."), Icon::Down, ImVec2(half, h))) {
         archiveExtractOnly.clear();
         archiveExtractTo = DirName(o.path);
         archiveExtractSub = true;
@@ -607,14 +609,14 @@ void App::DrawArchiveOpen() {
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(picked.empty());
-    if (ui::IconTextButton(TF("Unpack picked (%d)...", (int)picked.size()).c_str(), Icon::Down, ImVec2(0, h))) {
+    if (ui::IconTextButton(TF("Unpack picked (%d)...", (int)picked.size()).c_str(), Icon::Down, ImVec2(half, h))) {
         archiveExtractOnly = picked;
         archiveExtractTo = DirName(o.path);
         archiveExtractSub = false;
         archiveExtractOpen = true;
     }
-    ImGui::SameLine();
-    if (ui::IconTextButton(T("Send..."), Icon::Send, ImVec2(0, h))) {
+    if (!mobile) ImGui::SameLine();
+    if (ui::IconTextButton(T("Send..."), Icon::Send, ImVec2(half, h))) {
         std::string tmp = JoinPath(eng.ConfigPath(), "cache/send-" + std::to_string(NowMs()));
         std::string path = o.path, pw = o.password, strip = o.dir;
         Run(T("Getting them out to send"),
@@ -630,7 +632,7 @@ void App::DrawArchiveOpen() {
     ImGui::EndDisabled();
     if (pictures > 0 && pictures * 2 >= files) {  // (mostly pictures: a comic, or an album)
         ImGui::SameLine();
-        if (ui::IconTextButton(T("Read"), Icon::Book, ImVec2(0, h))) OpenComic(o.path, o.password);
+        if (ui::IconTextButton(T("Read"), Icon::Book, ImVec2(half, h))) OpenComic(o.path, o.password);
     }
     // where we are inside
     ImGui::Separator();
