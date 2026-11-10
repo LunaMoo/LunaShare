@@ -276,7 +276,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 #if defined(__ANDROID__)
-    if (const char* p = SDL_AndroidGetInternalStoragePath()) ls::SetConfigDirOverride(p);
+    if (const char* p = SDL_AndroidGetInternalStoragePath()) {
+        ls::SetConfigDirOverride(p);
+        // (libarchive makes its temporary files there when packing a 7z; Android has no /tmp)
+        std::string tmp = ls::JoinPath(p, "cache/tmp");
+        ls::MakeDirs(tmp);
+        setenv("TMPDIR", tmp.c_str(), 1);
+    }
 #endif
 
     const char* glsl = nullptr;

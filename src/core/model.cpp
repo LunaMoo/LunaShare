@@ -60,7 +60,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"galleryFolders", s.galleryFolders}, {"galleryVideos", s.galleryVideos}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"folderSyncs", [&] {
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"galleryFolders", s.galleryFolders}, {"archiveFolders", s.archiveFolders}, {"galleryVideos", s.galleryVideos}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"folderSyncs", [&] {
                       json a = json::array();
                       for (auto& f : s.folderSyncs) a.push_back({{"id", f.id}, {"path", f.path}, {"to", f.to}, {"on", f.on}});
                       return a;
@@ -204,6 +204,11 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "playerHideUi", s.playerHideUi);
     Get(j, "playerOrientByAspect", s.playerOrientByAspect);
     Get(j, "galleryVideos", s.galleryVideos);
+    if (j.contains("archiveFolders") && j["archiveFolders"].is_array()) {
+        s.archiveFolders.clear();
+        for (auto& f : j["archiveFolders"])
+            if (f.is_string() && s.archiveFolders.size() < 100) s.archiveFolders.push_back(f.get<std::string>());
+    }
     if (j.contains("galleryFolders") && j["galleryFolders"].is_array()) {
         s.galleryFolders.clear();
         for (auto& f : j["galleryFolders"])

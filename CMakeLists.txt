@@ -353,6 +353,7 @@ if(LUNASHARE_BUILD_APP)
         set(WEBP_BUILD_${o} OFF CACHE BOOL "" FORCE)
     endforeach()
     ls_fetch_excluded(libwebp)
+    include(cmake/archives.cmake)
     if(ANDROID OR IOS)
         set(LUNASHARE_GL_API "GLES3")
     endif()
@@ -394,6 +395,8 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_polls.cpp
         src/app/instance.cpp
         src/app/ui_gallery.cpp
+        src/app/archives.cpp
+        src/app/ui_archives.cpp
         src/app/file_assoc.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
@@ -447,7 +450,8 @@ if(LUNASHARE_BUILD_APP)
         # SDL ships the Khronos GLES2/EGL headers
         target_include_directories(${APP_TARGET} PRIVATE ${sdl2_SOURCE_DIR}/src/video/khronos)
     endif()
-    target_link_libraries(${APP_TARGET} PRIVATE lunashare_core webpdecoder)
+    target_link_libraries(${APP_TARGET} PRIVATE lunashare_core webpdecoder archive_static)
+    target_include_directories(${APP_TARGET} PRIVATE ${LS_ARCHIVE_INCLUDE})
     if(TARGET SDL2::SDL2main)
         target_link_libraries(${APP_TARGET} PRIVATE SDL2::SDL2main)
     endif()

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Archives** (a new tab; on phones on the home screen and in Library): zip, 7z, **rar 4 / 5**, tar.gz / .bz2 / .xz /
+  .zst, iso, cab and more - see inside, open a file straight from the archive, unpack all or the picked ones, send
+  them, passwords. **Pack** files and folders (also pictures picked in the Gallery) into zip, 7z or tar.*. Built on
+  libarchive with zlib, bzip2, xz and zstd.
 - **Gallery** (a new tab; on phones on the home screen and in Library): the camera's photos and videos, Pictures,
   received files and your folders, **by month** (EXIF date) or **by album**. The viewer gets a **slideshow** and
   **delete**; pick several (long press / Ctrl+click) to send or delete. Phones: **back up the camera** to one of your

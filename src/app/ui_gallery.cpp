@@ -353,6 +353,12 @@ void App::DrawGallery() {
         }
         ImGui::SameLine();
         if (ui::IconTextButton(T("Delete..."), Icon::Trash, ImVec2(0, h))) galleryDeleteAsk = true;
+        ImGui::SameLine();
+        if (ui::IconTextButton(T("Pack..."), Icon::Archive, ImVec2(0, h))) {
+            StartArchiveCreate(std::vector<std::string>(gallerySel.begin(), gallerySel.end()));
+            gallerySel.clear();
+            gallerySelecting = false;
+        }
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button(T("All"), ImVec2(0, h)))

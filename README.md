@@ -64,6 +64,11 @@ after receiving, so you know it arrived intact.
   **by album**. Full-screen viewer with slideshow; pick several to send or delete; WebP too.
 - Phones: **back up the camera** to one of your computers by itself.
 
+**Archives** (see [docs/ARCHIVES.md](docs/ARCHIVES.md))
+- Look inside **zip, 7z, rar (4 and 5), tar.gz / .bz2 / .xz / .zst, iso, cab**... - open a file straight from the
+  archive, unpack all or some of it, send what's inside; password-protected archives too.
+- **Pack** files and folders into zip, 7z, tar.gz, tar.xz or tar.zst.
+
 **Opening files with LunaShare**
 - **Android:** LunaShare is in the system's *Open with* for pictures, movies, songs, archives and comics, and in
   *Share* for any file (or text): pick a chat and it's sent.
@@ -267,7 +272,7 @@ after receiving, so you know it arrived intact.
 
 ## Building
 
-Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, quirc, libwebp, stb_image, Monocypher, KCP).
+Requirements: CMake 3.16+, a C++17 compiler. Dependencies are fetched automatically (SDL2 2.32, Dear ImGui 1.93, nlohmann/json, qrcodegen, quirc, libwebp, libarchive (with zlib, bzip2, xz, zstd), stb_image, Monocypher, KCP).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -365,7 +370,8 @@ tests/           engine, voice, video and player tests
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
-QR Code generator (MIT), quirc (ISC), libwebp (BSD-3-Clause), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
+QR Code generator (MIT), quirc (ISC), libwebp (BSD-3-Clause), libarchive (BSD-2-Clause), zlib (Zlib),
+bzip2 (bzip2 license), xz / liblzma (0BSD), zstd (BSD-3-Clause), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
 and in the voice module Opus (BSD-3-Clause), SpeexDSP (BSD-3-Clause) and RNNoise (BSD-3-Clause).
 
 FFmpeg: the Windows and Android builds use LGPL builds; on Linux the bundled FFmpeg includes x264 and is therefore

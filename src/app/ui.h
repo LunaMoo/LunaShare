@@ -220,6 +220,32 @@ private:
     int galleryView = 0;                      // 0 by month, 1 albums
     std::set<std::string> gallerySel;         // picked (long press / the Select button)
     bool gallerySelecting = false, galleryDeleteAsk = false;
+    // the Archives tab (ui_archives.cpp) and comics (ui_comics.cpp)
+public:
+    void OpenArchive(const std::string& path, const std::string& password = "");
+    void StartArchiveCreate(const std::vector<std::string>& inputs);
+    std::string archiveDoneMsg, archiveDoneDir;
+private:
+    void DrawArchives();
+    void DrawArchiveOpen();
+    void DrawArchiveJob();
+    void ArchiveTick();
+    void ArchivesRescan();
+    void OpenArchives();
+    bool ArchiveBack();
+    void ArchiveOpenEntry(const std::string& entry);
+    void ArchiveExtractPopup();
+    void ArchiveCreatePopup();
+    std::vector<std::string> ArchiveFolders();
+    bool archivesScanned = false, archivesRescanWanted = false, archivesComics = false;
+    std::string archivesSearch;
+    bool archiveExtractOpen = false, archiveExtractSub = true;
+    std::vector<std::string> archiveExtractOnly;
+    std::string archiveExtractTo;
+    bool archiveCreateOpen = false;
+    std::vector<std::string> archiveCreateInputs;
+    std::string archiveCreateName, archiveCreateTo;
+    int archiveCreateFormat = 0;
     // listening together / contacts' songs (ui_listen.cpp)
     void MusicExternalTick();
     void MusicPlayLib(const std::vector<ls::LibFile>& list, int at, const std::string& who);
@@ -401,7 +427,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder, GalleryFolder } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder, GalleryFolder, ArchiveOpen, ArchiveInputs, ArchiveDest, ArchiveCreateDest, ArchiveFolder } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

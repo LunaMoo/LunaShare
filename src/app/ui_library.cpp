@@ -43,6 +43,11 @@ void App::DrawLibrary() {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", T("Your photos and videos, by month or by album."));
     }
+    if (ui::IconTextButton(T("Archives"), Icon::Archive, ImVec2(mobile ? -1 : 0, h))) OpenArchives();
+    if (!mobile) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", T("Look inside zip, 7z, rar, tar... unpack them, or pack files into one."));
+    }
     if (Player().Available()) {
         if (ui::IconTextButton(T("Movie player"), Icon::Play, ImVec2(mobile ? -1 : 0, h))) OpenMovies();
         if (!mobile) {

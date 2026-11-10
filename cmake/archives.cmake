@@ -1,0 +1,91 @@
+# Archives (the Archives tab, comics): libarchive (BSD-2-Clause) reads zip, 7z, rar (4 and 5), tar, gz, bz2, xz, zstd,
+# iso, cab, lha, cpio... and writes zip, 7z and tar.*; its compression libraries are built here from source:
+# zlib (Zlib), bzip2 (bzip2 license), xz's liblzma (0BSD) and zstd (BSD-3-Clause). Everything is static, inside the app.
+#
+# libarchive finds them with find_package / check_function_exists at configure time, before they are built, so the
+# answers are given ahead (the cache variables below) and the libraries are linked as targets.
+
+# ---- zlib (deflate: zip, gz, cab)
+FetchContent_Declare(ls_zlib GIT_REPOSITORY https://github.com/madler/zlib.git GIT_TAG v1.3.1 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+FetchContent_MakeAvailable(ls_zlib)
+set(_z ${ls_zlib_SOURCE_DIR})
+add_library(ls_zlib STATIC ${_z}/adler32.c ${_z}/compress.c ${_z}/crc32.c ${_z}/deflate.c ${_z}/infback.c ${_z}/inffast.c
+    ${_z}/inflate.c ${_z}/inftrees.c ${_z}/trees.c ${_z}/uncompr.c ${_z}/zutil.c)
+target_include_directories(ls_zlib PUBLIC ${_z})
+set_target_properties(ls_zlib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(ls_zlib PRIVATE /w)
+else()
+    target_compile_options(ls_zlib PRIVATE -w)
+endif()
+
+# ---- bzip2 (tar.bz2, zip / 7z with bzip2)
+FetchContent_Declare(ls_bzip2 GIT_REPOSITORY https://github.com/libarchive/bzip2.git GIT_TAG bzip2-1.0.8 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+FetchContent_MakeAvailable(ls_bzip2)
+set(_b ${ls_bzip2_SOURCE_DIR})
+add_library(ls_bzip2 STATIC ${_b}/blocksort.c ${_b}/huffman.c ${_b}/crctable.c ${_b}/randtable.c ${_b}/compress.c
+    ${_b}/decompress.c ${_b}/bzlib.c)
+target_include_directories(ls_bzip2 PUBLIC ${_b})
+target_compile_definitions(ls_bzip2 PUBLIC USE_BZIP2_STATIC)
+set_target_properties(ls_bzip2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(ls_bzip2 PRIVATE /w)
+    target_compile_definitions(ls_bzip2 PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_options(ls_bzip2 PRIVATE -w)
+endif()
+
+# ---- zstd (tar.zst, zip with zstd)
+FetchContent_Declare(ls_zstd GIT_REPOSITORY https://github.com/facebook/zstd.git GIT_TAG v1.5.7 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+FetchContent_MakeAvailable(ls_zstd)
+file(GLOB _zs ${ls_zstd_SOURCE_DIR}/lib/common/*.c ${ls_zstd_SOURCE_DIR}/lib/compress/*.c ${ls_zstd_SOURCE_DIR}/lib/decompress/*.c)
+add_library(ls_zstd STATIC ${_zs})
+target_include_directories(ls_zstd PUBLIC ${ls_zstd_SOURCE_DIR}/lib)
+target_compile_definitions(ls_zstd PRIVATE ZSTD_DISABLE_ASM)
+set_target_properties(ls_zstd PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(ls_zstd PRIVATE /w)
+else()
+    target_compile_options(ls_zstd PRIVATE -w)
+endif()
+
+# ---- xz's liblzma (7z, tar.xz, zip with lzma) - with its own CMake, only the library
+set(XZ_NLS OFF CACHE BOOL "" FORCE)
+set(XZ_DOC OFF CACHE BOOL "" FORCE)
+foreach(t XZ XZDEC LZMADEC LZMAINFO SCRIPTS SYMLINKS SYMLINKS_LZMA)
+    set(XZ_TOOL_${t} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(ls_xz GIT_REPOSITORY https://github.com/tukaani-project/xz.git GIT_TAG v5.8.4 GIT_SHALLOW TRUE)
+ls_fetch_excluded(ls_xz)
+set_target_properties(liblzma PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# ---- libarchive
+foreach(o MBEDTLS NETTLE OPENSSL MD LIBB2 LZ4 LZO LIBXML2 BSDXML EXPAT WIN32_XMLLITE PCREPOSIX PCRE2POSIX LIBGCC TAR CPIO CAT
+          UNZIP XATTR ACL ICONV TEST COVERAGE INSTALL WERROR)
+    set(ENABLE_${o} OFF CACHE BOOL "" FORCE)
+endforeach()
+foreach(o ZLIB BZip2 LZMA ZSTD)
+    set(ENABLE_${o} ON CACHE BOOL "" FORCE)
+endforeach()
+# the answers its configure would find once the libraries exist
+set(ZLIB_INCLUDE_DIR ${_z} CACHE PATH "" FORCE)
+set(ZLIB_LIBRARY ls_zlib CACHE STRING "" FORCE)
+set(BZIP2_INCLUDE_DIR ${_b} CACHE PATH "" FORCE)
+set(BZIP2_LIBRARIES ls_bzip2 CACHE STRING "" FORCE)
+set(BZIP2_LIBRARY ls_bzip2 CACHE STRING "" FORCE)
+set(BZIP2_LIBRARY_RELEASE ls_bzip2 CACHE STRING "" FORCE)
+set(LIBLZMA_INCLUDE_DIR ${ls_xz_SOURCE_DIR}/src/liblzma/api CACHE PATH "" FORCE)
+set(LIBLZMA_LIBRARY liblzma CACHE STRING "" FORCE)
+set(LIBLZMA_HAS_AUTO_DECODER 1 CACHE INTERNAL "")
+set(LIBLZMA_HAS_EASY_ENCODER 1 CACHE INTERNAL "")
+set(LIBLZMA_HAS_LZMA_PRESET 1 CACHE INTERNAL "")
+set(ZSTD_INCLUDE_DIR ${ls_zstd_SOURCE_DIR}/lib CACHE PATH "" FORCE)
+set(ZSTD_LIBRARY ls_zstd CACHE STRING "" FORCE)
+set(HAVE_LIBZSTD 1 CACHE INTERNAL "")
+set(HAVE_ZSTD_compressStream 1 CACHE INTERNAL "")
+set(HAVE_ZSTD_minCLevel 1 CACHE INTERNAL "")
+FetchContent_Declare(libarchive GIT_REPOSITORY https://github.com/libarchive/libarchive.git GIT_TAG v3.8.11 GIT_SHALLOW TRUE)
+ls_fetch_excluded(libarchive)
+target_compile_definitions(archive_static PUBLIC LIBARCHIVE_STATIC LZMA_API_STATIC USE_BZIP2_STATIC)
+set(LS_ARCHIVE_INCLUDE ${libarchive_SOURCE_DIR}/libarchive)

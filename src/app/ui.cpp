@@ -17,6 +17,7 @@
 #include "music.h"
 #include "player_host.h"
 #include "emoji_host.h"
+#include "archives.h"
 #include "file_assoc.h"
 #include "wan.h"
 #include "imgui.h"
@@ -378,6 +379,7 @@ void App::Frame() {
     DrawLockSetPopup();
     DrawVerifyQrPopup();
     DrawLockEncPopup();
+    ArchiveTick();
     SleepPopup();
     DrawSleepAsk();
     DrawToasts();
@@ -672,6 +674,8 @@ void App::HandleOpenPaths() {
         watchFailed = false;
         watchLibList.clear();
         if (eng.StartWatch("", f)) watchShown = true;
+    } else if (arc::IsArchivePath(f) && !IsDirectory(f)) {
+        OpenArchive(f);
     } else if (ImageCache::IsImagePath(f)) {
         // the other pictures of its folder come along (arrows / swipes)
         std::vector<std::string> list;
@@ -1011,6 +1015,7 @@ void App::DrawDesktop() {
         item(T("Gallery"), Tab::Gallery);
         item(T("Movies"), Tab::Movies);
         item(T("Music"), Tab::Music);
+        item(T("Archives"), Tab::Archives);
         item(T("Devices"), Tab::Devices);
         item(T("Connect"), Tab::Nearby);
         item(T("Settings"), Tab::Settings);
@@ -1037,6 +1042,7 @@ void App::DrawDesktop() {
         case Tab::Music: DrawMusic(); break;
         case Tab::Movies: DrawMovies(); break;
         case Tab::Gallery: DrawGallery(); break;
+        case Tab::Archives: DrawArchives(); break;
         case Tab::Devices: DrawDevices(); break;
         case Tab::Nearby: DrawNearby(); break;
         case Tab::Settings: DrawSettings(); break;
@@ -1104,7 +1110,11 @@ void App::DrawMobile() {
     if (!root || !backStack.empty()) {
         if (ui::IconButton("back", Icon::Back, nullptr, rowH) || ImGui::IsKeyPressed(ImGuiKey_AppBack)) {
             if (!selMsgs.empty()) { selMsgs.clear(); selectionMode = false; }
-            else if (!backStack.empty()) { screen = backStack.back(); backStack.pop_back(); }
+            else if (screen == MScreen::Gallery && (!gallerySel.empty() || !galleryAlbum.empty())) {
+                if (!gallerySel.empty()) { gallerySel.clear(); gallerySelecting = false; }
+                else galleryAlbum.clear();
+            } else if (screen == MScreen::Archives && ArchiveBack()) {
+            } else if (!backStack.empty()) { screen = backStack.back(); backStack.pop_back(); }
             else screen = MScreen::Home;
         }
         ImGui::SameLine();
@@ -1211,6 +1221,7 @@ void App::DrawMobile() {
         case MScreen::Music: DrawMusic(); break;
         case MScreen::Movies: DrawMovies(); break;
         case MScreen::Gallery: DrawGallery(); break;
+        case MScreen::Archives: DrawArchives(); break;
         case MScreen::Nearby: DrawNearby(); break;
         case MScreen::Settings: DrawSettings(); break;
         case MScreen::Devices:
@@ -1250,6 +1261,7 @@ void App::DrawMobileHome() {
         if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Link)) ImGui::OpenPopup("##invites");
     }
     if (ui::BigButton(T("Gallery"), Icon::Image)) OpenGallery();
+    if (ui::BigButton(T("Archives"), Icon::Archive)) OpenArchives();
     if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMovies();
     if (Player().Available() && ui::BigButton(T("Music player"), Icon::Speaker)) {
         backStack.push_back(screen);
@@ -3616,6 +3628,32 @@ void App::DrawPopups() {
                 break;
             case BrowseFor::Movie:
                 if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;
+                break;
+            case BrowseFor::ArchiveOpen:
+                if (!res.empty()) OpenArchive(res[0]);
+                break;
+            case BrowseFor::ArchiveInputs:
+                if (!res.empty()) StartArchiveCreate(res);
+                break;
+            case BrowseFor::ArchiveDest:
+                if (!res.empty()) {
+                    archiveExtractTo = res[0];
+                    archiveExtractOpen = true;  // (back to the popup)
+                }
+                break;
+            case BrowseFor::ArchiveCreateDest:
+                if (!res.empty()) {
+                    archiveCreateTo = res[0];
+                    archiveCreateOpen = true;
+                }
+                break;
+            case BrowseFor::ArchiveFolder:
+                if (!res.empty() && std::find(s.archiveFolders.begin(), s.archiveFolders.end(), res[0]) == s.archiveFolders.end()) {
+                    s.archiveFolders.push_back(res[0]);
+                    edit.archiveFolders = s.archiveFolders;
+                    archivesRescanWanted = true;
+                    archivesScanned = false;
+                }
                 break;
             case BrowseFor::GalleryFolder:
                 if (!res.empty() && std::find(s.galleryFolders.begin(), s.galleryFolders.end(), res[0]) == s.galleryFolders.end()) {
