@@ -165,6 +165,7 @@ struct Settings {
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list
     std::string language;          // UI language code ("pl"), empty = the system's
+    bool welcomed = false;         // the first-run welcome was seen (or this is an install from before it existed)
     std::string emojiRecent;       // emoji picker: recently used, '\n' separated
     int emojiTone = 0;             // emoji picker: skin tone 0 (none) .. 5
     bool browserPicturesOnly = false;

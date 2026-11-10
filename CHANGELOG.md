@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **A welcome on the first start**: what LunaShare is in three lines, your name and picture, adding the first person,
+  and a few hints. It can be skipped; installs that already have contacts never see it.
+- **Add someone** (the button under the list of people; on phones on the home screen) - the friendly way to get two
+  devices together: **Nearby** (devices on the same network, one tap), **QR code** (show yours, scan theirs: it
+  connects and verifies in one go), **Internet** (use an invite code, or make one to copy, show as a QR code or -
+  on phones - send through any app) and **Get the app** (the download link and its QR code). The technical ways
+  (address, Bluetooth, hotspot, rooms) stay on the Connect page.
+- Empty lists say what to do next instead of "Looking for devices...".
+
 ## 1.5.9
 
 - **Torrents** (Windows and Linux, a new optional module with libtorrent; a new Torrents tab): magnet links and

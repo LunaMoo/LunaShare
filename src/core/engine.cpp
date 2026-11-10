@@ -3648,6 +3648,51 @@ void Engine::SetVerified(const std::string& peer, bool v) {
 
 std::string Engine::VerifyCode() { return "LSV1:" + MyAccount() + ":" + MyPublicKey(); }
 
+std::string Engine::ConnectCode() {
+    std::string ips;
+    int n = 0;
+    for (auto& a : LocalIPv4Addresses()) {
+        if (n++ >= 6) break;
+        ips += (ips.empty() ? "" : ",") + a.ip;
+    }
+    return "LSC1:" + MyAccount() + ":" + MyPublicKey() + ":" + std::to_string(boundPort) + ":" + ips;
+}
+
+int Engine::UseConnectCode(const std::string& code, std::string& pub, std::string& verify) {
+    // LSC1:<64 hex account>:<64 hex device>:<port>:<ip>[,<ip>...]
+    if (code.size() < 5 + 64 + 1 + 64 + 3 || code.size() > 400 || code.compare(0, 5, "LSC1:") != 0 || code[69] != ':' || code[134] != ':') return 0;
+    std::string acc = code.substr(5, 64), dev = code.substr(70, 64), rest = code.substr(135);
+    for (auto& s : {acc, dev})
+        if (s.find_first_not_of("0123456789abcdef") != std::string::npos) return 0;
+    size_t c = rest.find(':');
+    if (c == std::string::npos || c == 0 || c > 5 || rest.find_first_not_of("0123456789.:,") != std::string::npos) return 0;
+    int port = std::atoi(rest.substr(0, c).c_str());
+    if (port <= 0 || port > 65535) return 0;
+    if (dev == MyPublicKey()) return 0;  // (my own code)
+    pub = dev;
+    verify = "LSV1:" + acc + ":" + dev;
+    std::string ips = rest.substr(c + 1);
+    int n = 0;
+    for (size_t s = 0; s <= ips.size() && n < 8;) {
+        size_t e = ips.find(',', s);
+        if (e == std::string::npos) e = ips.size();
+        std::string ip = ips.substr(s, e - s);
+        if (ip.size() >= 7 && ip.size() <= 15) {
+            ConnectAddress(ip, (uint16_t)port);
+            n++;
+        }
+        s = e + 1;
+    }
+    return 1;
+}
+
+std::string Engine::ConnectedDeviceByKey(const std::string& pubHex) {
+    auto lk = Lock();
+    for (auto& [id, d] : devices)
+        if (!pubHex.empty() && d.pubKey == pubHex && ReadyConn(id)) return id;
+    return {};
+}
+
 int Engine::VerifyByCode(const std::string& peer, const std::string& code) {
     if (code.size() != 5 + 64 + 1 + 64 || code.compare(0, 5, "LSV1:") != 0 || code[69] != ':') return 0;
     std::string acc = code.substr(5, 64), dev = code.substr(70);

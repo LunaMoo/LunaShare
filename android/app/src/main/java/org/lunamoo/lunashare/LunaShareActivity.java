@@ -575,6 +575,22 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
+    /** The system's share sheet with a text (an invite code, the link to get the app). */
+    public static void shareText(final String text) {
+        ui(() -> {
+            try {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_TEXT, text);
+                Intent c = Intent.createChooser(i, null);
+                c.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                self.startActivity(c);
+            } catch (Exception e) {
+                toast("No app to share with");
+            }
+        });
+    }
+
     public static void openFolder(String path) {
         ui(() -> {
             try {

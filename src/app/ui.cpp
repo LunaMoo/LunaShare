@@ -348,9 +348,16 @@ void App::Frame() {
         ImGui::End();
         return;
     }
+    if (!welcomeInit) {
+        welcomeInit = true;
+        WelcomeInit();
+    }
+    AddPersonTick();
     DrawCallBar();
-    if (m.mobile) DrawMobile();
+    if (welcomeStep >= 0 && eng.call.state == CallState::None) DrawWelcome();  // (a first start; a call that comes in is still answered)
+    else if (m.mobile) DrawMobile();
     else DrawDesktop();
+    DrawAddPersonPopup();
     DrawPopups();
     DrawViewer();
     ImGui::End();
@@ -1087,25 +1094,29 @@ void App::DrawSidebar() {
     ImGui::TextUnformatted(T("LunaShare"));
     ImGui::PopFont();
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    bool openInvites = ImGui::Selectable((eng.settings.displayName + "  " + T("- invites...") + "##me").c_str(), false, 0,
-                                         ImVec2(0, ui::M().mobile ? ui::M().rowH * 0.8f : 0));
+    bool openInv = ImGui::Selectable((eng.settings.displayName + "  " + T("- invites...") + "##me").c_str(), false, 0,
+                                     ImVec2(0, ui::M().mobile ? ui::M().rowH * 0.8f : 0));
     ImGui::PopStyleColor();
     if (ImGui::IsItemHovered() && !ui::M().mobile) {
         ImGui::SetTooltip(T("Invite someone, or use an invite code you got\n\nThis device\nID: %s\nKey fingerprint: %s\nPort: %u"),
                           eng.settings.deviceId.c_str(), KeyFingerprint(eng.MyPublicKey()).c_str(), eng.boundPort);
     }
-    if (openInvites) ImGui::OpenPopup("##invites");
+    if (openInv) openInvites = true;
     DrawInvitesPopup();
     if (eng.watch.sid && (eng.watch.key.empty() || eng.watch.key != selectedPeer)) DrawWatchResume();
     ImGui::Separator();
     auto peers = SortedPeers();
     bool mini = music::Play().GetNow().active;
-    float footer = ImGui::GetFrameHeightWithSpacing() * 2.2f + (mini ? ImGui::GetFrameHeight() * 1.9f + ImGui::GetStyle().ItemSpacing.y * 2 : 0);
+    float footer = ImGui::GetFrameHeightWithSpacing() * 3.2f + (mini ? ImGui::GetFrameHeight() * 1.9f + ImGui::GetStyle().ItemSpacing.y * 2 : 0);
     ImGui::BeginChild("peers", ImVec2(0, -footer));
     if (peers.empty()) {
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", T("Looking for devices on your network...\n\nStart LunaShare on another device in the same Wi-Fi/LAN (or phone hotspot). It appears here automatically."));
+        ImGui::TextDisabled("%s", T("Nobody here yet.\n\nDevices running LunaShare on your network show up by themselves. Anyone else: Add someone."));
         ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Button, ui::ColAccent());
+        if (ui::IconTextButton(T("Add someone"), Icon::Plus, ImVec2(-1, ImGui::GetFrameHeight() * 1.2f))) OpenAddPerson(0);
+        ImGui::PopStyleColor();
     }
     for (auto& p : peers) {
         if (DevicePeerRow(p, p == selectedPeer && tab == Tab::Chat, 0)) {
@@ -1118,12 +1129,8 @@ void App::DrawSidebar() {
     if (mini) DrawMusicMini();
     ImGui::Separator();
     {
-        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-        if (ui::IconTextButton(T("Connect..."), Icon::Link, ImVec2(half, 0))) {
-            tab = Tab::Nearby;
-            tabForce = true;
-        }
-        ImGui::SameLine();
+        if (ui::IconTextButton(T("Add someone"), Icon::Plus, ImVec2(-1, 0))) OpenAddPerson(-1);
+        ImGui::SetItemTooltip("%s", T("Nearby devices, a QR code, an invite code, or the link to get LunaShare"));
         if (ui::IconTextButton(T("New group"), Icon::Users, ImVec2(-1, 0))) OpenNewGroup();
     }
     double up = 0, down = 0;
@@ -1274,12 +1281,12 @@ void App::DrawMobileHome() {
     if (peers.empty()) {
         ImGui::Spacing();
         ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", T("Looking for devices...\n\nOpen LunaShare on another phone or computer connected to the same Wi-Fi. "
-                            "No Wi-Fi? Use Connect > Hotspot or Bluetooth."));
+        ImGui::TextDisabled("%s", T("Nobody here yet.\n\nDevices running LunaShare on your network show up by themselves. Anyone else: Add someone."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        if (ui::BigButton(T("Connect / Hotspot / Bluetooth"), Icon::Link)) screen = MScreen::Nearby;
-        if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Users)) ImGui::OpenPopup("##invites");
+        ImGui::PushStyleColor(ImGuiCol_Button, ui::ColAccent());
+        if (ui::BigButton(T("Add someone"), Icon::Plus)) OpenAddPerson(0);
+        ImGui::PopStyleColor();
     }
     for (auto& p : peers) {
         if (DevicePeerRow(p, false, ui::M().rowH * 1.35f)) {
@@ -1291,8 +1298,8 @@ void App::DrawMobileHome() {
     }
     if (!peers.empty()) {
         ImGui::Spacing();
+        if (ui::BigButton(T("Add someone"), Icon::Plus)) OpenAddPerson(-1);
         if (ui::BigButton(T("New group"), Icon::Users)) OpenNewGroup();
-        if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Link)) ImGui::OpenPopup("##invites");
     }
     if (ui::BigButton(T("Gallery"), Icon::Image)) OpenGallery();
     if (ui::BigButton(T("Archives"), Icon::Archive)) OpenArchives();
@@ -4677,7 +4684,11 @@ void App::AudioCallControls(float fieldW, float h, bool& changed) {
 // The invites from the sidebar (clicking my own name): the same as the top of the settings
 void App::DrawInvitesPopup() {
     static bool invEnv = getenv("LUNASHARE_OPENINVITES") != nullptr;  // dev: screenshots
-    if (invEnv && ImGui::GetFrameCount() == 30) ImGui::OpenPopup("##invites");
+    if (invEnv && ImGui::GetFrameCount() == 30) openInvites = true;
+    if (openInvites) {
+        ImGui::OpenPopup("##invites");
+        openInvites = false;
+    }
     bool mobile = ui::M().mobile;
     ImVec2 vs = ImGui::GetMainViewport()->Size;
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -4725,48 +4736,11 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
     ImGui::InputTextWithHint("##inviteCode", T("invite code you got (LSI1-...)"), &code);
     if (ImGui::GetContentRegionAvail().x - ImGui::GetItemRectSize().x > ImGui::CalcTextSize(T("Use code")).x + 40) ImGui::SameLine();
     if (ImGui::Button(T("Use code"), ImVec2(0, h))) {
-        InviteInfo ii;
-        bool parsed = ParseInviteCode(code, ii);
-        std::string server = ii.server, secret = ii.secret, name = ii.name;
-        if (!parsed) {
-            msg = T("That isn't a valid invite code.");
-            msgErr = true;
-            msgAt = 1;
-        } else if (edit.wanEnabled && !edit.wanServer.empty() && edit.wanServer != server) {
-            msg = T("That code is for a different server than the one you use.");  // (no addresses: they may be private)
-            msgErr = true;
-            msgAt = 1;
-        } else {
-            bool have = false;
-            for (auto& l : edit.wanLinks) have |= l.secret == secret;
-            if (!have) {
-                if (!edit.wanEnabled || edit.wanServer.empty()) {
-                    // joined only for this: stay out of the server's shared room
-                    edit.wanServer = server;
-                    edit.wanEnabled = true;
-                    edit.wanHidden = true;
-                    edit.wanFromInvite = true;
-                    // a room of my own that nobody else uses: I see no one on that server but the people who invited me
-                    uint8_t rr[16];
-                    SecureRandom(rr, sizeof(rr));
-                    edit.wanRoom = "invite-" + ToHex(rr, sizeof(rr));
-                    edit.wanPassword.clear();
-                }
-                WanLink l;
-                l.secret = secret;
-                l.label = name;
-                l.created = NowMs();
-                l.mine = false;
-                l.room = ii.room;  // (its name, shown next to the inviter)
-                edit.wanLinks.push_back(l);
-                changed = true;
-            }
-            msg = name.empty() ? std::string(T("Added. You'll see each other in the device list when you're both online."))
-                               : TF("Added %s. You'll see each other in the device list when you're both online.", name.c_str());
-            msgErr = false;
-            msgAt = 1;
-            code.clear();
-        }
+        int r = UseInviteCode(code, msg);
+        msgErr = r < 0;
+        msgAt = 1;
+        if (r > 0) changed = true;
+        if (r >= 0) code.clear();
     }
     if (!msg.empty() && msgAt == 1) {
         ImGui::PushTextWrapPos(0);

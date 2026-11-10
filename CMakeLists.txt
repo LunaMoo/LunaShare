@@ -401,6 +401,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_polls.cpp
         src/app/instance.cpp
         src/app/ui_gallery.cpp
+        src/app/ui_welcome.cpp
         src/app/archives.cpp
         src/app/ui_archives.cpp
         src/app/ui_comics.cpp

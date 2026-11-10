@@ -387,6 +387,26 @@ private:
     void DrawCallSettings(float fieldW, float h, bool& changed);
     void DrawPrivateContacts(float fieldW, float h, bool& changed);
     void DrawInvitesPopup();
+    bool openInvites = false;
+    // the welcome of a first start and "Add someone" (ui_welcome.cpp)
+    void WelcomeInit();
+    void WelcomeDone();
+    void DrawWelcome();
+    void OpenAddPerson(int section);  // 0 nearby, 1 QR code, 2 Internet (invite codes), 3 get the app; -1 = where it was
+    void DrawAddPersonPopup();
+    bool DrawAddPersonBody(float width);
+    void HandleAddCode(const std::string& text);
+    void AddPersonTick();
+    int UseInviteCode(const std::string& code, std::string& msg);
+    std::string CreateInvite(const std::string& forWhom);
+    bool welcomeInit = false;
+    int welcomeStep = -1;  // 0..2 while the welcome shows
+    std::string welcomeName;
+    bool addPersonOpen = false, addPersonClose = false, addGoConnect = false, addGoInvites = false, addScan = false, addMsgErr = false;
+    int addSection = 0;
+    std::string addMsg, addCodeBuf, addInviteFor, addInviteCode;
+    std::string connectPendingPub, connectPendingVerify;  // someone whose QR code was scanned: connecting to them
+    int64_t connectPendingUntil = 0;
     void AudioCallControls(float fieldW, float h, bool& changed);
     // picture viewer (ui_viewer.cpp)
     void OpenViewer(const std::string& peer, const std::string& path, bool all);

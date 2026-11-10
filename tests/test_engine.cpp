@@ -341,6 +341,25 @@ int main() {
         CHECK(WaitFor([&] { auto l = A->Lock(); return A->devices[idB].verified; }, 10), "verify: bob verified");
         A->SetVerified(idB, false);
     }
+    {  // adding someone by QR code: the code carries the keys and where to connect
+        auto N = MakeEngine("qr-new", 48341, false, false);
+        std::string pub, verify;
+        CHECK(N->UseConnectCode("LSV1:" + A->MyAccount() + ":" + A->MyPublicKey(), pub, verify) == 0, "connect code: a verify code isn't one");
+        CHECK(N->UseConnectCode(N->ConnectCode(), pub, verify) == 0, "connect code: not my own");
+        CHECK(N->UseConnectCode("LSC1:" + std::string(64, 'a') + ":" + std::string(64, 'b') + ":99999:10.0.0.1", pub, verify) == 0, "connect code: a bad port");
+        CHECK(N->UseConnectCode(A->ConnectCode(), pub, verify) == 1 && pub == A->MyPublicKey(), "connect code: alice's is taken");
+        std::string got;
+        CHECK(WaitFor([&] { got = N->ConnectedDeviceByKey(pub); return !got.empty(); }, 6000) && got == idA, "connect code: connected to alice");
+        CHECK(N->VerifyByCode(got, verify) == 1, "connect code: and verified");
+        {
+            auto l = N->Lock();
+            CHECK(N->devices[idA].verified, "connect code: alice marked verified");
+        }
+        N->Stop();
+        std::string idN = N->settings.deviceId;
+        WaitFor([&] { return !A->IsConnected(idN); }, 3000);
+        A->ForgetDevice(idN);
+    }
     CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[A->ChatKey(idB)].messages.back().delivered; }, 3000), "chat delivered ack");
     {
         auto lk = B->Lock();

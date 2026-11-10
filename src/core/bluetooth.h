@@ -32,6 +32,7 @@ struct HostBridge {
     std::function<void(const std::string& ssid, const std::string& pass)> wifiJoin;
     std::function<void(const std::string& path)> openFile;
     std::function<void(const std::string& path)> openFolder;
+    std::function<void(const std::string& text)> shareText;  // Android: the system's "Share" sheet with this text (an invite)
     std::function<void()> requestPermissions;
     std::function<void(bool inCall)> callAudioMode;   // Android: MODE_IN_COMMUNICATION (earpiece routing, system AEC)
     // system notifications (Android) and running in the background

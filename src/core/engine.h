@@ -339,6 +339,13 @@ public:
     // verifying by QR code: my code shows my account and device keys; scanning someone's code from their device's page
     // compares them with the keys I hold. 1 = the same (that device and every device of their account become
     // verified), 0 = not a LunaShare code, -1 = different keys (someone may be in between)
+    // adding someone by QR code: my code carries my keys and where this device listens (its addresses on the networks
+    // it is on now). Using someone's code connects to them; once connected, the keys in the code are compared with
+    // theirs like VerifyCode (the code was read from their screen).
+    std::string ConnectCode();
+    // 1 = connecting (pub: their device key, verify: the "LSV1:..." text to check them with), 0 = not such a code
+    int UseConnectCode(const std::string& code, std::string& pub, std::string& verify);
+    std::string ConnectedDeviceByKey(const std::string& pubHex);  // "" = not connected (yet)
     std::string VerifyCode();
     int VerifyByCode(const std::string& peer, const std::string& code);
     void AcceptNewKey(const std::string& peer);  // after a key change warning

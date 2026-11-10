@@ -25,6 +25,13 @@ after receiving, so you know it arrived intact.
 - Several files stream in parallel (configurable). There's an optional upload speed limit and a free-space check before accepting.
 - Before sending, the app checks that the source file hasn't changed (size + mtime) since it was hashed.
 
+**Getting started**
+- A short **welcome** on the first start: your name and picture, adding the first person, a few hints.
+- **Add someone** puts the ways to get two devices together in one place: devices **nearby** (same network, one tap),
+  a **QR code** (show yours, scan theirs - it connects and verifies the keys at once; the code is
+  `LSC1:<account key>:<device key>:<port>:<addresses>`), an **invite code** for the Internet (made, copied, shown as
+  a QR code or shared through any app on phones), and the **link to get LunaShare**.
+
 **People, accounts and profile pictures** (see [docs/ACCOUNTS.md](docs/ACCOUNTS.md))
 - Your **account** is a key that belongs to you; no sign-up, no server account. Link your phone and computer to it
   (*Settings → Your account → Link another device…*, both screens show the same 6-digit code): messages to you reach all
