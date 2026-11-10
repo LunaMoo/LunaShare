@@ -87,6 +87,19 @@ bool SendAll(SocketHandle s, const void* data, size_t len) {
     return true;
 }
 
+int RecvSome(SocketHandle s, void* data, size_t len) {
+    int chunk = len > (1 << 20) ? (1 << 20) : (int)len;
+    for (;;) {
+#ifdef _WIN32
+        return recv((SOCKET)s, (char*)data, chunk, 0);
+#else
+        int n = (int)recv((int)s, data, chunk, 0);
+        if (n < 0 && errno == EINTR) continue;
+        return n;
+#endif
+    }
+}
+
 bool RecvAll(SocketHandle s, void* data, size_t len) {
     char* p = (char*)data;
     while (len > 0) {

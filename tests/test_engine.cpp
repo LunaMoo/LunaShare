@@ -16,6 +16,8 @@
 #include "wan.h"
 #include "upnp.h"
 #include "hash.h"
+#include "link_crypto.h"
+#include "link_server.h"
 #include "platform.h"
 
 using namespace ls;
@@ -306,7 +308,243 @@ static void TestHistoryCrypt() {
     CHECK(!has("history.enc") && has("history.json"), "forgotten PIN: plain file");
 }
 
+struct HttpRes {
+    int status = 0;
+    std::string head, body;
+};
+static HttpRes HttpGet(uint16_t port, const std::string& path, const std::string& extra = "") {
+    HttpRes r;
+    SocketHandle s = TcpConnect("127.0.0.1", port, 3000);
+    if (s == kInvalidSocket) return r;
+    std::string q = "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n" + extra + "\r\n";
+    SendAll(s, q.data(), q.size());
+    std::string all;
+    char b[65536];
+    while (WaitReadable(s, 15000) == 1) {
+        int n = RecvSome(s, b, sizeof(b));
+        if (n <= 0) break;
+        all.append(b, (size_t)n);
+    }
+    CloseSocket(s);
+    size_t e = all.find("\r\n\r\n");
+    if (e == std::string::npos) return r;
+    r.head = all.substr(0, e);
+    r.body = all.substr(e + 4);
+    sscanf(r.head.c_str(), "HTTP/1.1 %d", &r.status);
+    return r;
+}
+static std::string ReadAll(const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+static void TestShareLinks() {
+    printf("[links for anyone]\n");
+    std::string err;
+    // ---- on this network
+    std::string dir = JoinPath(Root(), "links");
+    MakeDirs(dir);
+    std::string f1 = JoinPath(dir, u8"zdjęcie 1.bin");
+    WriteRandomFile(f1, 3 * 1024 * 1024 + 123, 77);
+    ShareLinks sl;
+    std::vector<ShareAsk> fired;
+    std::mutex fm;
+    sl.onAsk = [&](const ShareAsk& a) { std::lock_guard<std::mutex> l(fm); fired.push_back(a); };
+    sl.Start(dir, 0);
+    uint16_t lp = sl.LanPort();
+    CHECK(lp != 0, "LAN link port");
+    ShareLinks::Options o;
+    std::string id = sl.Create(f1, o, err);
+    CHECK(!id.empty(), "link created: %s", err.c_str());
+    CHECK(WaitFor([&] { auto l = sl.List(); return !l.empty() && l[0].ready; }, 10000), "hashed");
+    auto info = sl.List()[0];
+    CHECK(info.sha256 == Sha256File(f1), "its SHA-256");
+    CHECK(info.webUrl.empty(), "no server: no Internet link");
+    std::string tok;
+    {
+        // the LAN address may be missing on a test machine without a private address: take the token from the state
+        json st;
+        LoadJsonFile(JoinPath(dir, "share_links.json"), st);
+        tok = st["links"][0].value("tok", "");
+    }
+    std::string base = "/f/" + tok;
+    auto page = HttpGet(lp, base);
+    CHECK(page.status == 200 && page.body.find("LunaShare") != std::string::npos && page.head.find("Content-Security-Policy") != std::string::npos, "the page (%d)", page.status);
+    CHECK(page.body.find(u8"zdjęcie 1.bin") != std::string::npos, "with the file's name");
+    CHECK(HttpGet(lp, "/f/nope").status == 404, "an unknown link");
+    auto st1 = HttpGet(lp, base + "/start?sid=browserone1");
+    CHECK(st1.status == 200 && st1.body.find("\"ok\"") != std::string::npos, "started (%d %s)", st1.status, st1.body.c_str());
+    auto fileR = HttpGet(lp, base + "/file?sid=browserone1");
+    CHECK(fileR.status == 200 && fileR.body == ReadAll(f1), "the file (%d, %d bytes)", fileR.status, (int)fileR.body.size());
+    CHECK(fileR.head.find("filename*=UTF-8''zdj%C4%99cie%201.bin") != std::string::npos, "its name for saving");
+    auto part = HttpGet(lp, base + "/file?sid=browserone1", "Range: bytes=100-199\r\n");
+    CHECK(part.status == 206 && part.body == ReadAll(f1).substr(100, 100), "resumes (range %d)", part.status);
+    CHECK(HttpGet(lp, base + "/file?sid=otherbrowser").status == 403, "the file only after the checks");
+    auto st2 = HttpGet(lp, base + "/start?sid=otherbrowser");
+    CHECK(st2.status == 410 && st2.body.find("used") != std::string::npos, "one person: the next one is told it's used (%s)", st2.body.c_str());
+    CHECK(WaitFor([&] { auto l = sl.List(); return l[0].visits.size() == 1 && l[0].visits[0].done && l[0].people == 1; }, 3000), "who got it is listed");
+
+    // PIN: 5 wrong tries end the link
+    o.pin = "4321";
+    o.maxPeople = 0;
+    std::string idp = sl.Create(f1, o, err);
+    CHECK(WaitFor([&] { for (auto& l : sl.List()) if (l.id == idp) return l.ready; return false; }, 10000), "PIN link ready");
+    json st;
+    LoadJsonFile(JoinPath(dir, "share_links.json"), st);
+    std::string tokp;
+    for (auto& l : st["links"]) if (l.value("id", "") == idp) tokp = l.value("tok", "");
+    auto np = HttpGet(lp, "/f/" + tokp + "/start?sid=pinbrowser1");
+    CHECK(np.status == 401 && np.body.find("\"pin\"") != std::string::npos, "asks for the PIN");
+    auto wp = HttpGet(lp, "/f/" + tokp + "/start?sid=pinbrowser1&pin=1111");
+    CHECK(wp.status == 401 && wp.body.find("\"left\":4") != std::string::npos, "wrong PIN: 4 tries left (%s)", wp.body.c_str());
+    auto gp = HttpGet(lp, "/f/" + tokp + "/start?sid=pinbrowser1&pin=4321");
+    CHECK(gp.status == 200, "the right PIN");
+    for (int i = 0; i < 4; i++) HttpGet(lp, "/f/" + tokp + "/start?sid=guesser0" + std::to_string(i) + "&pin=000" + std::to_string(i));
+    CHECK(HttpGet(lp, "/f/" + tokp + "/start?sid=guesser99&pin=4321").status == 410, "5 wrong PINs ended the link");
+    CHECK(HttpGet(lp, "/f/" + tokp + "/file?sid=pinbrowser1").status == 410, "for everyone");
+
+    // ask me first
+    ShareLinks::Options oa;
+    oa.ask = true;
+    std::string ida = sl.Create(f1, oa, err);
+    CHECK(WaitFor([&] { for (auto& l : sl.List()) if (l.id == ida) return l.ready; return false; }, 10000), "ask link ready");
+    LoadJsonFile(JoinPath(dir, "share_links.json"), st);
+    std::string toka;
+    for (auto& l : st["links"]) if (l.value("id", "") == ida) toka = l.value("tok", "");
+    auto w1 = HttpGet(lp, "/f/" + toka + "/start?sid=askbrowser1");
+    CHECK(w1.status == 202 && w1.body.find("wait") != std::string::npos, "waits for me");
+    CHECK(sl.Asks().size() == 1 && fired.size() == 1, "I'm asked");
+    sl.Answer(sl.Asks()[0].id, true);
+    CHECK(HttpGet(lp, "/f/" + toka + "/start?sid=askbrowser1").status == 200, "allowed");
+    sl.Revoke(ida);
+    CHECK(HttpGet(lp, "/f/" + toka + "/start?sid=askbrowser1").status == 410, "turned off");
+
+    // kept across a restart
+    sl.Stop();
+    ShareLinks sl2;
+    sl2.Start(dir, lp);
+    CHECK(sl2.List().size() == 3, "links kept (%d)", (int)sl2.List().size());
+    CHECK(HttpGet(sl2.LanPort(), base + "/file?sid=browserone1", "Range: bytes=0-9\r\n").status == 206, "the person who got it may resume after a restart");
+    sl2.Stop();
+
+    // ---- over the Internet: page on the server, file from the device through its tunnel, end-to-end encrypted
+    RendezvousServer rs;
+    RendezvousServer::Options ro;
+    ro.bind = "127.0.0.1";
+    ro.port = 48194;
+    ro.linkPort = 48195;
+    CHECK(rs.Start(ro, &err), "server");
+    LinkServer lsv;
+    LinkServer::Options lo;
+    lo.bind = "127.0.0.1";
+    lo.httpPort = 48195;
+    lo.tunnelPort = 48194;
+    lo.allowed = [&](const std::string& p) { return rs.LinkAllowed(p); };
+    CHECK(lsv.Start(lo, &err), "link server: %s", err.c_str());
+    auto W = MakeEngine("wanda", 48180, true, false, false, false, "127.0.0.1:48194", "linkroom");
+    std::string f2 = JoinPath(dir, "film.bin");
+    WriteRandomFile(f2, 2 * 1024 * 1024 + 5, 78);
+    ShareLinks::Options ow;
+    ow.maxPeople = 2;
+    std::string idw = W->shareLinks.Create(f2, ow, err);
+    CHECK(WaitFor([&] { auto l = W->shareLinks.List(); return !l.empty() && l[0].ready && !l[0].webUrl.empty(); }, 15000), "an Internet link once the server offers them");
+    CHECK(WaitFor([&] { return W->shareLinks.TunnelStatus() == "online"; }, 10000), "tunnel (%s)", W->shareLinks.TunnelStatus().c_str());
+    std::string url = W->shareLinks.List()[0].webUrl;
+    CHECK(url.rfind("http://127.0.0.1:48195/s/" + idw + "#", 0) == 0 && url.size() < 70, "a short link: %s", url.c_str());
+    std::string secret;
+    FromB64Url(url.substr(url.find('#') + 1), secret);
+    LinkKeys k = DeriveLinkKeys((const uint8_t*)secret.data(), secret.size());
+    auto wpage = HttpGet(48195, "/s/" + idw);
+    CHECK(wpage.status == 200 && wpage.body.find("\"mode\":\"web\"") != std::string::npos && wpage.body.find("film.bin") == std::string::npos,
+          "the server's page doesn't know the file");
+    auto meta = HttpGet(48195, "/api/" + idw + "/meta?sid=webbrowser1");
+    std::string plain;
+    CHECK(meta.status == 200 && LinkOpen(k, kLinkMetaIndex, true, meta.body, plain), "sealed details (%d)", meta.status);
+    json mj = json::parse(plain, nullptr, false);
+    CHECK(mj.is_object() && mj.value("n", "") == "film.bin" && mj.value("s", (int64_t)0) == FileSize(f2) && mj.value("h", "") == Sha256File(f2), "name, size, SHA-256");
+    std::string got;
+    int64_t parts = (FileSize(f2) + kLinkChunk - 1) / kLinkChunk;
+    bool allOk = true;
+    for (int64_t i = 0; i < parts; i++) {
+        auto pr = HttpGet(48195, "/api/" + idw + "/p/" + std::to_string(i) + "?sid=webbrowser1");
+        std::string pp;
+        bool ok = pr.status == 200 && LinkOpen(k, (uint64_t)i, i == parts - 1, pr.body, pp);
+        allOk &= ok;
+        if (i == 0) {
+            std::string bad = pr.body;
+            bad[10] ^= 1;
+            std::string x;
+            CHECK(!LinkOpen(k, 0, false, bad, x), "a changed part is caught");
+            CHECK(!LinkOpen(k, 1, false, pr.body, x), "a part in the wrong place is caught");
+            CHECK(!LinkOpen(k, 0, true, pr.body, x), "a cut-short file is caught");
+        }
+        got += pp;
+    }
+    CHECK(allOk && got == ReadAll(f2), "the file through the server (%d bytes)", (int)got.size());
+    CHECK(HttpGet(48195, "/api/" + idw + "/p/0?sid=strangerxx").status == 403, "parts only for whoever passed the checks");
+    CHECK(HttpGet(48195, "/api/AAAAAAAAAAAA/meta?sid=webbrowser1").status == 503, "an unknown link: offline");
+    CHECK(HttpGet(48195, "/sw.js").body.find("ReadableStream") != std::string::npos, "service worker");
+    CHECK(WaitFor([&] { auto l = W->shareLinks.List(); return !l[0].visits.empty() && l[0].visits[0].done && l[0].visits[0].via == "web"; }, 3000), "listed as got through the server");
+    W->shareLinks.Revoke(idw);
+    auto gone = HttpGet(48195, "/api/" + idw + "/meta?sid=webbrowser1");
+    CHECK(gone.status == 410 || gone.status == 503, "turned off (%d)", gone.status);
+    W->Stop();
+    CHECK(WaitFor([&] { return lsv.TunnelCount() == 0; }, 5000), "tunnel closed");
+    lsv.Stop();
+    rs.Stop();
+}
+
+// for browser tests (tools/test_links.py): a server and a device sharing a file, until the file `stop` appears
+static int ServeLinks(const char* file) {
+    std::string err;
+    RendezvousServer rs;
+    RendezvousServer::Options ro;
+    ro.bind = "127.0.0.1";
+    ro.port = 48294;
+    ro.linkPort = 48295;
+    ro.linkTls = getenv("LINK_CERT") != nullptr;
+    if (!rs.Start(ro, &err)) return printf("server: %s\n", err.c_str()), 1;
+    LinkServer lsv;
+    LinkServer::Options lo;
+    lo.bind = "127.0.0.1";
+    lo.httpPort = 48295;
+    lo.tunnelPort = 48294;
+    if (getenv("LINK_CERT")) lo.certFile = getenv("LINK_CERT"), lo.keyFile = getenv("LINK_KEY");
+    lo.allowed = [&](const std::string& p) { return rs.LinkAllowed(p); };
+    if (!lsv.Start(lo, &err)) return printf("links: %s\n", err.c_str()), 1;
+    auto W = MakeEngine("serve", 48280, true, false, false, false, "127.0.0.1:48294", "serveroom");
+    ShareLinks::Options o;
+    o.maxPeople = 0;
+    std::string plain = W->shareLinks.Create(file, o, err);
+    o.pin = "2468";
+    std::string pin = W->shareLinks.Create(file, o, err);
+    o.pin = "";
+    o.ask = true;
+    std::string ask = W->shareLinks.Create(file, o, err);
+    WaitFor([&] { for (auto& l : W->shareLinks.List()) if (!l.ready || l.webUrl.empty()) return false; return W->shareLinks.TunnelStatus() == "online"; }, 60000);
+    for (auto& l : W->shareLinks.List())
+        printf("%s %s %s\n", l.id == plain ? "plain" : l.id == pin ? "pin" : "ask", l.webUrl.c_str(), l.lanUrl.c_str());
+    json st;
+    LoadJsonFile(JoinPath(W->ConfigPath(), "share_links.json"), st);
+    for (auto& l : st["links"]) printf("tok %s %s\n", l.value("id", "").c_str(), l.value("tok", "").c_str());
+    printf("lanport %d\nready\n", W->shareLinks.LanPort());
+    std::string stop = JoinPath(DirName(file), "stop");
+    while (!FileExists(stop)) {
+        for (auto& a : W->shareLinks.Asks()) {
+            printf("asked %s %s\n", a.name.c_str(), a.via.c_str());
+            W->shareLinks.Answer(a.id, true);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    W->Stop();
+    lsv.Stop();
+    rs.Stop();
+    return 0;
+}
+
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    if (const char* f = getenv("LUNASHARE_TEST_SERVE_LINK")) return ServeLinks(f);
     SetMachineId("");  // engines on one test computer would all look like the same device to the server
     setvbuf(stdout, nullptr, _IONBF, 0);
     TestHash();
@@ -315,6 +553,8 @@ int main() {
     TestSeal();
     TestHistoryCrypt();
     printf("root: %s\n", Root().c_str());
+    TestShareLinks();
+    if (getenv("LUNASHARE_TEST_LINKS_ONLY")) return g_fail ? 1 : 0;
 
     auto A = MakeEngine("alice", 48110, false, true);
     auto B = MakeEngine("bob", 48120, true, true);

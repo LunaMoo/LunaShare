@@ -35,6 +35,11 @@ public:
         int mailboxMB = 10;                  // per recipient device
         int mailboxTotalMB = 1024;           // all mailboxes together
         std::string dataDir;                 // where mailboxes are saved (empty = kept in memory only)
+        // "a link for anyone" pages (link_server.h), told to devices: its port and whether it's HTTPS, or the
+        // public address in front of it (a reverse proxy); 0 = not offered
+        uint16_t linkPort = 0;
+        bool linkTls = false;
+        std::string linkUrl;
         std::function<void(const std::string&)> log;
     };
     ~RendezvousServer() { Stop(); }
@@ -43,6 +48,8 @@ public:
     size_t DeviceCount();
     size_t RoomCount();
     size_t MailCount();  // envelopes waiting in all mailboxes
+    // a device currently registered and not limited by an invite (it may offer links for anyone)
+    bool LinkAllowed(const std::string& pub);
 
 private:
     void Loop();
@@ -52,6 +59,7 @@ private:
     intptr_t sock_ = -1;
     std::mutex m_;
     size_t devices_ = 0, rooms_ = 0, mail_ = 0;
+    std::set<std::string> listed_;
 };
 
 }  // namespace ls

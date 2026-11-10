@@ -111,6 +111,11 @@ bool Engine::Start() {
     StartBtServer();
     StartMdns();
     StartWan();
+    shareLinks.sign = [this](const std::string& ch) { return SignData(identity_, "links", ch); };
+    shareLinks.myPub = [this] { return identity_.PubHex(); };
+    shareLinks.onAsk = [this](const ShareAsk& a) { Emit({EventType::ShareAsk, "", a.name}); };
+    shareLinks.log = [](const std::string& m) { fprintf(stderr, "%s\n", m.c_str()); };
+    shareLinks.Start(ConfigPath(), (uint16_t)(boundPort + 3));
 
     listenThread_ = std::thread([this] { ListenLoop(); });
     discoveryThread_ = std::thread([this] { DiscoveryLoop(); });
@@ -130,6 +135,7 @@ void Engine::Stop() {
     bt_.StopServer();
     mdns_.Stop();
     wan_.Stop();
+    shareLinks.Stop();
     std::vector<std::shared_ptr<Connection>> cs;
     {
         auto lk = Lock();
@@ -1007,6 +1013,23 @@ void Engine::HandleServerReply(const std::string& text) {
             usernamePending = false;
             usernameError = j.value("msg", "error");
         }
+    } else if (t == "lnk") {
+        // the server offers links for anyone: where its pages are
+        json l = j["lnk"];
+        std::string base;
+        if (l.is_object() && settings.wanEnabled && !settings.wanServer.empty()) {
+            base = l.value("url", "");
+            if (base.empty() && l.value("port", 0) > 0) {
+                std::string host = settings.wanServer;
+                if (!host.empty() && host[0] == '[') host = host.substr(0, host.find(']') + 1);  // [v6]:port
+                else if (std::count(host.begin(), host.end(), ':') == 1) host = host.substr(0, host.find(':'));
+                base = std::string(l.value("tls", false) ? "https" : "http") + "://" + host + ":" + std::to_string(l.value("port", 0));
+            }
+        }
+        std::string srv = base.empty() ? "" : settings.wanServer;
+        lk.unlock();
+        shareLinks.SetServer(srv, base);
+        return;
     } else if (t == "released") {
         // joined with someone's invite, and the server's admin released me: an ordinary member now - the server's
         // address shows in Settings and my own invite codes to it work
@@ -3019,7 +3042,10 @@ void Engine::StartWan() {
         for (auto& [id, p] : online) p.lastWan = 0;
     }
     wan_.Stop();
-    if (!on) return;
+    if (!on) {
+        shareLinks.SetServer("", "");  // (the server tells again when it's back on)
+        return;
+    }
     wan_.signMail = [this](const std::string& challenge) { return SignData(identity_, "mailbox", challenge); };
     wan_.onServerReply = [this](const std::string& text) { HandleServerReply(text); };
     {

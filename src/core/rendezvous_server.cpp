@@ -243,6 +243,11 @@ size_t RendezvousServer::RoomCount() {
     return rooms_;
 }
 
+bool RendezvousServer::LinkAllowed(const std::string& pub) {
+    std::lock_guard<std::mutex> l(m_);
+    return listed_.count(pub) > 0;
+}
+
 size_t RendezvousServer::MailCount() {
     std::lock_guard<std::mutex> l(m_);
     return mail_;
@@ -411,7 +416,13 @@ void RendezvousServer::Loop() {
         size_t n = 0, mails = 0;
         for (auto& [r, m] : rooms) n += m.size();
         for (auto& [k, v] : boxes) mails += v.size();
+        std::set<std::string> listed;
+        if (opt_.linkPort)
+            for (auto& [r, m] : rooms)
+                for (auto& [id, d] : m)
+                    if (!d.restricted && IsHex64(d.pub)) listed.insert(d.pub);
         std::lock_guard<std::mutex> l(m_);
+        listed_.swap(listed);
         devices_ = n;
         rooms_ = rooms.size();
         mail_ = mails;
@@ -922,6 +933,10 @@ void RendezvousServer::Loop() {
                     if (rl.idB == id) rl.b = from, rl.viaB = via;
                 }
             json reply = {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}, {"lk", true}};
+            if (opt_.linkPort && !d.restricted && IsHex64(d.pub)) {
+                reply["lnk"] = {{"port", opt_.linkPort}, {"tls", opt_.linkTls}};
+                if (!opt_.linkUrl.empty()) reply["lnk"]["url"] = opt_.linkUrl;
+            }
             if (d.restricted) reply["inv"] = true;
             else if (IsHex64(d.pub)) {  // released by the admin: the app may stop hiding this server from its user
                 bool rel = false;

@@ -21,6 +21,7 @@
 #include "model.h"
 #include "net.h"
 #include "protocol.h"
+#include "share_links.h"
 
 namespace ls {
 
@@ -84,6 +85,7 @@ enum class EventType { ChatReceived, IncomingOffer, TransferDone, TransferFailed
                        ChatReaction,  // text = emoji, a = the message text (shortened)
                        LinkRequest,   // a device asks this one to join its account: text = confirmation code, a = name
                        LinkDone,      // linking finished: text = what happened
+                       ShareAsk,      // someone opened a "link for anyone" that asks first: text = file name
                        };
 
 enum class CallState { None, OutgoingRinging, IncomingRinging, Active };
@@ -614,6 +616,8 @@ public:
     int64_t ChatMutedUntil(const std::string& key);  // 0 forever, -1 not muted
     std::vector<std::shared_ptr<Transfer>> BatchTransfers(uint64_t batch);
     std::string ConfigPath();  // this engine's config folder
+    // "a link for anyone" (share_links.h): the file is served by this device, on this network or through the server
+    ShareLinks shareLinks;
 
 private:
     void ListenLoop();

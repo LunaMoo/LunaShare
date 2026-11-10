@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "link_server.h"
 #include "rendezvous_server.h"
 #include "wan.h"
 
@@ -37,7 +38,14 @@ static void Usage() {
         "      --mailbox-days N   keep offline messages at most N days (default 10)\n"
         "      --mailbox-mb N     limit per receiving device in MB (default 10)\n"
         "      --mailbox-total-mb N   limit for all offline messages together (default 1024)\n"
-        "  -q, --quiet            no log output\n"
+        "  -q, --quiet            no log output\n\n"
+        "Links for anyone (people without LunaShare download a file in their browser; it comes from the sender's\n"
+        "device through this server, end-to-end encrypted):\n"
+        "      --link-port N      serve the link pages on TCP port N (devices also connect to TCP on --port)\n"
+        "      --cert FILE        certificate (PEM, full chain) for HTTPS; reloaded when it changes\n"
+        "      --key FILE         its private key (PEM)\n"
+        "      --link-url URL     the public address of the pages when a reverse proxy serves them with HTTPS\n"
+        "                         (then this server speaks plain HTTP and trusts X-Forwarded-For from 127.0.0.1)\n\n"
         "      --hash-room NAME PASSWORD   print the hash of a room (for the --rooms file) and exit\n\n"
         "People who joined with an invite code are remembered (in the -d directory) and stay limited to the people who\n"
         "invited them, even if they later enter the server's address by hand:\n"
@@ -87,6 +95,8 @@ static int ListInvited(const std::string& dir, bool asJson) {
 int main(int argc, char** argv) {
     ls::RendezvousServer::Options o;
     bool quiet = false, listInv = false, asJson = false;
+    uint16_t linkPort = 0;
+    std::string cert, key, linkUrl;
     std::vector<std::string> adminCmds;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -103,6 +113,10 @@ int main(int argc, char** argv) {
         else if (a == "--mailbox-mb") o.mailboxMB = std::max(1, atoi(next().c_str()));
         else if (a == "--mailbox-total-mb") o.mailboxTotalMB = std::max(1, atoi(next().c_str()));
         else if (a == "--list-invited") listInv = true;
+        else if (a == "--link-port") linkPort = (uint16_t)atoi(next().c_str());
+        else if (a == "--cert") cert = next();
+        else if (a == "--key") key = next();
+        else if (a == "--link-url") linkUrl = next();
         else if (a == "--json") asJson = true;
         else if (a == "--release" || a == "--restrict" || a == "--forget") {
             std::string k = next();
@@ -167,11 +181,43 @@ int main(int argc, char** argv) {
         };
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);
+    if (linkPort) {
+        if (cert.empty() != key.empty()) { fprintf(stderr, "error: give both --cert and --key\n"); return 1; }
+        if (!cert.empty() && !ls::LinkServer::TlsSupported()) {
+            fprintf(stderr, "error: this build has no HTTPS (OpenSSL); serve the pages behind a reverse proxy with --link-url\n");
+            return 1;
+        }
+        while (!linkUrl.empty() && linkUrl.back() == '/') linkUrl.pop_back();
+        o.linkPort = linkPort;
+        o.linkTls = !cert.empty();
+        o.linkUrl = linkUrl;
+    }
     ls::RendezvousServer srv;
+    ls::LinkServer links;
     std::string err;
     if (!srv.Start(o, &err)) {
         fprintf(stderr, "error: %s\n", err.c_str());
         return 1;
+    }
+    if (linkPort) {
+        ls::LinkServer::Options lo;
+        lo.bind = o.bind;
+        lo.httpPort = linkPort;
+        lo.tunnelPort = o.port;
+        lo.certFile = cert;
+        lo.keyFile = key;
+        lo.trustProxy = !linkUrl.empty() && cert.empty();
+        lo.allowed = [&srv](const std::string& pub) { return srv.LinkAllowed(pub); };
+        lo.log = o.log;
+        if (!links.Start(lo, &err)) {
+            fprintf(stderr, "error: %s\n", err.c_str());
+            srv.Stop();
+            return 1;
+        }
+        if (o.log)
+            o.log("links for anyone: " + std::string(cert.empty() ? "http" : "https") + " on tcp " + o.bind + ":" + std::to_string(linkPort) +
+                  (linkUrl.empty() ? "" : " (public address " + linkUrl + ")") + ", devices on tcp " + std::to_string(o.port) +
+                  (cert.empty() && linkUrl.empty() ? " - no HTTPS: browsers only open such links on this computer" : ""));
     }
     if (o.log)
         o.log("listening on udp " + o.bind + ":" + std::to_string(o.port) +
@@ -180,6 +226,7 @@ int main(int argc, char** argv) {
                                (o.dataDir.empty() ? " (in memory)" : " in " + o.dataDir)
                          : ", no offline messages"));
     while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    links.Stop();
     srv.Stop();
     if (o.log) o.log("stopped");
     return 0;

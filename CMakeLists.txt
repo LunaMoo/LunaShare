@@ -67,10 +67,14 @@ add_library(lunashare_core STATIC
     src/core/wan.cpp
     src/core/upnp.cpp
     src/core/rendezvous_server.cpp
+    src/core/link_crypto.cpp
+    src/core/link_page.cpp
+    src/core/share_links.cpp
     ${kcp_SOURCE_DIR}/ikcp.c
     ${monocypher_SOURCE_DIR}/src/monocypher.c
+    ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c
 )
-target_include_directories(lunashare_core PUBLIC src/core PRIVATE ${monocypher_SOURCE_DIR}/src ${kcp_SOURCE_DIR})
+target_include_directories(lunashare_core PUBLIC src/core PRIVATE ${monocypher_SOURCE_DIR}/src ${monocypher_SOURCE_DIR}/src/optional ${kcp_SOURCE_DIR})
 target_link_libraries(lunashare_core PUBLIC nlohmann_json::nlohmann_json)
 find_package(Threads REQUIRED)
 target_link_libraries(lunashare_core PUBLIC Threads::Threads)
@@ -311,16 +315,40 @@ if(LUNASHARE_BUILD_EMOJI)
 endif()
 
 # ---------------------------------------------------------------- rendezvous server
+if((LUNASHARE_BUILD_SERVER OR LUNASHARE_BUILD_TESTS) AND NOT ANDROID AND NOT IOS)
+    # "a link for anyone" pages: HTTPS with OpenSSL when it's there (static), plain HTTP (behind a proxy) without
+    add_library(lunashare_linkserver STATIC src/core/link_server.cpp)
+    target_link_libraries(lunashare_linkserver PUBLIC lunashare_core)
+    if(NOT OpenSSL_FOUND)
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        if(MSVC)
+            set(OPENSSL_MSVC_STATIC_RT TRUE)
+        endif()
+        find_package(OpenSSL QUIET)
+    endif()
+    if(OpenSSL_FOUND)
+        target_compile_definitions(lunashare_linkserver PRIVATE LUNASHARE_LINK_TLS=1)
+        target_link_libraries(lunashare_linkserver PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        if(WIN32)
+            target_link_libraries(lunashare_linkserver PRIVATE crypt32 ws2_32 user32 advapi32)
+        elseif(NOT APPLE)
+            target_link_libraries(lunashare_linkserver PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+        endif()
+        message(STATUS "link server: HTTPS with OpenSSL ${OPENSSL_VERSION}")
+    else()
+        message(STATUS "link server: OpenSSL not found - plain HTTP only (put it behind a reverse proxy for HTTPS)")
+    endif()
+endif()
 if(LUNASHARE_BUILD_SERVER AND NOT ANDROID AND NOT IOS)
     add_executable(lunashare-rendezvous server/main.cpp)
-    target_link_libraries(lunashare-rendezvous PRIVATE lunashare_core)
+    target_link_libraries(lunashare-rendezvous PRIVATE lunashare_core lunashare_linkserver)
     install(TARGETS lunashare-rendezvous RUNTIME DESTINATION bin)
 endif()
 
 # ---------------------------------------------------------------- tests
 if(LUNASHARE_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     add_executable(lunashare_tests tests/test_engine.cpp)
-    target_link_libraries(lunashare_tests PRIVATE lunashare_core)
+    target_link_libraries(lunashare_tests PRIVATE lunashare_core lunashare_linkserver)
     enable_testing()
     add_test(NAME engine COMMAND lunashare_tests)
     if(LUNASHARE_BUILD_VOICE)

@@ -17,6 +17,7 @@ int LastNetError();
 
 bool SendAll(SocketHandle s, const void* data, size_t len);
 bool RecvAll(SocketHandle s, void* data, size_t len);
+int RecvSome(SocketHandle s, void* data, size_t len);  // what's there (blocks until something comes); <= 0: closed / error
 // Returns 1 readable, 0 timeout, -1 error.
 int WaitReadable(SocketHandle s, int timeoutMs);
 
