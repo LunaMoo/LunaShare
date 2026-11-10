@@ -217,6 +217,8 @@ void App::Frame() {
         if (a == "nearby") { tab = Tab::Nearby; screen = MScreen::Nearby; }
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
+        if (a == "gallery") { tab = Tab::Gallery; screen = MScreen::Gallery; tabForce = true; if (getenv("LUNASHARE_GALLERYVIEW")) galleryView = atoi(getenv("LUNASHARE_GALLERYVIEW")); }
+        if (a == "archives") { tab = Tab::Archives; screen = MScreen::Archives; tabForce = true; }
         if (getenv("LUNASHARE_OPENSOUND")) musicSoundOpen = true;
         if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
         if (a == "movies") { tab = Tab::Movies; screen = MScreen::Movies; }
@@ -465,6 +467,7 @@ void App::PullEvents() {
             case EventType::TransferDone:
                 if (music::Library::IsAudioPath(e.text)) music::Lib().Rescan();  // (received music joins the library)
                 if (PlayerHost::IsVideoPath(e.text)) movieRescanWanted = true;  // (and movies the Movies tab)
+                if (PlayerHost::IsVideoPath(e.text) || ImageCache::IsImagePath(e.text)) galleryRescanWanted = true;  // (pictures the Gallery)
                 if (eng.ChatKey(e.peer) == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !ui::M().mobile) continue;
                 t.title = T("Transfer complete (verified)");
                 t.text = e.text + (who.empty() ? "" : "  -  " + who);
@@ -1005,6 +1008,7 @@ void App::DrawDesktop() {
         item(tl.c_str(), Tab::Transfers);
         item(T("History"), Tab::History);
         item(T("Library"), Tab::Library);
+        item(T("Gallery"), Tab::Gallery);
         item(T("Movies"), Tab::Movies);
         item(T("Music"), Tab::Music);
         item(T("Devices"), Tab::Devices);
@@ -1032,6 +1036,7 @@ void App::DrawDesktop() {
         case Tab::Library: DrawLibrary(); break;
         case Tab::Music: DrawMusic(); break;
         case Tab::Movies: DrawMovies(); break;
+        case Tab::Gallery: DrawGallery(); break;
         case Tab::Devices: DrawDevices(); break;
         case Tab::Nearby: DrawNearby(); break;
         case Tab::Settings: DrawSettings(); break;
@@ -1119,6 +1124,8 @@ void App::DrawMobile() {
         case MScreen::Library: title = T("Library"); break;
         case MScreen::Music: title = T("Music"); break;
         case MScreen::Movies: title = T("Movies"); break;
+        case MScreen::Gallery: title = T("Gallery"); break;
+        case MScreen::Archives: title = T("Archives"); break;
         case MScreen::Nearby: title = T("Connect"); break;
         case MScreen::Settings: title = T("Settings"); break;
         case MScreen::Devices: title = T("Device"); break;
@@ -1203,6 +1210,7 @@ void App::DrawMobile() {
         case MScreen::Library: DrawLibrary(); break;
         case MScreen::Music: DrawMusic(); break;
         case MScreen::Movies: DrawMovies(); break;
+        case MScreen::Gallery: DrawGallery(); break;
         case MScreen::Nearby: DrawNearby(); break;
         case MScreen::Settings: DrawSettings(); break;
         case MScreen::Devices:
@@ -1241,6 +1249,7 @@ void App::DrawMobileHome() {
         if (ui::BigButton(T("New group"), Icon::Users)) OpenNewGroup();
         if (ui::BigButton(T("Invite someone / use an invite code"), Icon::Link)) ImGui::OpenPopup("##invites");
     }
+    if (ui::BigButton(T("Gallery"), Icon::Image)) OpenGallery();
     if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMovies();
     if (Player().Available() && ui::BigButton(T("Music player"), Icon::Speaker)) {
         backStack.push_back(screen);
@@ -3607,6 +3616,14 @@ void App::DrawPopups() {
                 break;
             case BrowseFor::Movie:
                 if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;
+                break;
+            case BrowseFor::GalleryFolder:
+                if (!res.empty() && std::find(s.galleryFolders.begin(), s.galleryFolders.end(), res[0]) == s.galleryFolders.end()) {
+                    s.galleryFolders.push_back(res[0]);
+                    edit.galleryFolders = s.galleryFolders;
+                    galleryRescanWanted = true;
+                    galleryScanned = false;
+                }
                 break;
             case BrowseFor::MovieFolder:
                 if (!res.empty() && std::find(s.movieFolders.begin(), s.movieFolders.end(), res[0]) == s.movieFolders.end()) {

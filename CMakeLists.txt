@@ -18,6 +18,21 @@ option(LUNASHARE_SYSTEM_SDL  "Use an installed SDL2 instead of fetching it" OFF)
 set(LUNASHARE_GL_API "GL3" CACHE STRING "Renderer API: GL3 (desktop), GLES3 (Android/iOS), GLES2")
 
 include(FetchContent)
+# Some dependencies are added with their own CMake but nothing of theirs is built unless something here links it
+# (FetchContent_MakeAvailable gets EXCLUDE_FROM_ALL only with CMake 3.28; Android's is 3.22)
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
+macro(ls_fetch_excluded name)
+    FetchContent_GetProperties(${name})
+    if(NOT ${name}_POPULATED)
+        FetchContent_Populate(${name})
+        set(_ls_shared ${BUILD_SHARED_LIBS})
+        set(BUILD_SHARED_LIBS OFF)
+        add_subdirectory(${${name}_SOURCE_DIR} ${${name}_BINARY_DIR} EXCLUDE_FROM_ALL)
+        set(BUILD_SHARED_LIBS ${_ls_shared})
+    endif()
+endmacro()
 # Offline / pre-downloaded builds: pass -DFETCHCONTENT_SOURCE_DIR_IMGUI=/path etc.
 FetchContent_Declare(nlohmann_json GIT_REPOSITORY https://github.com/nlohmann/json.git GIT_TAG v3.12.0 GIT_SHALLOW TRUE)
 set(JSON_BuildTests OFF CACHE INTERNAL "")
@@ -332,6 +347,12 @@ if(LUNASHARE_BUILD_APP)
     # quirc (ISC): reads QR codes from camera pictures (verifying a contact by scanning their code)
     FetchContent_Declare(quirc GIT_REPOSITORY https://github.com/dlbeer/quirc.git GIT_TAG v1.2 GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
     FetchContent_MakeAvailable(imgui qrcodegen stb quirc)
+    # libwebp (BSD): WebP pictures (the gallery, comics, the viewer) - only its decoder is built
+    FetchContent_Declare(libwebp GIT_REPOSITORY https://github.com/webmproject/libwebp.git GIT_TAG v1.6.0 GIT_SHALLOW TRUE)
+    foreach(o ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO LIBWEBPMUX WEBPMUX EXTRAS)
+        set(WEBP_BUILD_${o} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    ls_fetch_excluded(libwebp)
     if(ANDROID OR IOS)
         set(LUNASHARE_GL_API "GLES3")
     endif()
@@ -372,6 +393,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_lock.cpp
         src/app/ui_polls.cpp
         src/app/instance.cpp
+        src/app/ui_gallery.cpp
         src/app/file_assoc.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
@@ -417,7 +439,7 @@ if(LUNASHARE_BUILD_APP)
 
     target_compile_definitions(${APP_TARGET} PRIVATE IMGUI_USE_WCHAR32)  # emoji and other characters beyond U+FFFF
     target_include_directories(${APP_TARGET} PRIVATE src/app src/media_api ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends
-        ${imgui_SOURCE_DIR}/misc/cpp ${qrcodegen_SOURCE_DIR}/cpp ${stb_SOURCE_DIR} ${quirc_SOURCE_DIR}/lib)
+        ${imgui_SOURCE_DIR}/misc/cpp ${qrcodegen_SOURCE_DIR}/cpp ${stb_SOURCE_DIR} ${quirc_SOURCE_DIR}/lib ${libwebp_SOURCE_DIR}/src)
     if(LUNASHARE_GL_API STREQUAL "GLES3")
         target_compile_definitions(${APP_TARGET} PRIVATE IMGUI_IMPL_OPENGL_ES3)
     elseif(LUNASHARE_GL_API STREQUAL "GLES2")
@@ -425,7 +447,7 @@ if(LUNASHARE_BUILD_APP)
         # SDL ships the Khronos GLES2/EGL headers
         target_include_directories(${APP_TARGET} PRIVATE ${sdl2_SOURCE_DIR}/src/video/khronos)
     endif()
-    target_link_libraries(${APP_TARGET} PRIVATE lunashare_core)
+    target_link_libraries(${APP_TARGET} PRIVATE lunashare_core webpdecoder)
     if(TARGET SDL2::SDL2main)
         target_link_libraries(${APP_TARGET} PRIVATE SDL2::SDL2main)
     endif()

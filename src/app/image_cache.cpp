@@ -11,6 +11,20 @@
 #define STBI_NO_STDIO
 #define STBI_FAILURE_USERMSG
 #include "stb_image.h"
+#include "webp/decode.h"
+
+#include <ctime>
+
+// a picture in memory to RGBA (stb_image's formats, and WebP); freed with FreePixels
+static unsigned char* LoadPixels(const unsigned char* d, size_t n, int* w, int* h) {
+    if (n >= 12 && memcmp(d, "RIFF", 4) == 0 && memcmp(d + 8, "WEBP", 4) == 0) return WebPDecodeRGBA(d, n, w, h);
+    int ch = 0;
+    return stbi_load_from_memory(d, (int)n, w, h, &ch, 4);
+}
+static void FreePixels(const unsigned char* d, size_t n, unsigned char* px) {
+    if (n >= 12 && memcmp(d, "RIFF", 4) == 0 && memcmp(d + 8, "WEBP", 4) == 0) WebPFree(px);
+    else stbi_image_free(px);
+}
 
 ImageCache& Images() {
     static ImageCache c;
@@ -23,7 +37,7 @@ bool ImageCache::IsImagePath(const std::string& path) {
     std::string e = path.substr(dot + 1);
     std::transform(e.begin(), e.end(), e.begin(), ::tolower);
     return e == "jpg" || e == "jpeg" || e == "png" || e == "bmp" || e == "gif" || e == "tga" || e == "psd" || e == "pnm" ||
-           e == "ppm" || e == "pgm" || e == "hdr" || e == "jfif";
+           e == "ppm" || e == "pgm" || e == "hdr" || e == "jfif" || e == "webp";
 }
 
 ImageCache::ImageCache() {
@@ -100,6 +114,65 @@ static int ExifOrientation(const unsigned char* d, size_t n) {
         p += 2 + len;
     }
     return 1;
+}
+
+int64_t PhotoDateMs(const std::string& path) {
+    unsigned char d[65536 + 16];
+    size_t n = 0;
+    if (FILE* f = ls::OpenFile(path, "rb")) {
+        n = fread(d, 1, sizeof d, f);
+        fclose(f);
+    }
+    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return 0;
+    size_t p = 2;
+    while (p + 4 < n) {
+        if (d[p] != 0xFF) return 0;
+        unsigned char marker = d[p + 1];
+        size_t len = ((size_t)d[p + 2] << 8) | d[p + 3];
+        if (marker == 0xDA || marker == 0xD9) return 0;
+        if (marker == 0xE1 && len > 14 && memcmp(d + p + 4, "Exif\0\0", 6) == 0) {
+            const unsigned char* t = d + p + 10;
+            size_t tn = std::min(len - 8, n - (p + 10));
+            bool le = t[0] == 'I';
+            auto u16 = [&](size_t o) -> unsigned { return o + 2 > tn ? 0 : le ? (t[o] | t[o + 1] << 8) : (t[o] << 8 | t[o + 1]); };
+            auto u32 = [&](size_t o) -> size_t {
+                if (o + 4 > tn) return 0;
+                return le ? ((size_t)t[o] | (size_t)t[o + 1] << 8 | (size_t)t[o + 2] << 16 | (size_t)t[o + 3] << 24)
+                          : ((size_t)t[o] << 24 | (size_t)t[o + 1] << 16 | (size_t)t[o + 2] << 8 | (size_t)t[o + 3]);
+            };
+            auto parse = [&](size_t off) -> int64_t {  // "YYYY:MM:DD HH:MM:SS"
+                if (!off || off + 19 > tn) return 0;
+                struct tm tm{};
+                const char* s = (const char*)t + off;
+                if (sscanf(s, "%4d:%2d:%2d %2d:%2d:%2d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &tm.tm_hour, &tm.tm_min, &tm.tm_sec) != 6 ||
+                    tm.tm_year < 1980)
+                    return 0;
+                tm.tm_year -= 1900;
+                tm.tm_mon -= 1;
+                tm.tm_isdst = -1;
+                time_t tt = mktime(&tm);
+                return tt > 0 ? (int64_t)tt * 1000 : 0;
+            };
+            size_t ifd0 = u32(4), exif = 0, dt0 = 0;
+            unsigned c0 = u16(ifd0);
+            for (unsigned i = 0; i < c0 && i < 200; i++) {
+                size_t e = ifd0 + 2 + i * 12;
+                if (u16(e) == 0x8769) exif = u32(e + 8);
+                if (u16(e) == 0x0132) dt0 = u32(e + 8);
+            }
+            if (exif) {
+                unsigned c1 = u16(exif);
+                for (unsigned i = 0; i < c1 && i < 200; i++) {
+                    size_t e = exif + 2 + i * 12;
+                    if (u16(e) == 0x9003)
+                        if (int64_t ms = parse(u32(e + 8))) return ms;
+                }
+            }
+            return parse(dt0);
+        }
+        p += 2 + len;
+    }
+    return 0;
 }
 
 // Embedded EXIF preview (IFD1 JPEGInterchangeFormat), typically 160x120. Returns {offset, length} into `d`.
@@ -222,11 +295,14 @@ void ImageCache::Worker() {
         int w = 0, h = 0, ch = 0;
         unsigned char* px = nullptr;
         size_t eo = 0, el = 0;
+        const unsigned char* src = file.data();  // (what px was made from: the preview or the picture)
+        size_t srcN = file.size();
         if (job.preferExif && ExifThumbnail(file.data(), file.size(), eo, el)) {
             px = stbi_load_from_memory(file.data() + eo, (int)el, &w, &h, &ch, 4);
             if (px && std::max(w, h) < 96) { stbi_image_free(px); px = nullptr; }  // too tiny to be useful
         }
-        if (!px && !file.empty()) px = stbi_load_from_memory(file.data(), (int)file.size(), &w, &h, &ch, 4);
+        if (!px && !file.empty()) px = LoadPixels(file.data(), file.size(), &w, &h);
+        else if (px) src = nullptr;  // (the preview: always stb)
         if (px && w > 0 && h > 0) {
             r.srcW = w;
             r.srcH = h;
@@ -238,7 +314,8 @@ void ImageCache::Worker() {
                 nh = std::max(1, (int)(h * s));
             }
             std::vector<unsigned char> img = (nw != w || nh != h) ? Downscale(px, w, h, nw, nh) : std::vector<unsigned char>(px, px + (size_t)w * h * 4);
-            stbi_image_free(px);
+            if (src) FreePixels(src, srcN, px);
+            else stbi_image_free(px);
             int o = ExifOrientation(file.data(), file.size());
             if (o != 1) {
                 int ow, oh;
@@ -269,10 +346,9 @@ bool DecodeImageFile(const std::string& path, int maxSide, std::vector<unsigned 
         }
         fclose(f);
     }
-    int ch = 0;
-    unsigned char* px = file.empty() ? nullptr : stbi_load_from_memory(file.data(), (int)file.size(), &w, &h, &ch, 4);
+    unsigned char* px = file.empty() ? nullptr : LoadPixels(file.data(), file.size(), &w, &h);
     if (!px || w <= 0 || h <= 0) {
-        if (px) stbi_image_free(px);
+        if (px) FreePixels(file.data(), file.size(), px);
         return false;
     }
     int nw = w, nh = h;
@@ -282,7 +358,7 @@ bool DecodeImageFile(const std::string& path, int maxSide, std::vector<unsigned 
         nh = std::max(1, (int)(h * s));
     }
     rgba = (nw != w || nh != h) ? Downscale(px, w, h, nw, nh) : std::vector<unsigned char>(px, px + (size_t)w * h * 4);
-    stbi_image_free(px);
+    FreePixels(file.data(), file.size(), px);
     w = nw;
     h = nh;
     int o = ExifOrientation(file.data(), file.size());

@@ -142,6 +142,8 @@ struct Settings {
     std::vector<FolderSync> folderSyncs;
     bool clipShare = false;   // the clipboard: copied on one of my devices, pasted on another (off: it may hold passwords)
     int64_t prefsVer = 0;     // when the synced settings last changed here (the newer ones win)  // chat key -> silent until (ms; 0 = until turned back on)
+    std::vector<std::string> galleryFolders;  // the Gallery: folders with pictures (besides the camera, Pictures and received files)
+    bool galleryVideos = true;                // the Gallery shows videos too
     std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)
     bool watchAllowSave = true;
     // the movie player's picture: brightness -0.5..0.5, contrast / saturation / gamma 1 = unchanged, colour temperature and

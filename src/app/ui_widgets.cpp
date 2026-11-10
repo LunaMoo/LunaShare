@@ -289,6 +289,17 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
                 for (int x = 0; x < 2; x++)
                     dl->AddRectFilled(P(-0.75f + x * 0.85f, -0.75f + y * 0.85f), P(-0.1f + x * 0.85f, -0.1f + y * 0.85f), col, 1.5f);
             break;
+        case Icon::Archive:  // a box with a lid and a zipper down the middle
+            dl->AddRect(P(-0.75f, -0.4f), P(0.75f, 0.8f), col, 2.0f, 0, t);
+            dl->AddRect(P(-0.85f, -0.75f), P(0.85f, -0.4f), col, 2.0f, 0, t);
+            for (float y = -0.25f; y < 0.55f; y += 0.2f) dl->AddLine(P(-0.12f, y), P(0.12f, y), col, t);
+            break;
+        case Icon::Book:  // an open book
+            dl->AddQuad(P(-0.85f, -0.6f), P(-0.02f, -0.45f), P(-0.02f, 0.75f), P(-0.85f, 0.6f), col, t);
+            dl->AddQuad(P(0.85f, -0.6f), P(0.02f, -0.45f), P(0.02f, 0.75f), P(0.85f, 0.6f), col, t);
+            dl->AddLine(P(-0.65f, -0.25f), P(-0.2f, -0.17f), col, t * 0.8f);
+            dl->AddLine(P(0.65f, -0.25f), P(0.2f, -0.17f), col, t * 0.8f);
+            break;
         case Icon::Image:
             dl->AddRect(P(-0.8f, -0.65f), P(0.8f, 0.65f), col, 2.0f, 0, t);
             dl->AddTriangleFilled(P(-0.6f, 0.45f), P(-0.15f, -0.15f), P(0.3f, 0.45f), col);

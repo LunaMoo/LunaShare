@@ -67,5 +67,9 @@ private:
 
 ImageCache& Images();
 
+// When a photo was taken (EXIF DateTimeOriginal, else DateTime; local time, ms since 1970), 0 = not known. Reads only
+// the start of the file.
+int64_t PhotoDateMs(const std::string& path);
+
 // Synchronous decode of a picture file to RGBA, EXIF orientation applied, longest side <= maxSide.
 bool DecodeImageFile(const std::string& path, int maxSide, std::vector<unsigned char>& rgba, int& w, int& h);

@@ -38,6 +38,11 @@ void App::DrawLibrary() {
     ImGui::BeginChild("library");
     if (mobile) ui::TouchScroll();
     DrawWatchResume();
+    if (ui::IconTextButton(T("Gallery"), Icon::Image, ImVec2(mobile ? -1 : 0, h))) OpenGallery();
+    if (!mobile) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", T("Your photos and videos, by month or by album."));
+    }
     if (Player().Available()) {
         if (ui::IconTextButton(T("Movie player"), Icon::Play, ImVec2(mobile ? -1 : 0, h))) OpenMovies();
         if (!mobile) {

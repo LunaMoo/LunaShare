@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Gallery** (a new tab; on phones on the home screen and in Library): the camera's photos and videos, Pictures,
+  received files and your folders, **by month** (EXIF date) or **by album**. The viewer gets a **slideshow** and
+  **delete**; pick several (long press / Ctrl+click) to send or delete. Phones: **back up the camera** to one of your
+  devices by itself. **WebP** pictures now show everywhere (libwebp).
 - **Open files with LunaShare.** Android: in *Open with* for pictures, movies, songs, archives and comics, and in
   *Share* for any file or text (pick a chat). Windows / Linux: *Settings → Opening files* adds it to the file
   manager's *Open with* (Windows: also *Default apps*). Files given on the command line open too (`--send`: to a chat).

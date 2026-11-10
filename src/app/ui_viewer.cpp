@@ -216,6 +216,8 @@ void App::DrawThumbnails(const std::string& peer, const std::vector<std::shared_
 void App::OpenViewerList(const std::vector<std::string>& paths, int index, const std::vector<std::string>& captions) {
     if (paths.empty()) return;
     viewer.fixed = true;
+    viewer.canDelete = false;
+    viewer.slideshow = false;
     viewer.peer.clear();
     viewer.paths = paths;
     viewer.captions = captions;
@@ -267,6 +269,8 @@ void App::RebuildViewerList() {
 
 void App::OpenViewer(const std::string& peer, const std::string& path, bool all) {
     viewer.fixed = false;
+    viewer.canDelete = false;
+    viewer.slideshow = false;
     viewer.peer = peer;
     viewer.all = all;
     viewer.paths = {path};
@@ -347,7 +351,7 @@ void App::DrawViewer() {
     if (viewer.paths.empty()) { viewer.open = false; ImGui::CloseCurrentPopup(); ImGui::EndPopup(); return; }
     int n = (int)viewer.paths.size();
     if (viewer.index >= n) viewer.index = n - 1;
-    const std::string& path = viewer.paths[(size_t)viewer.index];
+    const std::string path = viewer.paths[(size_t)viewer.index];
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     viewer.areaMin = vp->Pos;
@@ -383,6 +387,16 @@ void App::DrawViewer() {
         viewer.uiAlpha = 1.0f;
     }
     if (!active) viewer.swipeX *= powf(0.0005f, io.DeltaTime);  // spring back / slide in
+    // the slideshow: the next one every few seconds (any touch / key stops it)
+    if (viewer.slideshow) {
+        viewer.slideT += io.DeltaTime;
+        if (active || ImGui::IsKeyPressed(ImGuiKey_Escape)) viewer.slideshow = false;
+        else if (viewer.slideT > 4.0) {
+            viewer.slideT = 0;
+            if (viewer.index + 1 < (int)viewer.paths.size()) ViewerGo(1);
+            else viewer.slideshow = false;
+        }
+    }
     if (fabsf(viewer.swipeX) < 0.5f) viewer.swipeX = 0;
 
     bool isVideo = PlayerHost::IsVideoPath(path);
@@ -509,7 +523,7 @@ void App::DrawViewer() {
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.75f, 1), "%s", info);
         ImGui::EndGroup();
         // action buttons: top-right on desktop, bottom bar on phones
-        int nb = mobile ? 4 : 6;
+        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0);
         if (mobile) {
             float by = viewer.areaMax.y - barH;
             dl->AddRectFilled(ImVec2(viewer.areaMin.x, by), viewer.areaMax, IM_COL32(0, 0, 0, (int)(150 * a)));
@@ -538,6 +552,32 @@ void App::DrawViewer() {
             close = true;
         }
         ImGui::SameLine(0, sameGap);
+        if (ui::IconButton("vslide", viewer.slideshow ? Icon::Pause : Icon::Play, viewer.slideshow ? T("Stop the slideshow") : T("Slideshow"), bh)) {
+            viewer.slideshow = !viewer.slideshow;
+            viewer.slideT = 0;
+            if (viewer.slideshow) viewer.uiAlpha = 0;
+        }
+        if (viewer.canDelete) {
+            ImGui::SameLine(0, sameGap);
+            if (ui::IconButton("vdel", Icon::Trash, T("Delete from this device"), bh, true)) ImGui::OpenPopup("##vdel");
+        }
+        if (ImGui::BeginPopupModal("##vdel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted(TF("Delete %s from this device? This can't be undone.", BaseName(path).c_str()).c_str());
+            if (ImGui::Button(T("Delete"), ImVec2(0, bh * 0.8f))) {
+                RemoveFile(path);
+                galleryRescanWanted = true;
+                size_t at = (size_t)viewer.index;
+                viewer.paths.erase(viewer.paths.begin() + (long)at);
+                if (at < viewer.captions.size()) viewer.captions.erase(viewer.captions.begin() + (long)at);
+                if (viewer.paths.empty()) close = true;
+                else if (viewer.index >= (int)viewer.paths.size()) viewer.index = (int)viewer.paths.size() - 1;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(T("Cancel"), ImVec2(0, bh * 0.8f))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        if (!viewer.fixed) ImGui::SameLine(0, sameGap);
         if (!viewer.fixed && ui::IconButton("vall", viewer.all ? Icon::Users : Icon::Image, viewer.all ? T("Showing all shared pictures - tap for this chat only") : T("Showing this chat - tap for all shared pictures"), bh)) {
             viewer.all = !viewer.all;
             RebuildViewerList();

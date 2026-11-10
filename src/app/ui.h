@@ -130,8 +130,8 @@ public:
     int styleGeneration = 0;
 
 private:
-    enum class Tab { Chat, Transfers, History, Library, Movies, Music, Devices, Nearby, Settings };
-    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music, Movies };
+    enum class Tab { Chat, Transfers, History, Library, Gallery, Movies, Music, Archives, Devices, Nearby, Settings };
+    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music, Movies, Gallery, Archives };
 
     struct Toast {
         ls::EventType type;
@@ -210,6 +210,16 @@ private:
     bool movieScanned = false, movieRescanWanted = false;
     std::string movieSearch;
     int movieSort = 0;
+    // the Gallery (ui_gallery.cpp): pictures and videos of the camera and the folders, by album or by month
+    void DrawGallery();
+    void GalleryRescan();
+    void OpenGallery();
+    void GalleryBackupPopup();
+    bool galleryScanned = false, galleryRescanWanted = false;
+    std::string gallerySearch, galleryAlbum;  // (album: a folder opened; "" = the albums / everything)
+    int galleryView = 0;                      // 0 by month, 1 albums
+    std::set<std::string> gallerySel;         // picked (long press / the Select button)
+    bool gallerySelecting = false, galleryDeleteAsk = false;
     // listening together / contacts' songs (ui_listen.cpp)
     void MusicExternalTick();
     void MusicPlayLib(const std::vector<ls::LibFile>& list, int at, const std::string& who);
@@ -391,7 +401,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder, GalleryFolder } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();
@@ -448,6 +458,9 @@ private:
         ImVec2 areaMin{0, 0}, areaMax{0, 0};
         float uiAlpha = 1.0f;
         std::string videoPath;     // video being played in the viewer
+        bool slideshow = false;    // on its own to the next one every few seconds
+        double slideT = 0;
+        bool canDelete = false;    // (the gallery: pictures of mine)
     } viewer;
 
     bool openIncomingCall = false;
