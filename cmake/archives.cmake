@@ -69,6 +69,7 @@ foreach(o ZLIB BZip2 LZMA ZSTD)
     set(ENABLE_${o} ON CACHE BOOL "" FORCE)
 endforeach()
 # the answers its configure would find once the libraries exist
+set(POSIX_REGEX_LIB NONE CACHE STRING "" FORCE)  # (only its command-line tools use regular expressions)
 set(ZLIB_INCLUDE_DIR ${_z} CACHE PATH "" FORCE)
 set(ZLIB_LIBRARY ls_zlib CACHE STRING "" FORCE)
 set(BZIP2_INCLUDE_DIR ${_b} CACHE PATH "" FORCE)
