@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.9
 
 - **Torrents** (Windows and Linux, a new optional module with libtorrent; a new Torrents tab): magnet links and
   .torrent files (also opened with LunaShare from the browser / file manager), progress, speed limits, which files
