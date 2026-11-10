@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
 
 - **A welcome on the first start**: what LunaShare is in three lines, your name and picture, adding the first person,
   and a few hints. It can be skipped; installs that already have contacts never see it.
