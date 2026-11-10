@@ -652,6 +652,19 @@ void App::HandleOpenPaths() {
         if (FileExists(p) || IsDirectory(p)) files.push_back(p);
     if (files.empty()) return;
     bool mobile = IsMobileLayout();
+    // what was on top steps aside for it: a movie (paused when nobody else watches), the picture viewer, the song
+    // screen - else it would only show once those are closed
+    const std::string& first = files[0];
+    bool movie = !openPathsSend && files.size() == 1 && PlayerHost::IsVideoPath(first) && Player().Available();
+    bool picture = !openPathsSend && files.size() == 1 && ImageCache::IsImagePath(first);
+    if (watchShown && !movie) {
+        if (watchFromViewer && eng.watchKeys.empty() && eng.watch.host.empty()) eng.LeaveWatch();
+        else if (eng.watch.playing && eng.watch.host.empty() && eng.watchKeys.empty()) eng.WatchControl(false, -1);
+        watchFromViewer = false;
+        watchShown = false;
+    }
+    if (viewer.open && !picture) viewer.closeRequest = true;
+    if (!music::Library::IsAudioPath(first)) musicNowShown = false;
     auto show = [&](Tab t, MScreen s) {
         if (mobile) {
             backStack = {MScreen::Home};

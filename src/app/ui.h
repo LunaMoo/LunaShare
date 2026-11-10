@@ -494,6 +494,7 @@ private:
         bool canDelete = false;    // (the gallery: pictures of mine)
         std::string comic;         // reading this comic (its archive): the page is remembered
         bool rtl = false;          // pages go right to left (manga)
+        bool closeRequest = false; // (closed from outside: something else was opened)
     } viewer;
 
     bool openIncomingCall = false;

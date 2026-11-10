@@ -666,6 +666,10 @@ void App::DrawViewer() {
         }
         ImGui::PopStyleColor(2);
     }
+    if (viewer.closeRequest) {
+        viewer.closeRequest = false;
+        close = true;
+    }
     if (close) {
         viewer.open = false;
         if (!viewer.videoPath.empty()) {
