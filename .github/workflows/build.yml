@@ -123,15 +123,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxinerama-dev libxss-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libdbus-1-dev \
-            libudev-dev libasound2-dev libpulse-dev libfreetype-dev
+            libudev-dev libasound2-dev libpulse-dev libfreetype-dev libssl-dev
       - name: Configure
         shell: bash
         run: |
           EXTRA=""
           if [ "$RUNNER_OS" == "macOS" ]; then EXTRA="-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"; fi
           if [ "$RUNNER_OS" == "Windows" ]; then EXTRA="-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DLUNASHARE_FFMPEG_DIR=$(cygpath -m "$PWD")/ffwin"; fi
+          # the torrent module's HTTPS: the OpenSSL that comes with the Windows runner (static libraries)
+          if [ "$RUNNER_OS" == "Windows" ] && [ -d "/c/Program Files/OpenSSL" ]; then ls "/c/Program Files/OpenSSL/lib" "/c/Program Files/OpenSSL/lib/VC/x64/MT" 2>/dev/null | head -40; fi
           if [ "$RUNNER_OS" == "Linux" ]; then EXTRA="-DLUNASHARE_FFMPEG_DIR=$PWD/fflin"; fi
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA
+          if [ "$RUNNER_OS" == "Windows" ] && [ -d "/c/Program Files/OpenSSL" ]; then
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA "-DOPENSSL_ROOT_DIR=C:/Program Files/OpenSSL"
+          else
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA
+          fi
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
@@ -145,9 +151,9 @@ jobs:
           mkdir -p dist
           # the optional calls module goes into modules/ (delete that folder for a chat + files only install)
           mkdir -p dist/modules
-          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/; cp build/Release/lunashare_player.dll build/Release/lunashare_emoji.dll dist/modules/; cp ffwin/bin/avcodec-61.dll ffwin/bin/avutil-59.dll ffwin/bin/avformat-61.dll ffwin/bin/swresample-5.dll ffwin/FFmpeg-LICENSE.txt dist/modules/;
+          if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/; cp build/Release/lunashare_player.dll build/Release/lunashare_emoji.dll build/Release/lunashare_torrent.dll dist/modules/; cp ffwin/bin/avcodec-61.dll ffwin/bin/avutil-59.dll ffwin/bin/avformat-61.dll ffwin/bin/swresample-5.dll ffwin/FFmpeg-LICENSE.txt dist/modules/;
           elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/; cp build/liblunashare_media.dylib dist/LunaShare.app/Contents/MacOS/; rmdir dist/modules;
-          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service res/lunashare.png dist/; cp build/liblunashare_media.so build/liblunashare_emoji.so build/liblunashare_video.so build/liblunashare_player.so dist/modules/; cp -L fflin/lib/libavcodec.so.61 fflin/lib/libavutil.so.59 fflin/lib/libavformat.so.61 fflin/lib/libswresample.so.5 fflin/lib/libva.so.2 fflin/lib/libva-drm.so.2 dist/modules/; cp fflin/*-LICENSE.txt dist/modules/; fi
+          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service res/lunashare.png dist/; cp build/liblunashare_media.so build/liblunashare_emoji.so build/liblunashare_video.so build/liblunashare_player.so dist/modules/; strip -s build/liblunashare_torrent.so; cp build/liblunashare_torrent.so dist/modules/; cp -L fflin/lib/libavcodec.so.61 fflin/lib/libavutil.so.59 fflin/lib/libavformat.so.61 fflin/lib/libswresample.so.5 fflin/lib/libva.so.2 fflin/lib/libva-drm.so.2 dist/modules/; cp fflin/*-LICENSE.txt dist/modules/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:

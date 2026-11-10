@@ -13,6 +13,7 @@ option(LUNASHARE_BUILD_VOICE "Build the optional voice call module (separate lib
 option(LUNASHARE_VIDEO_TEST_MODULE "Development: build lunashare_video with a test-pattern camera where no real backend exists" OFF)
 set(LUNASHARE_FFMPEG_DIR "" CACHE PATH "FFmpeg 7.1 install for HEVC/AV1 decoding in the Windows video module (optional)")
 option(LUNASHARE_BUILD_PLAYER "Build the optional player module (audio/video files in chat)" ON)
+option(LUNASHARE_BUILD_TORRENT "Build the optional torrent module (desktops: libtorrent, Boost headers, OpenSSL)" ON)
 option(LUNASHARE_BUILD_VIDEO "Build the optional video call module (separate library, Windows/Android)" ON)
 option(LUNASHARE_SYSTEM_SDL  "Use an installed SDL2 instead of fetching it" OFF)
 set(LUNASHARE_GL_API "GL3" CACHE STRING "Renderer API: GL3 (desktop), GLES3 (Android/iOS), GLES2")
@@ -268,6 +269,11 @@ endif()
 # ---------------------------------------------------------------- optional emoji module
 # lunashare_emoji: colour emoji drawn with the system's emoji font (Windows: DirectWrite, Android: android.graphics
 # via android/app/src/main/java/.../EmojiRenderer.java, elsewhere: FreeType) and the picker's emoji list.
+# lunashare_torrent: torrents on desktops (see cmake/torrent.cmake)
+if(LUNASHARE_BUILD_TORRENT AND LUNASHARE_BUILD_APP AND NOT ANDROID AND NOT APPLE AND NOT IOS AND NOT CMAKE_SYSTEM_NAME MATCHES "BSD")
+    include(cmake/torrent.cmake)
+endif()
+
 option(LUNASHARE_BUILD_EMOJI "Build the optional emoji module" ON)
 if(LUNASHARE_BUILD_EMOJI)
     set(LSE_PLATFORM "")
@@ -398,6 +404,8 @@ if(LUNASHARE_BUILD_APP)
         src/app/archives.cpp
         src/app/ui_archives.cpp
         src/app/ui_comics.cpp
+        src/app/torrent_host.cpp
+        src/app/ui_torrents.cpp
         src/app/file_assoc.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
