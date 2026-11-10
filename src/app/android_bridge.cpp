@@ -375,6 +375,10 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnInte
         if (g_engine) g_engine->EndCall("declined");
         return;
     }
+    if (what == "VIEW" || what == "SEND" || what == "SENDTEXT") {  // (opened / shared with LunaShare)
+        notify::Push({what == "VIEW" ? "view" : what == "SEND" ? "send" : "sendtext", key});
+        return;
+    }
     notify::Push({what == "ANSWER" ? "answer" : what == "CALL" ? "call" : what == "UNLOCK" ? "unlock" : "open", key});
 }
 

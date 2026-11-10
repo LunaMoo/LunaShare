@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Open files with LunaShare.** Android: in *Open with* for pictures, movies, songs, archives and comics, and in
+  *Share* for any file or text (pick a chat). Windows / Linux: *Settings → Opening files* adds it to the file
+  manager's *Open with* (Windows: also *Default apps*). Files given on the command line open too (`--send`: to a chat).
+- Desktops: **one copy at a time** - starting LunaShare again brings the running one to the front (and opens the file
+  there).
+
 ## 1.5.7
 
 - **Verify a contact with QR codes** (*Devices → the person → Verify with QR codes...*): show your code, scan theirs with

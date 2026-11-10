@@ -58,6 +58,15 @@ after receiving, so you know it arrived intact.
   your own playlists; repeat, shuffle, a mini player everywhere.
 - Plays on in the background (Android: media notification, lock screen, headset buttons; Windows: media keys) and
   pauses for movies and calls. Send songs or whole albums (as a folder) to people.
+
+**Opening files with LunaShare**
+- **Android:** LunaShare is in the system's *Open with* for pictures, movies, songs, archives and comics, and in
+  *Share* for any file (or text): pick a chat and it's sent.
+- **Windows / Linux:** *Settings → Opening files* adds LunaShare to the file manager's *Open with* (for you only, no
+  administrator; Windows also lists it in *Default apps*, where it can become the default). `LunaShare <files>` opens
+  them too; `--send` shares them to a chat instead.
+- One copy per settings folder: starting LunaShare again (or opening a file with it) brings up the running one and
+  shows the file there.
 - Equalizer, smooth transitions and a remix mode (a part of every song, blending into the next).
 - Listening together: everyone adds songs from their own music to a shared queue; each streams from its device.
   Songs in contacts' Shared folders play straight in the music player.

@@ -147,7 +147,7 @@ jobs:
           mkdir -p dist/modules
           if [ "$RUNNER_OS" == "Windows" ]; then cp build/Release/LunaShare.exe build/Release/lunashare-rendezvous.exe dist/; cp build/Release/lunashare_media.dll build/Release/lunashare_video.dll build/Release/lunashare_vcam.dll dist/modules/; cp build/Release/lunashare_player.dll build/Release/lunashare_emoji.dll dist/modules/; cp ffwin/bin/avcodec-61.dll ffwin/bin/avutil-59.dll ffwin/bin/avformat-61.dll ffwin/bin/swresample-5.dll ffwin/FFmpeg-LICENSE.txt dist/modules/;
           elif [ "$RUNNER_OS" == "macOS" ]; then cp -R build/LunaShare.app build/lunashare-rendezvous dist/; cp build/liblunashare_media.dylib dist/LunaShare.app/Contents/MacOS/; rmdir dist/modules;
-          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service dist/; cp build/liblunashare_media.so build/liblunashare_emoji.so build/liblunashare_video.so build/liblunashare_player.so dist/modules/; cp -L fflin/lib/libavcodec.so.61 fflin/lib/libavutil.so.59 fflin/lib/libavformat.so.61 fflin/lib/libswresample.so.5 fflin/lib/libva.so.2 fflin/lib/libva-drm.so.2 dist/modules/; cp fflin/*-LICENSE.txt dist/modules/; fi
+          else cp build/LunaShare build/lunashare-rendezvous server/lunashare-rendezvous.service res/lunashare.png dist/; cp build/liblunashare_media.so build/liblunashare_emoji.so build/liblunashare_video.so build/liblunashare_player.so dist/modules/; cp -L fflin/lib/libavcodec.so.61 fflin/lib/libavutil.so.59 fflin/lib/libavformat.so.61 fflin/lib/libswresample.so.5 fflin/lib/libva.so.2 fflin/lib/libva-drm.so.2 dist/modules/; cp fflin/*-LICENSE.txt dist/modules/; fi
           cp README.md LICENSE dist/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:

@@ -42,6 +42,13 @@ public:
     // Builds the whole UI for this frame. Call between ImGui::NewFrame() and ImGui::Render().
     void Frame();
     void OnDrop(const std::vector<std::string>& paths);
+    // files opened with LunaShare (the file manager's "Open with", a second start, Android's open / share): shown in
+    // the matching place - pictures in the viewer, movies in the movie player, songs in the music player, archives and
+    // comics in theirs; send = to a chat. Taken up at the next frame.
+    void OpenPaths(const std::vector<std::string>& paths, bool send);
+    void HandleOpenPaths();
+    std::vector<std::string> openPathsPending;
+    bool openPathsSend = false;
     // Returns true when the app may quit now; otherwise shows a confirmation first.
     bool RequestQuit();
     // Two-finger pinch from SDL_MULTIGESTURE (dDist as reported, x/y in window pixels).
@@ -325,6 +332,8 @@ private:
     void AudioCallControls(float fieldW, float h, bool& changed);
     // picture viewer (ui_viewer.cpp)
     void OpenViewer(const std::string& peer, const std::string& path, bool all);
+    // a set list (a gallery folder, a comic's pages, the pictures next to an opened file); captions optional
+    void OpenViewerList(const std::vector<std::string>& paths, int index, const std::vector<std::string>& captions = {});
     void RebuildViewerList();
     void DrawViewer();
     void ViewerZoomAt(ImVec2 pt, float factor);
@@ -346,6 +355,7 @@ private:
     std::string selectedPeer;
     std::string chatInput;
     std::vector<std::string> pendingForward;  // messages' text to pass on (with pendingSend: their files)
+    bool pendingShareText = false;            // pendingForward is text shared with LunaShare (not forwarded)
     // sending files from the app: photos made smaller first when that's on (on a thread), then SendPaths
     void SendFilesUI(const std::string& peer, const std::vector<std::string>& paths);
     void ForwardMessages(const std::string& peer, const std::vector<std::string>& mids);
@@ -428,6 +438,7 @@ private:
     struct Viewer {
         bool open = false, requestOpen = false;
         bool all = false;          // false: pictures of this chat, true: all shared pictures
+        bool fixed = false;        // a set list (OpenViewerList): not rebuilt from the chats
         std::string peer;
         std::vector<std::string> paths, captions;
         int index = 0;

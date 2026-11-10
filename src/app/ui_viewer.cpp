@@ -213,7 +213,24 @@ void App::DrawThumbnails(const std::string& peer, const std::vector<std::shared_
 }
 
 // ---------------------------------------------------------------- viewer
+void App::OpenViewerList(const std::vector<std::string>& paths, int index, const std::vector<std::string>& captions) {
+    if (paths.empty()) return;
+    viewer.fixed = true;
+    viewer.peer.clear();
+    viewer.paths = paths;
+    viewer.captions = captions;
+    viewer.captions.resize(paths.size());
+    viewer.index = std::clamp(index, 0, (int)paths.size() - 1);
+    viewer.zoom = 1;
+    viewer.pan = ImVec2(0, 0);
+    viewer.swipeX = 0;
+    viewer.open = true;
+    viewer.requestOpen = true;
+    viewer.uiAlpha = 1;
+}
+
 void App::RebuildViewerList() {
+    if (viewer.fixed) return;
     std::string current = viewer.index >= 0 && viewer.index < (int)viewer.paths.size() ? viewer.paths[(size_t)viewer.index] : "";
     viewer.paths.clear();
     viewer.captions.clear();
@@ -249,6 +266,7 @@ void App::RebuildViewerList() {
 }
 
 void App::OpenViewer(const std::string& peer, const std::string& path, bool all) {
+    viewer.fixed = false;
     viewer.peer = peer;
     viewer.all = all;
     viewer.paths = {path};
@@ -520,7 +538,7 @@ void App::DrawViewer() {
             close = true;
         }
         ImGui::SameLine(0, sameGap);
-        if (ui::IconButton("vall", viewer.all ? Icon::Users : Icon::Image, viewer.all ? T("Showing all shared pictures - tap for this chat only") : T("Showing this chat - tap for all shared pictures"), bh)) {
+        if (!viewer.fixed && ui::IconButton("vall", viewer.all ? Icon::Users : Icon::Image, viewer.all ? T("Showing all shared pictures - tap for this chat only") : T("Showing this chat - tap for all shared pictures"), bh)) {
             viewer.all = !viewer.all;
             RebuildViewerList();
             if (viewer.paths.empty()) close = true;

@@ -371,6 +371,8 @@ if(LUNASHARE_BUILD_APP)
         src/app/update.cpp
         src/app/ui_lock.cpp
         src/app/ui_polls.cpp
+        src/app/instance.cpp
+        src/app/file_assoc.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
         src/app/notify.cpp
@@ -400,7 +402,7 @@ if(LUNASHARE_BUILD_APP)
         set(APP_TARGET LunaShare)
         if(WIN32)
             target_sources(LunaShare PRIVATE res/lunashare.rc)
-            target_link_libraries(LunaShare PRIVATE winhttp)  # the update check
+            target_link_libraries(LunaShare PRIVATE winhttp shell32 advapi32)  # the update check; "Open with" registration
             if(MSVC)
                 target_link_options(LunaShare PRIVATE /MANIFEST:NO)  # our .rc already embeds the manifest
             endif()

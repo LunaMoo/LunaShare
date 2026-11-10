@@ -24,6 +24,7 @@ extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, 
 #include "emoji_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
+#include "instance.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -242,14 +243,24 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     SetProcessDPIAware();
 #endif
-    // --portable / --config <dir>: keep settings next to the executable or elsewhere
+    // --portable / --config <dir>: keep settings next to the executable or elsewhere; other words: files to open
+    // (--send: to share them instead)
+    std::vector<std::string> openPaths;
+    bool openSend = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--config" && i + 1 < argc) ls::SetConfigDirOverride(argv[++i]);
         else if (a == "--portable") {
             char* base = SDL_GetBasePath();
             if (base) { ls::SetConfigDirOverride(ls::JoinPath(base, "LunaShareData")); SDL_free(base); }
-        }
+        } else if (a == "--send") openSend = true;
+        else if (a.size() > 2 && a.compare(0, 2, "--") == 0) continue;
+        else if (a.compare(0, 4, "-psn") != 0) openPaths.push_back(a);
+    }
+    // one copy per settings folder: a second start hands its files over and ends
+    if (!ls::IsMobilePlatform() && !instance::Acquire(ls::ConfigDir())) {
+        instance::SendRequest(ls::ConfigDir(), openPaths, openSend);
+        return 0;
     }
     SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
@@ -419,6 +430,8 @@ int main(int argc, char** argv) {
     if (tray::Available()) notify::SetTrayHook([](const std::string& t, const std::string& x) { tray::Balloon(t, x); });
     if (ls::Bridge().backgroundService && engine.GetSettings().backgroundRun) ls::Bridge().backgroundService(true);
     App app(engine);
+    if (!openPaths.empty()) app.OpenPaths(openPaths, openSend);
+    int64_t lastRequestPoll = 0;
     bool hiddenToTray = false;
     // closing the window: quit, or (setting) keep running - in the tray on Windows, minimised elsewhere
     auto closeRequested = [&]() -> bool {
@@ -525,7 +538,16 @@ int main(int argc, char** argv) {
         }
         if (app.quitConfirmed) running = false;
         if (tray::TakeQuit()) running = false;
-        if (tray::TakeShow() || (hiddenToTray && notify::Peek())) {
+        bool showReq = false;
+        if (!ls::IsMobilePlatform() && ls::SteadyMs() - lastRequestPoll > 300) {  // (another start handed something over)
+            lastRequestPoll = ls::SteadyMs();
+            instance::Request rq;
+            if (instance::Poll(ls::ConfigDir(), rq)) {
+                showReq = true;
+                if (!rq.paths.empty()) app.OpenPaths(rq.paths, rq.send);
+            }
+        }
+        if (tray::TakeShow() || showReq || (hiddenToTray && notify::Peek())) {
             SDL_ShowWindow(window);
             SDL_RestoreWindow(window);
             SDL_RaiseWindow(window);

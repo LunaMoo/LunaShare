@@ -144,10 +144,103 @@ public class LunaShareActivity extends SDLActivity {
         handleIntent(intent);
     }
 
+    /** Files opened with LunaShare ("Open with") or shared to it ("Share"): their paths go to the native side - the
+     *  real file where it can be read directly, otherwise a copy in the cache (incoming/). On a thread of its own. */
+    void handleFiles(Intent intent) {
+        final String a = intent.getAction();
+        final ArrayList<Uri> uris = new ArrayList<>();
+        String text = null;
+        if (Intent.ACTION_VIEW.equals(a)) {
+            if (intent.getData() != null) uris.add(intent.getData());
+        } else if (Intent.ACTION_SEND.equals(a)) {
+            Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (u != null) uris.add(u);
+            else text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(a)) {
+            ArrayList<Uri> l = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (l != null) uris.addAll(l);
+        }
+        intent.setAction(null);
+        final String sharedText = text;
+        final boolean view = Intent.ACTION_VIEW.equals(a);
+        new Thread(() -> {
+            if (sharedText != null && !sharedText.isEmpty()) {
+                try { nativeOnIntent("org.lunamoo.lunashare.SENDTEXT", sharedText); } catch (Throwable ignored) {}
+                return;
+            }
+            StringBuilder paths = new StringBuilder();
+            File in = new File(getCacheDir(), "incoming");
+            cleanIncoming(in);
+            File batch = new File(in, Long.toString(System.currentTimeMillis()));
+            for (Uri u : uris) {
+                String p = localPath(u, batch);
+                if (p != null) paths.append(p).append('\n');
+            }
+            if (paths.length() == 0) return;
+            try { nativeOnIntent(view ? "org.lunamoo.lunashare.VIEW" : "org.lunamoo.lunashare.SEND", paths.toString()); } catch (Throwable ignored) {}
+        }).start();
+    }
+
+    /** A content:// (or file://) address as a file: the file itself when it can be read, else copied into dir. */
+    String localPath(Uri u, File dir) {
+        try {
+            if ("file".equals(u.getScheme())) return u.getPath();
+            String name = null;
+            try (android.database.Cursor c = getContentResolver().query(u, null, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    int di = c.getColumnIndex("_data");
+                    if (di >= 0) {
+                        String p = c.getString(di);
+                        if (p != null && new File(p).canRead()) return p;  // (all-files access: the real one)
+                    }
+                    int ni = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                    if (ni >= 0) name = c.getString(ni);
+                }
+            } catch (Throwable ignored) {}
+            if (name == null || name.isEmpty()) {
+                String last = u.getLastPathSegment();
+                name = last != null ? last.replaceAll(".*/", "") : "file";
+                String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(getContentResolver().getType(u));
+                if (ext != null && !name.contains(".")) name += "." + ext;
+            }
+            name = name.replaceAll("[/\\\\:*?\"<>|]", "_");
+            dir.mkdirs();
+            File out = new File(dir, name);
+            try (InputStream is = getContentResolver().openInputStream(u); OutputStream os = new FileOutputStream(out)) {
+                if (is == null) return null;
+                byte[] buf = new byte[1 << 16];
+                int n;
+                while ((n = is.read(buf)) > 0) os.write(buf, 0, n);
+            }
+            return out.getAbsolutePath();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Copies from earlier days go. */
+    static void cleanIncoming(File in) {
+        File[] l = in.listFiles();
+        if (l == null) return;
+        long old = System.currentTimeMillis() - 24L * 3600 * 1000;
+        for (File b : l)
+            if (b.lastModified() < old) deleteTree(b);
+    }
+
+    static void deleteTree(File f) {
+        File[] l = f.listFiles();
+        if (l != null) for (File c : l) deleteTree(c);
+        f.delete();
+    }
+
     /** Notifications open the app with an action: open a chat, show the ringing call, answer it. */
     void handleIntent(Intent intent) {
         if (intent == null || intent.getAction() == null) return;
         String a = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(a) || Intent.ACTION_SEND.equals(a) || Intent.ACTION_SEND_MULTIPLE.equals(a)) {
+            handleFiles(intent);
+            return;
+        }
         if (!a.startsWith("org.lunamoo.lunashare.")) return;
         if (a.equals(Notify.ACTION_CALL) || a.equals(Notify.ACTION_ANSWER)) showOverLockScreen(true);
         if (a.equals(Notify.ACTION_ANSWER)) Notify.cancelCallNotification();

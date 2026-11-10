@@ -14,8 +14,10 @@
 #include "notify.h"
 #include "image_cache.h"
 #include "media_host.h"
+#include "music.h"
 #include "player_host.h"
 #include "emoji_host.h"
+#include "file_assoc.h"
 #include "wan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -105,12 +107,28 @@ void App::Frame() {
             SelectPeer(eng.call.peer);
             if (IsMobileLayout()) { backStack = {MScreen::Home}; screen = MScreen::Chat; }
             else { tab = Tab::Chat; tabForce = true; }
+        } else if (a.what == "view" || a.what == "send") {  // (Android: opened / shared with LunaShare; one path a line)
+            std::vector<std::string> ps;
+            size_t s = 0;
+            while (s <= a.key.size()) {
+                size_t e = a.key.find('\n', s);
+                if (e == std::string::npos) e = a.key.size();
+                if (e > s) ps.push_back(a.key.substr(s, e - s));
+                s = e + 1;
+            }
+            if (!ps.empty()) OpenPaths(ps, a.what == "send");
+        } else if (a.what == "sendtext" && !a.key.empty()) {  // (text shared with LunaShare: to a chat)
+            pendingSend.clear();
+            pendingForward = {a.key};
+            pendingShareText = true;
+            openSendTo = true;
         } else if (a.what == "unlock" && !eng.HistoryLocked()) {  // (the fingerprint; the encrypted history needs the PIN)
             locked = false;
             lockWrong = 0;
         }
     }
     LockTick();
+    if (!openPathsPending.empty() && !locked) HandleOpenPaths();
     ui::Metrics& m = ui::M();
     m.mobile = IsMobileLayout();
     m.rowH = ImGui::GetFrameHeight() * (m.mobile ? 1.9f : 1.0f);
@@ -616,9 +634,59 @@ void App::OnDrop(const std::vector<std::string>& paths) {
     }
 }
 
+void App::OpenPaths(const std::vector<std::string>& paths, bool send) {
+    openPathsPending = paths;
+    openPathsSend = send;
+}
+
+void App::HandleOpenPaths() {
+    std::vector<std::string> paths;
+    paths.swap(openPathsPending);
+    std::vector<std::string> files;
+    for (auto& p : paths)
+        if (FileExists(p) || IsDirectory(p)) files.push_back(p);
+    if (files.empty()) return;
+    bool mobile = IsMobileLayout();
+    auto show = [&](Tab t, MScreen s) {
+        if (mobile) {
+            backStack = {MScreen::Home};
+            screen = s;
+        } else {
+            tab = t;
+            tabForce = true;
+        }
+    };
+    if (openPathsSend || files.size() > 1 && !std::all_of(files.begin(), files.end(), [](const std::string& f) { return music::Library::IsAudioPath(f); })) {
+        OpenSendTo(files);  // (several different things, or shared: to a chat)
+        return;
+    }
+    const std::string& f = files[0];
+    if (music::Library::IsAudioPath(f) && Player().Available()) {
+        music::Play().PlayList(files, 0);
+        show(Tab::Music, MScreen::Music);
+        musicNowShown = true;
+    } else if (PlayerHost::IsVideoPath(f) && Player().Available()) {
+        watchFailed = false;
+        watchLibList.clear();
+        if (eng.StartWatch("", f)) watchShown = true;
+    } else if (ImageCache::IsImagePath(f)) {
+        // the other pictures of its folder come along (arrows / swipes)
+        std::vector<std::string> list;
+        std::string dir = DirName(f);
+        for (auto& e : ListDir(dir))
+            if (!e.isDir && ImageCache::IsImagePath(e.name)) list.push_back(JoinPath(dir, e.name));
+        std::sort(list.begin(), list.end(), [](const std::string& a, const std::string& b) { return NaturalLess(BaseName(a), BaseName(b)); });
+        if (std::find(list.begin(), list.end(), f) == list.end()) list = {f};
+        OpenViewerList(list, (int)(std::find(list.begin(), list.end(), f) - list.begin()));
+    } else {
+        OpenSendTo(files);  // (nothing here shows it: it can still go to someone)
+    }
+}
+
 void App::OpenSendTo(const std::vector<std::string>& paths) {
     pendingSend = paths;
     pendingForward.clear();
+    pendingShareText = false;
     openSendTo = true;
 }
 
@@ -643,6 +711,7 @@ void App::ForwardMessages(const std::string& peer, const std::vector<std::string
     }
     pendingSend = paths;
     pendingForward = texts;
+    pendingShareText = false;
     openSendTo = true;
 }
 
@@ -3212,6 +3281,29 @@ void App::DrawSettings() {
     }
     ImGui::SameLine();
     if (ImGui::Button(T("Open folder"), ImVec2(0, h))) RevealPath(edit.downloadDir);
+    if (assoc::Supported()) {  // "Open with" (desktops; Android always has it)
+        ImGui::SeparatorText(T("Opening files"));
+        static int assocState = -1;  // (asked once, not every frame)
+        if (assocState < 0) assocState = assoc::Registered() ? 1 : 0;
+        bool on = assocState == 1;
+        if (ImGui::Checkbox(T("Offer LunaShare for pictures, movies, songs, archives and comics"), &on)) {
+            std::string err;
+            if (on) {
+                if (!assoc::Register(err)) {
+                    infoMessage = TF("Couldn't register LunaShare: %s", err.c_str());
+                    openInfo = true;
+                }
+            } else {
+                assoc::Unregister();
+            }
+            assocState = assoc::Registered() ? 1 : 0;
+        }
+        ImGui::SameLine();
+        ui::HelpMarker(T("LunaShare shows up in the file manager's \"Open with\" for these files (for you only). Started again while it "
+                         "runs, it shows them in the running one. To open them with LunaShare on a double click, pick it as the "
+                         "default app for them."));
+        if (on && assoc::CanOpenSystemSettings() && ImGui::Button(T("Default apps..."), ImVec2(0, h))) assoc::OpenSystemSettings();
+    }
     ImGui::SeparatorText(T("Appearance"));
     int layout = (int)edit.layout;
     ImGui::SetNextItemWidth(fieldW);
@@ -3580,7 +3672,7 @@ void App::DrawPopups() {
         int64_t total = 0;
         for (auto& p : pendingSend) total += IsDirectory(p) ? 0 : std::max<int64_t>(0, FileSize(p));
         if (!pendingForward.empty()) {
-            ImGui::TextUnformatted(TF("Forward %d message(s)", (int)pendingForward.size()).c_str());
+            ImGui::TextUnformatted(pendingShareText ? T("Send this text") : TF("Forward %d message(s)", (int)pendingForward.size()).c_str());
             for (size_t i = 0; i < pendingForward.size() && i < 3; i++) {
                 std::string s = Emoji().Display(pendingForward[i]);
                 if (s.size() > 60) {
@@ -3609,9 +3701,10 @@ void App::DrawPopups() {
             if (Engine::IsGroupKey(p) && !pendingSend.empty()) continue;  // (files go to people, not to groups)
             if (const Group* g = eng.GroupOf(p); g && g->left) continue;
             if (DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0)) {
-                for (auto& t : pendingForward) eng.SendChat(p, t, "", {}, true);
+                for (auto& t : pendingForward) eng.SendChat(p, t, "", {}, !pendingShareText);
                 if (!pendingSend.empty()) SendFilesUI(p, pendingSend);
                 pendingForward.clear();
+                pendingShareText = false;
                 SelectPeer(p);
                 if (mobile) { backStack.clear(); backStack.push_back(MScreen::Home); screen = MScreen::Chat; }
                 else { tab = Tab::Chat; tabForce = true; }
