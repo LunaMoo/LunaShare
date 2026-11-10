@@ -513,12 +513,12 @@ void App::DrawMusicNow(bool big) {
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (bw - total) * 0.5f));
     bool together = n.follow && eng.listen.sid;  // listening together: shuffle and repeat are everyone's
     bool sh = together ? eng.listen.shuffle : n.shuffle;
-    if (sh) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    ui::PushAccent(sh);
     if (ui::IconButton("mshuf", Icon::Shuffle, sh ? T("Shuffle: on") : T("Shuffle: off"), bs)) {
         if (together) eng.ListenControl("shuffle", sh ? 0 : 1);
         else music::Play().SetShuffle(!sh);
     }
-    if (sh) ImGui::PopStyleColor();
+    ui::PopAccent();
     ImGui::SameLine();
     if (ui::IconButton("mprev", Icon::Back, T("Previous"), bs)) music::Play().Prev();
     ImGui::SameLine();
@@ -537,7 +537,7 @@ void App::DrawMusicNow(bool big) {
     }
     ImGui::SameLine();
     int rp = together ? eng.listen.repeat : n.repeat;
-    if (rp) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    ui::PushAccent(rp);
     const char* rt = rp == music::RepeatOne ? T("Repeat: this song") : rp == music::RepeatAll ? T("Repeat: the list") : T("Repeat: off");
     ImVec2 rpp = ImGui::GetCursorScreenPos();
     if (ui::IconButton("mrep", Icon::Loop, rt, bs)) {
@@ -545,7 +545,7 @@ void App::DrawMusicNow(bool big) {
         else music::Play().SetRepeat((rp + 1) % 3);
     }
     if (rp == music::RepeatOne) dl->AddText(ImVec2(rpp.x + bs * 0.68f, rpp.y + bs * 0.05f), ImGui::GetColorU32(ImGuiCol_Text), "1");
-    if (rp) ImGui::PopStyleColor();
+    ui::PopAccent();
     if (n.external) {  // a song from elsewhere: keep it / leave
         ImGui::Spacing();
         float aw = (ImGui::GetContentRegionAvail().x - sp * 2) / 3, ah = mobile ? h * 0.85f : ImGui::GetFrameHeight() * 1.2f;
@@ -839,12 +839,12 @@ void App::DrawMusic() {
     for (int i = 0; i < 6 && musicGroup.empty(); i++) {
         if (i) ImGui::SameLine();
         bool on = musicView == i;
-        if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        ui::PushAccent(on);
         if (ImGui::Button(views[i], ImVec2(0, h))) {
             musicView = i;
             musicGroup.clear();
         }
-        if (on) ImGui::PopStyleColor();
+        ui::PopAccent();
         if (mobile && i == 2) ImGui::NewLine();  // (two rows on phones)
     }
     // search, sort, folders

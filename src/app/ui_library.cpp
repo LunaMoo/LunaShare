@@ -39,44 +39,57 @@ void App::DrawLibrary() {
     ImGui::BeginChild("library");
     if (mobile) ui::TouchScroll();
     DrawWatchResume();
-    if (ui::IconTextButton(T("Gallery"), Icon::Image, ImVec2(mobile ? -1 : 0, h))) OpenGallery();
-    if (!mobile) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", T("Your photos and videos, by month or by album."));
-    }
-    if (Torrents().Available() || !Torrents().Computers().empty()) {
-        if (ui::IconTextButton(T("Torrents"), Icon::Down, ImVec2(mobile ? -1 : 0, h))) OpenTorrents();
-        if (!mobile) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", Torrents().Available() ? T("Download magnet links and .torrent files; watch while they download.")
-                                                               : T("Download torrents on your computer, and get them sent here."));
+    if (mobile) {
+        // ---- phones: the other pages, as tiles (computers have them in the bar at the top)
+        struct Tile {
+            const char* label;
+            Icon icon;
+            int what;
+        };
+        std::vector<Tile> tiles = {{T("Gallery"), Icon::Image, 0}};
+        if (Player().Available()) {
+            tiles.push_back({T("Movies"), Icon::Play, 1});
+            tiles.push_back({T("Music"), Icon::Speaker, 2});
         }
-    }
-    if (ui::IconTextButton(T("Archives"), Icon::Archive, ImVec2(mobile ? -1 : 0, h))) OpenArchives();
-    if (!mobile) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", T("Look inside zip, 7z, rar, tar... unpack them, or pack files into one."));
-    }
-    if (Player().Available()) {
-        if (ui::IconTextButton(T("Movie player"), Icon::Play, ImVec2(mobile ? -1 : 0, h))) OpenMovies();
-        if (!mobile) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", T("Play a movie here - you can add people to watch with you afterwards."));
-        }
-        if (ui::IconTextButton(T("Music player"), Icon::Speaker, ImVec2(mobile ? -1 : 0, h))) {
-            if (mobile) {
-                backStack.push_back(screen);
-                screen = MScreen::Music;
-                musicNowShown = false;
-            } else {
-                tab = Tab::Music;
-                tabForce = true;
+        tiles.push_back({T("Comics"), Icon::Book, 3});
+        tiles.push_back({T("Archives"), Icon::Archive, 4});
+        if (Torrents().Available() || !Torrents().Computers().empty()) tiles.push_back({T("Torrents"), Icon::Down, 5});
+        float sp = ImGui::GetStyle().ItemSpacing.x, fs = ImGui::GetFontSize();
+        int cols = 3;
+        float tw = (ImGui::GetContentRegionAvail().x - sp * (cols - 1)) / cols, th = fs * 5.2f;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        for (size_t i = 0; i < tiles.size(); i++) {
+            if (i % cols) ImGui::SameLine();
+            ImGui::PushID((int)i);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            bool click = ImGui::InvisibleButton("##tile", ImVec2(tw, th));
+            bool held = ImGui::IsItemActive();
+            dl->AddRectFilled(p, ImVec2(p.x + tw, p.y + th), ImGui::GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_Button), fs * 0.8f);
+            ui::DrawIcon(dl, tiles[i].icon, ImVec2(p.x + tw * 0.5f, p.y + th * 0.4f), fs * 1.9f, held ? ui::ColOnAccent() : ui::ColAccentText());
+            ImVec2 ts = ImGui::CalcTextSize(tiles[i].label);
+            dl->AddText(ImVec2(p.x + (tw - ts.x) * 0.5f, p.y + th * 0.68f), ImGui::GetColorU32(ImGuiCol_Text), tiles[i].label);
+            ImGui::PopID();
+            if (!click) continue;
+            switch (tiles[i].what) {
+                case 0: OpenGallery(); break;
+                case 1: OpenMovies(); break;
+                case 2:
+                    backStack.push_back(screen);
+                    screen = MScreen::Music;
+                    musicNowShown = false;
+                    break;
+                case 3:
+                    OpenArchives();
+                    archivesComics = true;
+                    break;
+                case 4:
+                    OpenArchives();
+                    archivesComics = false;
+                    break;
+                case 5: OpenTorrents(); break;
             }
         }
-        if (!mobile) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", T("Your music, songs from contacts' Shared folders, listening together."));
-        }
+        ImGui::Dummy(ImVec2(0, fs * 0.3f));
     }
 
     // ---- my Shared folder

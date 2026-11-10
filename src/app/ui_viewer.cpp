@@ -126,9 +126,9 @@ void App::DrawAudioItems(const std::vector<std::shared_ptr<Transfer>>& items, fl
         ImGui::EndGroup();
         ImGui::SameLine();
         bool lp = eng.settings.playerLoop;
-        if (lp) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        ui::PushAccent(lp);
         if (ui::IconButton("loop", Icon::Loop, lp ? T("Loop: on") : T("Loop: off"), h * 0.8f)) ToggleLoop();
-        if (lp) ImGui::PopStyleColor();
+        ui::PopAccent();
         ImGui::BeginGroup();
         if (meta.done && !meta.ok) ImGui::TextDisabled("%s", T("can't play this file here"));
         ImGui::EndGroup();

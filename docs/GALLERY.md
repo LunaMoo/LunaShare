@@ -1,6 +1,6 @@
 # Gallery
 
-The **Gallery** tab (on phones: *Gallery* on the home screen or in *Library*) shows the pictures and videos of:
+The **Gallery** (*Multimedia → Gallery*; on phones a tile in *Library*) shows the pictures and videos of:
 
 * the camera and *Pictures* (Android: `DCIM` and `Pictures`; desktops: `~/Pictures`),
 * the received files folder,

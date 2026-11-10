@@ -208,13 +208,13 @@ bool App::DrawAddPersonBody(float width) {
     for (int i = 0; i < 4; i++) {
         if (i % perRow) ImGui::SameLine();
         bool on = addSection == i;
-        if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        ui::PushAccent(on);
         if (ui::IconTextButton(secs[i].label, secs[i].icon, ImVec2(bw, h)) && !on) {
             if (addSection == 1 && Media().Scanning()) Media().CloseScanner();
             addSection = i;
             addMsg.clear();
         }
-        if (on) ImGui::PopStyleColor();
+        ui::PopAccent();
     }
     ImGui::Dummy(ImVec2(0, fs * 0.3f));
     auto message = [&] {
@@ -500,9 +500,9 @@ void App::DrawWelcome() {
         ImGui::Dummy(ImVec2(0, fs * 0.6f));
         if (ImGui::Button(T("Skip"), ImVec2(half, h))) WelcomeDone();
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ui::ColAccent());
+        ui::PushAccent();
         bool next = ImGui::Button(T("Next"), ImVec2(half, h));
-        ImGui::PopStyleColor();
+        ui::PopAccent();
         if (next) {
             std::string n = welcomeName;
             while (!n.empty() && isspace((unsigned char)n.back())) n.pop_back();
@@ -566,9 +566,9 @@ void App::DrawWelcome() {
         ImGui::Dummy(ImVec2(0, fs * 0.6f));
         if (ImGui::Button(T("Back"), ImVec2(half, h))) welcomeStep = 1;
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ui::ColAccent());
+        ui::PushAccent();
         bool go = ImGui::Button(T("Start"), ImVec2(half, h));
-        ImGui::PopStyleColor();
+        ui::PopAccent();
         if (go) WelcomeDone();
     }
     ImGui::EndChild();

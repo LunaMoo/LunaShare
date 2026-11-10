@@ -10,6 +10,12 @@
   on phones - send through any app) and **Get the app** (the download link and its QR code). The technical ways
   (address, Bluetooth, hotspot, rooms) stay on the Connect page.
 - Empty lists say what to do next instead of "Looking for devices...".
+- **Fewer tabs.** Computers: six sections across the top - *Chat*, *Files* (Transfers, History, Shared folder),
+  *Multimedia* (Gallery, Movies, Music), *Tools* (Archives, Torrents), *Devices* (Devices, Connect) and *Settings* -
+  with the pages of a section in a row under it; each section opens on the page it was left on. Phones: the home
+  screen is people again; Gallery, Movies, Music, Comics, Archives and Torrents are tiles in *Library*.
+- **A new look**: a calmer palette (dark and light) with one accent colour, softer corners, more room; buttons in the
+  accent have white text; reply quotes and links are readable in the light theme.
 
 ## 1.5.9
 

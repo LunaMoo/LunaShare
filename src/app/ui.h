@@ -388,6 +388,7 @@ private:
     void DrawPrivateContacts(float fieldW, float h, bool& changed);
     void DrawInvitesPopup();
     bool openInvites = false;
+    Tab navLast[8] = {Tab::Chat, Tab::Transfers, Tab::Gallery, Tab::Archives, Tab::Devices, Tab::Settings, Tab::Chat, Tab::Chat};  // the page each section was left on
     // the welcome of a first start and "Add someone" (ui_welcome.cpp)
     void WelcomeInit();
     void WelcomeDone();

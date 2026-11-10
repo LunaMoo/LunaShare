@@ -15,6 +15,15 @@ Metrics& M() {
 }
 
 ImU32 ColAccent() { return ImGui::GetColorU32(ImGuiCol_ButtonActive); }
+ImU32 ColAccentText() { return ImGui::GetColorU32(ImGuiCol_CheckMark); }
+ImU32 ColOnAccent() { return IM_COL32_WHITE; }
+void PushAccent(bool on) {
+    const ImGuiStyle& st = ImGui::GetStyle();
+    ImGui::PushStyleColor(ImGuiCol_Button, on ? st.Colors[ImGuiCol_ButtonActive] : st.Colors[ImGuiCol_Button]);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, on ? st.Colors[ImGuiCol_SliderGrabActive] : st.Colors[ImGuiCol_ButtonHovered]);
+    ImGui::PushStyleColor(ImGuiCol_Text, on ? ImGui::ColorConvertU32ToFloat4(ColOnAccent()) : st.Colors[ImGuiCol_Text]);
+}
+void PopAccent() { ImGui::PopStyleColor(3); }
 ImU32 ColOk() { return IM_COL32(64, 190, 110, 255); }
 ImU32 ColWarn() { return IM_COL32(230, 175, 50, 255); }
 ImU32 ColErr() { return IM_COL32(225, 75, 75, 255); }

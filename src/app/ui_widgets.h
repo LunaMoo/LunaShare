@@ -39,6 +39,12 @@ void TouchScrollUpdate(bool enabled);
 void QrCode(const char* text, float px);
 
 ImU32 ColAccent();
+ImU32 ColAccentText();  // the accent as a colour for text and icons on the window's background
+ImU32 ColOnAccent();    // text on the accent
+// a button (or several) in the accent colour: the main action, or the choice that is on. on = false pushes nothing
+// that shows (so Push / Pop can stay unconditional).
+void PushAccent(bool on = true);
+void PopAccent();
 ImU32 ColOk();
 ImU32 ColWarn();
 ImU32 ColErr();

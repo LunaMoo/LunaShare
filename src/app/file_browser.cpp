@@ -416,9 +416,9 @@ bool FileBrowser::Draw() {
     // ---- toolbar: view
     if (mode_ != Mode::SelectDir) {
         auto toggle = [&](const char* id, ui::Icon icon, const char* tip, bool on) {
-            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            ui::PushAccent(on);
             bool r = ui::IconButton(id, icon, tip, bs);
-            if (on) ImGui::PopStyleColor();
+            ui::PopAccent();
             return r;
         };
         if (toggle("vlist", ui::Icon::List, T("List"), !prefs.grid)) prefs.grid = false;

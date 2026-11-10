@@ -179,41 +179,90 @@ static void ApplyStyle(int theme, float scale, bool mobile) {
         case 2: ImGui::StyleColorsClassic(); break;
         default: ImGui::StyleColorsDark(); break;
     }
-    style.WindowRounding = 6;
-    style.ChildRounding = 6;
-    style.FrameRounding = 5;
-    style.PopupRounding = 6;
-    style.GrabRounding = 5;
-    style.TabRounding = 5;
+    // soft shapes, room to breathe, no hard frames
+    style.WindowRounding = 10;
+    style.ChildRounding = 10;
+    style.FrameRounding = 8;
+    style.PopupRounding = 10;
+    style.GrabRounding = 8;
+    style.TabRounding = 8;
     style.ScrollbarRounding = 8;
-    style.FramePadding = ImVec2(8, 5);
-    style.ItemSpacing = ImVec2(8, 6);
-    if (theme == 0) {
+    style.ScrollbarSize = 11;
+    style.FramePadding = ImVec2(10, 6);
+    style.ItemSpacing = ImVec2(8, 7);
+    style.ItemInnerSpacing = ImVec2(6, 5);
+    style.WindowPadding = ImVec2(12, 10);
+    style.WindowBorderSize = 0;
+    style.ChildBorderSize = 1;
+    style.PopupBorderSize = 1;
+    style.FrameBorderSize = 0;
+    style.SeparatorTextBorderSize = 1;
+    style.SeparatorTextPadding = ImVec2(12, 6);
+    style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+    auto rgb = [](int hex, float a = 1.0f) { return ImVec4(((hex >> 16) & 255) / 255.0f, ((hex >> 8) & 255) / 255.0f, (hex & 255) / 255.0f, a); };
+    if (theme == 0 || theme == 1) {
+        // one palette for both: a background, two raised steps, text, and one accent (indigo)
+        bool dark = theme == 0;
+        ImVec4 bg = rgb(dark ? 0x15171C : 0xF4F5F8), raised = rgb(dark ? 0x1E2128 : 0xFFFFFF), frame = rgb(dark ? 0x272B34 : 0xE7E9EF),
+               frameHi = rgb(dark ? 0x313642 : 0xDCDFE8), frameAct = rgb(dark ? 0x3A4050 : 0xCDD2E0), text = rgb(dark ? 0xE9EBF0 : 0x1B1D23),
+               muted = rgb(dark ? 0x8E94A3 : 0x6A7080), line = rgb(dark ? 0x2C303A : 0xDADDE5), accent = rgb(dark ? 0x6474F0 : 0x4F5FE0),
+               accentHi = rgb(dark ? 0x7685F5 : 0x6170EA), accentSoft = rgb(dark ? 0x6474F0 : 0x4F5FE0, dark ? 0.22f : 0.16f),
+               accentText = rgb(dark ? 0x93A0FF : 0x4353D6);
         ImVec4* c = style.Colors;
-        c[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-        c[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.11f, 0.13f, 0.00f);
-        c[ImGuiCol_PopupBg] = ImVec4(0.13f, 0.14f, 0.17f, 0.98f);
-        c[ImGuiCol_FrameBg] = ImVec4(0.18f, 0.19f, 0.23f, 1.00f);
-        c[ImGuiCol_FrameBgHovered] = ImVec4(0.23f, 0.25f, 0.30f, 1.00f);
-        c[ImGuiCol_FrameBgActive] = ImVec4(0.26f, 0.29f, 0.36f, 1.00f);
-        c[ImGuiCol_Button] = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
-        c[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.36f, 0.50f, 1.00f);
-        c[ImGuiCol_ButtonActive] = ImVec4(0.36f, 0.42f, 0.75f, 1.00f);
-        c[ImGuiCol_Header] = ImVec4(0.24f, 0.27f, 0.36f, 1.00f);
-        c[ImGuiCol_HeaderHovered] = ImVec4(0.28f, 0.32f, 0.44f, 1.00f);
-        c[ImGuiCol_HeaderActive] = ImVec4(0.36f, 0.42f, 0.70f, 1.00f);
-        c[ImGuiCol_Tab] = ImVec4(0.16f, 0.17f, 0.21f, 1.00f);
-        c[ImGuiCol_TabHovered] = ImVec4(0.36f, 0.42f, 0.70f, 1.00f);
-        c[ImGuiCol_TabSelected] = ImVec4(0.30f, 0.35f, 0.58f, 1.00f);
-        c[ImGuiCol_PlotHistogram] = ImVec4(0.42f, 0.50f, 0.90f, 1.00f);
-        c[ImGuiCol_CheckMark] = ImVec4(0.55f, 0.65f, 1.00f, 1.00f);
-        c[ImGuiCol_SliderGrab] = ImVec4(0.45f, 0.55f, 0.95f, 1.00f);
-        c[ImGuiCol_TitleBgActive] = ImVec4(0.16f, 0.17f, 0.21f, 1.00f);
-        c[ImGuiCol_Separator] = ImVec4(0.25f, 0.27f, 0.32f, 1.00f);
+        c[ImGuiCol_Text] = text;
+        c[ImGuiCol_TextDisabled] = muted;
+        c[ImGuiCol_WindowBg] = bg;
+        c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_PopupBg] = raised;
+        c[ImGuiCol_Border] = line;
+        c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_FrameBg] = frame;
+        c[ImGuiCol_FrameBgHovered] = frameHi;
+        c[ImGuiCol_FrameBgActive] = frameAct;
+        c[ImGuiCol_TitleBg] = raised;
+        c[ImGuiCol_TitleBgActive] = raised;
+        c[ImGuiCol_TitleBgCollapsed] = raised;
+        c[ImGuiCol_MenuBarBg] = raised;
+        c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_ScrollbarGrab] = frameHi;
+        c[ImGuiCol_ScrollbarGrabHovered] = frameAct;
+        c[ImGuiCol_ScrollbarGrabActive] = muted;
+        c[ImGuiCol_CheckMark] = accentText;
+        c[ImGuiCol_SliderGrab] = accent;
+        c[ImGuiCol_SliderGrabActive] = accentHi;
+        c[ImGuiCol_Button] = frame;
+        c[ImGuiCol_ButtonHovered] = frameHi;
+        c[ImGuiCol_ButtonActive] = accent;
+        c[ImGuiCol_Header] = accentSoft;
+        c[ImGuiCol_HeaderHovered] = frameHi;
+        c[ImGuiCol_HeaderActive] = accent;
+        c[ImGuiCol_Separator] = line;
+        c[ImGuiCol_SeparatorHovered] = accent;
+        c[ImGuiCol_SeparatorActive] = accentHi;
+        c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_ResizeGripHovered] = accentSoft;
+        c[ImGuiCol_ResizeGripActive] = accent;
+        c[ImGuiCol_Tab] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_TabHovered] = frameHi;
+        c[ImGuiCol_TabSelected] = accentSoft;
+        c[ImGuiCol_TabSelectedOverline] = accent;
+        c[ImGuiCol_TabDimmed] = ImVec4(0, 0, 0, 0);
+        c[ImGuiCol_TabDimmedSelected] = accentSoft;
+        c[ImGuiCol_PlotLines] = accent;
+        c[ImGuiCol_PlotHistogram] = accent;
+        c[ImGuiCol_TableHeaderBg] = frame;
+        c[ImGuiCol_TableBorderStrong] = line;
+        c[ImGuiCol_TableBorderLight] = line;
+        c[ImGuiCol_TableRowBgAlt] = rgb(dark ? 0xFFFFFF : 0x000000, 0.03f);
+        c[ImGuiCol_TextSelectedBg] = rgb(dark ? 0x6474F0 : 0x4F5FE0, 0.40f);
+        c[ImGuiCol_DragDropTarget] = accentHi;
+        c[ImGuiCol_NavCursor] = accent;
+        c[ImGuiCol_ModalWindowDimBg] = rgb(0x000000, dark ? 0.55f : 0.35f);
     }
     if (mobile) {
-        style.FramePadding = ImVec2(12, 10);
+        style.FramePadding = ImVec2(13, 10);
         style.ItemSpacing = ImVec2(10, 10);
+        style.FrameRounding = 12;
         style.ScrollbarSize = 6;  // drag to scroll instead
         style.TouchExtraPadding = ImVec2(4, 4);
         style.GrabMinSize = 28;

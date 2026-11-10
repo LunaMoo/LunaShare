@@ -1,6 +1,6 @@
 # Archives
 
-The **Archives** tab (on phones: *Archives* on the home screen or in *Library*) lists the archives in *Downloads*,
+The **Archives** page (*Tools → Archives*; on phones a tile in *Library*) lists the archives in *Downloads*,
 *Documents*, the received files folder and the folders you add (*Folders...*), newest first. *Open...* opens any
 other one; opening an archive from the file manager (*Open with*) or from a chat lands here too.
 

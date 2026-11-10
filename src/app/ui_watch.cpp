@@ -500,9 +500,9 @@ void App::WatchTracksPopup() {
             char lb[16];
             snprintf(lb, sizeof lb, "%gx", sp[i]);
             bool on = std::fabs(eng.watch.speed - sp[i]) < 0.001;
-            if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            ui::PushAccent(on);
             if (ImGui::Button(lb, ImVec2(bw, h))) eng.WatchSetSpeed(sp[i]);
-            if (on) ImGui::PopStyleColor();
+            ui::PopAccent();
         }
     }
     {  // the picture: brightness, contrast, colour... (this device only, remembered)

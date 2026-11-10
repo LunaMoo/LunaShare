@@ -1032,33 +1032,90 @@ void App::DrawDesktop() {
     ImGui::EndChild();
     ImGui::SameLine();
     ImGui::BeginChild("content", ImVec2(0, 0), ImGuiChildFlags_None);
-    if (ImGui::BeginTabBar("tabs")) {
-        auto item = [&](const char* label, Tab t) {
-            ImGuiTabItemFlags f = (tabForce && tab == t) ? ImGuiTabItemFlags_SetSelected : 0;
-            bool open = ImGui::BeginTabItem(label, nullptr, f);
-            if (open) {
-                if (!tabForce) tab = t;
-                ImGui::EndTabItem();
-            }
+    // ---- where to: a few sections across the top, their pages (when a section has more than one) in a row under it
+    {
+        struct Page {
+            Tab t;
+            const char* label;
         };
+        struct Sec {
+            const char* label;
+            Icon icon;
+            std::vector<Page> pages;
+        };
+        bool torrents = Torrents().Available() || !Torrents().Computers().empty();
+        std::vector<Sec> secs = {
+            {T("Chat"), Icon::Send, {{Tab::Chat, T("Chat")}}},
+            {T("Files"), Icon::Transfers, {{Tab::Transfers, T("Transfers")}, {Tab::History, T("History")}, {Tab::Library, T("Shared folder")}}},
+            {T("Multimedia"), Icon::Image, {{Tab::Gallery, T("Gallery")}, {Tab::Movies, T("Movies")}, {Tab::Music, T("Music")}}},
+            {T("Tools"), Icon::Archive, {{Tab::Archives, T("Archives")}}},
+            {T("Devices"), Icon::Users, {{Tab::Devices, T("Devices")}, {Tab::Nearby, T("Connect")}}},
+            {T("Settings"), Icon::Gear, {{Tab::Settings, T("Settings")}}},
+        };
+        if (torrents) secs[3].pages.push_back({Tab::Torrents, T("Torrents")});
+        else if (tab == Tab::Torrents) tab = Tab::Archives;
+        int cur = 0;
+        for (size_t i = 0; i < secs.size(); i++)
+            for (auto& p : secs[i].pages)
+                if (p.t == tab) cur = (int)i;
+        navLast[cur] = tab;
         int active = 0;
         for (auto& [id, t] : eng.transfers)
             if (!TStateFinal(t->state)) active++;
-        std::string tl = active ? TF("Transfers (%d)", active) + "###transfers" : std::string(T("Transfers")) + "###transfers";
-        item(T("Chat"), Tab::Chat);
-        item(tl.c_str(), Tab::Transfers);
-        item(T("History"), Tab::History);
-        item(T("Library"), Tab::Library);
-        item(T("Gallery"), Tab::Gallery);
-        item(T("Movies"), Tab::Movies);
-        item(T("Music"), Tab::Music);
-        item(T("Archives"), Tab::Archives);
-        if (Torrents().Available() || !Torrents().Computers().empty()) item(T("Torrents"), Tab::Torrents);
-        item(T("Devices"), Tab::Devices);
-        item(T("Connect"), Tab::Nearby);
-        item(T("Settings"), Tab::Settings);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float fs = ImGui::GetFontSize(), barH = fs * 2.3f, pad = fs * 0.9f, icon = fs * 1.05f;
+        ImU32 accent = ui::ColAccentText(), text = ImGui::GetColorU32(ImGuiCol_Text), muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(fs * 0.25f, ImGui::GetStyle().ItemSpacing.y));
+        for (size_t i = 0; i < secs.size(); i++) {
+            Sec& sc = secs[i];
+            bool on = (int)i == cur;
+            float tw = ImGui::CalcTextSize(sc.label).x, w = pad + icon + fs * 0.45f + tw + pad;
+            if (i) ImGui::SameLine();
+            ImGui::PushID((int)i);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            bool click = ImGui::InvisibleButton("##sec", ImVec2(w, barH));
+            bool hov = ImGui::IsItemHovered();
+            if (on) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + barH), ImGui::GetColorU32(ImGuiCol_Header), fs * 0.5f);
+            else if (hov) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + barH), ImGui::GetColorU32(ImGuiCol_FrameBg), fs * 0.5f);
+            ImU32 col = on ? accent : hov ? text : muted;
+            ui::DrawIcon(dl, sc.icon, ImVec2(p.x + pad + icon * 0.5f, p.y + barH * 0.5f), icon, col);
+            dl->AddText(ImVec2(p.x + pad + icon + fs * 0.45f, p.y + (barH - fs) * 0.5f), on ? text : col, sc.label);
+            if (i == 1 && active > 0) {  // (transfers going on: how many)
+                std::string n = std::to_string(active);
+                ImVec2 ts = ImGui::CalcTextSize(n.c_str());
+                float r = std::max(ts.x, ts.y) * 0.5f + 2;
+                ImVec2 c(p.x + w - r - 1, p.y + r + 1);
+                dl->AddCircleFilled(c, r, ui::ColAccent());
+                dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32_WHITE, n.c_str());
+            }
+            if (click && !on) {
+                Tab to = navLast[i];
+                bool ok = false;
+                for (auto& pg : sc.pages) ok |= pg.t == to;
+                tab = ok ? to : sc.pages[0].t;
+                cur = (int)i;
+            }
+            ImGui::PopID();
+        }
+        ImGui::PopStyleVar();
+        Sec& sc = secs[(size_t)cur];
+        if (sc.pages.size() > 1) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, fs);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(fs * 0.8f, fs * 0.22f));
+            for (size_t i = 0; i < sc.pages.size(); i++) {
+                if (i) ImGui::SameLine();
+                bool on = sc.pages[i].t == tab;
+                std::string label = sc.pages[i].label;
+                if (sc.pages[i].t == Tab::Transfers && active > 0) label = TF("Transfers (%d)", active);
+                ImGui::PushStyleColor(ImGuiCol_Button, on ? ui::ColAccent() : IM_COL32(0, 0, 0, 0));
+                ImGui::PushStyleColor(ImGuiCol_Text, on ? ui::ColOnAccent() : muted);
+                if (ImGui::Button((label + "###pg" + std::to_string(i)).c_str())) tab = sc.pages[i].t;
+                ImGui::PopStyleColor(2);
+            }
+            ImGui::PopStyleVar(2);
+        }
+        ImGui::Dummy(ImVec2(0, fs * 0.15f));
         tabForce = false;
-        ImGui::EndTabBar();
     }
     switch (tab) {
         case Tab::Chat:
@@ -1114,9 +1171,9 @@ void App::DrawSidebar() {
         ImGui::TextDisabled("%s", T("Nobody here yet.\n\nDevices running LunaShare on your network show up by themselves. Anyone else: Add someone."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_Button, ui::ColAccent());
+        ui::PushAccent();
         if (ui::IconTextButton(T("Add someone"), Icon::Plus, ImVec2(-1, ImGui::GetFrameHeight() * 1.2f))) OpenAddPerson(0);
-        ImGui::PopStyleColor();
+        ui::PopAccent();
     }
     for (auto& p : peers) {
         if (DevicePeerRow(p, p == selectedPeer && tab == Tab::Chat, 0)) {
@@ -1284,9 +1341,9 @@ void App::DrawMobileHome() {
         ImGui::TextDisabled("%s", T("Nobody here yet.\n\nDevices running LunaShare on your network show up by themselves. Anyone else: Add someone."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_Button, ui::ColAccent());
+        ui::PushAccent();
         if (ui::BigButton(T("Add someone"), Icon::Plus)) OpenAddPerson(0);
-        ImGui::PopStyleColor();
+        ui::PopAccent();
     }
     for (auto& p : peers) {
         if (DevicePeerRow(p, false, ui::M().rowH * 1.35f)) {
@@ -1300,15 +1357,6 @@ void App::DrawMobileHome() {
         ImGui::Spacing();
         if (ui::BigButton(T("Add someone"), Icon::Plus)) OpenAddPerson(-1);
         if (ui::BigButton(T("New group"), Icon::Users)) OpenNewGroup();
-    }
-    if (ui::BigButton(T("Gallery"), Icon::Image)) OpenGallery();
-    if (ui::BigButton(T("Archives"), Icon::Archive)) OpenArchives();
-    if ((Torrents().Available() || !Torrents().Computers().empty()) && ui::BigButton(T("Torrents"), Icon::Down)) OpenTorrents();
-    if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMovies();
-    if (Player().Available() && ui::BigButton(T("Music player"), Icon::Speaker)) {
-        backStack.push_back(screen);
-        screen = MScreen::Music;
-        musicNowShown = false;
     }
     DrawWatchResume();
     DrawInvitesPopup();
@@ -1327,12 +1375,12 @@ void App::DrawMobileNav() {
         if (i) ImGui::SameLine();
         bool active = screen == items[i].s;
         ImGui::PushID(i);
-        if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        ui::PushAccent(active);
         if (ImGui::Button("##nav", ImVec2(w, h))) {
             screen = items[i].s;
             backStack.clear();
         }
-        if (active) ImGui::PopStyleColor();
+        ui::PopAccent();
         ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
         ImDrawList* dl = ImGui::GetWindowDrawList();
         float cx = (mn.x + mx.x) * 0.5f;
@@ -2146,12 +2194,15 @@ void App::DrawMessages(const std::string& peer) {
             if (qh > 0) {  // the message it answers
                 ImVec2 q0(p0.x + pad * 0.6f, p0.y + pad * 0.5f), q1(p0.x + bw - pad * 0.6f, p0.y + pad * 0.3f + qh);
                 bool qhov = ImGui::IsMouseHoveringRect(q0, q1);
-                dl->AddRectFilled(q0, q1, IM_COL32(0, 0, 0, qhov ? 70 : 45), pad * 0.4f);
-                dl->AddRectFilled(q0, ImVec2(q0.x + 3, q1.y), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), pad * 0.2f);
+                // (a shade of the bubble: darker on dark themes, lighter on the light one - the accent stays readable on it)
+                bool lightTheme = ImGui::GetStyle().Colors[ImGuiCol_WindowBg].x > 0.5f;
+                ImU32 qbg = lightTheme ? IM_COL32(255, 255, 255, qhov ? 200 : 160) : IM_COL32(0, 0, 0, qhov ? 70 : 45);
+                dl->AddRectFilled(q0, q1, qbg, pad * 0.4f);
+                dl->AddRectFilled(q0, ImVec2(q0.x + 3, q1.y), ui::ColAccentText(), pad * 0.2f);
                 ImVec4 qc(q0.x, q0.y, q1.x - 4, q1.y);
                 float ty = q0.y + pad * 0.25f;
                 if (!qWho.empty()) {
-                    dl->AddText(nullptr, 0, ImVec2(q0.x + 9, ty), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), qWho.c_str(), nullptr, 0, &qc);
+                    dl->AddText(nullptr, 0, ImVec2(q0.x + 9, ty), ui::ColAccentText(), qWho.c_str(), nullptr, 0, &qc);
                     ty += ImGui::GetTextLineHeight();
                 }
                 dl->AddText(nullptr, 0, ImVec2(q0.x + 9, ty), ImGui::GetColorU32(ImGuiCol_TextDisabled), qText.c_str(), nullptr, 0, &qc);
@@ -2161,7 +2212,9 @@ void App::DrawMessages(const std::string& peer) {
             if (glyphs.empty()) {
                 dl->AddText(ImGui::GetFont(), textSize, tp, ImGui::GetColorU32(ImGuiCol_Text), shown.c_str(), nullptr, wrap);
             } else {  // with links: run by run, links coloured and underlined
-                ImU32 tc = ImGui::GetColorU32(ImGuiCol_Text), lc = IM_COL32(110, 175, 255, 255), lch = IM_COL32(160, 205, 255, 255);
+                bool lightLinks = ImGui::GetStyle().Colors[ImGuiCol_WindowBg].x > 0.5f;
+                ImU32 tc = ImGui::GetColorU32(ImGuiCol_Text), lc = lightLinks ? IM_COL32(30, 90, 200, 255) : IM_COL32(110, 175, 255, 255),
+                      lch = lightLinks ? IM_COL32(20, 60, 160, 255) : IM_COL32(160, 205, 255, 255);
                 size_t k = 0;
                 while (k < glyphs.size()) {
                     int li = -1;
@@ -4079,11 +4132,10 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             }
         }
         if (Media().Available()) {
-            if (camPanel) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            bool wasOpen = camPanel;
+            ui::PushAccent(camPanel);  // (pushes the same count on or off)
             if (ui::IconButton("camset", Icon::Sliders, T("Call settings (sound, camera, quality...)"), bw, false, cap ? T("Settings##cap") : nullptr))
                 camPanel = !camPanel;
-            if (wasOpen) ImGui::PopStyleColor();
+            ui::PopAccent();
             ImGui::SameLine();
         }
         if (IsMobilePlatform()) {
@@ -4091,7 +4143,7 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             const MediaHost::Route* cur = Media().Current();
             bool spk = cur && cur->kind == "speaker";
             bool hl = cur && cur->kind != "earpiece";
-            if (hl) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            ui::PushAccent(hl);
             if (ui::IconButton("speaker", Icon::Speaker, cur ? MediaHost::RouteLabel(*cur).c_str() : T("Audio output"), bw, false,
                                cap ? (spk ? T("Speaker##cap") : T("Sound##cap")) : nullptr)) {
                 Media().RefreshRoutes();
@@ -4103,7 +4155,7 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
                         if ((r.kind == "speaker") != spk) { Media().SetRoute(r.id); break; }
                 }
             }
-            if (hl) ImGui::PopStyleColor();
+            ui::PopAccent();
             if (ImGui::BeginPopup("##callroute")) {
                 for (auto& r : Media().Routes()) {
                     if (ImGui::Selectable(MediaHost::RouteLabel(r).c_str(), r.id == Media().CurrentRoute(), 0, ImVec2(ImGui::GetFontSize() * 12, h * 0.9f)))
