@@ -139,7 +139,7 @@ jobs:
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $EXTRA
           fi
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
       - name: Test
         shell: bash
         run: |
