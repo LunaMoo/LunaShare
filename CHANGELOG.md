@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Links for anyone** ([docs/LINKS.md](docs/LINKS.md)): *Send to... → Link for anyone...* makes a link (with a QR
+  code) that people without LunaShare open in a browser - sent by SMS or any messenger. The file comes from this
+  device: on the same network straight from it, over the Internet through your rendezvous server when it offers
+  links (`--link-port`, `--cert`/`--key` or `--link-url`; OPNsense: *Links for anyone* with a certificate from the
+  trust store). Over the Internet it's end-to-end encrypted with a key after `#` in the link that the server never
+  sees (it doesn't learn the file's name either), and the browser checks every part: a changed, misplaced or missing
+  part is refused and fetched again, and the page says the file was checked and shows its SHA-256. Valid for an
+  hour, a day or a week; for one person, five or anyone; an optional PIN (5 wrong tries end it); optionally "ask me
+  before each download"; listed under *Files → Transfers* with who downloaded it, and can be turned off any time.
+  Several files go as one zip. Big files are written straight to disk in the browser.
 - **Rendezvous server: *Release* works on OPNsense.** The command ran as root and left its note for the server
   readable only by root, so the server (running as `nobody`) never saw it and nobody was released. The note is now
   handed to the server's user, and the server logs when it can't read one.

@@ -1,6 +1,8 @@
 #include "share_links.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 
@@ -128,15 +130,19 @@ std::string ShareLinks::TunnelStatus() {
 
 std::string ShareLinks::LanBase() {
     if (!lanPort_) return "";
-    std::string best;
+    std::string best, other;
     for (auto& a : LocalIPv4Addresses()) {
         const std::string& ip = a.ip;
         int b1 = 0, b2 = 0;
-        if (sscanf(ip.c_str(), "%d.%d", &b1, &b2) != 2) continue;
+        if (sscanf(ip.c_str(), "%d.%d", &b1, &b2) != 2 || b1 == 127 || b1 == 0 || (b1 == 169 && b2 == 254)) continue;
         bool priv = b1 == 10 || (b1 == 192 && b2 == 168) || (b1 == 172 && b2 >= 16 && b2 < 32);
-        if (!priv) continue;
+        if (!priv) {
+            if (other.empty()) other = ip;  // (no private address: whatever this device has)
+            continue;
+        }
         if (best.empty() || (b1 == 192 && best.rfind("192.", 0) != 0)) best = ip;  // home networks first
     }
+    if (best.empty()) best = other;
     return best.empty() ? "" : "http://" + best + ":" + std::to_string(lanPort_);
 }
 

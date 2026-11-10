@@ -252,7 +252,7 @@ jobs:
             cmake -S . -B build-bsd -DCMAKE_BUILD_TYPE=Release -DLUNASHARE_BUILD_APP=OFF -DLUNASHARE_BUILD_TESTS=OFF -DCMAKE_EXE_LINKER_FLAGS=-static
             cmake --build build-bsd --target lunashare-rendezvous -j 3
             ./build-bsd/lunashare-rendezvous --hash-room test test
-            ./build-bsd/lunashare-rendezvous -p 47999 & PID=$!; sleep 2; kill $PID
+            ./build-bsd/lunashare-rendezvous -p 47999 --link-port 47998 & PID=$!; sleep 2; kill $PID
             mkdir -p dist/lunashare-opnsense/bin
             cp build-bsd/lunashare-rendezvous dist/lunashare-opnsense/bin/
             cp -R opnsense/src opnsense/install.sh docs/INTERNET.md dist/lunashare-opnsense/

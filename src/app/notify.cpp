@@ -82,6 +82,11 @@ void Attach(ls::Engine* eng) {
                 }
                 break;
             }
+            case ls::EventType::ShareAsk:
+                if (!g_bg) return;
+                if (b.notifyMessage) b.notifyMessage("", T("Someone wants your file"), e.text, "");
+                else if (g_tray) g_tray(T("Someone wants your file"), e.text);
+                break;
             case ls::EventType::LinkRequest:
                 if (g_bg && b.notifyMessage) b.notifyMessage(e.peer, e.a, T("Link this device?"), "");
                 break;

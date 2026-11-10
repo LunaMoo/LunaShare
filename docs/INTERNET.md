@@ -41,13 +41,19 @@ OPNsense router.
    *Allow on WAN* ticked (adds the firewall pass rule for you), press **Apply**. The service also appears in the
    Services widget / dashboard with start/stop buttons. Logs: *System → Log Files → General* (tag `lunashare`).
 3. Optional: paste your room hash(es) into *Allowed rooms* so strangers can't use your server.
+4. Optional, **links for anyone** ([LINKS.md](LINKS.md): people without LunaShare download a file in a browser):
+   tick *Links for anyone*, pick a certificate for your public name under *Links: certificate* (get one with the
+   ACME client plugin, Let's Encrypt), keep port **47831** (TCP; not the port of the web interface), press
+   **Apply**. *Allow on WAN* then also opens TCP 47830 and 47831. After the certificate is renewed, restart the
+   service (an ACME automation can do it).
 
 Uninstall: `sh install.sh uninstall`.
 
 ## Server anywhere else
 
 The same program runs on Linux/macOS/Windows: `lunashare-rendezvous -p 47830 -d /var/lib/lunashare` (see `--help`). For Linux there's a
-systemd unit in `server/lunashare-rendezvous.service`. Open UDP 47830 in front of it.
+systemd unit in `server/lunashare-rendezvous.service`. Open UDP 47830 in front of it. For links for anyone add
+`--link-port 47831 --cert ... --key ...` and open TCP 47830 and 47831 too (see [LINKS.md](LINKS.md)).
 
 ## In LunaShare (each device)
 

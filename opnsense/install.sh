@@ -6,7 +6,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 FILES="opnsense/mvc/app/models/OPNsense/LunaShare opnsense/mvc/app/controllers/OPNsense/LunaShare
 opnsense/mvc/app/views/OPNsense/LunaShare opnsense/service/templates/OPNsense/LunaShare
-opnsense/service/conf/actions.d/actions_lunashare.conf etc/inc/plugins.inc.d/lunashare.inc etc/rc.d/lunashare_rendezvous"
+opnsense/service/conf/actions.d/actions_lunashare.conf etc/inc/plugins.inc.d/lunashare.inc etc/rc.d/lunashare_rendezvous opnsense/scripts/OPNsense/LunaShare"
 
 refresh() {
     rm -f /tmp/opnsense_menu_cache.xml /tmp/opnsense_acl_cache.json /var/lib/php/tmp/opnsense_menu_cache.xml 2>/dev/null || true
@@ -29,6 +29,6 @@ fi
 install -m 0755 "$HERE/bin/lunashare-rendezvous" /usr/local/bin/lunashare-rendezvous
 mkdir -p /usr/local/etc/lunashare
 (cd "$HERE/src" && tar cf - .) | (cd /usr/local && tar xpf -)
-chmod 0755 /usr/local/etc/rc.d/lunashare_rendezvous
+chmod 0755 /usr/local/etc/rc.d/lunashare_rendezvous /usr/local/opnsense/scripts/OPNsense/LunaShare/*.php
 refresh
 echo "Installed. Open Services > LunaShare rendezvous in the web UI, enable it and press Apply."

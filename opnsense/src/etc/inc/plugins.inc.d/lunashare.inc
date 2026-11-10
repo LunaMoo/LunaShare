@@ -55,4 +55,29 @@ function lunashare_firewall($fw)
             '#ref' => 'ui/lunashare/',
         ]
     );
+    if ((string)$mdl->links == '1') {
+        // links for anyone: devices keep a TCP connection on the rendezvous port; browsers open the pages
+        $ports = [(string)$mdl->port];
+        if ((string)$mdl->linkurl == '') {
+            $ports[] = (string)$mdl->linkport;
+        }
+        foreach ($ports as $p) {
+            $fw->registerFilterRule(
+                1,
+                [
+                    'interface' => 'wan',
+                    'ipprotocol' => 'inet',
+                    'protocol' => 'tcp',
+                    'to' => '(self)',
+                    'to_port' => $p,
+                    'type' => 'pass',
+                    'direction' => 'in',
+                    'quick' => true,
+                    'statetype' => 'keep',
+                    'descr' => 'LunaShare links for anyone (automatic rule)',
+                    '#ref' => 'ui/lunashare/',
+                ]
+            );
+        }
+    }
 }

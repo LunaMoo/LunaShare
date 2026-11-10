@@ -72,4 +72,29 @@
         <advanced>true</advanced>
         <help>Upper limit of registered devices.</help>
     </field>
+    <field>
+        <id>general.links</id>
+        <label>Links for anyone</label>
+        <type>checkbox</type>
+        <help>Lets people in your rooms send a file as a link that anyone can open in a web browser, without LunaShare (for example by SMS). The page is served here; the file comes from the sender's device through this server while they're online, end-to-end encrypted (the key is in the link after #, which browsers never send), and every part is checked in the browser. Nothing is stored here. Devices that joined with an invite can't make such links.</help>
+    </field>
+    <field>
+        <id>general.linkport</id>
+        <label>Links: HTTPS port</label>
+        <type>text</type>
+        <help>TCP port of the link pages (default 47831; it must not be the port of this web interface). Devices also connect to TCP on the UDP port above. With "Allow on WAN" both TCP ports are opened on WAN.</help>
+    </field>
+    <field>
+        <id>general.linkcert</id>
+        <label>Links: certificate</label>
+        <type>dropdown</type>
+        <help>A certificate for your public name (for example one from the ACME client plugin, Let's Encrypt). Browsers need HTTPS for these pages. After a renewal restart this service (the ACME plugin can do that with an automation), or it keeps the old one.</help>
+    </field>
+    <field>
+        <id>general.linkurl</id>
+        <label>Links: public address</label>
+        <type>text</type>
+        <advanced>true</advanced>
+        <help>Only when a reverse proxy (HAProxy, nginx, Caddy) serves the pages with HTTPS: its address, for example https://share.example.com. This server then speaks plain HTTP on the port above (keep it closed on WAN) and takes the visitor's address from X-Forwarded-For.</help>
+    </field>
 </form>

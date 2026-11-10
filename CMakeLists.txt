@@ -424,6 +424,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_archive.cpp
         src/app/ui_sleep.cpp
         src/app/ui_sync.cpp
+        src/app/ui_links.cpp
         src/app/update.cpp
         src/app/ui_lock.cpp
         src/app/ui_polls.cpp

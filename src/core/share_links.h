@@ -79,6 +79,7 @@ public:
     bool WebAvailable();          // a server that offers links
     std::string TunnelStatus();   // "" = not needed; for the UI / tests
     uint16_t LanPort() const { return lanPort_; }
+    std::string LanBase();        // "http://<this device on its network>:<port>", "" = not on a network
 
 private:
     struct Link;
@@ -104,7 +105,6 @@ private:
     bool TunnelSend(uint8_t type, const std::string& payload);
     void TunnelRequest(const std::string& reqJson);
     void HashLater(std::shared_ptr<Link> l);
-    std::string LanBase();
 
     std::mutex m_;
     std::condition_variable cv_;

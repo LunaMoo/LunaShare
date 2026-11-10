@@ -187,6 +187,12 @@ void App::Frame() {
             OpenChatHistory(selectedPeer);
         }
     }
+    static const char* devLink = getenv("LUNASHARE_SHARELINK");  // dev: "a link for anyone" for this file (screenshots)
+    if (devLink && ImGui::GetFrameCount() == 20) {
+        std::string p = devLink;
+        if (p.find("|send") != std::string::npos) OpenSendTo({p.substr(0, p.find('|'))});
+        else OpenShareLink(std::vector<std::string>{p.substr(0, p.find('|'))});
+    }
     static const char* devMovie = getenv("LUNASHARE_MOVIE");  // dev: open a movie in the movie player (screenshots)
     if (devMovie && ImGui::GetFrameCount() == 20 && eng.StartWatch("", devMovie)) {
         watchShown = true;
@@ -521,6 +527,9 @@ void App::PullEvents() {
                 continue;
             case EventType::CallIncoming:
                 openIncomingCall = true;
+                wantAttention = true;
+                continue;
+            case EventType::ShareAsk:  // (its window opens by itself)
                 wantAttention = true;
                 continue;
             case EventType::CallStarted:
@@ -2725,6 +2734,7 @@ void App::DrawTransfers() {
     ImGui::SameLine();
     if (ui::IconTextButton(mobile ? T("Clear") : T("Clear finished"), Icon::Trash, ImVec2(bw, h))) eng.ClearFinishedTransfers();
     ImGui::Separator();
+    DrawShareLinksList();
     std::vector<std::shared_ptr<Transfer>> list;
     for (auto& [id, t] : eng.transfers) list.push_back(t);
     std::sort(list.begin(), list.end(), [](auto& a, auto& b) {
@@ -3882,6 +3892,13 @@ void App::DrawPopups() {
         }
         if (peers.empty()) ImGui::TextDisabled("%s", T("No devices known yet."));
         ImGui::EndChild();
+        bool linkable = !pendingSend.empty() && pendingForward.empty();
+        if (linkable && ui::IconTextButton(T("Link for anyone..."), Icon::Link, ImVec2(mobile ? -1 : 0, h))) {
+            OpenShareLink(pendingSend);
+            pendingSend.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        if (linkable && !mobile) ImGui::SameLine();
         if (ImGui::Button(T("Cancel"), ImVec2(mobile ? -1 : 0, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             pendingSend.clear();
             pendingForward.clear();
@@ -3889,6 +3906,8 @@ void App::DrawPopups() {
         }
         ImGui::EndPopup();
     }
+
+    DrawShareLinkPopups();
 
     // ---- select text view
     if (openTextView) { ImGui::OpenPopup(T("Message text")); openTextView = false; }

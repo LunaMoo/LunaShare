@@ -421,6 +421,12 @@ private:
     void DrawAudioItems(const std::vector<std::shared_ptr<ls::Transfer>>& items, float width);
     void DrawToasts();
     void OpenSendTo(const std::vector<std::string>& paths);
+    // "a link for anyone" (ui_links.cpp)
+    void OpenShareLink(const std::vector<std::string>& paths);
+    void DrawShareLinkPopups();
+    void DrawShareLinksList();
+    struct ShareLinkUi;
+    std::shared_ptr<ShareLinkUi> shareUi;
     void CopySelectedMessages(const std::string& peer);
     void SelectPeer(const std::string& peer);
 

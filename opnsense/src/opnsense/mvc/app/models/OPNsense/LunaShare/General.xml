@@ -1,7 +1,7 @@
 <model>
     <mount>//OPNsense/lunashare/general</mount>
     <description>LunaShare rendezvous server</description>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <items>
         <enabled type="BooleanField">
             <Default>0</Default>
@@ -55,5 +55,20 @@
             <MaximumValue>100000</MaximumValue>
             <Required>Y</Required>
         </maxdevices>
+        <links type="BooleanField">
+            <Default>0</Default>
+            <Required>Y</Required>
+        </links>
+        <linkport type="PortField">
+            <Default>47831</Default>
+            <Required>Y</Required>
+        </linkport>
+        <linkcert type="CertificateField">
+            <Required>N</Required>
+        </linkcert>
+        <linkurl type="TextField">
+            <Mask>/^https:\/\/[A-Za-z0-9.\-\[\]:]+(\/[^\s"']*)?$/</Mask>
+            <ValidationMessage>Enter an address like https://share.example.com, or leave it empty.</ValidationMessage>
+        </linkurl>
     </items>
 </model>

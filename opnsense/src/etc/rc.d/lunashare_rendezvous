@@ -6,6 +6,7 @@
 #
 # lunashare_rendezvous_enable (bool): YES to run the LunaShare rendezvous server
 # lunashare_rendezvous_args (str):    server options (written by the OPNsense template)
+# lunashare_rendezvous_linkcert (str): refid of the certificate for the link pages (exported before start)
 
 . /etc/rc.subr
 
@@ -33,6 +34,12 @@ lunashare_rendezvous_prestart()
 {
     install -d -o "${lunashare_rendezvous_user}" -m 0755 "${piddir}"
     install -d -o "${lunashare_rendezvous_user}" -m 0700 /var/db/lunashare  # offline messages (sealed)
+    # links for anyone: the chosen certificate from the trust store, readable by the server's user only
+    if [ -n "${lunashare_rendezvous_linkcert}" ]; then
+        /usr/local/opnsense/scripts/OPNsense/LunaShare/export_cert.php "${lunashare_rendezvous_linkcert}" \
+            /usr/local/etc/lunashare/links.crt /usr/local/etc/lunashare/links.key "${lunashare_rendezvous_user}" ||
+            warn "LunaShare: could not export the links certificate"
+    fi
 }
 
 run_rc_command "$1"

@@ -24,6 +24,10 @@ after receiving, so you know it arrived intact.
 - Integrity checks: the sender computes the SHA-256 before offering, every chunk carries a CRC-32, and the receiver computes the SHA-256 of the finished file. The chat card shows *"SHA-256 verified on both sides"*. If the hashes don't match, the partial file is discarded and you can **Retry**.
 - Several files stream in parallel (configurable). There's an optional upload speed limit and a free-space check before accepting.
 - Before sending, the app checks that the source file hasn't changed (size + mtime) since it was hashed.
+- **Links for anyone** (see [docs/LINKS.md](docs/LINKS.md)): send a file as a link (SMS, any messenger) that
+  people without LunaShare open in a browser. It comes from your device - on the same network, or over the Internet
+  through your rendezvous server, end-to-end encrypted and checked part by part in the browser. Expiry, a limit of
+  people, a PIN, "ask me first", turn it off any time.
 
 **Getting started**
 - A short **welcome** on the first start: your name and picture, adding the first person, a few hints.
@@ -334,6 +338,8 @@ src/core/        engine (no UI dependencies)
   wan.*            internet transport: rendezvous client, hole punching, NAT-PMP, relay, KCP sessions, invites
   upnp.*           UPnP IGD port mapping
   rendezvous_server.*  the rendezvous server (also used by the tests)
+  share_links.*    links for anyone (device side)   link_server.*  their pages and tunnel on the server
+  link_crypto.*, link_page.*  the links' encryption (AES-256-CTR + HMAC per part) and the browser page
   bluetooth.*      RFCOMM per platform + HostBridge hooks for Android
   model.*          settings / devices / messages / transfers / history + JSON
   platform.*       paths, MACs, interfaces, UTF-8 file I/O

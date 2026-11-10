@@ -1,6 +1,8 @@
 #include "link_server.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
