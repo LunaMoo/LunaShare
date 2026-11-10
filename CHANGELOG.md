@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Rendezvous server: *Release* works on OPNsense.** The command ran as root and left its note for the server
+  readable only by root, so the server (running as `nobody`) never saw it and nobody was released. The note is now
+  handed to the server's user, and the server logs when it can't read one.
+- A released device is told so: its app shows the server's address and rooms again and can make invite codes for it
+  (it no longer acts as "joined through an invite").
+- Slideshow and arrow keys: the change to the next picture is seamless - the picture being left stays where it was and
+  both slide together (it used to jump aside and drop to a blurrier copy), and the first frames of the change are no
+  longer late.
+
 ## 1.6.0
 
 - **A welcome on the first start**: what LunaShare is in three lines, your name and picture, adding the first person,

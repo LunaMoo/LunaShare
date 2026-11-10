@@ -10,6 +10,10 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -136,9 +140,19 @@ int main(int argc, char** argv) {
     if (listInv || !adminCmds.empty()) {
         if (o.dataDir.empty()) { fprintf(stderr, "give the server's data directory with -d\n"); return 1; }
         if (!adminCmds.empty()) {
-            std::ofstream f(o.dataDir + "/invited-cmd", std::ios::app);
-            for (auto& c : adminCmds) f << c << "\n";
-            if (!f) { fprintf(stderr, "cannot write to %s\n", o.dataDir.c_str()); return 1; }
+            std::string path = o.dataDir + "/invited-cmd";
+            {
+                std::ofstream f(path, std::ios::app);
+                for (auto& c : adminCmds) f << c << "\n";
+                if (!f) { fprintf(stderr, "cannot write to %s\n", o.dataDir.c_str()); return 1; }
+            }
+#ifndef _WIN32
+            // the running server reads this file as its own user (e.g. nobody): this command often runs as root
+            // (OPNsense's configd, sudo) with a umask that would leave it unreadable - hand it to the folder's owner
+            struct stat ds;
+            if (stat(o.dataDir.c_str(), &ds) == 0 && chown(path.c_str(), ds.st_uid, ds.st_gid) != 0) {}
+            chmod(path.c_str(), 0644);
+#endif
             printf("done - a running server applies it within a few seconds\n");
         }
         return listInv ? ListInvited(o.dataDir, asJson) : 0;

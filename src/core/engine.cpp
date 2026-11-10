@@ -1007,6 +1007,15 @@ void Engine::HandleServerReply(const std::string& text) {
             usernamePending = false;
             usernameError = j.value("msg", "error");
         }
+    } else if (t == "released") {
+        // joined with someone's invite, and the server's admin released me: an ordinary member now - the server's
+        // address shows in Settings and my own invite codes to it work
+        if (settings.wanFromInvite) {
+            settings.wanFromInvite = false;
+            MarkDirty();
+            Emit({EventType::Info, "", "The server's admin made you an ordinary member: its address and rooms are now in Settings > Internet, "
+                                       "and you can invite people to it."});
+        }
     } else if (t == "uinfo") {
         lookup.pending = false;
         lookup.name = name;

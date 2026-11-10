@@ -231,6 +231,7 @@ void App::OpenViewerList(const std::vector<std::string>& paths, int index, const
     viewer.open = true;
     viewer.requestOpen = true;
     viewer.uiAlpha = 1;
+    if (getenv("LUNASHARE_SLIDESHOW")) viewer.slideshow = true;  // (dev: smoothness checks)
 }
 
 void App::RebuildViewerList() {
@@ -302,8 +303,11 @@ void App::ViewerGo(int delta) {
     viewer.index = ni;
     viewer.zoom = 1;
     viewer.pan = ImVec2(0, 0);
-    // slide in from the side we are coming from
-    viewer.swipeX = (viewer.areaMax.x - viewer.areaMin.x) * 0.35f * (float)delta * (viewer.rtl ? -1.0f : 1.0f);
+    // slide in from the side we are coming from - from where the pictures are now: the one we leave stays exactly where
+    // it was (it is the neighbour now, one width away) and both move together, without a jump
+    float w = viewer.areaMax.x - viewer.areaMin.x;
+    viewer.swipeX = std::clamp(viewer.swipeX + w * (float)delta * (viewer.rtl ? -1.0f : 1.0f), -w, w);
+    busy = true;  // (the next frame right away, not after the idle wait)
 }
 
 void App::ViewerZoomAt(ImVec2 pt, float factor) {
@@ -392,7 +396,8 @@ void App::DrawViewer() {
         viewer.uiAlpha = 1.0f;
     }
     if (!active) {
-        viewer.swipeX *= powf(0.0005f, std::min(io.DeltaTime, 0.05f));  // spring back / slide in
+        // spring back / slide in (the slideshow glides more slowly than a swipe)
+        viewer.swipeX *= powf(viewer.slideshow ? 0.004f : 0.0005f, std::min(io.DeltaTime, 0.05f));
         if (fabsf(viewer.swipeX) < 0.5f) viewer.swipeX = 0;
         // (no touch keeps frames coming: without this the app idles at a few frames a second and the slide stutters)
         else busy = true;
@@ -401,7 +406,8 @@ void App::DrawViewer() {
     if (viewer.slideshow) {
         viewer.slideT += io.DeltaTime;
         if (active || ImGui::IsKeyPressed(ImGuiKey_Escape)) viewer.slideshow = false;
-        else if (viewer.slideT > 4.0) {
+        else if (viewer.slideT > 3.6) busy = true;  // (frames at full rate before the change: its first step isn't late)
+        if (viewer.slideshow && viewer.slideT > 4.0) {
             viewer.slideT = 0;
             if (viewer.index + 1 < (int)viewer.paths.size()) ViewerGo(1);
             else viewer.slideshow = false;
@@ -488,7 +494,9 @@ void App::DrawViewer() {
         if (viewer.swipeX != 0) {
             int ni = viewer.swipeX > 0 ? viewer.index - fwd : viewer.index + fwd;
             if (ni >= 0 && ni < n) {
-                const ImageTex& nt = Images().Get(viewer.paths[(size_t)ni], false);
+                // (the sharp picture when it is loaded - the one just left always is - else its smaller copy)
+                const ImageTex& nfull = Images().Get(viewer.paths[(size_t)ni], true);
+                const ImageTex& nt = nfull.state == ImageTex::Ready ? nfull : Images().Get(viewer.paths[(size_t)ni], false);
                 if (nt.state == ImageTex::Ready) {
                     float nf = std::min(areaSize.x / (float)nt.w, areaSize.y / (float)nt.h);
                     float nw = (float)nt.w * nf, nh = (float)nt.h * nf;

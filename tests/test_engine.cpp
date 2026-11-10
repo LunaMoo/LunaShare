@@ -1887,8 +1887,50 @@ int main() {
             std::this_thread::sleep_for(std::chrono::milliseconds(2500));
             CHECK(!sees(*A2, idC) && !sees(*C, idA2), "a new install on the same phone is still limited");
             A2->Stop();
+            // ... and that new install (a new person on the phone) gets an invite of its own from L: they see each other
+            {
+                std::string kN(64, '9');
+                {
+                    auto lk = L->Lock();
+                    Settings s = L->settings;
+                    WanLink w;
+                    w.secret = kN;
+                    w.label = "dad";
+                    w.created = NowMs();
+                    s.wanLinks.push_back(w);
+                    L->ApplySettings(s);
+                }
+                auto A3 = std::make_unique<Engine>();
+                std::string cfg3 = JoinPath(Root(), "adam3/config");
+                MakeDirs(cfg3);
+                Settings s3;
+                s3.displayName = "dad";
+                s3.downloadDir = JoinPath(Root(), "adam3/downloads");
+                s3.tcpPort = 48189;
+                s3.autoConnect = true;
+                s3.wanEnabled = true;
+                s3.wanServer = srvAddr;
+                s3.wanRoom = "invite-0123456789abcdef";  // (what using an invite sets up: a room of its own, hidden)
+                s3.wanHidden = true;
+                s3.wanFromInvite = true;
+                WanLink got;
+                got.secret = kN;
+                got.label = "lina";
+                got.created = NowMs();
+                got.mine = false;
+                s3.wanLinks.push_back(got);
+                SaveJsonFile(JoinPath(cfg3, "settings.json"), json{{"settings", ToJson(s3, false)}, {"devices", json::array()}});
+                A3->configDir = cfg3;
+                A3->machineId = "adams-phone";
+                A3->Start();  // (straight away: it may register before L has sent the new code)
+                std::string idA3 = A3->settings.deviceId;
+                CHECK(WaitFor([&] { return sees(*A3, idL) && sees(*L, idA3); }, 25000),
+                      "a new person on a phone that was invited before reaches the one who invited them now (A3: %s)", A3->WanStatus().c_str());
+                CHECK(!sees(*A3, idC), "...and is still limited to that");
+                A3->Stop();
+            }
             json inv;
-            CHECK(LoadJsonFile(JoinPath(po.dataDir, "invited.json"), inv) && inv["devices"].size() == 5, "invited devices saved (%s)",
+            CHECK(LoadJsonFile(JoinPath(po.dataDir, "invited.json"), inv) && inv["devices"].size() >= 5, "invited devices saved (%s)",
                   inv.dump().c_str());
             // the admin releases A: an ordinary device again
             std::string pubA;
@@ -1896,6 +1938,14 @@ int main() {
                 if (v.value("id", "") == idA) pubA = pub;
             std::ofstream(JoinPath(po.dataDir, "invited-cmd")) << "release " << pubA.substr(0, 12) << "\n";
             CHECK(WaitFor([&] { return sees(*A, idC) && sees(*C, idA); }, 25000), "released by the admin");
+            {
+                // the app is told: a device that joined with an invite stops hiding the server once released
+                auto lk = A->Lock();
+                Settings s = A->settings;
+                s.wanFromInvite = true;
+                A->ApplySettings(s);
+            }
+            CHECK(WaitFor([&] { auto l = A->Lock(); return !A->settings.wanFromInvite; }, 25000), "the released device's app is told (it shows the server now)");
             L->Stop();
             A->Stop();
             B->Stop();

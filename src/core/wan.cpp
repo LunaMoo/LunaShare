@@ -633,6 +633,7 @@ void WanTransport::Loop() {
                     serverLinks_ = j.value("lk", false);
                     SetStatus("connected - " + std::to_string(j.value("peers", json::array()).size()) + " other device(s) in the room");
                     if (j.contains("uname") && onServerReply) onServerReply(json{{"t", "uname"}, {"name", j.value("uname", "")}}.dump());
+                    if (j.value("rel", false) && onServerReply) onServerReply(json{{"t", "released"}}.dump());
                     std::vector<WanPeer> peers;
                     for (auto& pj : j.value("peers", json::array())) {
                         WanPeer p;

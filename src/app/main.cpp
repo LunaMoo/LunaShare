@@ -772,6 +772,10 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         // optional screenshot for docs/CI (read before swapping)
         static int64_t startMs = ls::SteadyMs();
+        if (static const char* fl = SDL_getenv("LUNASHARE_FRAMELOG"); fl) {  // dev: when each frame was drawn (smoothness)
+            static FILE* ff = fopen(fl, "w");
+            if (ff) fprintf(ff, "%lld\n", (long long)(ls::SteadyMs() - startMs)), fflush(ff);
+        }
         if (const char* shot = SDL_getenv("LUNASHARE_SCREENSHOT")) {
             const char* delay = SDL_getenv("LUNASHARE_SCREENSHOT_DELAY");
             if (ls::SteadyMs() - startMs > (delay ? atoi(delay) : 4000)) {

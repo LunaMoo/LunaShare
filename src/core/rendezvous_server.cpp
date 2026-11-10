@@ -528,10 +528,17 @@ void RendezvousServer::Loop() {
         return nullptr;
     };
     // admin commands: lines "release KEY", "restrict KEY", "forget KEY" (KEY: a device key or its first 8+ characters)
+    bool cmdUnreadable = false;
     auto runAdmin = [&] {
         if (cmdFile.empty()) return;
         std::ifstream f(cmdFile);
-        if (!f) return;
+        if (!f) {
+            // (there but not readable: written by another user without giving it to this one - say so once)
+            if (FileSize(cmdFile) >= 0 && !cmdUnreadable) log("can't read " + cmdFile + " (its owner / permissions): admin commands wait");
+            cmdUnreadable = FileSize(cmdFile) >= 0;
+            return;
+        }
+        cmdUnreadable = false;
         std::string line;
         std::vector<std::pair<std::string, std::string>> cmds;
         while (std::getline(f, line)) {
@@ -916,6 +923,12 @@ void RendezvousServer::Loop() {
                 }
             json reply = {{"t", "peers"}, {"you", Ep(d.pubEp)}, {"peers", peersOf(room, id)}, {"lk", true}};
             if (d.restricted) reply["inv"] = true;
+            else if (IsHex64(d.pub)) {  // released by the admin: the app may stop hiding this server from its user
+                bool rel = false;
+                for (auto& [p, x] : invited)
+                    if (x.released && (p == d.pub || (!d.acc.empty() && x.acc == d.acc) || (!d.hw.empty() && x.hw == d.hw))) rel = true;
+                if (rel) reply["rel"] = true;
+            }
             if (!d.acc.empty()) reply["uname"] = nameOf(room, d.acc);
             if (opt_.mailbox) {
                 reply["mail"] = mailCount(room, d.pub);
