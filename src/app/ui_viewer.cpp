@@ -391,7 +391,12 @@ void App::DrawViewer() {
         else ViewerZoomAt(io.MousePos, 2.5f);
         viewer.uiAlpha = 1.0f;
     }
-    if (!active) viewer.swipeX *= powf(0.0005f, io.DeltaTime);  // spring back / slide in
+    if (!active) {
+        viewer.swipeX *= powf(0.0005f, std::min(io.DeltaTime, 0.05f));  // spring back / slide in
+        if (fabsf(viewer.swipeX) < 0.5f) viewer.swipeX = 0;
+        // (no touch keeps frames coming: without this the app idles at a few frames a second and the slide stutters)
+        else busy = true;
+    }
     // the slideshow: the next one every few seconds (any touch / key stops it)
     if (viewer.slideshow) {
         viewer.slideT += io.DeltaTime;
