@@ -397,6 +397,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_gallery.cpp
         src/app/archives.cpp
         src/app/ui_archives.cpp
+        src/app/ui_comics.cpp
         src/app/file_assoc.cpp
         src/app/ui_music.cpp
         src/app/music.cpp

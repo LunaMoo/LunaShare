@@ -217,6 +217,8 @@ void App::OpenViewerList(const std::vector<std::string>& paths, int index, const
     if (paths.empty()) return;
     viewer.fixed = true;
     viewer.canDelete = false;
+    viewer.comic.clear();
+    viewer.rtl = false;
     viewer.slideshow = false;
     viewer.peer.clear();
     viewer.paths = paths;
@@ -270,6 +272,8 @@ void App::RebuildViewerList() {
 void App::OpenViewer(const std::string& peer, const std::string& path, bool all) {
     viewer.fixed = false;
     viewer.canDelete = false;
+    viewer.comic.clear();
+    viewer.rtl = false;
     viewer.slideshow = false;
     viewer.peer = peer;
     viewer.all = all;
@@ -299,7 +303,7 @@ void App::ViewerGo(int delta) {
     viewer.zoom = 1;
     viewer.pan = ImVec2(0, 0);
     // slide in from the side we are coming from
-    viewer.swipeX = (viewer.areaMax.x - viewer.areaMin.x) * 0.35f * (float)delta;
+    viewer.swipeX = (viewer.areaMax.x - viewer.areaMin.x) * 0.35f * (float)delta * (viewer.rtl ? -1.0f : 1.0f);
 }
 
 void App::ViewerZoomAt(ImVec2 pt, float factor) {
@@ -343,6 +347,7 @@ void App::DrawViewer() {
         return;
     }
     ImGuiIO& io = ImGui::GetIO();
+    int fwd = viewer.rtl ? -1 : 1;  // (manga: right to left - swipes and arrows the other way)
     bool mobile = ui::M().mobile;
     bool close = false;
     // pick up pictures that finished arriving while the viewer is open
@@ -376,8 +381,8 @@ void App::DrawViewer() {
     }
     if (ImGui::IsItemDeactivated()) {
         float th = areaSize.x * 0.15f;
-        if (viewer.zoom <= 1.01f && viewer.swipeX > th) ViewerGo(-1);
-        else if (viewer.zoom <= 1.01f && viewer.swipeX < -th) ViewerGo(1);
+        if (viewer.zoom <= 1.01f && viewer.swipeX > th) ViewerGo(-fwd);
+        else if (viewer.zoom <= 1.01f && viewer.swipeX < -th) ViewerGo(fwd);
         else if (fabsf(ImGui::GetMouseDragDelta(0, 0).x) < 3 && fabsf(ImGui::GetMouseDragDelta(0, 0).y) < 3 && io.MouseClickedLastCount[0] < 2)
             viewer.uiAlpha = viewer.uiAlpha > 0.5f ? 0.0f : 1.0f;  // tap toggles the toolbar
     }
@@ -400,6 +405,7 @@ void App::DrawViewer() {
     if (fabsf(viewer.swipeX) < 0.5f) viewer.swipeX = 0;
 
     bool isVideo = PlayerHost::IsVideoPath(path);
+    if (!viewer.comic.empty()) ComicTick();  // (where it's read up to)
     // videos play on the movie screen (the same one as the movie player: sound, subtitles, picture, loop, people)
     if (!viewer.videoPath.empty()) {
         Player().Stop();
@@ -410,8 +416,10 @@ void App::DrawViewer() {
     // keyboard (space plays a video, otherwise next picture)
     if (isVideo && (ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsKeyPressed(ImGuiKey_Enter))) playVideo = true;
     else if (ImGui::IsKeyPressed(ImGuiKey_Space)) ViewerGo(1);
-    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_PageDown)) ViewerGo(1);
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) ViewerGo(-1);
+    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) ViewerGo(fwd);
+    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) ViewerGo(-fwd);
+    if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) ViewerGo(1);
+    if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) ViewerGo(-1);
     if (ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) ViewerZoomAt(c, 1.25f);
     if (ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) ViewerZoomAt(c, 0.8f);
     if (ImGui::IsKeyPressed(ImGuiKey_0) || ImGui::IsKeyPressed(ImGuiKey_Keypad0)) { viewer.zoom = 1; viewer.pan = ImVec2(0, 0); }
@@ -473,7 +481,7 @@ void App::DrawViewer() {
         dl->AddImage(show->Id(), ImVec2(ic.x - dw * 0.5f, ic.y - dh * 0.5f), ImVec2(ic.x + dw * 0.5f, ic.y + dh * 0.5f));
         // neighbours peek in while swiping
         if (viewer.swipeX != 0) {
-            int ni = viewer.swipeX > 0 ? viewer.index - 1 : viewer.index + 1;
+            int ni = viewer.swipeX > 0 ? viewer.index - fwd : viewer.index + fwd;
             if (ni >= 0 && ni < n) {
                 const ImageTex& nt = Images().Get(viewer.paths[(size_t)ni], false);
                 if (nt.state == ImageTex::Ready) {
@@ -487,7 +495,7 @@ void App::DrawViewer() {
     }
     // neighbours peek in while swiping away from a video too
     if (isVideo && viewer.swipeX != 0) {
-        int ni = viewer.swipeX > 0 ? viewer.index - 1 : viewer.index + 1;
+        int ni = viewer.swipeX > 0 ? viewer.index - fwd : viewer.index + fwd;
         if (ni >= 0 && ni < n) {
             ThumbRef nt = ThumbFor(viewer.paths[(size_t)ni]);
             if (nt.ready) {
@@ -523,7 +531,7 @@ void App::DrawViewer() {
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.75f, 1), "%s", info);
         ImGui::EndGroup();
         // action buttons: top-right on desktop, bottom bar on phones
-        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0);
+        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0) + (viewer.comic.empty() ? 0 : 1);
         if (mobile) {
             float by = viewer.areaMax.y - barH;
             dl->AddRectFilled(ImVec2(viewer.areaMin.x, by), viewer.areaMax, IM_COL32(0, 0, 0, (int)(150 * a)));
@@ -556,6 +564,15 @@ void App::DrawViewer() {
             viewer.slideshow = !viewer.slideshow;
             viewer.slideT = 0;
             if (viewer.slideshow) viewer.uiAlpha = 0;
+        }
+        if (!viewer.comic.empty()) {
+            ImGui::SameLine(0, sameGap);
+            if (viewer.rtl) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 110, 200, 255));
+            if (ui::IconButton("vrtl", Icon::Book, viewer.rtl ? T("Pages right to left (manga): on") : T("Pages right to left (manga): off"), bh)) {
+                viewer.rtl = !viewer.rtl;
+                ComicTick();
+            }
+            if (viewer.rtl) ImGui::PopStyleColor();
         }
         if (viewer.canDelete) {
             ImGui::SameLine(0, sameGap);
@@ -590,11 +607,11 @@ void App::DrawViewer() {
         dl->AddText(ImVec2(viewer.areaMax.x - zs.x - 12, viewer.areaMin.y + barH + 6), IM_COL32(220, 220, 220, (int)(200 * a)), z);
         // prev / next arrows at the edges
         float aw = mobile ? bh : bh * 1.2f;
-        if (viewer.index > 0) {
+        if (viewer.index - fwd >= 0 && viewer.index - fwd < n) {
             ImGui::SetCursorScreenPos(ImVec2(viewer.areaMin.x + 8, c.y - aw * 0.5f));
-            if (ui::IconButton("vprev", Icon::Back, T("Previous (Left)"), aw)) ViewerGo(-1);
+            if (ui::IconButton("vprev", Icon::Back, fwd > 0 ? T("Previous (Left)") : T("Next (Left)"), aw)) ViewerGo(-fwd);
         }
-        if (viewer.index + 1 < n) {
+        if (viewer.index + fwd >= 0 && viewer.index + fwd < n) {
             ImGui::SetCursorScreenPos(ImVec2(viewer.areaMax.x - aw - 8, c.y - aw * 0.5f));
             ImGui::PushID("next");
             bool nx = ImGui::Button("##n", ImVec2(aw, aw));
@@ -603,9 +620,9 @@ void App::DrawViewer() {
             float h = aw * 0.275f, t = std::max(1.5f, aw * 0.55f * 0.11f) * 1.3f;
             ImVec2 pts[3] = {ImVec2(cc.x - h * 0.35f, cc.y - h * 0.7f), ImVec2(cc.x + h * 0.35f, cc.y), ImVec2(cc.x - h * 0.35f, cc.y + h * 0.7f)};
             dl->AddPolyline(pts, 3, IM_COL32(240, 240, 240, 255), 0, t);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Next (Right)"));
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fwd > 0 ? T("Next (Right)") : T("Previous (Right)"));
             ImGui::PopID();
-            if (nx) ViewerGo(1);
+            if (nx) ViewerGo(fwd);
         }
         // video: play/pause + seek bar + time, above the bottom bar on phones
         if (isVideo && Player().IsCurrent(path)) {

@@ -25,3 +25,16 @@ liblzma (xz) and zstd built in. Not supported: encrypted rar contents, AES-encry
 
 Unpacking never writes outside the chosen folder: absolute paths, `..` and links in the archive are left out, and
 characters that Windows or memory cards don't allow become `_`.
+
+## Comics
+
+*Comics* (next to *Archives* at the top of the tab) shows the **cbz, cbr, cb7 and cbt** files of those folders as
+covers (the first page), the ones read lately first, with how far each one is read (a red bar; a tick when
+finished). Tapping one unpacks its pages into the cache - the last six comics stay there, so reopening is instant -
+and opens them in the picture viewer **at the page where you stopped**: swipe or arrows, pinch / wheel to zoom,
+slideshow. The book button reads **right to left** (manga: swipes and arrows go the other way); it is remembered per
+comic. Pages are the pictures inside (JPEG, PNG, WebP, GIF...) in natural order (`page2` before `page10`), folders
+in order too; macOS leftovers (`__MACOSX`, `._*`) are skipped.
+
+Any archive that is mostly pictures can be read the same way: open it and press **Read**. Opening a comic from the
+file manager (*Open with*) opens it straight away. Places are kept in `comic_positions.json`.

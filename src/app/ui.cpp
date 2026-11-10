@@ -219,7 +219,7 @@ void App::Frame() {
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
         if (a == "gallery") { tab = Tab::Gallery; screen = MScreen::Gallery; tabForce = true; if (getenv("LUNASHARE_GALLERYVIEW")) galleryView = atoi(getenv("LUNASHARE_GALLERYVIEW")); }
-        if (a == "archives") { tab = Tab::Archives; screen = MScreen::Archives; tabForce = true; }
+        if (a == "archives" || a == "comics") { tab = Tab::Archives; screen = MScreen::Archives; tabForce = true; archivesComics = a == "comics"; }
         if (getenv("LUNASHARE_OPENSOUND")) musicSoundOpen = true;
         if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
         if (a == "movies") { tab = Tab::Movies; screen = MScreen::Movies; }
@@ -674,6 +674,10 @@ void App::HandleOpenPaths() {
         watchFailed = false;
         watchLibList.clear();
         if (eng.StartWatch("", f)) watchShown = true;
+    } else if (arc::IsComicPath(f)) {
+        OpenComic(f);
+        OpenArchives();  // (the Comics view: how far the opening is)
+        archivesComics = true;
     } else if (arc::IsArchivePath(f) && !IsDirectory(f)) {
         OpenArchive(f);
     } else if (ImageCache::IsImagePath(f)) {

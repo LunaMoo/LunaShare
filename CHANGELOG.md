@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Comics**: cbz, cbr, cb7 and cbt as a shelf of covers (Archives → Comics) with how far each one is read; they open
+  in the viewer at the page where you stopped, manga **right to left**, natural page order. Any archive of pictures
+  can be read with *Read*.
 - **Archives** (a new tab; on phones on the home screen and in Library): zip, 7z, **rar 4 / 5**, tar.gz / .bz2 / .xz /
   .zst, iso, cab and more - see inside, open a file straight from the archive, unpack all or the picked ones, send
   them, passwords. **Pack** files and folders (also pictures picked in the Gallery) into zip, 7z or tar.*. Built on

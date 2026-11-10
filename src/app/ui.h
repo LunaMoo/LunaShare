@@ -224,12 +224,17 @@ private:
 public:
     void OpenArchive(const std::string& path, const std::string& password = "");
     void StartArchiveCreate(const std::vector<std::string>& inputs);
+    void OpenComic(const std::string& path, const std::string& password = "");
     std::string archiveDoneMsg, archiveDoneDir;
 private:
     void DrawArchives();
     void DrawArchiveOpen();
     void DrawArchiveJob();
     void ArchiveTick();
+    void DrawComicShelf(const std::vector<std::string>& paths, bool busy);
+    void ComicTick();
+    void ComicFrame();
+    bool ComicOpening() const;
     void ArchivesRescan();
     void OpenArchives();
     bool ArchiveBack();
@@ -487,6 +492,8 @@ private:
         bool slideshow = false;    // on its own to the next one every few seconds
         double slideT = 0;
         bool canDelete = false;    // (the gallery: pictures of mine)
+        std::string comic;         // reading this comic (its archive): the page is remembered
+        bool rtl = false;          // pages go right to left (manga)
     } viewer;
 
     bool openIncomingCall = false;

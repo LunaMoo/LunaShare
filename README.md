@@ -68,6 +68,8 @@ after receiving, so you know it arrived intact.
 - Look inside **zip, 7z, rar (4 and 5), tar.gz / .bz2 / .xz / .zst, iso, cab**... - open a file straight from the
   archive, unpack all or some of it, send what's inside; password-protected archives too.
 - **Pack** files and folders into zip, 7z, tar.gz, tar.xz or tar.zst.
+- **Comics** (cbz, cbr, cb7, cbt): a shelf of covers with how far each is read; opens at the page where you stopped,
+  manga right to left.
 
 **Opening files with LunaShare**
 - **Android:** LunaShare is in the system's *Open with* for pictures, movies, songs, archives and comics, and in

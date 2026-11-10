@@ -359,6 +359,7 @@ void App::ArchiveCreatePopup() {
 // every frame: work that finished gets its "after" (open the file, the send-to list...), and a note when it was
 // started elsewhere (the gallery)
 void App::ArchiveTick() {
+    ComicFrame();
     ArchiveExtractPopup();
     ArchiveCreatePopup();
     Job& j = TheJob();
@@ -436,6 +437,10 @@ void App::DrawArchives() {
         archivesRescanWanted = false;
         ArchivesRescan();
     }
+    if (ImGui::RadioButton(T("Archives"), !archivesComics)) archivesComics = false;
+    ImGui::SameLine();
+    if (ImGui::RadioButton(T("Comics"), archivesComics)) archivesComics = true;
+    ImGui::SameLine();
     if (ui::IconTextButton(T("Open..."), Icon::Folder, ImVec2(0, h))) {
         browseFor = BrowseFor::ArchiveOpen;
         browser.Open(FileBrowser::Mode::OpenFile, T("Open an archive"), browser.lastDir);
@@ -498,8 +503,15 @@ void App::DrawArchives() {
     std::string q = Low(archivesSearch);
     std::vector<const Found*> list;
     for (auto& f : found) {
+        if (arc::IsComicPath(f.name) != archivesComics) continue;
         if (!q.empty() && Low(f.name).find(q) == std::string::npos) continue;
         list.push_back(&f);
+    }
+    if (archivesComics) {
+        std::vector<std::string> paths;
+        for (auto* f : list) paths.push_back(f->path);
+        DrawComicShelf(paths, sc.busy);
+        return;
     }
     std::sort(list.begin(), list.end(), [](const Found* a, const Found* b) { return a->mtime > b->mtime; });
     ImGui::BeginChild("archives");
@@ -616,7 +628,10 @@ void App::DrawArchiveOpen() {
         o.picked.clear();
     }
     ImGui::EndDisabled();
-    (void)pictures;
+    if (pictures > 0 && pictures * 2 >= files) {  // (mostly pictures: a comic, or an album)
+        ImGui::SameLine();
+        if (ui::IconTextButton(T("Read"), Icon::Book, ImVec2(0, h))) OpenComic(o.path, o.password);
+    }
     // where we are inside
     ImGui::Separator();
     if (ImGui::SmallButton("/")) o.dir.clear();
