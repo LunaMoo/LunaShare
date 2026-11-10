@@ -91,6 +91,10 @@ void ShareLinks::Stop() {
     }
     cv_.notify_all();
     if (lanThread_.joinable()) lanThread_.join();
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        for (auto c : lanSocks_) ShutdownSocket(c);  // (a download stuck on a slow browser)
+    }
     if (tunThread_.joinable()) tunThread_.join();
     for (;;) {
         std::vector<std::thread> t;
@@ -683,8 +687,16 @@ void ShareLinks::LanLoop() {
             continue;
         }
         lanConns_++;
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            lanSocks_.insert(c);
+        }
         std::thread([this, c, ip] {
             LanConn(c, ip);
+            {
+                std::lock_guard<std::mutex> lk(m_);
+                lanSocks_.erase(c);
+            }
             CloseSocket(c);
             lanConns_--;
         }).detach();

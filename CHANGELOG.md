@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.1
 
 - **Links for anyone** ([docs/LINKS.md](docs/LINKS.md)): *Send to... → Link for anyone...* makes a link (with a QR
   code) that people without LunaShare open in a browser - sent by SMS or any messenger. The file comes from this

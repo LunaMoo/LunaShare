@@ -50,7 +50,7 @@ static std::string Root() {
 
 static void WriteRandomFile(const std::string& path, int64_t size, uint32_t seed) {
     MakeDirs(DirName(path));
-    FILE* f = fopen(path.c_str(), "wb");
+    FILE* f = OpenFile(path, "wb");  // (UTF-8 names on Windows too)
     std::mt19937 rng(seed);
     std::vector<uint32_t> buf(1 << 16);
     int64_t left = size;
@@ -334,8 +334,14 @@ static HttpRes HttpGet(uint16_t port, const std::string& path, const std::string
     return r;
 }
 static std::string ReadAll(const std::string& p) {
-    std::ifstream f(p, std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::string out;
+    FILE* f = OpenFile(p, "rb");
+    if (!f) return out;
+    char b[65536];
+    size_t n;
+    while ((n = fread(b, 1, sizeof(b), f)) > 0) out.append(b, n);
+    fclose(f);
+    return out;
 }
 
 static void TestShareLinks() {
@@ -357,6 +363,7 @@ static void TestShareLinks() {
     std::string id = sl.Create(f1, o, err);
     CHECK(!id.empty(), "link created: %s", err.c_str());
     CHECK(WaitFor([&] { auto l = sl.List(); return !l.empty() && l[0].ready; }, 10000), "hashed");
+    if (sl.List().empty()) return;
     auto info = sl.List()[0];
     CHECK(info.sha256 == Sha256File(f1), "its SHA-256");
     CHECK(info.webUrl.empty(), "no server: no Internet link");
@@ -382,7 +389,7 @@ static void TestShareLinks() {
     CHECK(HttpGet(lp, base + "/file?sid=otherbrowser").status == 403, "the file only after the checks");
     auto st2 = HttpGet(lp, base + "/start?sid=otherbrowser");
     CHECK(st2.status == 410 && st2.body.find("used") != std::string::npos, "one person: the next one is told it's used (%s)", st2.body.c_str());
-    CHECK(WaitFor([&] { auto l = sl.List(); return l[0].visits.size() == 1 && l[0].visits[0].done && l[0].people == 1; }, 3000), "who got it is listed");
+    CHECK(WaitFor([&] { auto l = sl.List(); return !l.empty() && l[0].visits.size() == 1 && l[0].visits[0].done && l[0].people == 1; }, 3000), "who got it is listed");
 
     // PIN: 5 wrong tries end the link
     o.pin = "4321";
@@ -449,6 +456,7 @@ static void TestShareLinks() {
     std::string idw = W->shareLinks.Create(f2, ow, err);
     CHECK(WaitFor([&] { auto l = W->shareLinks.List(); return !l.empty() && l[0].ready && !l[0].webUrl.empty(); }, 15000), "an Internet link once the server offers them");
     CHECK(WaitFor([&] { return W->shareLinks.TunnelStatus() == "online"; }, 10000), "tunnel (%s)", W->shareLinks.TunnelStatus().c_str());
+    if (W->shareLinks.List().empty()) return;
     std::string url = W->shareLinks.List()[0].webUrl;
     CHECK(url.rfind("http://127.0.0.1:48195/s/" + idw + "#", 0) == 0 && url.size() < 70, "a short link: %s", url.c_str());
     std::string secret;
@@ -484,7 +492,7 @@ static void TestShareLinks() {
     CHECK(HttpGet(48195, "/api/" + idw + "/p/0?sid=strangerxx").status == 403, "parts only for whoever passed the checks");
     CHECK(HttpGet(48195, "/api/AAAAAAAAAAAA/meta?sid=webbrowser1").status == 503, "an unknown link: offline");
     CHECK(HttpGet(48195, "/sw.js").body.find("ReadableStream") != std::string::npos, "service worker");
-    CHECK(WaitFor([&] { auto l = W->shareLinks.List(); return !l[0].visits.empty() && l[0].visits[0].done && l[0].visits[0].via == "web"; }, 3000), "listed as got through the server");
+    CHECK(WaitFor([&] { auto l = W->shareLinks.List(); return !l.empty() && !l[0].visits.empty() && l[0].visits[0].done && l[0].visits[0].via == "web"; }, 3000), "listed as got through the server");
     W->shareLinks.Revoke(idw);
     auto gone = HttpGet(48195, "/api/" + idw + "/meta?sid=webbrowser1");
     CHECK(gone.status == 410 || gone.status == 503, "turned off (%d)", gone.status);

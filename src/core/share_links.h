@@ -102,6 +102,7 @@ private:
     void Housekeeping();
     void FireAsks();  // onAsk for new asks, outside m_
     std::vector<ShareAsk> newAsks_;
+    std::set<SocketHandle> lanSocks_;  // open browser connections (shut on Stop)
     bool TunnelSend(uint8_t type, const std::string& payload);
     void TunnelRequest(const std::string& reqJson);
     void HashLater(std::shared_ptr<Link> l);
