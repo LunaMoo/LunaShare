@@ -24,7 +24,9 @@ extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, 
 #include "emoji_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
+#include "file_assoc.h"
 #include "instance.h"
+#include "torrent_host.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -255,7 +257,17 @@ int main(int argc, char** argv) {
             if (base) { ls::SetConfigDirOverride(ls::JoinPath(base, "LunaShareData")); SDL_free(base); }
         } else if (a == "--send") openSend = true;
         else if (a.size() > 2 && a.compare(0, 2, "--") == 0) continue;
-        else if (a.compare(0, 4, "-psn") != 0) openPaths.push_back(a);
+        else if (a.compare(0, 7, "file://") == 0) {  // (desktops hand files over as addresses: back to a path)
+            std::string p = a.substr(7), out;
+            if (p.compare(0, 9, "localhost") == 0) p = p.substr(9);
+            for (size_t k = 0; k < p.size(); k++) {
+                if (p[k] == '%' && k + 2 < p.size() && isxdigit((unsigned char)p[k + 1]) && isxdigit((unsigned char)p[k + 2])) {
+                    out += (char)std::stoi(p.substr(k + 1, 2), nullptr, 16);
+                    k += 2;
+                } else out += p[k];
+            }
+            openPaths.push_back(out);
+        } else if (a.compare(0, 4, "-psn") != 0) openPaths.push_back(a);
     }
     // one copy per settings folder: a second start hands its files over and ends
     if (!ls::IsMobilePlatform() && !instance::Acquire(ls::ConfigDir())) {
@@ -389,7 +401,18 @@ int main(int argc, char** argv) {
     Player().Load();         // optional player module (audio/video files in chat)
     Media().Load();          // optional calls module; must happen before Start() so the capability is announced
     Media().Attach(&engine);
+    Torrents().Load();       // optional torrent module (desktops)
+    Torrents().Attach(&engine);  // (after Media's: it adds to the capabilities announced)
     engine.Start();
+    Torrents().Start();
+    if (Torrents().Available() && assoc::Supported()) {
+        // "Open with" was set up before torrents came: .torrent files and magnet links are added to it
+        assoc::WithTorrents(false);
+        bool had = assoc::Registered();
+        assoc::WithTorrents(true);
+        std::string err;
+        if (had && !assoc::Registered()) assoc::Register(err);
+    }
     // the music player (its own audio device and thread: it plays on in the background)
     // chat archives are kept compressed (zlib, from stb - already here for pictures)
     engine.compress = [](const std::string& in) -> std::string {
@@ -717,6 +740,7 @@ int main(int argc, char** argv) {
     UpdateShutdown();
     Player().Shutdown();
     Media().Shutdown();
+    Torrents().Shutdown();
     engine.Stop();
     Images().Shutdown();
     ImGui_ImplOpenGL3_Shutdown();

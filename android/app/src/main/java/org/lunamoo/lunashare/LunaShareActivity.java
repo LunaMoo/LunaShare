@@ -150,6 +150,13 @@ public class LunaShareActivity extends SDLActivity {
         final String a = intent.getAction();
         final ArrayList<Uri> uris = new ArrayList<>();
         String text = null;
+        if (Intent.ACTION_VIEW.equals(a) && intent.getData() != null && "magnet".equalsIgnoreCase(intent.getData().getScheme())) {
+            // a magnet link: the link itself goes on (no file behind it)
+            final String link = intent.getData().toString();
+            intent.setAction(null);
+            try { nativeOnIntent("org.lunamoo.lunashare.VIEW", link); } catch (Throwable ignored) {}
+            return;
+        }
         if (Intent.ACTION_VIEW.equals(a)) {
             if (intent.getData() != null) uris.add(intent.getData());
         } else if (Intent.ACTION_SEND.equals(a)) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Torrents** (Windows and Linux, a new optional module with libtorrent; a new Torrents tab): magnet links and
+  .torrent files (also opened with LunaShare from the browser / file manager), progress, speed limits, which files
+  to download, how long to share when done. **Watch a movie while it downloads.** Finished torrents can be sent to
+  a chat. See docs/TORRENTS.md.
+- **Torrents from a phone:** a magnet link or .torrent opened on a phone is downloaded **on your computer** (the
+  same account); the phone shows the progress, gets the files sent when it's done, or watches the movie from the
+  computer - also before it's complete.
+- The slideshow (and any slide between pictures) is smooth now; opening a file while a movie plays shows it right
+  away.
+
 ## 1.5.8
 
 - **Comics**: cbz, cbr, cb7 and cbt as a shelf of covers (Archives → Comics) with how far each one is read; they open

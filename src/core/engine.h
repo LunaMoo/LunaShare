@@ -173,6 +173,7 @@ struct WatchInfo {
     std::string hostSub;       // the subtitles the host has on: "" none, "file:<name>", "track:<n>:<lang>" (n-th in the file)
     bool loop = false;         // start again at the end (everyone)
     std::string libId;         // streamed from a contact's Shared folder (content id): played here, not shared on
+    double extLoaded = 0;      // ("ext:" streams: how much is there, as the app tells)
     bool saving = false;       // keeping a copy (viewer / library stream)
     bool allowSave = true;     // the host lets viewers keep a copy
     double speed = 1.0;        // playback speed (everyone's)
@@ -356,6 +357,12 @@ public:
     // my other devices: things the app keeps the same everywhere (playlists, settings). SyncPush hands mine (sent to
     // those online now, and to the others when they come); SyncPop gives theirs, for the app to merge.
     void SyncPush(const std::string& kind, const nlohmann::json& data);
+    // ... and something asked of ONE of them (kind "torrent": download this there, how far is it...). Only when it
+    // is online now (false otherwise: the app keeps what must not be lost). What arrives goes to ownHook, on the
+    // engine's thread with its lock held: it must be quick and not wait for anything. Set before Start().
+    bool OwnSend(const std::string& device, const std::string& kind, const nlohmann::json& data);
+    bool OwnOnline(const std::string& device);
+    std::function<void(const std::string& from, const std::string& kind, const nlohmann::json& data)> ownHook;
     bool SyncPop(std::string& kind, nlohmann::json& data);
     void SetPrefsVer(int64_t ver);
     void SetUpdateState(int64_t last, const std::string& seen);    // (the update check)
@@ -500,6 +507,11 @@ public:
     double ListenLoaded(uint64_t iid);  // 0..1 here
     // the player's thread (no engine lock): bytes of someone else's song; -2 = not here yet (waited waitMs)
     int ListenRead(uint64_t iid, int64_t off, uint8_t* buf, int len, int waitMs);
+    // a movie the app reads itself (a torrent still downloading, here or on one of my computers): watched alone, like
+    // one from a contact's Shared folder. watch.libId is "ext:<ext>"; the app says when the reader waits for data
+    // (the clock stands still meanwhile) and how much is there.
+    uint64_t StartWatchExt(const std::string& ext, const std::string& name, int64_t size);
+    void WatchSetExt(bool buffering, double loaded);
     uint64_t StartWatch(const std::string& key, const std::string& path);  // share a file to watch it together ("" key: alone, for now)
     void WatchInviteTo(const std::string& key);  // host: invite a person / group to the movie that's on
     uint64_t StartLibraryWatch(const LibFile& f);

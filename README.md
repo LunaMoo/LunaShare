@@ -71,6 +71,12 @@ after receiving, so you know it arrived intact.
 - **Comics** (cbz, cbr, cb7, cbt): a shelf of covers with how far each is read; opens at the page where you stopped,
   manga right to left.
 
+**Torrents** (computers; see [docs/TORRENTS.md](docs/TORRENTS.md))
+- Magnet links and .torrent files, downloaded by the optional torrent module (libtorrent): pick the files, set
+  limits, **watch a movie while it downloads**, send what's done to a chat.
+- **From a phone:** a link opened on the phone is downloaded **on your computer** - then sent to the phone, or
+  watched from the computer (also before it's complete).
+
 **Opening files with LunaShare**
 - **Android:** LunaShare is in the system's *Open with* for pictures, movies, songs, archives and comics, and in
   *Share* for any file (or text): pick a chat and it's sent.
@@ -372,7 +378,7 @@ tests/           engine, voice, video and player tests
 
 LunaShare is licensed under the [GNU General Public License v3.0](LICENSE).
 Third-party components keep their own licenses: Dear ImGui (MIT), SDL2 (zlib), nlohmann/json (MIT),
-QR Code generator (MIT), quirc (ISC), libwebp (BSD-3-Clause), libarchive (BSD-2-Clause), zlib (Zlib),
+QR Code generator (MIT), quirc (ISC), libwebp (BSD-3-Clause), libarchive (BSD-2-Clause), libtorrent (BSD-3-Clause), Boost (BSL-1.0), OpenSSL (Apache-2.0), zlib (Zlib),
 bzip2 (bzip2 license), xz / liblzma (0BSD), zstd (BSD-3-Clause), stb_image (MIT / public domain), Monocypher (BSD-2-Clause / CC0), KCP (MIT),
 and in the voice module Opus (BSD-3-Clause), SpeexDSP (BSD-3-Clause) and RNNoise (BSD-3-Clause).
 

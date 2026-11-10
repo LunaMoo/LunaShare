@@ -21,7 +21,21 @@ namespace fs = std::filesystem;
 
 namespace assoc {
 
+static bool g_torrents = false;
+void WithTorrents(bool on) { g_torrents = on; }
+
+static const std::vector<Kind>& BaseKinds();
 const std::vector<Kind>& Kinds() {
+    static std::vector<Kind> with;
+    if (!g_torrents) return BaseKinds();
+    if (with.empty()) {
+        with = BaseKinds();
+        with.push_back({"Torrent", "Torrent", {"torrent"}, {"application/x-bittorrent", "x-scheme-handler/magnet"}});
+    }
+    return with;
+}
+
+static const std::vector<Kind>& BaseKinds() {
     static const std::vector<Kind> k = {
         {"Image", "Picture", {"jpg", "jpeg", "jfif", "png", "gif", "bmp", "webp", "tga", "psd"},
          {"image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp", "image/x-tga", "image/vnd.adobe.photoshop"}},
@@ -71,7 +85,11 @@ static std::wstring Command() { return L"\"" + ExePath() + L"\" \"%1\""; }
 
 bool Supported() { return true; }
 
-bool Registered() { return GetStr(HKEY_CURRENT_USER, L"Software\\Classes\\LunaShare.Image\\shell\\open\\command", nullptr) == Command(); }
+bool Registered() {
+    if (GetStr(HKEY_CURRENT_USER, L"Software\\Classes\\LunaShare.Image\\shell\\open\\command", nullptr) != Command()) return false;
+    // (registered before torrents came: not complete)
+    return !g_torrents || GetStr(HKEY_CURRENT_USER, L"Software\\Classes\\LunaShare.Torrent\\shell\\open\\command", nullptr) == Command();
+}
 
 bool Register(std::string& err) {
     const std::wstring cls = L"Software\\Classes\\";
@@ -98,6 +116,16 @@ bool Register(std::string& err) {
             ok &= SetStr(HKEY_CURRENT_USER, cap + L"\\FileAssociations", ext.c_str(), prog);
         }
     }
+    if (g_torrents) {
+        // magnet: links - offered as a handler (Default apps > by link type), and taken when nothing else has them
+        ok &= SetStr(HKEY_CURRENT_USER, cap + L"\\UrlAssociations", L"magnet", L"LunaShare.Torrent");
+        if (GetStr(HKEY_CURRENT_USER, cls + L"magnet\\shell\\open\\command", nullptr).empty() &&
+            GetStr(HKEY_CLASSES_ROOT, L"magnet\\shell\\open\\command", nullptr).empty()) {
+            ok &= SetStr(HKEY_CURRENT_USER, cls + L"magnet", nullptr, L"URL:Magnet link");
+            ok &= SetStr(HKEY_CURRENT_USER, cls + L"magnet", L"URL Protocol", L"");
+            ok &= SetStr(HKEY_CURRENT_USER, cls + L"magnet\\shell\\open\\command", nullptr, cmd);
+        }
+    }
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
     if (!ok) err = "the registry refused a change";
     return ok;
@@ -116,6 +144,12 @@ void Unregister() {
             }
         }
     }
+    RegDeleteTreeW(HKEY_CURRENT_USER, (cls + L"LunaShare.Torrent").c_str());  // (also when torrents are off now)
+    if (HKEY h2; RegOpenKeyExW(HKEY_CURRENT_USER, (cls + L".torrent\\OpenWithProgids").c_str(), 0, KEY_WRITE, &h2) == ERROR_SUCCESS) {
+        RegDeleteValueW(h2, L"LunaShare.Torrent");
+        RegCloseKey(h2);
+    }
+    if (GetStr(HKEY_CURRENT_USER, cls + L"magnet\\shell\\open\\command", nullptr) == Command()) RegDeleteTreeW(HKEY_CURRENT_USER, (cls + L"magnet").c_str());
     RegDeleteTreeW(HKEY_CURRENT_USER, (cls + L"Applications\\LunaShare.exe").c_str());
     RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\LunaShare");
     HKEY h;
@@ -160,7 +194,8 @@ bool Registered() {
     size_t n = fread(buf, 1, sizeof buf, f);
     fclose(f);
     s.assign(buf, n);
-    return s.find("Exec=" + Quote(ExePath())) != std::string::npos;
+    if (s.find("Exec=" + Quote(ExePath())) == std::string::npos) return false;
+    return !g_torrents || s.find("x-scheme-handler/magnet") != std::string::npos;  // (written before torrents came: not complete)
 }
 
 bool Register(std::string& err) {
@@ -181,7 +216,7 @@ bool Register(std::string& err) {
     for (auto& k : Kinds())
         for (auto& m : k.mimes) mimes += m + ";";
     std::string d = "[Desktop Entry]\nType=Application\nName=LunaShare\nComment=Chat and share files; pictures, movies, music, archives and comics\n"
-                    "Exec=" + Quote(exe) + " %F\nIcon=" + icon + "\nTerminal=false\nCategories=Network;FileTransfer;AudioVideo;Graphics;Utility;\n"
+                    "Exec=" + Quote(exe) + " %U\nIcon=" + icon + "\nTerminal=false\nCategories=Network;FileTransfer;AudioVideo;Graphics;Utility;\n"
                     "MimeType=" + mimes + "\nStartupWMClass=LunaShare\n";
     MakeDirs(JoinPath(DataHome(), "applications"));
     FILE* f = OpenFile(DesktopFile(), "wb");

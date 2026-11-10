@@ -69,13 +69,15 @@ void App::WatchSync() {
         }
         if (!watchOpened.empty()) {
             if (Player().IsCurrent(watchOpened) || Player().OpenState() == PlayerHost::Opening::Busy) Player().Stop();
+            if (!watchExtId.empty()) WatchExtEnd();
             watchOpened.clear();
             watchShown = false;
         }
         return;
     }
-    bool host = w.host.empty(), lib = !w.libId.empty();
+    bool host = w.host.empty(), lib = !w.libId.empty(), ext = w.libId.compare(0, 4, "ext:") == 0;
     bool stream = !host || lib;  // read through the network (a host's movie, or a contact's Shared folder)
+    if (ext) WatchExtTick();
     std::string cur = lib ? "lib:" + w.libId : host ? w.path : id;
     if (watchOpened != cur) {  // a new session: open its movie (paused)
         watchOpened = cur;
@@ -94,7 +96,10 @@ void App::WatchSync() {
         watchSubsAdded.clear();
         watchSubFollow = true;
         watchSubApplied = "-";
-        if (lib) {
+        if (ext) {
+            if (watchExtReader && watchExtId == w.libId) Player().OpenStream(cur, w.size, watchExtReader);
+            else watchFailed = true;
+        } else if (lib) {
             Player().OpenStream(cur, w.size, eng.LibStreamReader(w.libId));
         } else if (host) {
             if (Player().Play(w.path)) Player().Pause();
@@ -914,7 +919,8 @@ void App::DrawWatch() {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(255, 255, 255, 30));
         if (ui::IconButton("wplay", playing ? Icon::Pause : Icon::Play, playing ? T("Pause for everyone") : T("Play for everyone"), bh)) toggle = true;
         bool inCall = eng.call.state == CallState::Active;
-        bool canAdd = host && !lib, canSave = ((!host && w.allowSave) || lib) && !w.saving;
+        bool ext = w.libId.compare(0, 4, "ext:") == 0;  // (a torrent: it saves itself)
+        bool canAdd = host && !lib, canSave = ((!host && w.allowSave) || (lib && !ext)) && !w.saving;
         int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 2 : 0);
         float rightW = (bh + sp) * (float)right;
         ImGui::SameLine();

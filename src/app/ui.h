@@ -130,8 +130,8 @@ public:
     int styleGeneration = 0;
 
 private:
-    enum class Tab { Chat, Transfers, History, Library, Gallery, Movies, Music, Archives, Devices, Nearby, Settings };
-    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music, Movies, Gallery, Archives };
+    enum class Tab { Chat, Transfers, History, Library, Gallery, Movies, Music, Archives, Torrents, Devices, Nearby, Settings };
+    enum class MScreen { Home, Chat, Transfers, History, Nearby, Settings, Devices, Library, Music, Movies, Gallery, Archives, Torrents };
 
     struct Toast {
         ls::EventType type;
@@ -220,6 +220,23 @@ private:
     int galleryView = 0;                      // 0 by month, 1 albums
     std::set<std::string> gallerySel;         // picked (long press / the Select button)
     bool gallerySelecting = false, galleryDeleteAsk = false;
+    // torrents (ui_torrents.cpp): here with the torrent module, or on one of my computers
+public:
+    void TorrentOpenSource(const std::string& source);  // a magnet link or a .torrent file: asks where to / on which computer
+private:
+    void DrawTorrents();
+    void OpenTorrents();
+    void TorrentPopups();
+    void WatchTorrent(const std::string& device, const std::string& id, int file, int64_t size, const std::string& name);
+    void WatchExtTick();
+    void WatchExtEnd();
+    std::function<int(int64_t, uint8_t*, int)> watchExtReader;
+    std::string watchExtId, watchExtTorrent, watchExtDevice;
+    std::shared_ptr<std::atomic<bool>> watchExtStarved;
+    bool torrentAddOpen = false, torrentSettingsOpen = false, torrentFilesOpen = false, torrentRemoveOpen = false, torrentRemoveFiles = false;
+    std::string torrentAddSource, torrentAddDir, torrentAddErr, torrentAddDevice, torrentMagnetBuf;
+    int torrentAddThen = 0;  // (on a computer: 0 send it here when done, 1 keep it there)
+    std::string torrentFilesId, torrentRemoveId, torrentRemoveDevice, torrentRemoveName, torrentDevice;
     // the Archives tab (ui_archives.cpp) and comics (ui_comics.cpp)
 public:
     void OpenArchive(const std::string& path, const std::string& password = "");
@@ -432,7 +449,7 @@ private:
     std::set<uint64_t> expandedBatches;
 
     FileBrowser browser;
-    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder, GalleryFolder, ArchiveOpen, ArchiveInputs, ArchiveDest, ArchiveCreateDest, ArchiveFolder } browseFor = BrowseFor::None;
+    enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder, GalleryFolder, ArchiveOpen, ArchiveInputs, ArchiveDest, ArchiveCreateDest, ArchiveFolder, TorrentFile, TorrentDir, TorrentSaveDir } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
     void DrawAccountSettings(float fieldW, float h);
     void DrawAccountPopups();

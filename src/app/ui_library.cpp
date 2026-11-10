@@ -11,6 +11,7 @@
 #include "platform.h"
 #include "player_host.h"
 #include "ui.h"
+#include "torrent_host.h"
 #include "ui_widgets.h"
 
 using namespace ls;
@@ -42,6 +43,14 @@ void App::DrawLibrary() {
     if (!mobile) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", T("Your photos and videos, by month or by album."));
+    }
+    if (Torrents().Available() || !Torrents().Computers().empty()) {
+        if (ui::IconTextButton(T("Torrents"), Icon::Down, ImVec2(mobile ? -1 : 0, h))) OpenTorrents();
+        if (!mobile) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", Torrents().Available() ? T("Download magnet links and .torrent files; watch while they download.")
+                                                               : T("Download torrents on your computer, and get them sent here."));
+        }
     }
     if (ui::IconTextButton(T("Archives"), Icon::Archive, ImVec2(mobile ? -1 : 0, h))) OpenArchives();
     if (!mobile) {

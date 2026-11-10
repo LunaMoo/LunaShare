@@ -2103,6 +2103,14 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             MarkDirty();
             break;
         }
+        case Msg::OwnCmd: {
+            auto dv = devices.find(c->peerId);
+            if (dv == devices.end() || MyAccount().empty() || dv->second.accountPub != MyAccount()) break;  // (mine only)
+            std::string kind = j.value("kind", "");
+            if (kind.empty() || kind.size() > 32 || !j.contains("data") || !ownHook) break;
+            ownHook(c->peerId, kind, j["data"]);
+            break;
+        }
         case Msg::ChatEditAck: {
             std::string mid = j.value("mid", "");
             auto dv = devices.find(c->peerId);
@@ -2597,6 +2605,21 @@ void Engine::SetMutedChats(const std::map<std::string, int64_t>& m) {
     auto lk = Lock();
     settings.mutedChats = m;
     MarkDirty();
+}
+
+bool Engine::OwnSend(const std::string& device, const std::string& kind, const json& data) {
+    auto lk = Lock();
+    auto dv = devices.find(device);
+    if (dv == devices.end() || MyAccount().empty() || dv->second.accountPub != MyAccount()) return false;  // (mine only)
+    auto c = ReadyConn(device);
+    if (!c) return false;
+    Queue(c, Msg::OwnCmd, {{"kind", kind}, {"data", data}});
+    return true;
+}
+
+bool Engine::OwnOnline(const std::string& device) {
+    auto lk = Lock();
+    return ReadyConn(device) != nullptr;
 }
 
 bool Engine::SyncPop(std::string& kind, json& data) {

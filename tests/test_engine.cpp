@@ -716,6 +716,23 @@ int main() {
         A2->settings.clipShare = true;
         A->SyncPush("clip", {{"text", "copied"}, {"ts", NowMs()}});
         CHECK(WaitFor([&] { return popKind(*A2, "clip", got); }, 3000) && got["text"] == "copied", "the clipboard reaches my other device");
+        // something asked of one device of mine (torrents on my computer): only between my own devices
+        {
+            std::mutex hm;
+            std::vector<std::string> got2;
+            {
+                auto l = A2->Lock();
+                A2->ownHook = [&](const std::string& from, const std::string& kind, const json& d) {
+                    std::lock_guard<std::mutex> g(hm);
+                    got2.push_back(from + "|" + kind + "|" + d.value("op", ""));
+                };
+            }
+            CHECK(A->OwnOnline(idA2) && A->OwnSend(idA2, "torrent", {{"op", "list"}}), "asked of my other device");
+            CHECK(WaitFor([&] { std::lock_guard<std::mutex> g(hm); return got2.size() == 1 && got2[0] == idA + "|torrent|list"; }, 3000), "it arrives, with who asked");
+            CHECK(!A->OwnSend(idB, "torrent", {{"op", "list"}}) && !B->OwnSend(idA, "torrent", {{"op", "list"}}), "never to or from a contact");
+            auto l = A2->Lock();
+            A2->ownHook = nullptr;
+        }
         // folder sync: a folder's files go to my other device by themselves (new ones later too), without asking
         {
             namespace fs = std::filesystem;

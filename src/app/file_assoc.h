@@ -8,6 +8,8 @@
 
 namespace assoc {
 
+// torrents too (.torrent files and magnet: links): set before the calls below, when this device can take them
+void WithTorrents(bool on);
 bool Supported();
 bool Registered();             // (as this program, from where it is now)
 bool Register(std::string& err);

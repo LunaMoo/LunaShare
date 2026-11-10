@@ -144,6 +144,12 @@ struct Settings {
     int64_t prefsVer = 0;     // when the synced settings last changed here (the newer ones win)  // chat key -> silent until (ms; 0 = until turned back on)
     std::vector<std::string> galleryFolders;  // the Gallery: folders with pictures (besides the camera, Pictures and received files)
     bool galleryVideos = true;                // the Gallery shows videos too
+    // torrents (desktops, with the torrent module): where they're saved ("" = "Torrents" in the folder for received
+    // files), speed limits in KiB/s (0 = none), the port (0 = any), how long to seed once done (-1 on and on, 0 not at
+    // all, N: until N % of the size was uploaded), and whether my other devices may add torrents here
+    std::string torrentDir;
+    int torrentDown = 0, torrentUp = 0, torrentPort = 0, torrentSeed = 100;
+    bool torrentRemote = true;
     std::vector<std::string> archiveFolders;  // the Archives tab: folders looked through (besides Downloads, Documents, received files)
     std::vector<std::string> movieFolders;  // the Movies tab: folders with videos (besides received files and Videos)  // movies start playing on their own (no need to press play)
     bool watchAllowSave = true;

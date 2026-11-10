@@ -53,6 +53,10 @@ void SendRequest(const std::string& configDir, const std::vector<std::string>& p
     json j;
     j["paths"] = json::array();
     for (auto& p : paths) {
+        if (p.compare(0, 7, "magnet:") == 0) {  // (a link, not a file)
+            j["paths"].push_back(p);
+            continue;
+        }
         std::error_code ec;
         fs::path a = fs::absolute(fs::u8path(p), ec);
         j["paths"].push_back(ec ? p : a.u8string());

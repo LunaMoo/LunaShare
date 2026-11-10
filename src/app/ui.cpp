@@ -19,6 +19,7 @@
 #include "emoji_host.h"
 #include "archives.h"
 #include "file_assoc.h"
+#include "torrent_host.h"
 #include "wan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -219,6 +220,7 @@ void App::Frame() {
         if (a == "settings") { tab = Tab::Settings; screen = MScreen::Settings; }
         if (a == "library") { tab = Tab::Library; screen = MScreen::Library; }
         if (a == "gallery") { tab = Tab::Gallery; screen = MScreen::Gallery; tabForce = true; if (getenv("LUNASHARE_GALLERYVIEW")) galleryView = atoi(getenv("LUNASHARE_GALLERYVIEW")); }
+        if (a == "torrents") { tab = Tab::Torrents; screen = MScreen::Torrents; tabForce = true; }
         if (a == "archives" || a == "comics") { tab = Tab::Archives; screen = MScreen::Archives; tabForce = true; archivesComics = a == "comics"; }
         if (getenv("LUNASHARE_OPENSOUND")) musicSoundOpen = true;
         if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
@@ -380,6 +382,8 @@ void App::Frame() {
     DrawVerifyQrPopup();
     DrawLockEncPopup();
     ArchiveTick();
+    TorrentPopups();
+    Torrents().Tick();
     SleepPopup();
     DrawSleepAsk();
     DrawToasts();
@@ -647,6 +651,15 @@ void App::OpenPaths(const std::vector<std::string>& paths, bool send) {
 void App::HandleOpenPaths() {
     std::vector<std::string> paths;
     paths.swap(openPathsPending);
+    // a magnet link, or a .torrent file: to the torrents (here, or on one of my computers)
+    if (!paths.empty() && !openPathsSend && TorrentHost::IsTorrentSource(paths[0]) &&
+        (paths[0].compare(0, 7, "magnet:") == 0 || FileExists(paths[0]))) {
+        if (watchShown) watchShown = false;
+        if (viewer.open) viewer.closeRequest = true;
+        musicNowShown = false;
+        TorrentOpenSource(paths[0]);
+        return;
+    }
     std::vector<std::string> files;
     for (auto& p : paths)
         if (FileExists(p) || IsDirectory(p)) files.push_back(p);
@@ -1033,6 +1046,7 @@ void App::DrawDesktop() {
         item(T("Movies"), Tab::Movies);
         item(T("Music"), Tab::Music);
         item(T("Archives"), Tab::Archives);
+        if (Torrents().Available() || !Torrents().Computers().empty()) item(T("Torrents"), Tab::Torrents);
         item(T("Devices"), Tab::Devices);
         item(T("Connect"), Tab::Nearby);
         item(T("Settings"), Tab::Settings);
@@ -1060,6 +1074,7 @@ void App::DrawDesktop() {
         case Tab::Movies: DrawMovies(); break;
         case Tab::Gallery: DrawGallery(); break;
         case Tab::Archives: DrawArchives(); break;
+        case Tab::Torrents: DrawTorrents(); break;
         case Tab::Devices: DrawDevices(); break;
         case Tab::Nearby: DrawNearby(); break;
         case Tab::Settings: DrawSettings(); break;
@@ -1153,6 +1168,7 @@ void App::DrawMobile() {
         case MScreen::Movies: title = T("Movies"); break;
         case MScreen::Gallery: title = T("Gallery"); break;
         case MScreen::Archives: title = T("Archives"); break;
+        case MScreen::Torrents: title = T("Torrents"); break;
         case MScreen::Nearby: title = T("Connect"); break;
         case MScreen::Settings: title = T("Settings"); break;
         case MScreen::Devices: title = T("Device"); break;
@@ -1239,6 +1255,7 @@ void App::DrawMobile() {
         case MScreen::Movies: DrawMovies(); break;
         case MScreen::Gallery: DrawGallery(); break;
         case MScreen::Archives: DrawArchives(); break;
+        case MScreen::Torrents: DrawTorrents(); break;
         case MScreen::Nearby: DrawNearby(); break;
         case MScreen::Settings: DrawSettings(); break;
         case MScreen::Devices:
@@ -1279,6 +1296,7 @@ void App::DrawMobileHome() {
     }
     if (ui::BigButton(T("Gallery"), Icon::Image)) OpenGallery();
     if (ui::BigButton(T("Archives"), Icon::Archive)) OpenArchives();
+    if ((Torrents().Available() || !Torrents().Computers().empty()) && ui::BigButton(T("Torrents"), Icon::Down)) OpenTorrents();
     if (Player().Available() && ui::BigButton(T("Movie player"), Icon::Play)) OpenMovies();
     if (Player().Available() && ui::BigButton(T("Music player"), Icon::Speaker)) {
         backStack.push_back(screen);
@@ -3645,6 +3663,24 @@ void App::DrawPopups() {
                 break;
             case BrowseFor::Movie:
                 if (!res.empty() && eng.StartWatch("", res[0])) watchShown = true;
+                break;
+            case BrowseFor::TorrentFile:
+                if (!res.empty()) {
+                    torrentAddSource = res[0];
+                    torrentAddDir = Torrents().Available() ? Torrents().DefaultDir() : "";
+                }
+                torrentAddOpen = true;  // (back to the popup)
+                break;
+            case BrowseFor::TorrentDir:
+                if (!res.empty()) torrentAddDir = res[0];
+                torrentAddOpen = true;
+                break;
+            case BrowseFor::TorrentSaveDir:
+                if (!res.empty()) {
+                    s.torrentDir = res[0];
+                    edit.torrentDir = res[0];
+                }
+                torrentSettingsOpen = true;
                 break;
             case BrowseFor::ArchiveOpen:
                 if (!res.empty()) OpenArchive(res[0]);

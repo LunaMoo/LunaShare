@@ -162,6 +162,36 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     return watch.sid;
 }
 
+uint64_t Engine::StartWatchExt(const std::string& ext, const std::string& name, int64_t size) {
+    auto lk = Lock();
+    if (ext.empty() || size <= 0) return 0;
+    if (watch.sid) LeaveWatch();
+    watch = WatchInfo();
+    watch.sid = RandomU64() | 1;
+    watch.name = name;
+    watch.size = size;
+    watch.libId = "ext:" + ext;
+    watch.at = SteadyMs();
+    watch.playing = settings.playerAutoplay;
+    watch.people = {settings.displayName};
+    watchKeys.clear();
+    watchViewers_.clear();
+    watchBuffering_.clear();
+    watchSelfBuffering_ = false;
+    MarkDirty();
+    return watch.sid;
+}
+
+void Engine::WatchSetExt(bool buffering, double loaded) {
+    auto lk = Lock();
+    if (!watch.sid || watch.libId.compare(0, 4, "ext:") != 0) return;
+    watch.extLoaded = loaded;
+    if (buffering != watchSelfBuffering_) {
+        watchSelfBuffering_ = buffering;
+        WatchUpdateHold();
+    }
+}
+
 uint64_t Engine::WatchSwitch(const std::string& path) {
     auto lk = Lock();
     if (!watch.sid || !watch.host.empty() || !watch.libId.empty() || FileSize(path) <= 0) return 0;
@@ -590,7 +620,9 @@ void Engine::WatchTick() {
     if (!watch.sid) return;
     int64_t now = SteadyMs();
     if (watch.host.empty()) {
-        if (!watch.libId.empty()) {  // a library stream: the clock waits while the pieces come
+        if (watch.libId.compare(0, 4, "ext:") == 0) {
+            // (the app's own stream: it says when it waits - WatchSetExt)
+        } else if (!watch.libId.empty()) {  // a library stream: the clock waits while the pieces come
             auto it = swarm.find(watch.libId);
             bool b = it != swarm.end() && LibStreamBuffering(it->second);
             if (b != watchSelfBuffering_) {
@@ -968,6 +1000,7 @@ bool Engine::WatchBuffering() {
 }
 
 double Engine::WatchLoaded() {
+    if (watch.libId.compare(0, 4, "ext:") == 0) return watch.extLoaded;
     if (!watch.libId.empty()) {  // (UI thread, under the engine lock)
         auto it = swarm.find(watch.libId);
         return it == swarm.end() || !it->second->size ? 0.0 : (double)it->second->done / (double)it->second->size;
