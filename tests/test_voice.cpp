@@ -202,8 +202,9 @@ static void TestEcho() {
     CHECK(nearOff - nearOn < 10, "own voice preserved");
 }
 
-// Like a phone, in real time: the speaker takes 512 samples every 10.7 ms, the microphone delivers 40 ms at once,
-// sound comes out 60 ms after it's handed over and reaches the microphone 20 ms later.
+// Like a phone: the speaker takes 512 samples every 10.7 ms, the microphone delivers 40 ms at once, sound comes out
+// 60 ms after it's handed over and reaches the microphone 20 ms later. (A simulated clock, 1 ms steps: the same on
+// every machine - a sleeping test was at the mercy of Windows' 15 ms timer.)
 static double EchoRunBursty(bool aec) {
     const LsmModule* m = lunashare_media_module();
     Net net;
@@ -217,10 +218,9 @@ static double EchoRunBursty(bool aec) {
     std::mt19937 rng(9);
     const int outLat = R * 60 / 1000, acoustic = R * 20 / 1000, P = 512, C = R * 40 / 1000;
     int64_t played = 0, captured = 0, farSent = 0;
-    auto t0 = std::chrono::steady_clock::now();
     const int64_t total = R * 6;  // 6 s
-    while (captured < total) {
-        int64_t now = (int64_t)(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() * R);
+    for (int64_t ms = 0; captured < total; ms++) {
+        int64_t now = ms * R / 1000;
         while (farSent * F < now + R / 10) {  // the far end keeps ~100 ms ahead (the jitter buffer smooths it)
             int16_t far[F];
             for (int i = 0; i < F; i++) {
@@ -260,7 +260,6 @@ static double EchoRunBursty(bool aec) {
             }
             net.sent.clear();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     m->stop();
     opus_encoder_destroy(farEnc);
