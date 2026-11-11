@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-#define LST_API_VERSION 1
+#define LST_API_VERSION 2
 
 #if defined(_WIN32)
 #define LST_EXPORT __declspec(dllexport)
@@ -34,14 +34,18 @@ typedef struct LstHost {
 } LstHost;
 
 /* settings_json: {"down": KiB/s (0 = no limit), "up": KiB/s, "port": listen port (0 = any),
- *                 "seed": -1 keep seeding | 0 stop when done | N > 0: until N% of the size was uploaded,
+ *                 "seed" (port 0: one picked once and kept): -1 keep seeding | 0 stop when done | N > 0: until N% of the size was uploaded,
  *                 "dht": bool, "upnp": bool, "agent": "LunaShare/1.5.9",
  *                 "limitLocal": bool (init only: the limits also count for peers on the local network)}
  * options_json (add): {"dir": folder to save into, "paused": bool}
  * list() -> [{"id": 40 hex, "name", "dir", "state": "meta" | "checking" | "down" | "seed" | "done" | "paused" | "error",
  *             "error", "size" (wanted bytes), "done" (bytes), "downRate", "upRate" (B/s), "uploaded", "peers", "seeds",
  *             "files" (count), "added" (unix s), "paused": bool, "single": bool (one file, saved without a folder),
- *             "path": the file or folder on disk}]
+ *             "path": the file or folder on disk,
+ *             why it may be slow - "seedsAll", "peersAll" (known), "swarmSeeds", "swarmPeers" (the trackers' count, -1
+ *             unknown), "copies" (full copies among connected peers, -1 n/a), "incoming" (anyone connected to us),
+ *             "trackers", "trackersOk", "trackerMsg" (the first complaint), "port" (listening), "mapped" (router:
+ *             1 opened it, -1 couldn't, 0 not known)}]
  * files(id) -> [{"i", "path" (inside the torrent), "size", "done", "want": bool}]  */
 typedef struct LstModule {
     int api_version;
@@ -68,6 +72,8 @@ typedef struct LstModule {
     int (*read)(const char* id, int file, int64_t offset, uint8_t* buf, int len, int timeout_ms, int* timed_out);
     /* connect to this peer too (tests, or a known source) */
     void (*add_peer)(const char* id, const char* ip, int port);
+    /* (2) ask the trackers, the DHT and the local network for peers again, now */
+    void (*reannounce)(const char* id);
 } LstModule;
 
 typedef const LstModule* (*LstGetModuleFn)(void);

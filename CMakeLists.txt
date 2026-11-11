@@ -408,6 +408,14 @@ if(LUNASHARE_BUILD_APP)
             set(SDL_SHARED OFF CACHE BOOL "" FORCE)
             set(SDL_STATIC ON CACHE BOOL "" FORCE)
         endif()
+        if(FETCHCONTENT_SOURCE_DIR_SDL2)  # (Android: gradle's own copy - FetchContent runs no PATCH_COMMAND on it)
+            execute_process(COMMAND ${CMAKE_COMMAND} -DPATCH=${CMAKE_CURRENT_SOURCE_DIR}/patches/sdl2-android-voice-audio.patch
+                                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patch.cmake
+                            WORKING_DIRECTORY ${FETCHCONTENT_SOURCE_DIR_SDL2} RESULT_VARIABLE sdl_patch)
+            if(NOT sdl_patch EQUAL 0)
+                message(FATAL_ERROR "could not patch SDL in ${FETCHCONTENT_SOURCE_DIR_SDL2}")
+            endif()
+        endif()
         FetchContent_MakeAvailable(SDL2)
     endif()
 

@@ -21,7 +21,10 @@
 #include <thread>
 #include <vector>
 
+#include <random>
+
 #include <libtorrent/add_torrent_params.hpp>
+#include <libtorrent/announce_entry.hpp>
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/ip_filter.hpp>
@@ -75,6 +78,9 @@ struct State {
     std::mutex fm;
     std::string fpath;
     FILE* f = nullptr;
+    // can others reach us: the port we listen on, and whether the router opened it (UPnP / NAT-PMP)
+    std::atomic<int> listenPort{0};
+    std::atomic<int> mapped{0};  // 0 not tried / unknown, 1 opened, -1 the router refused or has none
 };
 State g;
 
@@ -130,8 +136,25 @@ void SetErr(char* err, int n, const std::string& s) {
     snprintf(err, (size_t)n, "%s", s.c_str());
 }
 
+// "any port": one picked once and kept in the state folder - a port that changes each start can't be opened on a
+// router (port forwarding), and others then can't connect to us
+int StablePort() {
+    std::string path = (U8(g.dir) / "port").u8string();
+    std::vector<char> buf;
+    if (ReadAll(path, buf) && !buf.empty()) {
+        int p = atoi(std::string(buf.begin(), buf.end()).c_str());
+        if (p >= 1024 && p < 65536) return p;
+    }
+    std::random_device rd;
+    int p = 20000 + (int)(rd() % 40000);
+    std::string s = std::to_string(p);
+    WriteAll(path, std::vector<char>(s.begin(), s.end()));
+    return p;
+}
+
 void ApplyPack(lt::settings_pack& p, const json& j) {
     int down = j.value("down", 0), up = j.value("up", 0), port = j.value("port", 0);
+    if (port <= 0 || port >= 65536) port = StablePort();  // ("any": the same one every time, so it can be forwarded)
     p.set_int(lt::settings_pack::download_rate_limit, down > 0 ? down * 1024 : 0);
     p.set_int(lt::settings_pack::upload_rate_limit, up > 0 ? up * 1024 : 0);
     std::string ps = std::to_string(port > 0 && port < 65536 ? port : 0);
@@ -187,6 +210,13 @@ void HandleAlerts() {
             Log("file error: " + fe->message());
         } else if (auto* lf = lt::alert_cast<lt::listen_failed_alert>(a)) {
             Log(lf->message());
+        } else if (auto* ls = lt::alert_cast<lt::listen_succeeded_alert>(a)) {
+            if (ls->socket_type == lt::socket_type_t::tcp) g.listenPort = ls->port;
+        } else if (lt::alert_cast<lt::portmap_alert>(a)) {
+            g.mapped = 1;
+        } else if (auto* pe = lt::alert_cast<lt::portmap_error_alert>(a)) {
+            if (g.mapped != 1) g.mapped = -1;
+            Log(pe->message());
         }
     }
 }
@@ -285,7 +315,8 @@ int Init(const LstHost* host, const char* stateDir, const char* settingsJson) {
             if (!ec) sp = lt::read_session_params(n, lt::session::save_dht_state);
         }
         lt::settings_pack& p = sp.settings;
-        p.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage);
+        p.set_int(lt::settings_pack::alert_mask,
+                  lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::port_mapping);
         p.set_str(lt::settings_pack::dht_bootstrap_nodes,
                   "dht.libtorrent.org:25401,router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881");
         p.set_int(lt::settings_pack::active_downloads, -1);  // (no queue: every torrent runs)
@@ -480,7 +511,34 @@ const char* List() {
                     auto it = g.x.find(id);
                     if (it != g.x.end()) it->second.savePath = st.save_path;
                 }
+                // the trackers: how many answer, the swarm they report, and what the first one that complains says
+                int trackers = 0, trackersOk = 0, swarmSeeds = st.num_complete, swarmPeers = st.num_incomplete;
+                std::string trackerMsg;
+                for (const lt::announce_entry& ae : h.trackers()) {
+                    trackers++;
+                    bool ok = false;
+                    for (const lt::announce_endpoint& ep : ae.endpoints)
+                        for (const lt::announce_infohash& ih : ep.info_hashes) {
+                            if (ih.fails == 0 && !ih.last_error && (ih.start_sent || ih.scrape_complete >= 0)) ok = true;
+                            if (trackerMsg.empty() && (ih.last_error || !ih.message.empty()))
+                                trackerMsg = ih.last_error ? ih.last_error.message() + (ih.message.empty() ? "" : ": " + ih.message) : ih.message;
+                            swarmSeeds = std::max(swarmSeeds, ih.scrape_complete);
+                            swarmPeers = std::max(swarmPeers, ih.scrape_incomplete);
+                        }
+                    trackersOk += ok;
+                }
                 arr.push_back({{"id", id},
+                               {"seedsAll", st.list_seeds},          // known to us (connected or not)
+                               {"peersAll", st.list_peers},
+                               {"swarmSeeds", swarmSeeds},           // what the trackers say (-1: not known)
+                               {"swarmPeers", swarmPeers},
+                               {"copies", st.distributed_copies},    // full copies among the connected peers (-1: n/a)
+                               {"incoming", st.has_incoming},        // someone connected to us for it
+                               {"trackers", trackers},
+                               {"trackersOk", trackersOk},
+                               {"trackerMsg", trackerMsg},
+                               {"port", g.listenPort.load()},
+                               {"mapped", g.mapped.load()},
                                {"name", st.name.empty() ? id : st.name},
                                {"dir", st.save_path},
                                {"path", path},
@@ -732,6 +790,20 @@ int Read(const char* id, int file, int64_t offset, uint8_t* buf, int len, int ti
     }
 }
 
+// ask the trackers, the DHT and the local network for peers again, now
+void Reannounce(const char* id) {
+    lt::torrent_handle h;
+    if (!g.ses || !Find(id, h)) return;
+    try {
+        h.force_reannounce(0, -1, lt::torrent_handle::ignore_min_interval);
+        h.force_dht_announce();
+        h.force_lsd_announce();
+        h.scrape_tracker();
+        Log("asking for more peers: " + std::string(id));
+    } catch (const std::exception&) {
+    }
+}
+
 void AddPeer(const char* id, const char* ip, int port) {
     lt::torrent_handle h;
     if (!g.ses || !ip || !Find(id, h)) return;
@@ -745,7 +817,7 @@ void AddPeer(const char* id, const char* ip, int port) {
 
 const LstModule kModule = {LST_API_VERSION, "libtorrent", LIBTORRENT_VERSION, Init,   Shutdown, ApplySettings, Add,
                            AddData,         List,         Files,              SetWanted, Pause,  Remove,        Stream,
-                           Read,            AddPeer};
+                           Read,            AddPeer,      Reannounce};
 
 }  // namespace
 

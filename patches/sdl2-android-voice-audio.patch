@@ -1,5 +1,5 @@
 diff --git a/src/audio/openslES/SDL_openslES.c b/src/audio/openslES/SDL_openslES.c
-index 278e891..be45a97 100644
+index 278e891..81e2efd 100644
 --- a/src/audio/openslES/SDL_openslES.c
 +++ b/src/audio/openslES/SDL_openslES.c
 @@ -27,6 +27,7 @@
@@ -21,7 +21,7 @@ index 278e891..be45a97 100644
      SLresult result;
      int i;
  
-@@ -276,12 +277,21 @@ static int openslES_CreatePCMRecorder(_THIS)
+@@ -276,12 +277,22 @@ static int openslES_CreatePCMRecorder(_THIS)
  
      /* create audio recorder */
      /* (requires the RECORD_AUDIO permission) */
@@ -33,18 +33,19 @@ index 278e891..be45a97 100644
      }
  
 +    /* LunaShare: for calls, the voice communication preset (the platform's echo canceller and noise suppressor) */
-+    if (SDL_GetHintBoolean("SDL_ANDROID_VOICE_AUDIO", SDL_FALSE)) {
++    if (SDL_GetHintBoolean("SDL_ANDROID_VOICE_CAPTURE", SDL_FALSE)) {
 +        SLAndroidConfigurationItf config;
 +        if ((*recorderObject)->GetInterface(recorderObject, SL_IID_ANDROIDCONFIGURATION, &config) == SL_RESULT_SUCCESS) {
 +            SLuint32 preset = SL_ANDROID_RECORDING_PRESET_VOICE_COMMUNICATION;
-+            (*config)->SetConfiguration(config, SL_ANDROID_KEY_RECORDING_PRESET, &preset, sizeof(preset));
++            SLresult r = (*config)->SetConfiguration(config, SL_ANDROID_KEY_RECORDING_PRESET, &preset, sizeof(preset));
++            SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE_OK", r == SL_RESULT_SUCCESS ? "1" : "0");
 +        }
 +    }
 +
      /* realize the recorder */
      result = (*recorderObject)->Realize(recorderObject, SL_BOOLEAN_FALSE);
      if (SL_RESULT_SUCCESS != result) {
-@@ -408,8 +418,8 @@ static int openslES_CreatePCMPlayer(_THIS)
+@@ -408,8 +419,8 @@ static int openslES_CreatePCMPlayer(_THIS)
      SLDataSource audioSrc;
      SLDataSink audioSnk;
      SLDataLocator_OutputMix loc_outmix;
@@ -55,7 +56,7 @@ index 278e891..be45a97 100644
      SLresult result;
      int i;
  
-@@ -513,12 +523,21 @@ static int openslES_CreatePCMPlayer(_THIS)
+@@ -513,12 +524,22 @@ static int openslES_CreatePCMPlayer(_THIS)
      audioSnk.pFormat = NULL;
  
      /* create audio player */
@@ -71,7 +72,8 @@ index 278e891..be45a97 100644
 +        SLAndroidConfigurationItf config;
 +        if ((*bqPlayerObject)->GetInterface(bqPlayerObject, SL_IID_ANDROIDCONFIGURATION, &config) == SL_RESULT_SUCCESS) {
 +            SLint32 stream = SL_ANDROID_STREAM_VOICE;
-+            (*config)->SetConfiguration(config, SL_ANDROID_KEY_STREAM_TYPE, &stream, sizeof(stream));
++            SLresult r = (*config)->SetConfiguration(config, SL_ANDROID_KEY_STREAM_TYPE, &stream, sizeof(stream));
++            SDL_SetHint("SDL_ANDROID_VOICE_PLAYBACK_OK", r == SL_RESULT_SUCCESS ? "1" : "0");
 +        }
 +    }
 +

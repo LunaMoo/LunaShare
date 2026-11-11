@@ -480,12 +480,48 @@ void App::DrawTorrents() {
             ImVec4 clip(p.x + 4, p.y, p.x + w - 4, p.y + bh);
             dl->AddText(nullptr, 0, ImVec2(p.x + 8, p.y + (bh - ImGui::GetTextLineHeight()) * 0.5f), IM_COL32(240, 240, 240, 255), text.c_str(), nullptr, 0, &clip);
             if (t.state == "error" && !t.error.empty()) ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1), "%s", t.error.c_str());
-            std::string sub = TF("%d peers", t.peers);
+            // connected seeds / other peers, and the swarm the trackers report
+            std::string sub = TF("seeds %d, peers %d", t.seeds, std::max(0, t.peers - t.seeds));
+            if (t.swarmSeeds >= 0 || t.swarmPeers >= 0)
+                sub += "  " + TF("(swarm: %d / %d)", std::max(0, t.swarmSeeds), std::max(0, t.swarmPeers));
             if (t.upRate > 0) sub += std::string("   ") + T("up") + " " + Rate(t.upRate);
             if (t.uploaded > 0) sub += "   " + TF("%s uploaded", FormatBytes((double)t.uploaded).c_str());
             if (!t.from.empty() && here) sub += "   " + TF("for %s", Emoji().Display(eng.PeerName(t.from)).c_str()) + (t.then == "send" ? std::string(" ") + (t.sent ? T("(sent)") : T("(sent when done)")) : "");
             if (!here && t.then == "send") sub += std::string("   ") + (t.sent ? T("sent here") : T("sent here when done"));
             ImGui::TextDisabled("%s", sub.c_str());
+            bool getting = (t.state == "down" || t.state == "meta") && !t.paused;
+            if (getting && (ImGui::IsItemHovered() || (mobile && ImGui::IsItemClicked()))) {  // everything we know
+                std::string tip = TF("Connected: %d seeds, %d peers", t.seeds, std::max(0, t.peers - t.seeds)) + "\n" +
+                                  TF("Known: %d seeds, %d peers", t.seedsAll, std::max(0, t.peersAll - t.seedsAll));
+                if (t.swarmSeeds >= 0 || t.swarmPeers >= 0)
+                    tip += "\n" + TF("The trackers count: %d seeds, %d downloading", std::max(0, t.swarmSeeds), std::max(0, t.swarmPeers));
+                if (t.copies >= 0) tip += "\n" + TF("Full copies among the connected peers: %.2f", t.copies);
+                tip += "\n" + (t.incoming ? std::string(T("Others connect to you: yes")) : std::string(T("Others connect to you: not yet")));
+                if (t.port) tip += "\n" + TF("Port %d - router: %s", t.port, t.mapped > 0 ? T("opened it (UPnP / NAT-PMP)") : t.mapped < 0 ? T("didn't open it") : T("not known"));
+                if (t.trackers) tip += "\n" + TF("Trackers answering: %d of %d", t.trackersOk, t.trackers);
+                if (!t.trackerMsg.empty()) tip += "\n" + TF("Tracker: %s", t.trackerMsg.c_str());
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+            // why it's slow (nothing coming): the likeliest reason, in a sentence
+            if (getting && t.downRate < 1024 && t.state == "down") {
+                std::string why;
+                bool reachable = t.incoming || t.mapped > 0;
+                if (t.trackers > 0 && t.trackersOk == 0 && !t.trackerMsg.empty() && t.peers == 0)
+                    why = TF("The trackers don't help: %s", t.trackerMsg.c_str());
+                else if (t.peers == 0)
+                    why = reachable ? std::string(T("No one to download from right now - still looking.")) : TF("No one to download from, and others can't connect to you: open port %d (TCP and UDP) to this computer on your router, or turn on UPnP there.", t.port);
+                else if (t.copies >= 0 && t.copies < 1.0f)
+                    why = TF("The peers you're connected to have only %d%% of it between them - waiting for someone who has the rest.", (int)(t.copies * 100));
+                else if (!reachable)
+                    why = TF("Others can't connect to you, so only some peers can be reached: open port %d (TCP and UDP) to this computer on your router, or turn on UPnP there.", t.port);
+                if (!why.empty()) {
+                    ImGui::PushTextWrapPos(0);
+                    ImGui::PushStyleColor(ImGuiCol_Text, ui::ColWarn());
+                    ImGui::TextUnformatted(why.c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::PopTextWrapPos();
+                }
+            }
             // buttons
             float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f : 0;
             int nb = 0;
@@ -502,6 +538,11 @@ void App::DrawTorrents() {
                 next();
                 if (ui::IconTextButton(T("Watch"), Icon::Video, ImVec2(bw, h))) WatchTorrent(device, t.id, t.watchFile, t.watchSize, t.watchName);
                 if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", t.watchName.c_str());
+            }
+            if (here && getting) {
+                next();
+                if (ui::IconTextButton(T("Find more peers"), Icon::ZoomIn, ImVec2(bw, h))) Torrents().Reannounce(t.id);
+                if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Ask the trackers, the DHT and the local network again now"));
             }
             if (here) {
                 next();

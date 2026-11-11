@@ -173,6 +173,17 @@ TorrentHost::Torrent TorrentHost::FromJson(const json& j) {
     t.upRate = (int)I("upRate");
     t.peers = (int)I("peers");
     t.seeds = (int)I("seeds");
+    t.seedsAll = (int)I("seedsAll");
+    t.peersAll = (int)I("peersAll");
+    t.swarmSeeds = j.contains("swarmSeeds") ? (int)I("swarmSeeds") : -1;
+    t.swarmPeers = j.contains("swarmPeers") ? (int)I("swarmPeers") : -1;
+    t.copies = j.contains("copies") && j["copies"].is_number() ? j["copies"].get<float>() : -1.0f;
+    t.incoming = B("incoming");
+    t.trackers = (int)I("trackers");
+    t.trackersOk = (int)I("trackersOk");
+    t.trackerMsg = S("trackerMsg");
+    t.port = (int)I("port");
+    t.mapped = (int)I("mapped");
     t.files = (int)I("files");
     t.paused = B("paused");
     t.single = B("single");
@@ -190,7 +201,10 @@ json TorrentHost::ToJson(const Torrent& t) const {
     return {{"id", t.id},       {"name", t.name},         {"state", t.state},     {"error", t.error},       {"size", t.size},
             {"done", t.done},   {"downRate", t.downRate}, {"upRate", t.upRate},   {"peers", t.peers},       {"seeds", t.seeds},
             {"files", t.files}, {"paused", t.paused},     {"added", t.added},     {"watchFile", t.watchFile}, {"watchSize", t.watchSize},
-            {"watchName", t.watchName}, {"from", t.from}, {"then", t.then},       {"sent", t.sent}};
+            {"watchName", t.watchName}, {"from", t.from}, {"then", t.then},       {"sent", t.sent},
+            {"seedsAll", t.seedsAll}, {"peersAll", t.peersAll}, {"swarmSeeds", t.swarmSeeds}, {"swarmPeers", t.swarmPeers},
+            {"copies", t.copies}, {"incoming", t.incoming}, {"trackers", t.trackers}, {"trackersOk", t.trackersOk},
+            {"trackerMsg", t.trackerMsg}, {"port", t.port}, {"mapped", t.mapped}};
 }
 
 const std::vector<TorrentHost::Torrent>& TorrentHost::List() {
@@ -276,6 +290,12 @@ void TorrentHost::SetWanted(const std::string& id, const std::vector<bool>& want
 void TorrentHost::Pause(const std::string& id, bool paused) {
     if (!Available()) return;
     mod_->pause(id.c_str(), paused ? 1 : 0);
+    listAt_ = 0;
+}
+
+void TorrentHost::Reannounce(const std::string& id) {
+    if (!Available() || !mod_->reannounce) return;
+    mod_->reannounce(id.c_str());
     listAt_ = 0;
 }
 

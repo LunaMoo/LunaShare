@@ -803,7 +803,12 @@ bool MediaHost::OpenDevices(bool capture, bool playback) {
 #if defined(__ANDROID__)
     // calls on the voice stream with the voice-communication microphone (our SDL patch): the call volume buttons
     // work, and the phone's own echo canceller / noise suppressor get both sides (they didn't on the media stream)
-    SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", mode_ == Mode::Call || mode_ == Mode::Ringback ? "1" : "0");
+    // (the microphone's preset only with echo cancellation on: the phone's processing costs some sound quality)
+    bool voice = mode_ == Mode::Call || mode_ == Mode::Ringback;
+    SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", voice ? "1" : "0");
+    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE", voice && s.callEchoCancel ? "1" : "0");
+    SDL_SetHint("SDL_ANDROID_VOICE_PLAYBACK_OK", "");
+    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE_OK", "");
 #endif
     SDL_AudioSpec want{}, have{};
     want.freq = LSM_SAMPLE_RATE;
@@ -834,6 +839,14 @@ bool MediaHost::OpenDevices(bool capture, bool playback) {
         if (!capDev_ && !s.callInputDevice.empty()) capDev_ = SDL_OpenAudioDevice(nullptr, 1, &want, &have, 0);
         if (!capDev_) audioError += std::string(audioError.empty() ? "" : "; ") + "microphone: " + SDL_GetError();
     }
+#if defined(__ANDROID__)
+    if (voice) {  // (logcat: did the phone take the call stream / the call microphone)
+        const char* po = SDL_GetHint("SDL_ANDROID_VOICE_PLAYBACK_OK");
+        const char* co = SDL_GetHint("SDL_ANDROID_VOICE_CAPTURE_OK");
+        SDL_Log("call audio (%s): voice stream %s, call microphone %s", SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?",
+                po && *po ? (*po == '1' ? "on" : "refused") : "not asked", co && *co ? (*co == '1' ? "on" : "refused") : "not asked");
+    }
+#endif
     if (playDev_) SDL_PauseAudioDevice(playDev_, 0);
     if (capDev_) SDL_PauseAudioDevice(capDev_, 0);
     return (!playback || playDev_) && (!capture || capDev_);
@@ -941,9 +954,15 @@ void MediaHost::ApplyLiveAudio() {
     LsmSettings ls{s.callEchoCancel ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
     if (memcmp(&ls, &liveLs_, sizeof(ls)) != 0) {
         bool aecOn = ls.echo_cancel && !liveLs_.echo_cancel;
+#if defined(__ANDROID__)
+        bool aecChanged = ls.echo_cancel != liveLs_.echo_cancel;  // (the phone's call microphone goes with it)
+#endif
         liveLs_ = ls;
         mod_->set_settings(&ls);
         if (aecOn) ResetEcho();
+#if defined(__ANDROID__)
+        if (aecChanged) OpenDevices(true, true);
+#endif
     }
     bool pathChanged = false;
     if (s.callInputDevice != liveIn_ || s.callOutputDevice != liveOut_) {

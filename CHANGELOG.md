@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Android calls: the call-audio change in 1.6.6 never reached the Android build (its copy of SDL wasn't patched) -
+  it does now: calls play on the call stream (volume buttons) and, with echo cancellation on, use the phone's call
+  microphone and its echo canceller. The stronger echo suppression added in 1.6.6 is undone (it made voices choppy).
+- Torrents: what's going on with peers - seeds and peers connected (and what the trackers count), and when nothing
+  comes, why in a sentence (nobody to download from, the peers have only part of it, others can't reach you, a
+  tracker complaint); hover for the details (availability, port and router, trackers). *Find more peers* asks again
+  now. "Any port" is now one port picked once and kept, so it can be opened on the router.
 ## 1.6.6
 
 - Android: Back closes the on-screen keyboard (it used to come straight back); tap the text field to open it again.

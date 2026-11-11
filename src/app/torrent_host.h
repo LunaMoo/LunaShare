@@ -34,6 +34,11 @@ public:
         std::string id, name, dir, path, state, error;
         int64_t size = 0, done = 0, uploaded = 0, added = 0;
         int downRate = 0, upRate = 0, peers = 0, seeds = 0, files = 0;
+        // why it may be slow (module 2+): known / swarm counts, availability, can others reach us, the trackers
+        int seedsAll = 0, peersAll = 0, swarmSeeds = -1, swarmPeers = -1, trackers = 0, trackersOk = 0, port = 0, mapped = 0;
+        float copies = -1;
+        bool incoming = false;
+        std::string trackerMsg;
         bool paused = false, single = false;
         int watchFile = -1;  // the biggest movie inside (-1: none, or not known yet)
         int64_t watchSize = 0;
@@ -66,6 +71,7 @@ public:
     std::vector<File> Files(const std::string& id);
     void SetWanted(const std::string& id, const std::vector<bool>& want);
     void Pause(const std::string& id, bool paused);
+    void Reannounce(const std::string& id);  // look for more peers now
     void Remove(const std::string& id, bool deleteFiles);
     std::string DefaultDir() const;
     // watching while it downloads: the file's reader for PlayerHost::OpenStream (and the name it plays under)
