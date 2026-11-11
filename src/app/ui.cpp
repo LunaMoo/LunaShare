@@ -1699,6 +1699,7 @@ void App::DrawChat(const std::string& peer) {
         if (!replyFor.empty() && editMid.empty()) DraftSet(replyFor, chatInput);
         replyFor = peer;
         chatInput = DraftGet(peer);
+        imeReset = true;
         replyMid.clear();
         editMid.clear();
         if (const char* r = getenv("LUNASHARE_REPLYTO")) replyMid = r;  // dev: answering this message (screenshots)
@@ -1737,6 +1738,7 @@ void App::DrawChat(const std::string& peer) {
             ImGui::PushID((int)i);
             if (ImGui::Button(("@" + menMatch[i].second).c_str(), ImVec2(0, menH - ImGui::GetStyle().ItemSpacing.y))) {
                 chatInput = chatInput.substr(0, menAt) + "@" + menMatch[i].second + " ";
+                imeReset = true;
                 focusInput = true;
                 Emoji().CursorToEnd();
             }
@@ -1766,7 +1768,7 @@ void App::DrawChat(const std::string& peer) {
                      ImGui::GetColorU32(ImGuiCol_TextDisabled), line.c_str(), nullptr, 0, &clip);
         ImGui::SetCursorScreenPos(ImVec2(p.x + w + ImGui::GetStyle().ItemSpacing.x, p.y));
         if (ui::IconButton("rpx", Icon::Cancel, T("Cancel"), xw)) {
-            if (!editMid.empty()) chatInput.clear();
+            if (!editMid.empty()) chatInput.clear(), imeReset = true;
             replyMid.clear();
             editMid.clear();
         }
@@ -1778,6 +1780,7 @@ void App::DrawChat(const std::string& peer) {
             // insert where the cursor was (the box isn't active while the picker is used)
             size_t at = Emoji().InputCursor() >= 0 ? std::min((size_t)Emoji().InputCursor(), chatInput.size()) : chatInput.size();
             chatInput.insert(at, picked);
+            imeReset = true;
             Emoji().SetInputCursor((int)(at + picked.size()));  // the next one goes after it
         }
     }
@@ -1924,6 +1927,7 @@ void App::DrawChat(const std::string& peer) {
         replyMid.clear();
         editMid.clear();
         chatInput.clear();
+        imeReset = true;
         Emoji().SetInputCursor(-1);
         if (!mobile) focusInput = true;
     }
@@ -2436,6 +2440,7 @@ void App::DrawMessages(const std::string& peer) {
                 editMid = m.mid;
                 replyMid.clear();
                 chatInput = Emoji().Display(m.text);
+                imeReset = true;
                 focusInput = true;
                 Emoji().CursorToEnd();
                 selMsgs.clear();

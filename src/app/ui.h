@@ -129,6 +129,9 @@ public:
 
     // style rebuild requests
     int styleGeneration = 0;
+    // Android: the app itself changed the chat's text (sent, emoji, a mention, editing, another chat) - the
+    // on-screen keyboard is told to start over on it (main.cpp)
+    bool imeReset = false;
     int theme = 0;  // (set with the style: 3 Twilight / 4 Moonlight draw their sky behind the window)
 
 private:

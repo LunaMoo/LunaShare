@@ -336,7 +336,6 @@ static float DetectScale(SDL_Window* window) {
 #ifdef __ANDROID__
 static bool g_kbOn = false;         // the on-screen keyboard was asked for
 static Uint64 g_kbOffSince = 0;     // ... and no text field has wanted it since then (0 = one does)
-static Uint64 g_imeAt = 0;          // the last time the keyboard typed something (text, a key)
 #endif
 
 int main(int argc, char** argv) {
@@ -686,9 +685,6 @@ int main(int argc, char** argv) {
                     break;
                 default: break;
             }
-#ifdef __ANDROID__
-            if (ev.type == SDL_TEXTINPUT || ev.type == SDL_TEXTEDITING || ev.type == SDL_KEYDOWN) g_imeAt = SDL_GetTicks64();
-#endif
             if (ev.type == SDL_MOUSEMOTION || ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEWHEEL || ev.type == SDL_KEYDOWN ||
                 ev.type == SDL_TEXTINPUT || ev.type == SDL_FINGERMOTION || ev.type == SDL_FINGERDOWN || ev.type == SDL_WINDOWEVENT)
                 lastInput = ls::SteadyMs();
@@ -887,26 +883,23 @@ int main(int argc, char** argv) {
             }
         }
 #ifdef __ANDROID__
-        // The keyboard's idea of the text must stay ours: when the text in the field changed without the keyboard
-        // typing (the app sent / cleared it, put an emoji in) or another field took over, the keyboard starts over
+        // The keyboard's idea of the text must stay ours: when the app itself changed the text (it says so:
+        // imeReset) or another field took over, the keyboard starts over. (Never guessed from timing: holding a key
+        // for a Polish letter takes longer than any such guess, and a restart in the middle of it wrecked the typing.)
         {
             static ImGuiID lastId = 0;
-            static std::string lastText;
             ImGuiID id = ImGui::GetActiveID();
-            ImGuiInputTextState* st = id ? ImGui::GetInputTextState(id) : nullptr;
-            if (st && g_kbOn) {
-                std::string now(st->GetText(), (size_t)std::max(0, st->TextLen));
-                bool reset = false;
-                if (id != lastId) reset = lastId != 0;  // (another field: the first one gets a fresh start from SDL)
-                else if (now != lastText)               // (a change the keyboard didn't make)
-                    reset = SDL_GetTicks64() - g_imeAt > 250 || (now.empty() && lastText.size() > 3);
-                if (reset && ls::Bridge().resetTextInput) ls::Bridge().resetTextInput();
+            bool field = id && ImGui::GetInputTextState(id);
+            bool reset = false;
+            if (g_kbOn && field) {
+                reset = (id != lastId && lastId != 0) || app.imeReset;  // (the first field: SDL gives it a fresh start)
                 lastId = id;
-                lastText = std::move(now);
-            } else if (!g_kbOn) {  // (the keyboard went away: shown again, SDL starts it over itself)
+            } else if (!g_kbOn) {
                 lastId = 0;
-                lastText.clear();
-            }  // (no field for a moment while the keyboard stays: the next field is compared with the last one)
+            }
+            if (g_kbOn && app.imeReset && !field) reset = true;  // (sent: the field may let go for a frame)
+            app.imeReset = false;
+            if (reset && ls::Bridge().resetTextInput) ls::Bridge().resetTextInput();
         }
 #endif
         SDL_GL_SwapWindow(window);
