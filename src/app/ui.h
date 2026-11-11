@@ -59,6 +59,7 @@ public:
     bool wantAttention = false;  // flash the taskbar / vibrate
     std::string windowTitle = "LunaShare";
     bool busy = false;           // transfers running -> keep redrawing
+    bool discardFrame = false;   // this frame's picture is off (a list jumped): draw the next one at once, don't show this
     float keyboardInset = 0;     // px hidden by the on-screen keyboard (mobile)
     // the typed text shown again just above the on-screen keyboard (the field itself may be under it); tapping it
     // moves the cursor. main.cpp keeps the taps inside mirrorRect away from ImGui (they'd end the typing)
@@ -526,7 +527,8 @@ private:
     std::string renameBuf;
     std::string renamePeer;
     bool chatFollow = true;       // the chat stays at its end (until the reader scrolls up)
-    float chatLastScrollY = 0;
+    float chatLastScrollY = 0, chatLastEndY = 0;
+    int chatSettle = 0;
     std::string forgetPeer;  // "Forget..." asks first (a person: all their devices and the chat)
     bool openForget = false;
     bool openRename = false;

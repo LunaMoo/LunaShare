@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Opening a chat no longer flickers while pictures and video thumbnails above load: a frame in which the chat would
+  show away from its end isn't shown, the next one (back at the end) comes at once.
+
 ## 1.6.5
 
 - A chat opens at its end and stays there while pictures and video thumbnails above it load (it used to end up

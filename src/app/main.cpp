@@ -746,6 +746,7 @@ int main(int argc, char** argv) {
             }
         }
         ImGui::NewFrame();
+        app.discardFrame = false;
         app.Frame();
         Player().SetLoop(engine.settings.playerLoop && !engine.watch.sid);
         Player().Update();  // before Media(): hands it the current video picture to upload
@@ -763,6 +764,13 @@ int main(int argc, char** argv) {
 #endif
         }
 
+        // a frame whose picture is off (the chat jumped back to its end) isn't shown: the next one comes at once
+        static int discarded = 0;
+        if (app.discardFrame && discarded < 6) {
+            discarded++;
+            continue;
+        }
+        discarded = 0;
         int fbw, fbh;
         SDL_GL_GetDrawableSize(window, &fbw, &fbh);
         glf::Viewport(0, 0, fbw, fbh);

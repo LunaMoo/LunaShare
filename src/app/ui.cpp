@@ -187,6 +187,21 @@ void App::Frame() {
             OpenChatHistory(selectedPeer);
         }
     }
+    if (static const char* dc = getenv("LUNASHARE_DEVCHAT"); dc && ImGui::GetFrameCount() == 3) {  // dev: a long chat, open
+        auto lk = eng.Lock();
+        auto& cv = eng.chats["devchatpeer00000"];
+        for (int i = 0; i < atoi(dc); i++) {
+            ChatMessage m;
+            m.mid = "dev" + std::to_string(i);
+            m.ts = NowMs() - (atoi(dc) - i) * 60000LL;
+            m.kind = i % 3 ? MsgKind::Text : MsgKind::System;
+            m.outgoing = i % 2;
+            m.text = "message " + std::to_string(i) + (i % 5 ? "" : " with a longer text that wraps over a couple of lines in the chat window, like a real one");
+            cv.messages.push_back(m);
+        }
+        selectedPeer = "devchatpeer00000";
+        scrollToBottom = true;
+    }
     static const char* devLink = getenv("LUNASHARE_SHARELINK");  // dev: "a link for anyone" for this file (screenshots)
     if (devLink && ImGui::GetFrameCount() == 20) {
         std::string p = devLink;
@@ -2060,6 +2075,8 @@ void App::DrawMessages(const std::string& peer) {
             ImGui::PopID();
             continue;
         }
+        static const char* devGrow = getenv("LUNASHARE_DEVGROW");  // dev: something above grows (a thumbnail loading)
+        if (devGrow && i == 5) ImGui::Dummy(ImVec2(1, ImGui::GetTime() > 2.0 ? 300.0f : 10.0f));
         bool sel = selMsgs.count(m.mid) > 0;
         if (Engine::IsGroupKey(peer) && !m.outgoing && !m.from.empty()) {  // who wrote it (once for a run of messages)
             const ChatMessage* prev = i > 0 ? &cv.messages[(size_t)i - 1] : nullptr;
@@ -2337,6 +2354,21 @@ void App::DrawMessages(const std::string& peer) {
         if (scrollToBottom || sy >= maxY - 4.0f) chatFollow = true;
         else if (sy < chatLastScrollY - 1.0f) chatFollow = false;  // the reader scrolled up
         if (chatFollow && (scrollToBottom || sy < maxY - 0.5f)) ImGui::SetScrollHereY(1.0f);
+        // Where the end really is this frame (things above grew, or the chat just opened): if the view isn't there,
+        // this picture would flash - it's not shown, and the next frame (at the end) comes at once.
+        ImGuiWindow* win = ImGui::GetCurrentWindow();  // (its content as ImGui will measure it: the next frame's end)
+        float content = IM_TRUNC(win->DC.CursorMaxPos.y - win->DC.CursorStartPos.y);
+        float endY = content + win->WindowPadding.y * 2 - (win->Size.y - win->ScrollbarSizes.y - win->TitleBarHeight - win->MenuBarHeight);
+        // (only for a few frames after the end moved: should the two ever disagree for good, nothing spins)
+        if (scrollToBottom || fabsf(endY - chatLastEndY) > 0.5f) chatSettle = 3;
+        chatLastEndY = endY;
+        if (chatFollow && chatSettle > 0 && endY > 0 && fabsf(sy - endY) > 1.0f) {
+            discardFrame = true;
+            busy = true;
+        }
+        if (chatSettle > 0) chatSettle--;
+        if (static const char* lg = getenv("LUNASHARE_CHATLOG"); lg)
+            fprintf(stderr, "chat t=%.3f sy=%.1f max=%.1f end=%.1f follow=%d discard=%d\n", ImGui::GetTime(), sy, maxY, endY, chatFollow, discardFrame);
     }
     scrollToBottom = false;
     chatLastScrollY = sy;
