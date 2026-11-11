@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.7
 
 - Phones: no flash through the text when the first letter is typed or the last one removed - the text field kept
   changing width (the video-message button goes away while typing); now the Send button takes that space instead.
