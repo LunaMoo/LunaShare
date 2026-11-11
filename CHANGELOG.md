@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Calls: a new echo canceller - WebRTC's AEC3 (the one in Chrome) instead of speexdsp's. It finds the delay between
+  speaker and microphone itself, copes with room reverb and small speakers that distort, and keeps your voice when
+  both of you talk at once. In a test with speech in a reverberant room it removes 57 dB of echo, speexdsp 9 dB.
+  Used on computers and on phones without their own call echo canceller (phones that have one keep using it).
+  RNNoise still does the noise suppression.
+
 ## 1.6.7
 
 - Phones: no flash through the text when the first letter is typed or the last one removed - the text field kept

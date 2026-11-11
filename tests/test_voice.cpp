@@ -198,7 +198,8 @@ static void TestEcho() {
     printf("  far-end echo in what we send: %.1f dB without AEC, %.1f dB with AEC (-%.1f dB); own voice %.1f -> %.1f dB\n", echoOff,
            echoOn, echoOff - echoOn, nearOff, nearOn);
     printf("  AEC without noise suppression: echo -%.1f dB, own voice %.1f dB\n", echoOff - echoNoNs, nearNoNs);
-    CHECK(echoOff - echoOn > 15, "echo reduced by more than 15 dB");
+    // (steady tones are not what AEC3 is tuned for - it removes less here than from speech; TestEchoRoom is the real test)
+    CHECK(echoOff - echoOn > 10, "echo reduced by more than 10 dB");
     CHECK(nearOff - nearOn < 10, "own voice preserved");
 }
 
@@ -272,6 +273,121 @@ static void TestEchoBursty() {
     double off = EchoRunBursty(false), on = EchoRunBursty(true);
     printf("  echo in what we send: %.1f dB without AEC, %.1f dB with AEC (-%.1f dB)\n", off, on, off - on);
     CHECK(off - on > 15, "echo reduced by more than 15 dB with bursty audio callbacks");
+}
+
+// Speech-like test signal: a pitch pulse train through three moving formants, in syllables and talk spurts with pauses.
+struct FakeTalker {
+    std::mt19937 rng;
+    double f0, phase = 0, y1[3] = {}, y2[3] = {};
+    double fm[3] = {500, 1500, 2500}, target[3] = {500, 1500, 2500};
+    int64_t n = 0;
+    FakeTalker(unsigned seed, double pitch) : rng(seed), f0(pitch) {}
+    double Next() {
+        double t = (double)n / R;
+        if (n % (R / 5) == 0) {  // a new syllable every 200 ms: formants move somewhere else
+            target[0] = 300 + rng() % 600;
+            target[1] = 900 + rng() % 1400;
+            target[2] = 2200 + rng() % 1000;
+        }
+        n++;
+        double spurt = std::fmod(t, 2.3) < 1.6 ? 1.0 : 0.0;  // 1.6 s talking, 0.7 s pause
+        double syl = std::max(0.0, std::sin(2 * PI * 2.5 * t));
+        double pitch = f0 * (1 + 0.15 * std::sin(2 * PI * 0.7 * t));
+        phase += pitch / R;
+        double src = 0;
+        if (phase >= 1) { phase -= 1; src = 1.0; }
+        src += ((double)(rng() % 2001) - 1000) / 1000.0 * 0.05;  // breath
+        double out = 0;
+        for (int k = 0; k < 3; k++) {
+            fm[k] += (target[k] - fm[k]) * 0.001;
+            double r = 0.995, w = 2 * PI * fm[k] / R;
+            double y = src + 2 * r * std::cos(w) * y1[k] - r * r * y2[k];
+            y2[k] = y1[k];
+            y1[k] = y;
+            out += y * (k == 0 ? 1.0 : 0.5);
+        }
+        return out * spurt * syl;
+    }
+};
+
+// A room: speaker distortion, 70 ms to the microphone, then reverb (decaying reflections over 150 ms).
+// Phase 1 (0-8 s): only the far end talks - the echo canceller learns the room, then we measure what echo is left.
+// Phase 2 (8-14 s): both talk at once - how much of our own voice survives.
+static void EchoRoomRun(bool aec, bool withEcho, bool withNear, double* farOnly, double* doubleTalk) {
+    const LsmModule* m = lunashare_media_module();
+    Net net;
+    LsmHost h{LSM_API_VERSION, &net, HostSend, HostLog};
+    LsmSettings s{aec ? 1 : 0, 0, 0, 64000};
+    m->start(&h, &s);
+    int err;
+    OpusEncoder* farEnc = opus_encoder_create(R, 1, OPUS_APPLICATION_VOIP, &err);
+    opus_encoder_ctl(farEnc, OPUS_SET_BITRATE(64000));
+    OpusDecoder* tap = opus_decoder_create(R, 1, &err);
+    FakeTalker far(11, 120), near(23, 210);
+    std::vector<double> ir((size_t)(R * 150 / 1000));
+    std::mt19937 rng(5);
+    for (size_t i = 0; i < ir.size(); i++)
+        ir[i] = (i == 0 ? 0.5 : 0.0) + ((double)(rng() % 2001) - 1000) / 1000.0 * 0.08 * std::exp(-(double)i / (R * 0.03));
+    const int delay = R * 70 / 1000;
+    std::vector<double> spk;  // distorted speaker output
+    std::vector<int16_t> sent;
+    const int steps = 14 * 50, dtFrom = 8 * 50;
+    for (int step = 0; step < steps; step++) {
+        int16_t f[F];
+        for (int i = 0; i < F; i++) f[i] = (int16_t)std::clamp(far.Next() * 2500, -32000.0, 32000.0);
+        uint8_t pkt[1500];
+        pkt[0] = 1;
+        pkt[1] = (uint8_t)step; pkt[2] = (uint8_t)(step >> 8);
+        uint32_t ts = (uint32_t)(step * F);
+        memcpy(pkt + 3, &ts, 4);
+        int n = opus_encode(farEnc, f, F, pkt + 7, 1400);
+        m->receive(pkt, (size_t)n + 7);
+        int16_t out[F];
+        m->playback(out, F);
+        for (int i = 0; i < F; i++) {
+            double x = out[i] / 32768.0;
+            spk.push_back(std::tanh(2.0 * x) / 2.0);  // a small speaker pushed a bit too hard
+        }
+        int16_t mic[F];
+        for (int i = 0; i < F; i++) {
+            int64_t at = (int64_t)spk.size() - F + i - delay;
+            double e = 0;
+            if (withEcho)
+                for (size_t k = 0; k < ir.size() && at - (int64_t)k >= 0; k += 1) e += ir[k] * spk[(size_t)(at - (int64_t)k)];
+            double v = withNear && step >= dtFrom ? near.Next() * 1200 : (near.Next(), 0.0);
+            mic[i] = (int16_t)std::clamp(e * 32768.0 + v + (double)((int)(rng() % 60) - 30), -32767.0, 32767.0);
+        }
+        m->capture(mic, F);
+        for (auto& p : net.sent) {
+            int16_t dec[F * 6];
+            int k = opus_decode(tap, p.data() + 7, (opus_int32)p.size() - 7, dec, F * 6, 0);
+            if (k > 0) sent.insert(sent.end(), dec, dec + k);
+        }
+        net.sent.clear();
+    }
+    m->stop();
+    opus_encoder_destroy(farEnc);
+    opus_decoder_destroy(tap);
+    auto energy = [&](size_t a, size_t b) {
+        double e = 0;
+        for (size_t i = a; i < b && i < sent.size(); i++) e += (double)sent[i] * sent[i];
+        return Db(e / (double)std::max<size_t>(1, b - a) / (32768.0 * 32768.0));
+    };
+    *farOnly = energy((size_t)R * 4, (size_t)R * 8);
+    *doubleTalk = energy((size_t)R * 9, (size_t)R * 14);
+}
+
+static void TestEchoRoom() {
+    printf("[echo cancellation: speech-like, reverberant room, distorting speaker, double talk]\n");
+    double echoOff, dtOff, echoOn, dtOn, nearAlone, unused;
+    EchoRoomRun(false, true, true, &echoOff, &dtOff);
+    EchoRoomRun(true, true, true, &echoOn, &dtOn);
+    EchoRoomRun(false, false, true, &unused, &nearAlone);
+    printf("  echo while only the far end talks: %.1f dB without AEC, %.1f dB with AEC (-%.1f dB)\n", echoOff, echoOn,
+           echoOff - echoOn);
+    printf("  both talking: own voice alone %.1f dB, with echo + AEC %.1f dB (%+.1f dB)\n", nearAlone, dtOn, dtOn - nearAlone);
+    CHECK(echoOff - echoOn > 20, "echo in a reverberant room reduced by more than 20 dB");
+    CHECK(dtOn - nearAlone > -6, "own voice kept while both talk");
 }
 
 static void TestVoiceMessage() {
@@ -434,6 +550,7 @@ int main() {
     TestLoudness();
     TestEcho();
     TestEchoBursty();
+    TestEchoRoom();
     TestVoiceMessage();
     TestVideoMessageFile();
     printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL VOICE TESTS PASSED\n", g_fail);

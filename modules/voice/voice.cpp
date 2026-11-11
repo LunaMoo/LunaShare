@@ -1,7 +1,7 @@
-// LunaShare Voice - optional media module: Opus + SpeexDSP echo cancellation / noise suppression + jitter buffer.
+// LunaShare Voice - optional media module: Opus + WebRTC AEC3 echo cancellation + RNNoise + jitter buffer.
 //
-// Pipeline (16 kHz mono, 20 ms frames):
-//   mic -> echo canceller (reference = what we play) -> denoise/AGC -> Opus (in-band FEC) -> packet -> host
+// Pipeline (48 kHz mono, 20 ms frames; the echo canceller works in 10 ms halves):
+//   mic -> AEC3 echo canceller (reference = what we play) -> RNNoise -> AGC -> Opus (in-band FEC) -> packet -> host
 //   host -> packet -> jitter buffer -> Opus decode / FEC / loss concealment -> speaker (and AEC reference)
 // Packet: [u8 version=1][u16 LE seq][u32 LE timestamp in samples][opus payload]
 #include <algorithm>
@@ -17,10 +17,11 @@
 #include <vector>
 
 #include <opus.h>
-#include <speex/speex_echo.h>
 #include <speex/speex_preprocess.h>
 
 #include "rnnoise.h"
+
+#include "modules/audio_processing/include/audio_processing.h"
 
 #include "lunashare_media.h"
 
@@ -48,7 +49,7 @@ namespace {
 constexpr int kRate = LSM_SAMPLE_RATE;
 constexpr int kFrame = kRate / 50;          // 20 ms = 960 samples
 constexpr int kOpusRate = 48000;             // Opus timestamps / pre-skip are always in 48 kHz units
-constexpr int kEchoTail = kRate * 2 / 5;    // 400 ms echo tail (phone audio paths add a lot of latency)
+constexpr int kHalf = kRate / 100;           // 10 ms, what WebRTC's audio processing works in
 constexpr int kMaxPacket = 1500;
 
 // Make-up gain after speexdsp's AGC, which levels speech at only about -25 dBFS (quiet next to other apps):
@@ -112,7 +113,9 @@ struct Voice {
 
     // ---- send side (capture thread)
     OpusEncoder* enc = nullptr;
-    SpeexEchoState* echo = nullptr;
+    // echo canceller: WebRTC AEC3 + high-pass filter (finds the speaker->mic delay itself, handles double talk)
+    rtc::scoped_refptr<webrtc::AudioProcessing> apm;
+    std::vector<int16_t> ref;  // speaker samples not yet given to the echo canceller (it takes 10 ms at a time)
     SpeexPreprocessState* pre = nullptr;
     DenoiseState* rnn = nullptr;  // noise suppression (RNNoise: voices stay natural, steady and changing noise both go)
     Leveler leveler;
@@ -171,18 +174,29 @@ void ApplySettingsLocked() {
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_AGC, &agc);
         float level = 20000;
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_AGC_LEVEL, &level);
-        speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_ECHO_STATE, g.settings.echo_cancel ? g.echo : nullptr);
+    }
+    if (g.apm) {
+        webrtc::AudioProcessing::Config c;
+        c.pipeline.multi_channel_render = false;
+        c.pipeline.multi_channel_capture = false;
+        c.high_pass_filter.enabled = g.settings.echo_cancel != 0;  // low rumble confuses the echo canceller
+        c.echo_canceller.enabled = g.settings.echo_cancel != 0;
+        c.echo_canceller.mobile_mode = false;
+        c.noise_suppression.enabled = false;  // RNNoise does it
+        c.gain_controller1.enabled = false;   // (speexdsp's AGC + the leveler do the gain)
+        c.gain_controller2.enabled = false;
+        g.apm->ApplyConfig(c);
     }
 }
 
 void FreeLocked() {
     if (g.enc) opus_encoder_destroy(g.enc);
     g.streams.clear();
-    if (g.echo) speex_echo_state_destroy(g.echo);
     if (g.pre) speex_preprocess_state_destroy(g.pre);
     if (g.rnn) rnnoise_destroy(g.rnn);
     g.enc = nullptr;
-    g.echo = nullptr;
+    g.apm = nullptr;
+    g.ref.clear();
     g.pre = nullptr;
     g.rnn = nullptr;
 }
@@ -200,9 +214,8 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     opus_encoder_ctl(g.enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
     opus_encoder_ctl(g.enc, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));  // up to 20 kHz: natural voices
     opus_encoder_ctl(g.enc, OPUS_SET_COMPLEXITY(9));
-    g.echo = speex_echo_state_init(kFrame, kEchoTail);
-    int rate = kRate;
-    speex_echo_ctl(g.echo, SPEEX_ECHO_SET_SAMPLING_RATE, &rate);
+    g.apm = webrtc::AudioProcessingBuilder().Create();
+    if (!g.apm) Log("echo canceller could not start");
     g.pre = speex_preprocess_state_init(kFrame, kRate);
     g.rnn = rnnoise_create(nullptr);
     ApplySettingsLocked();
@@ -215,7 +228,7 @@ int Start(const LsmHost* host, const LsmSettings* s) {
     g.bytesOut = 0;
     g.farHold = 0;
     g.running = true;
-    Log("voice started (Opus 48 kHz, speexdsp AEC, RNNoise)");
+    Log("voice started (Opus 48 kHz, WebRTC AEC3, RNNoise)");
     return 0;
 }
 
@@ -228,10 +241,11 @@ void Stop() {
 // ---------------------------------------------------------------- send
 void EncodeFrameLocked(int16_t* frame) {
     int16_t clean[kFrame];
-    if (g.settings.echo_cancel && g.echo) {
-        speex_echo_capture(g.echo, frame, clean);  // uses the playback history fed by speex_echo_playback()
-    } else {
-        memcpy(clean, frame, sizeof(clean));
+    memcpy(clean, frame, sizeof(clean));
+    if (g.settings.echo_cancel && g.apm) {
+        // removes what the speaker put into the microphone (reference fed in Playback())
+        webrtc::StreamConfig sc(kRate, 1);
+        for (int k = 0; k < kFrame; k += kHalf) g.apm->ProcessStream(clean + k, sc, sc, clean + k);
     }
     if (g.settings.noise_suppress) Denoise(g.rnn, clean, kFrame);
     if (g.pre) speex_preprocess_run(g.pre, clean);
@@ -399,16 +413,17 @@ void Playback(int16_t* outBuf, int samples) {
         }
     }
     g.spkLevel = g.spkLevel * 0.7f + Level(outBuf, samples) * 0.3f;
-    // feed what goes to the speaker to the echo canceller, in exact 20 ms frames
-    if (g.settings.echo_cancel && g.echo) {
-        static std::vector<int16_t> ref;
-        ref.insert(ref.end(), outBuf, outBuf + samples);
+    // feed what goes to the speaker to the echo canceller, in exact 10 ms frames
+    if (g.settings.echo_cancel && g.apm) {
+        g.ref.insert(g.ref.end(), outBuf, outBuf + samples);
+        webrtc::StreamConfig sc(kRate, 1);
         size_t off = 0;
-        while (ref.size() - off >= (size_t)kFrame) {
-            speex_echo_playback(g.echo, &ref[off]);
-            off += kFrame;
+        int16_t tmp[kHalf];
+        while (g.ref.size() - off >= (size_t)kHalf) {
+            g.apm->ProcessReverseStream(&g.ref[off], sc, sc, tmp);
+            off += kHalf;
         }
-        ref.erase(ref.begin(), ref.begin() + (ptrdiff_t)off);
+        g.ref.erase(g.ref.begin(), g.ref.begin() + (ptrdiff_t)off);
     }
 }
 
@@ -416,7 +431,11 @@ void SetMute(int m) { g.mute = m != 0; }
 
 void ResetEcho() {
     std::lock_guard<std::mutex> l(g.m);
-    if (g.echo) speex_echo_state_reset(g.echo);
+    if (g.apm) {
+        g.apm->Initialize();  // starts learning the new speaker->mic path from scratch
+        ApplySettingsLocked();
+    }
+    g.ref.clear();
     g.leveler.Reset();  // the microphone may have changed too (headset)
     if (g.running) Log("echo canceller reset (sound path changed)");
 }

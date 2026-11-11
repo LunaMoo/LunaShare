@@ -142,11 +142,14 @@ if(LUNASHARE_BUILD_VOICE)
         target_link_libraries(lunashare_speexdsp PUBLIC m)
     endif()
 
+    # WebRTC's echo canceller AEC3 (as in Chrome), vendored: only the audio processing parts
+    add_subdirectory(third_party/webrtc_apm)
+
     add_library(lunashare_media SHARED modules/voice/voice.cpp)
     set_target_properties(lunashare_media PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
     target_include_directories(lunashare_media PRIVATE src/media_api)
-    target_link_libraries(lunashare_media PRIVATE opus lunashare_speexdsp lunashare_rnnoise Threads::Threads)
+    target_link_libraries(lunashare_media PRIVATE opus lunashare_speexdsp lunashare_rnnoise webrtc_apm Threads::Threads)
     if(WIN32 AND NOT MSVC)
         target_link_options(lunashare_media PRIVATE -static)
     elseif(APPLE)
@@ -157,7 +160,7 @@ if(LUNASHARE_BUILD_VOICE)
 
     add_library(lunashare_voice_static STATIC modules/voice/voice.cpp)  # same code, for tests
     target_include_directories(lunashare_voice_static PUBLIC src/media_api)
-    target_link_libraries(lunashare_voice_static PUBLIC opus lunashare_speexdsp lunashare_rnnoise Threads::Threads)
+    target_link_libraries(lunashare_voice_static PUBLIC opus lunashare_speexdsp lunashare_rnnoise webrtc_apm Threads::Threads)
 endif()
 
 # ---------------------------------------------------------------- optional video module

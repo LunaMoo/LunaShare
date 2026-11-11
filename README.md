@@ -213,7 +213,7 @@ after receiving, so you know it arrived intact.
 - One-to-one and group calls (see **Groups** above).
 - The call button sits in the chat header. It's only shown when **both** devices have the module, since each device announces its capabilities.
 - Calls go peer-to-peer over the same encrypted connection as chat (LAN, hotspot, internet/KCP, and in principle Bluetooth, though there it can be choppy).
-- Audio: Opus (48 kHz fullband, 16–128 kbit/s, default 48, in-band FEC), an adaptive jitter buffer with loss concealment, SpeexDSP for echo cancellation and auto gain, and RNNoise for noise suppression.
+- Audio: Opus (48 kHz fullband, 16–128 kbit/s, default 48, in-band FEC), an adaptive jitter buffer with loss concealment, WebRTC's AEC3 for echo cancellation (on phones with their own call echo canceller, that one is used instead), SpeexDSP for auto gain, and RNNoise for noise suppression.
 - During a call, file transfers to that device are throttled so they don't cause audio stutter.
 - Call bar: timer, mic/speaker levels, link stats (loss, jitter, delay), and buttons for mute, speaker (phones) and hang up. Incoming calls get a ringtone and a full-screen answer screen on phones.
 - Calls are logged in the chat (*Outgoing call – 2:31*, *Missed call*, …).
