@@ -23,7 +23,7 @@ public class BackgroundService extends Service {
             return START_NOT_STICKY;
         }
         Notification n = Notify.builder(this, Notify.CH_SERVICE)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_cow)
                 .setContentTitle("LunaShare")
                 .setContentText(getString(R.string.bg_ready))
                 .setOngoing(true)
@@ -51,7 +51,7 @@ public class BackgroundService extends Service {
     void stoppedNotice() {
         try {
             Notification n = Notify.builder(this, Notify.CH_SERVICE)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setSmallIcon(R.drawable.ic_stat_cow)
                     .setContentTitle("LunaShare")
                     .setContentText(getString(R.string.bg_stopped))
                     .setAutoCancel(true)

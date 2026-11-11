@@ -57,7 +57,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"wanPassword", s.wanPassword}, {"wanNatPmp", s.wanNatPmp}, {"wanLocalPort", s.wanLocalPort},
         {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
         {"maxParallel", s.maxParallel}, {"notifySound", s.notifySound}, {"backgroundRun", s.backgroundRun}, {"shareLibrary", s.shareLibrary}, {"shareOnMobileData", s.shareOnMobileData}, {"groupsViaServer", s.groupsViaServer}, {"sharedDir", s.sharedDir}, {"closeToTray", s.closeToTray}, {"keepHistory", s.keepHistory},
-        {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"lastBrowseDir", s.lastBrowseDir},
+        {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"themeV", 1}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
         {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"welcomed", s.welcomed}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"galleryFolders", s.galleryFolders}, {"archiveFolders", s.archiveFolders},
@@ -163,6 +163,9 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     s.layout = (UiLayout)(layout < 0 || layout > 2 ? 0 : layout);
     Get(j, "uiScale", s.uiScale);
     Get(j, "theme", s.theme);
+    int themeV = 0;  // (before 1.6.9 dark was the default and saved like a choice: once, it becomes Moonlight)
+    Get(j, "themeV", themeV);
+    if (themeV < 1 && s.theme == 0 && j.contains("theme")) s.theme = 4;
     Get(j, "lastBrowseDir", s.lastBrowseDir);
     Get(j, "browserGrid", s.browserGrid);
     Get(j, "emojiRecent", s.emojiRecent);

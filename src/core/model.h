@@ -102,7 +102,7 @@ struct Settings {
 
     UiLayout layout = UiLayout::Auto;
     float uiScale = 0.0f;          // 0 = automatic (DPI based)
-    int theme = 0;                 // 0 dark, 1 light, 2 classic
+    int theme = 4;                 // 0 dark, 1 light, 2 classic, 3 twilight, 4 moonlight (the default)
     std::string lastBrowseDir;
     // calls (used only when the optional media module is installed)
     bool callEchoCancel = true;

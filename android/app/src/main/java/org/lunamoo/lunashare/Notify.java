@@ -58,8 +58,12 @@ public final class Notify {
         m.createNotificationChannel(mus);
     }
 
+    // the little cow (res/drawable/ic_stat_cow.xml) in the status bar, tinted soft pink where Android shows colour
+    static final int ACCENT = 0xFFF2A3BD;
+
     static Notification.Builder builder(Context c, String channel) {
-        return Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, channel) : new Notification.Builder(c);
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, channel) : new Notification.Builder(c);
+        return b.setColor(ACCENT);
     }
 
     static PendingIntent activityIntent(Context c, String action, String key, int req) {
@@ -87,7 +91,7 @@ public final class Notify {
             Context c = ctx();
             channels(c);
             Notification.Builder b = builder(c, CH_MESSAGES)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setSmallIcon(R.drawable.ic_stat_cow)
                     .setContentTitle(title)
                     .setContentText(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))
@@ -117,7 +121,7 @@ public final class Notify {
             PendingIntent answerPi = activityIntent(c, ACTION_ANSWER, key, 4);
             PendingIntent fullPi = activityIntent(c, ACTION_CALL, key, 5);
             Notification.Builder b = builder(c, CH_CALLS)
-                    .setSmallIcon(R.mipmap.ic_launcher)
+                    .setSmallIcon(R.drawable.ic_stat_cow)
                     .setContentTitle(title)
                     .setContentText(sub)
                     .setCategory(Notification.CATEGORY_CALL)

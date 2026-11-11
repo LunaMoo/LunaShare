@@ -85,6 +85,64 @@ bool App::IsMobileLayout() {
 
 // ============================================================================ frame
 
+// Twilight theme: the sky behind everything - night blue going plum, a soft moon and a few faint stars. Static (no
+// redraws of its own) and dim enough that text on it reads as on the plain dark theme.
+static void DrawTwilightSky(ImDrawList* dl, ImVec2 a, ImVec2 b, bool cold) {
+    float w = b.x - a.x, h = b.y - a.y;
+    if (w <= 0 || h <= 0) return;
+    // (cold: Moonlight - night blue all the way down instead of turning plum)
+    ImU32 top = cold ? IM_COL32(12, 18, 36, 255) : IM_COL32(21, 19, 42, 255), mid = cold ? IM_COL32(15, 25, 48, 255) : IM_COL32(28, 21, 48, 255),
+          bot = cold ? IM_COL32(20, 34, 60, 255) : IM_COL32(40, 24, 52, 255);
+    float my = a.y + h * 0.55f;
+    dl->AddRectFilledMultiColor(a, ImVec2(b.x, my), top, top, mid, mid);
+    dl->AddRectFilledMultiColor(ImVec2(a.x, my), b, mid, mid, bot, bot);
+    // the moon: a faint glow, then a crescent (the outer edge of one disc, back along the edge of an offset one)
+    float u = std::min(w, h), r = u * 0.07f;
+    ImVec2 c(b.x - u * 0.15f, a.y + h * 0.26f);
+    for (int i = 14; i >= 1; i--) dl->AddCircleFilled(c, r * (1.0f + i * 0.22f), cold ? IM_COL32(140, 185, 245, 2) : IM_COL32(225, 150, 200, 2), 64);
+    {
+        ImVec2 o(c.x + r * 0.45f, c.y - r * 0.25f);
+        float ro = r * 0.85f;
+        // where the two circles cross: the crescent runs between those angles on each
+        float d = std::sqrt((o.x - c.x) * (o.x - c.x) + (o.y - c.y) * (o.y - c.y));
+        float base = std::atan2(o.y - c.y, o.x - c.x), ang = std::acos(std::clamp((r * r + d * d - ro * ro) / (2 * r * d), -1.0f, 1.0f));
+        float baseO = std::atan2(c.y - o.y, c.x - o.x), angO = std::acos(std::clamp((ro * ro + d * d - r * r) / (2 * ro * d), -1.0f, 1.0f));
+        ImVector<ImVec2> pts;
+        const int n = 40;
+        for (int i = 0; i <= n; i++) {  // the outside: the long way round the moon
+            float t = base + ang + (2 * 3.14159265f - 2 * ang) * (float)i / n;
+            pts.push_back(ImVec2(c.x + std::cos(t) * r, c.y + std::sin(t) * r));
+        }
+        for (int i = 1; i < n; i++) {  // the inside: back along the shadow's edge (its ends are the outside's ends)
+            float t = baseO + angO - 2 * angO * (float)i / n;
+            pts.push_back(ImVec2(o.x + std::cos(t) * ro, o.y + std::sin(t) * ro));
+        }
+        dl->AddConcavePolyFilled(pts.Data, pts.Size, cold ? IM_COL32(222, 236, 255, 44) : IM_COL32(255, 226, 240, 40));
+    }
+    // stars: the same every frame (a fixed sequence), denser up high, a few brighter ones with a little cross
+    uint32_t x = 0x9E3779B9u;
+    auto rnd = [&] {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        return (float)(x & 0xFFFFFF) / (float)0x1000000;
+    };
+    float px = std::max(1.0f, u / 500.0f);
+    int n = (int)std::clamp(w * h / 9000.0f, 30.0f, 140.0f);
+    for (int i = 0; i < n; i++) {
+        float sx = a.x + rnd() * w, sy = a.y + rnd() * rnd() * h, br = rnd();
+        if ((sx - c.x) * (sx - c.x) + (sy - c.y) * (sy - c.y) < r * r * 1.4f) continue;  // (not in front of the moon)
+        int al = 18 + (int)(br * br * 70);
+        ImU32 col = cold ? IM_COL32(225 - (int)(br * 25), 238, 255, al) : IM_COL32(255, 240 - (int)(br * 30), 250, al);
+        dl->AddCircleFilled(ImVec2(sx, sy), px * (0.6f + br * 0.9f), col, 8);
+        if (br > 0.9f) {
+            float l = px * 3.2f;
+            dl->AddLine(ImVec2(sx - l, sy), ImVec2(sx + l, sy), (cold ? IM_COL32(220, 235, 255, al / 2) : IM_COL32(255, 230, 245, al / 2)), px * 0.6f);
+            dl->AddLine(ImVec2(sx, sy - l), ImVec2(sx, sy + l), (cold ? IM_COL32(220, 235, 255, al / 2) : IM_COL32(255, 230, 245, al / 2)), px * 0.6f);
+        }
+    }
+}
+
 void App::Frame() {
     auto lk = eng.Lock();
     PullEvents();
@@ -366,6 +424,9 @@ void App::Frame() {
     ImGui::Begin("##main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar(2);
+    if (theme == 3 || theme == 4)
+        DrawTwilightSky(ImGui::GetWindowDrawList(), ImGui::GetWindowPos(),
+                        ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x, ImGui::GetWindowPos().y + ImGui::GetWindowSize().y), theme == 4);
     if (locked) {  // nothing else until the PIN
         DrawLockScreen();
         ImGui::End();
@@ -1330,25 +1391,32 @@ void App::DrawMobile() {
     ImGui::PopFont();
     if (chatScreen) {
         ImGui::SameLine(rowEnd - hb * (float)nb - sp * (float)(nb - 1));
-        ImGui::SetCursorPosY(rowY + (rowH - hb) * 0.5f);
+        // every button at the same height (SameLine() alone goes back to where the line began, so only the first
+        // would be centred on the row)
+        float by = rowY + (rowH - hb) * 0.5f;
+        auto next = [&] {
+            ImGui::SameLine();
+            ImGui::SetCursorPosY(by);
+        };
+        ImGui::SetCursorPosY(by);
         if (webcam) {
             WebcamButton(selectedPeer, hb);
-            ImGui::SameLine();
+            next();
         }
         if (callable) {
             CallButton(selectedPeer, hb);
-            ImGui::SameLine();
+            next();
         }
         if (videoable) {
             CallButton(selectedPeer, hb, true);
-            ImGui::SameLine();
+            next();
         }
         if (watchable) {
             if (ui::IconButton("watch", Icon::Play, nullptr, hb)) OpenWatchPicker(selectedPeer);
-            ImGui::SameLine();
+            next();
         }
         if (ui::IconButton("chathist", Icon::History, nullptr, hb)) OpenChatHistory(selectedPeer);
-        ImGui::SameLine();
+        next();
         if (groupChat) GroupButtons(selectedPeer, hb);
         else if (ui::IconButton("attach", Icon::Attach, nullptr, hb)) {
             browseFor = BrowseFor::SendFiles;
@@ -1517,7 +1585,7 @@ void App::DrawChat(const std::string& peer) {
     }
     if (d && d->trusted) {
         ImGui::SameLine();
-        ui::Badge("trusted", IM_COL32(60, 120, 200, 255));
+        ui::Badge(T("trusted"), IM_COL32(60, 120, 200, 255));
     }
     if (!mobile) {
         float bw = ImGui::GetFrameHeight();
@@ -1749,7 +1817,7 @@ void App::DrawChat(const std::string& peer) {
         if (ImGui::Button("##emojibtn", ImVec2(bw, inputH))) emojiOpen = !emojiOpen;
         if (emojiOpen) ImGui::PopStyleColor();
         if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Emoji"));
-        std::string g = Emoji().Glyph("\xF0\x9F\x99\x82");
+        std::string g = Emoji().Glyph("\xF0\x9F\x90\xAE");  // (a cow: LunaShare's own)
         float es = std::min(bw, inputH) * 0.55f;
         ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(es, FLT_MAX, 0, g.c_str());
         ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), es, ImVec2(p.x + (bw - ts.x) * 0.5f, p.y + (inputH - ts.y) * 0.5f), IM_COL32_WHITE, g.c_str());
@@ -3551,7 +3619,7 @@ void App::DrawSettings() {
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; styleGeneration++; }
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::Combo("##theme", &edit.theme, TItems("Theme: dark\0Theme: light\0Theme: classic\0"))) { changed = true; styleGeneration++; }
+    if (ImGui::Combo("##theme", &edit.theme, TItems("Theme: dark\0Theme: light\0Theme: classic\0Theme: twilight\0Theme: moonlight\0"))) { changed = true; styleGeneration++; }
     {
         // language: automatic (the system's) or one of the translations
         const auto& langs = Languages();

@@ -129,6 +129,7 @@ public:
 
     // style rebuild requests
     int styleGeneration = 0;
+    int theme = 0;  // (set with the style: 3 Twilight / 4 Moonlight draw their sky behind the window)
 
 private:
     enum class Tab { Chat, Transfers, History, Library, Gallery, Movies, Music, Archives, Torrents, Devices, Nearby, Settings };

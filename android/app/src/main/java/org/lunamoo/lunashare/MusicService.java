@@ -188,7 +188,7 @@ public class MusicService extends Service {
                           SystemClock.elapsedRealtime())
                 .build());
         Notification.Builder b = Notify.builder(this, Notify.CH_MUSIC)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_cow)
                 .setContentTitle(title)
                 .setContentText(artist.isEmpty() ? album : artist)
                 .setOngoing(playing)

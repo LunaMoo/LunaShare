@@ -201,14 +201,45 @@ static void ApplyStyle(int theme, float scale, bool mobile) {
     style.SeparatorTextPadding = ImVec2(12, 6);
     style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
     auto rgb = [](int hex, float a = 1.0f) { return ImVec4(((hex >> 16) & 255) / 255.0f, ((hex >> 8) & 255) / 255.0f, (hex & 255) / 255.0f, a); };
-    if (theme == 0 || theme == 1) {
-        // one palette for both: a background, two raised steps, text, and one accent (indigo)
-        bool dark = theme == 0;
+    if (theme == 0 || theme == 1 || theme == 3 || theme == 4) {
+        // one palette for all three: a background, two raised steps, text, and one accent (indigo; Twilight: rose)
+        bool dark = theme != 1;
         ImVec4 bg = rgb(dark ? 0x15171C : 0xF4F5F8), raised = rgb(dark ? 0x1E2128 : 0xFFFFFF), frame = rgb(dark ? 0x272B34 : 0xE7E9EF),
                frameHi = rgb(dark ? 0x313642 : 0xDCDFE8), frameAct = rgb(dark ? 0x3A4050 : 0xCDD2E0), text = rgb(dark ? 0xE9EBF0 : 0x1B1D23),
                muted = rgb(dark ? 0x8E94A3 : 0x6A7080), line = rgb(dark ? 0x2C303A : 0xDADDE5), accent = rgb(dark ? 0x6474F0 : 0x4F5FE0),
                accentHi = rgb(dark ? 0x7685F5 : 0x6170EA), accentSoft = rgb(dark ? 0x6474F0 : 0x4F5FE0, dark ? 0.22f : 0.16f),
                accentText = rgb(dark ? 0x93A0FF : 0x4353D6);
+        if (theme == 3) {
+            // Twilight: a night sky going plum, sakura-rose accent. Text stays as bright as on Dark; the accent is deep
+            // enough for white text on it (outgoing messages), with a light pink for accent-coloured text.
+            bg = rgb(0x17142A);
+            raised = rgb(0x231D38);
+            frame = rgb(0x2B2442, 0.92f);
+            frameHi = rgb(0x372E54, 0.95f);
+            frameAct = rgb(0x433864);
+            text = rgb(0xF2ECF8);
+            muted = rgb(0xA79CC0);
+            line = rgb(0x3A3152);
+            accent = rgb(0xB8467C);
+            accentHi = rgb(0xCB5A90);
+            accentSoft = rgb(0xE07AA8, 0.24f);
+            accentText = rgb(0xFF9EC8);
+        }
+        if (theme == 4) {
+            // Moonlight: the same sky, colder - night blues, a moonlit blue accent (white text still reads on it)
+            bg = rgb(0x0F1628);
+            raised = rgb(0x172036);
+            frame = rgb(0x1E2A44, 0.92f);
+            frameHi = rgb(0x283754, 0.95f);
+            frameAct = rgb(0x324466);
+            text = rgb(0xEAF1FB);
+            muted = rgb(0x93A3BF);
+            line = rgb(0x2A3856);
+            accent = rgb(0x3A6FC4);
+            accentHi = rgb(0x4B82D6);
+            accentSoft = rgb(0x6FA8F0, 0.22f);
+            accentText = rgb(0x8EC5FF);
+        }
         ImVec4* c = style.Colors;
         c[ImGuiCol_Text] = text;
         c[ImGuiCol_TextDisabled] = muted;
@@ -255,7 +286,7 @@ static void ApplyStyle(int theme, float scale, bool mobile) {
         c[ImGuiCol_TableBorderStrong] = line;
         c[ImGuiCol_TableBorderLight] = line;
         c[ImGuiCol_TableRowBgAlt] = rgb(dark ? 0xFFFFFF : 0x000000, 0.03f);
-        c[ImGuiCol_TextSelectedBg] = rgb(dark ? 0x6474F0 : 0x4F5FE0, 0.40f);
+        c[ImGuiCol_TextSelectedBg] = theme == 3 ? rgb(0xE07AA8, 0.40f) : theme == 4 ? rgb(0x6FA8F0, 0.40f) : rgb(dark ? 0x6474F0 : 0x4F5FE0, 0.40f);
         c[ImGuiCol_DragDropTarget] = accentHi;
         c[ImGuiCol_NavCursor] = accent;
         c[ImGuiCol_ModalWindowDimBg] = rgb(0x000000, dark ? 0.55f : 0.35f);
@@ -268,6 +299,14 @@ static void ApplyStyle(int theme, float scale, bool mobile) {
         style.TouchExtraPadding = ImVec2(4, 4);
         style.GrabMinSize = 28;
         style.WindowPadding = ImVec2(10, 10);
+    }
+    if (theme == 3 || theme == 4) {  // Twilight, Moonlight: softer, rounder
+        style.FrameRounding += 3;
+        style.ChildRounding = 14;
+        style.PopupRounding = 14;
+        style.WindowRounding = 14;
+        style.GrabRounding = style.FrameRounding;
+        style.PopupBorderSize = 1;
     }
     style.ScaleAllSizes(scale);
     style.FontScaleDpi = scale;
@@ -690,6 +729,7 @@ int main(int argc, char** argv) {
         if (key != styleKey) {
             styleKey = key;
             ApplyStyle(s.theme, scale, mobile);
+            app.theme = s.theme;
             ui::M().scale = scale;
         }
         int dw, dh;

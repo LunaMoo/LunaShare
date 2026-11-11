@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Moonlight theme, now the default: a night sky behind everything - a soft moon, faint stars - in cold blues with a
+  moonlit blue accent and rounder corners. Text keeps the contrast of the dark theme; the sky is drawn with the
+  window, nothing animates. Devices that had the old default (dark) switch to it once; Dark is still in Settings.
+- Twilight theme: the same sky going plum, with a sakura-rose accent.
+- The chat's emoji button is a cow.
+- Android notifications: a little cow instead of a blank square (the status bar only shows a silhouette, and the
+  app icon is a full square), tinted soft pink.
+- Phones: the chat's header buttons all sit at the same height (only the first was centred on the row).
+- "trusted" badge translated.
+
 ## 1.6.8
 
 - Calls: a new echo canceller - WebRTC's AEC3 (the one in Chrome) instead of speexdsp's. It finds the delay between
