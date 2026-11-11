@@ -793,6 +793,17 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
     }
 }
 
+// LunaShare's own echo canceller - not on top of the phone's: one canceller should own the echo (a second one only
+// distorts a signal that's already been cleaned)
+bool MediaHost::SoftwareAec(const Settings& s) const {
+    if (!s.callEchoCancel) return false;
+#if defined(__ANDROID__)
+    const char* co = SDL_GetHint("SDL_ANDROID_VOICE_CAPTURE_OK");
+    if (co && *co == '1') return false;
+#endif
+    return true;
+}
+
 bool MediaHost::OpenDevices(bool capture, bool playback) {
     CloseDevices();
     if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
@@ -870,7 +881,7 @@ void MediaHost::SetMode(Mode m) {
     if (m == Mode::Call && mod_) {
         Settings s = eng_->GetSettings();
         LsmHost h{LSM_API_VERSION, this, SendCb, LogCb};
-        LsmSettings ls{s.callEchoCancel ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
+        LsmSettings ls{SoftwareAec(s) ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
         mod_->start(&h, &ls);
         {
             auto lk = eng_->Lock();
@@ -881,6 +892,7 @@ void MediaHost::SetMode(Mode m) {
         mode_ = Mode::Call;
         OpenDevices(true, true);
         liveLs_ = ls;
+        liveUserAec_ = s.callEchoCancel;
         liveIn_ = s.callInputDevice;
         liveOut_ = s.callOutputDevice;
         liveDefaultOut_ = DefaultOutputName();
@@ -951,19 +963,19 @@ void MediaHost::ResetEcho() {
 // the echo canceller start over (what it learned about the old sound path only gets in the way).
 void MediaHost::ApplyLiveAudio() {
     Settings s = eng_->GetSettings();
-    LsmSettings ls{s.callEchoCancel ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
+    LsmSettings ls{SoftwareAec(s) ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
     if (memcmp(&ls, &liveLs_, sizeof(ls)) != 0) {
         bool aecOn = ls.echo_cancel && !liveLs_.echo_cancel;
-#if defined(__ANDROID__)
-        bool aecChanged = ls.echo_cancel != liveLs_.echo_cancel;  // (the phone's call microphone goes with it)
-#endif
         liveLs_ = ls;
         mod_->set_settings(&ls);
         if (aecOn) ResetEcho();
-#if defined(__ANDROID__)
-        if (aecChanged) OpenDevices(true, true);
-#endif
     }
+#if defined(__ANDROID__)
+    if (s.callEchoCancel != liveUserAec_) {  // the phone's call microphone goes with the setting
+        liveUserAec_ = s.callEchoCancel;
+        OpenDevices(true, true);
+    }
+#endif
     bool pathChanged = false;
     if (s.callInputDevice != liveIn_ || s.callOutputDevice != liveOut_) {
         liveIn_ = s.callInputDevice;

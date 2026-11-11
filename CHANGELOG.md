@@ -4,7 +4,8 @@
 
 - Android calls: the call-audio change in 1.6.6 never reached the Android build (its copy of SDL wasn't patched) -
   it does now: calls play on the call stream (volume buttons) and, with echo cancellation on, use the phone's call
-  microphone and its echo canceller. The stronger echo suppression added in 1.6.6 is undone (it made voices choppy).
+  microphone and its echo canceller - and then LunaShare's own canceller stays out of it (two cancellers in a row
+  only distort the voice). The stronger echo suppression added in 1.6.6 is undone (it made voices choppy).
 - Torrents: what's going on with peers - seeds and peers connected (and what the trackers count), and when nothing
   comes, why in a sentence (nobody to download from, the peers have only part of it, others can't reach you, a
   tracker complaint); hover for the details (availability, port and router, trackers). *Find more peers* asks again
