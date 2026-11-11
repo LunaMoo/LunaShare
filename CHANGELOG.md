@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.13
+
+- Android keyboard: no more lag after every letter. Since 1.6.12 the keyboard's text reached the app without waking
+  it up - after a moment without touching the screen the app sleeps between frames, and every letter waited for it.
+  Typing now wakes it at once and keeps the frames coming until the letter is in.
+
 ## 1.6.12
 
 - Android keyboard, properly this time: it no longer goes haywire after a while (words jumping back, letters landing

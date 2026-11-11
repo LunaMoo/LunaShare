@@ -349,7 +349,7 @@ static int Utf8Back(const std::string& s, int i) {
     return i;
 }
 
-static void ImeSync(App& app) {
+static bool ImeSync(App& app) {
     static ImGuiID imeId = 0;
     static int gen = 0;
     static std::string last;
@@ -377,7 +377,7 @@ static void ImeSync(App& app) {
         imeId = 0;
         applying = pend = false;
         pEnters = 0;
-        return;
+        return false;
     }
     std::string cur(st->GetText(), (size_t)std::max(0, st->TextLen));
     int len = (int)cur.size();
@@ -398,14 +398,14 @@ static void ImeSync(App& app) {
         imeId = id;
         app.imeReset = false;
         push(true);
-        return;
+        return false;
     }
     if (applying) {
-        if (GImGui->InputEventsQueue.Size > 0) return;
+        if (GImGui->InputEventsQueue.Size > 0) return true;
         applying = false;
         if (cur != apText) {  // (the field made it something else - or it was Enter, and the message went)
             push(true);
-            return;
+            return false;
         }
         st->SetSelection(std::min(Utf8Back(cur, apS), len), std::min(Utf8Back(cur, apE), len));
         st->CursorFollow = true;
@@ -420,7 +420,7 @@ static void ImeSync(App& app) {
             }
             applying = true;
         }
-        return;
+        return true;
     }
     if (pend) {
         pend = false;
@@ -446,12 +446,13 @@ static void ImeSync(App& app) {
                 io.AddInputCharactersUTF8(mid.c_str());
             }
             applying = true;
-            return;
+            return true;
         }
         applying = true;  // (only the selection / Enter: set as the queue is empty)
-        return;
+        return true;
     }
     if (cur != last || cs != lastS || ce != lastE) push(cur != last);
+    return false;
 }
 #endif
 
@@ -603,6 +604,10 @@ int main(int argc, char** argv) {
             SDL_RaiseWindow(window);
             inBorderless = true;
         };
+#ifdef __ANDROID__
+    ls::Bridge().imeWakeEvent = SDL_RegisterEvents(1);  // (see ImeSync)
+    if (ls::Bridge().imeWakeEvent == (Uint32)-1) ls::Bridge().imeWakeEvent = 0;
+#endif
     ls::Bridge().keepAwake = [](bool on) { on ? SDL_DisableScreenSaver() : SDL_EnableScreenSaver(); };
     if (!glf::Load()) printf("warning: some OpenGL functions are missing\n");
     SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
@@ -803,7 +808,8 @@ int main(int argc, char** argv) {
                 default: break;
             }
             if (ev.type == SDL_MOUSEMOTION || ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEWHEEL || ev.type == SDL_KEYDOWN ||
-                ev.type == SDL_TEXTINPUT || ev.type == SDL_FINGERMOTION || ev.type == SDL_FINGERDOWN || ev.type == SDL_WINDOWEVENT)
+                ev.type == SDL_TEXTINPUT || ev.type == SDL_FINGERMOTION || ev.type == SDL_FINGERDOWN || ev.type == SDL_WINDOWEVENT ||
+                (ls::Bridge().imeWakeEvent && ev.type == ls::Bridge().imeWakeEvent))
                 lastInput = ls::SteadyMs();
             got = SDL_PollEvent(&ev) != 0;
         }
@@ -1000,7 +1006,7 @@ int main(int argc, char** argv) {
             }
         }
 #ifdef __ANDROID__
-        ImeSync(app);
+        if (ImeSync(app)) lastInput = ls::SteadyMs();  // (an edit on its way through: the next frames come at once)
 #endif
         SDL_GL_SwapWindow(window);
 

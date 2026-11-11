@@ -436,6 +436,11 @@ JNIEXPORT void JNICALL Java_org_libsdl_app_LunaIme_nativeImeState(JNIEnv* env, j
     g_ime.e = e;
     g_ime.enters += enters;
     g_ime.fresh = true;
+    if (Uint32 t = ls::Bridge().imeWakeEvent) {  // (the main loop may be asleep: idle, it waits for events)
+        SDL_Event ev{};
+        ev.type = t;
+        SDL_PushEvent(&ev);
+    }
 }
 
 // Java created a Bluetooth socket. We hand back one end of a native socketpair; Java pumps bytes between

@@ -5,6 +5,7 @@
 //  - macOS/iOS: not implemented yet (IOBluetooth / no RFCOMM on iOS) -> Supported() == false.
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <thread>
@@ -70,6 +71,7 @@ struct HostBridge {
     // field); imeTake: the latest the keyboard made of it (gen: the field state it was made on, enters: Enter pressed)
     std::function<void(const std::string& text, int selStart, int selEnd, int gen, bool restart)> imeSetState;
     std::function<bool(int& gen, std::string& text, int& selStart, int& selEnd, int& enters)> imeTake;
+    uint32_t imeWakeEvent = 0;  // (an SDL event type: the keyboard typed - the main loop wakes up and counts it as input)
     std::function<bool()> biometricAvailable;                                         // Android: fingerprint / face set up
     std::function<void(const std::string& title, const std::string& cancel)> biometricAsk;  // success: notify action "unlock"
     std::function<void(bool on)> secureWindow;  // Android: no screenshots / app switcher preview (the app lock is on)  // Android: a small HTTPS GET (any thread)
