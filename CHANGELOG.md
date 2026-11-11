@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.4
+
+- Forgotten contacts no longer stay in the list as nameless entries (a code like `257df4af`, "offline"): forgetting
+  a person's last device used to leave their chat behind, under a name nothing could show. It's now forgotten with
+  them. Those already left over can be removed: **Forget...** in a contact's menu (right-click / long press) - for any
+  person: all their devices, nicknames and the chat - and in the details of such an entry.
+
 ## 1.6.3
 
 - OPNsense: *Delete* and *Block* did nothing after updating the plugin - the server that was already running kept the

@@ -1022,10 +1022,14 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", name.c_str()), browser.lastDir);
         }
-        if (ImGui::Selectable(T("Device details"), false, 0, ImVec2(0, h))) {
+        if (d && ImGui::Selectable(T("Device details"), false, 0, ImVec2(0, h))) {
             devicesSel = dev;
             if (ui::M().mobile) { backStack.push_back(screen); screen = MScreen::Devices; }
             else { tab = Tab::Devices; tabForce = true; }
+        }
+        if (ImGui::Selectable(T("Forget..."), false, 0, ImVec2(0, h))) {
+            forgetPeer = peer;
+            openForget = true;
         }
         ImGui::EndPopup();
     }
@@ -2983,8 +2987,14 @@ void App::DrawDeviceDetails(const std::string& peer) {
     if (it == eng.devices.end()) {
         auto o = eng.online.find(peer);
         ImGui::Text("%s", o != eng.online.end() ? o->second.name.c_str() : peer.c_str());
-        ImGui::TextDisabled("%s", T("Seen on the network but never connected."));
-        if (ui::IconTextButton(T("Connect"), Icon::Link, ImVec2(0, h))) eng.ConnectPeer(peer);
+        bool seen = o != eng.online.end();
+        ImGui::TextDisabled("%s", seen ? T("Seen on the network but never connected.") : T("No device of this contact is known any more."));
+        if (seen && ui::IconTextButton(T("Connect"), Icon::Link, ImVec2(0, h))) eng.ConnectPeer(peer);
+        if (seen) ImGui::SameLine();
+        if (ui::IconTextButton(T("Forget..."), Icon::Trash, ImVec2(0, h))) {
+            forgetPeer = peer;
+            openForget = true;
+        }
         return;
     }
     KnownDevice& d = it->second;
@@ -3911,6 +3921,27 @@ void App::DrawPopups() {
     }
 
     DrawShareLinkPopups();
+
+    // ---- forgetting a contact (a person: all their devices, their nicknames and the chat)
+    if (openForget) { ImGui::OpenPopup("##forgetpeer"); openForget = false; }
+    centerNext(0.35f);
+    if (ImGui::BeginPopupModal("##forgetpeer", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
+        ImGui::PushTextWrapPos(mobile ? 0 : ImGui::GetFontSize() * 26);
+        ImGui::TextUnformatted(TF("Forget %s? Their devices, nicknames and the chat history are removed from this device. "
+                                  "If they connect again, they show up as new.", eng.PeerName(forgetPeer).c_str()).c_str());
+        ImGui::PopTextWrapPos();
+        float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2 : 0;
+        if (ImGui::Button(T("Forget"), ImVec2(bw, h))) {
+            eng.ForgetDevice(forgetPeer);
+            if (selectedPeer == forgetPeer || eng.ChatKey(selectedPeer) == forgetPeer) selectedPeer.clear();
+            if (devicesSel == forgetPeer) devicesSel.clear();
+            forgetPeer.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(T("Cancel"), ImVec2(bw, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
 
     // ---- select text view
     if (openTextView) { ImGui::OpenPopup(T("Message text")); openTextView = false; }

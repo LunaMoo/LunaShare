@@ -1410,3 +1410,6 @@
 {"Someone on this network (%s) opened your link to \"%s\". Let them download it?", "Ktoś w tej sieci (%s) otworzył Twój link do „%s”. Pozwolić mu pobrać?"},
 {"Someone on the Internet (%s) opened your link to \"%s\". Let them download it?", "Ktoś w internecie (%s) otworzył Twój link do „%s”. Pozwolić mu pobrać?"},
 {"More...", "Więcej..."},
+{"Forget...", "Zapomnij..."},
+{"No device of this contact is known any more.", "Żadne urządzenie tego kontaktu nie jest już znane."},
+{"Forget %s? Their devices, nicknames and the chat history are removed from this device. If they connect again, they show up as new.", "Zapomnieć %s? Jego urządzenia, nazwy i historia czatu zostaną usunięte z tego urządzenia. Jeśli połączy się ponownie, pojawi się jako nowy."},

@@ -3779,14 +3779,25 @@ void Engine::ForgetDevice(const std::string& peer) {
     }
     for (auto& d : ds) Disconnect(d);
     auto lk = Lock();
+    std::set<std::string> accs;  // the people these devices belong to
+    if (IsContactKey(peer)) accs.insert(peer.substr(1));
     for (auto& d : ds) {
         auto dv = devices.find(d);
+        if (dv != devices.end() && !dv->second.accountPub.empty()) accs.insert(dv->second.accountPub);
         if (dv != devices.end() && !dv->second.avatarHash.empty()) RemoveFile(AvatarFile(d, dv->second.avatarHash));
         devices.erase(d);
         chats.erase(d);
+        online.erase(d);
     }
-    if (IsContactKey(peer)) accounts.erase(peer.substr(1));
     chats.erase(peer);
+    // a person whose last device this was is forgotten too (their chat would otherwise stay, nameless)
+    for (auto& acc : accs) {
+        bool left = false;
+        for (auto& [id, kd] : devices) left |= kd.accountPub == acc;
+        if (left && !IsContactKey(peer)) continue;
+        accounts.erase(acc);
+        chats.erase("@" + acc);
+    }
     MarkDirty();
 }
 

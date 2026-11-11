@@ -525,6 +525,8 @@ private:
     std::string devicesSel;
     std::string renameBuf;
     std::string renamePeer;
+    std::string forgetPeer;  // "Forget..." asks first (a person: all their devices and the chat)
+    bool openForget = false;
     bool openRename = false;
 
     std::string manualHost;

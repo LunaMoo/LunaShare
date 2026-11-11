@@ -603,10 +603,19 @@ int main() {
             auto l = N->Lock();
             CHECK(N->devices[idA].verified, "connect code: alice marked verified");
         }
-        N->Stop();
         std::string idN = N->settings.deviceId;
+        A->SendChat(idN, "hi from the QR code");
+        std::string keyN = A->ChatKey(idN);
+        CHECK(WaitFor([&] { auto l = A->Lock(); auto& m = A->chats[keyN].messages; return !m.empty() && m.back().delivered; }, 3000), "chat with the new contact");
+        N->Stop();
         WaitFor([&] { return !A->IsConnected(idN); }, 3000);
         A->ForgetDevice(idN);
+        {
+            auto l = A->Lock();
+            auto conv = A->Conversations();
+            CHECK(keyN[0] == '@' && std::find(conv.begin(), conv.end(), keyN) == conv.end() && !A->chats.count(keyN),
+                  "forgetting a person's only device forgets the person and the chat (no nameless entry left)");
+        }
     }
     CHECK(WaitFor([&] { auto l = A->Lock(); return A->chats[A->ChatKey(idB)].messages.back().delivered; }, 3000), "chat delivered ack");
     {
