@@ -15,7 +15,12 @@ jobs:
         id: cache
         with:
           path: ffwin
-          key: ffmpeg-n7.1-win64-player-v4
+          key: ffmpeg-n7.1-win64-player-hls-v5
+      - uses: actions/checkout@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: lsrc
+          sparse-checkout: patches
       - name: Build FFmpeg (mingw-w64 cross)
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -23,11 +28,12 @@ jobs:
           # zlib linked in (MKV subtitle tracks are usually zlib-compressed): no zlib1.dll to ship
           sudo rm -f /usr/x86_64-w64-mingw32/lib/libz.dll.a
           git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
+          git -C ffsrc apply $GITHUB_WORKSPACE/lsrc/patches/ffmpeg-hls-host-io.patch  # (HLS through the host's downloads: internet radio)
           mkdir ffbuild && cd ffbuild
           ../ffsrc/configure --prefix=$GITHUB_WORKSPACE/ffwin --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- \
             --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale \
             --disable-avfilter --disable-network --disable-autodetect --enable-zlib --enable-w32threads --enable-d3d11va \
-            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt \
+            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt,hls \
             --enable-decoder=h264,hevc,av1,vp8,vp9,mpeg4,aac,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp2,mp2float,aac_latm,wmav2,wmapro,pcm_s16be,pcm_dvd,pcm_bluray,mpeg2video,mpeg1video,vc1,wmv3,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
             --enable-parser=h264,hevc,av1,vp8,vp9,mpeg4video,aac,mpegaudio,opus,vorbis,flac,ac3,dca,mlp,mpegvideo,vc1,aac_latm,dvdsub,dvbsub \
             --enable-hwaccel=h264_d3d11va,h264_d3d11va2,hevc_d3d11va,hevc_d3d11va2,av1_d3d11va,av1_d3d11va2,vp9_d3d11va,vp9_d3d11va2 \
@@ -48,7 +54,12 @@ jobs:
         id: cache
         with:
           path: fflin
-          key: ffmpeg-n7.1-linux-x264-dav1d-gpu-v4
+          key: ffmpeg-n7.1-linux-x264-dav1d-gpu-hls-v5
+      - uses: actions/checkout@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: lsrc
+          sparse-checkout: patches
       - name: Build x264, dav1d and FFmpeg
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
@@ -68,12 +79,13 @@ jobs:
           (cd dav1dsrc && meson setup build --prefix=$W/deps --libdir=lib --default-library=static -Denable_tools=false -Denable_tests=false \
              -Db_staticpic=true --buildtype=release && ninja -C build install)
           git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
+          git -C ffsrc apply $GITHUB_WORKSPACE/lsrc/patches/ffmpeg-hls-host-io.patch
           mkdir ffbuild && cd ffbuild
           PKG_CONFIG_PATH=$W/deps/lib/pkgconfig ../ffsrc/configure --prefix=$W/fflin \
             --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter \
             --disable-postproc --disable-network --disable-autodetect --enable-zlib --enable-gpl --enable-libx264 --enable-libdav1d --enable-pthreads \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-vaapi \
-            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt \
+            --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,srt,ass,webvtt,hls \
             --enable-decoder=h264,hevc,av1,libdav1d,vp8,vp9,mpeg4,mjpeg,aac,ac3,ac3_fixed,eac3,dca,truehd,mlp,mp2,mp2float,aac_latm,wmav2,wmapro,pcm_s16be,pcm_dvd,pcm_bluray,mpeg2video,mpeg1video,vc1,wmv3,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub,mp3,mp3float,opus,vorbis,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 \
             --enable-encoder=libx264,h264_nvenc,h264_vaapi \
             --enable-hwaccel=h264_vaapi,hevc_vaapi,av1_vaapi,vp9_vaapi,h264_nvdec,hevc_nvdec,av1_nvdec,vp9_nvdec \
@@ -188,13 +200,14 @@ jobs:
         id: ffandroid
         with:
           path: ffandroid
-          key: ffmpeg-n7.1-android-sound-subs-v1
+          key: ffmpeg-n7.1-android-sound-subs-hls-v2
       - name: Build FFmpeg for Android (sound + subtitle decoders, static)
         if: steps.ffandroid.outputs.cache-hit != 'true'
         run: |
           NDK=$ANDROID_HOME/ndk/27.2.12479018
           TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
           git clone --depth 1 --branch n7.1 https://github.com/FFmpeg/FFmpeg.git ffsrc
+          git -C ffsrc apply $GITHUB_WORKSPACE/patches/ffmpeg-hls-host-io.patch
           for abi in arm64-v8a armeabi-v7a x86_64; do
             case $abi in
               arm64-v8a) arch=aarch64; cc=aarch64-linux-android24-clang ;;
@@ -206,7 +219,7 @@ jobs:
               --cc=$TC/$cc --cxx=$TC/$cc++ --ar=$TC/llvm-ar --ranlib=$TC/llvm-ranlib --nm=$TC/llvm-nm --strip=$TC/llvm-strip \
               --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter \
               --disable-postproc --disable-network --disable-autodetect --enable-zlib --disable-asm --enable-pic --enable-static --disable-shared \
-              --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd \
+              --enable-avformat --enable-protocol=file --enable-demuxer=mov,matroska,ogg,mp3,flac,wav,aac,avi,mpegts,mpegps,flv,asf,ac3,eac3,dts,truehd,hls \
               --enable-decoder=aac,aac_latm,mp3,mp3float,mp2,mp2float,opus,vorbis,flac,alac,ac3,ac3_fixed,eac3,dca,truehd,mlp,wmav2,wmapro,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8,pcm_dvd,pcm_bluray,subrip,srt,ass,ssa,webvtt,mov_text,text,pgssub,dvdsub,dvbsub \
               --enable-parser=aac,aac_latm,mpegaudio,opus,vorbis,flac,ac3,dca,mlp,dvdsub,dvbsub \
               --disable-debug

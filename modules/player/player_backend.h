@@ -33,6 +33,15 @@ public:
     virtual ~Source() = default;
     virtual bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) = 0;
     virtual bool OpenStream(const LspStream* s, LspInfo* info, bool wantAudio, std::string* err) = 0;
+    // a URL fetched through the host (live: no seeking); sources that can't: false
+    virtual bool OpenUrl(const std::string& url, const char* format, const LspUrlIo* io, LspInfo* info, std::string* err) {
+        (void)url;
+        (void)format;
+        (void)io;
+        (void)info;
+        *err = "not supported";
+        return false;
+    }
     // decode a little; returns 1 = go on, 0 = end of file, -1 = error
     virtual int Step(Sink& sink) = 0;
     // the same, knowing what the player is short of (sources made of two decoders step only the one needed)

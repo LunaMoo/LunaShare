@@ -75,6 +75,10 @@ struct Api {
     int (*decode_subtitle2)(AVCodecContext*, AVSubtitle*, int*, const AVPacket*);
     void (*subtitle_free)(AVSubtitle*);
     AVDictionaryEntry* (*dict_get)(const AVDictionary*, const char*, const AVDictionaryEntry*, int);
+    // internet radio (optional: an FFmpeg without them still plays files)
+    const AVInputFormat* (*find_input_format)(const char*);
+    int (*dict_set)(AVDictionary**, const char*, const char*, int);
+    void (*dict_free)(AVDictionary**);
 };
 Api A;
 std::mutex g_m;
@@ -168,6 +172,9 @@ bool LoadFf(std::string*) {
     A.decode_subtitle2 = reinterpret_cast<decltype(A.decode_subtitle2)>(&::avcodec_decode_subtitle2);
     A.subtitle_free = reinterpret_cast<decltype(A.subtitle_free)>(&::avsubtitle_free);
     A.dict_get = reinterpret_cast<decltype(A.dict_get)>(&::av_dict_get);
+    A.find_input_format = reinterpret_cast<decltype(A.find_input_format)>(&::av_find_input_format);
+    A.dict_set = reinterpret_cast<decltype(A.dict_set)>(&::av_dict_set);
+    A.dict_free = reinterpret_cast<decltype(A.dict_free)>(&::av_dict_free);
     A.log_set_level(AV_LOG_ERROR);
     g_ok = true;
     return true;
@@ -211,6 +218,9 @@ bool LoadFf(std::string* err) {
                   G(lc, a.find_decoder, "avcodec_find_decoder") && G(lc, a.decode_subtitle2, "avcodec_decode_subtitle2") &&
                   G(lc, a.subtitle_free, "avsubtitle_free") && G(lu, a.dict_get, "av_dict_get");
         if (!ok) continue;
+        G(lf, a.find_input_format, "av_find_input_format");
+        G(lu, a.dict_set, "av_dict_set");
+        G(lu, a.dict_free, "av_dict_free");
         A = a;
         A.log_set_level(AV_LOG_ERROR);
         g_ok = true;
@@ -243,6 +253,7 @@ public:
             A.freep(&io_->buffer);
             A.avio_context_free(&io_);
         }
+        if (urlMain_) FreeUrlPb(urlMain_);  // (after close_input: FFmpeg leaves a custom main input to us)
         if (pkt_) A.packet_free(&pkt_);
         if (frame_) A.frame_free(&frame_);
         if (sw_) A.frame_free(&sw_);
@@ -266,6 +277,79 @@ public:
 
     bool Open(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) override { return OpenCommon(path, info, wantAudio, err); }
 
+    // ---- internet radio: everything (the stream, or an HLS playlist and each of its segments) through the host
+    struct UrlPb {
+        FfSource* self;
+        void* h;
+    };
+    AVIOContext* MakeUrlPb(const char* url) {
+        void* h = uio_.open(uio_.user, url);
+        if (!h) return nullptr;
+        const int kBuf = 64 * 1024;
+        auto* buf = (unsigned char*)A.malloc_(kBuf);
+        auto* u = new UrlPb{this, h};
+        AVIOContext* pb = buf ? A.avio_alloc_context(buf, kBuf, 0, u, &FfSource::UrlRead, nullptr, nullptr) : nullptr;
+        if (!pb) {
+            uio_.close(uio_.user, h);
+            delete u;
+            if (buf) A.freep(&buf);
+            return nullptr;
+        }
+        pb->seekable = 0;
+        return pb;
+    }
+    void FreeUrlPb(AVIOContext* pb) {
+        auto* u = (UrlPb*)pb->opaque;
+        uio_.close(uio_.user, u->h);
+        delete u;
+        A.freep(&pb->buffer);
+        A.avio_context_free(&pb);
+    }
+    static int UrlRead(void* o, uint8_t* buf, int size) {
+        auto* u = (UrlPb*)o;
+        int n = u->self->uio_.read(u->self->uio_.user, u->h, buf, size);
+        if (n < 0) return AVERROR(EIO);
+        if (n == 0) return AVERROR_EOF;
+        return n;
+    }
+    // (HLS: its playlists and segments; nested demuxers ask the outer context, so `opaque` is always this source)
+    static int IoOpen(AVFormatContext* s, AVIOContext** pb, const char* url, int flags, AVDictionary**) {
+        auto* self = (FfSource*)s->opaque;
+        if (flags & AVIO_FLAG_WRITE) return AVERROR(EPERM);
+        *pb = self->MakeUrlPb(url);
+        return *pb ? 0 : AVERROR(EIO);
+    }
+    static int IoClose2(AVFormatContext* s, AVIOContext* pb) {
+        if (pb) ((FfSource*)s->opaque)->FreeUrlPb(pb);
+        return 0;
+    }
+    bool OpenUrl(const std::string& url, const char* format, const LspUrlIo* io, LspInfo* info, std::string* err) override {
+        if (!io || !io->open || !io->read || !io->close) {
+            *err = "no way to fetch it";
+            return false;
+        }
+        uio_ = *io;
+        fmt_ = A.format_alloc_context();
+        if (!fmt_) {
+            *err = "out of memory";
+            return false;
+        }
+        fmt_->opaque = this;
+        fmt_->io_open = &FfSource::IoOpen;
+        fmt_->io_close2 = &FfSource::IoClose2;
+        urlMain_ = MakeUrlPb(url.c_str());
+        if (!urlMain_) {
+            *err = "cannot connect";
+            return false;
+        }
+        fmt_->pb = urlMain_;
+        fmt_->flags |= AVFMT_FLAG_CUSTOM_IO;
+        live_ = true;
+        url_ = url;
+        if (format && *format && A.find_input_format) urlFormat_ = A.find_input_format(format);
+        return OpenCommon(url, info, true, err);
+    }
+
     static int IoRead(void* o, uint8_t* buf, int size) {
         auto* self = (FfSource*)o;
         int n = self->stream_.read(self->stream_.user, self->pos_, buf, size);
@@ -286,8 +370,17 @@ public:
     }
 
     bool OpenCommon(const std::string& path, LspInfo* info, bool wantAudio, std::string* err) {
-        if (A.open_input(&fmt_, io_ ? nullptr : path.c_str(), nullptr, nullptr) < 0) {
-            *err = "cannot open file";
+        AVDictionary* opts = nullptr;
+        if (live_ && A.dict_set) {
+            // HLS: no keep-alive reuse of connections (that path needs FFmpeg's own HTTP), and a live stream's
+            // playlist is read again as it grows
+            A.dict_set(&opts, "http_persistent", "0", 0);
+            A.dict_set(&opts, "http_multiple", "0", 0);
+        }
+        int r = A.open_input(&fmt_, io_ ? nullptr : path.c_str(), live_ ? urlFormat_ : nullptr, opts ? &opts : nullptr);
+        if (opts && A.dict_free) A.dict_free(&opts);
+        if (r < 0) {
+            *err = live_ ? "not a stream it can play" : "cannot open file";
             return false;
         }
         if (A.find_stream_info(fmt_, nullptr) < 0) {
@@ -674,6 +767,12 @@ private:
     AVIOContext* io_ = nullptr;
     LspStream stream_{};
     int64_t pos_ = 0;
+    // internet radio
+    LspUrlIo uio_{};
+    AVIOContext* urlMain_ = nullptr;
+    const AVInputFormat* urlFormat_ = nullptr;
+    bool live_ = false;
+    std::string url_;
     AVCodecContext* vctx_ = nullptr;
     AVCodecContext* actx_ = nullptr;
     AVCodecContext* sctx_ = nullptr;

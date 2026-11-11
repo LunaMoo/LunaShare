@@ -675,6 +675,32 @@ LspPlayer* ApiOpenStream(const LspStream* s, int rate, int channels, LspInfo* in
     return p;
 }
 
+// internet radio: FFmpeg reads it through the host (on Android its sound-only side: the phone's decoders can't take
+// a stream we feed in pieces)
+LspPlayer* ApiOpenUrl(const char* url, const char* format, const LspUrlIo* io, int rate, int channels, LspInfo* info) {
+    if (!g_init || !url || !io) return nullptr;
+    auto* p = new LspPlayer();
+#if defined(__ANDROID__)
+#ifdef LSP_FF_SIDE
+    if (InitFf(nullptr)) p->src = CreateFfSource();
+#endif
+#else
+    p->src = CreateSource(&g_host);
+#endif
+    p->rate = rate > 0 ? rate : 48000;
+    p->channels = channels == 1 ? 1 : 2;
+    std::string err;
+    if (!p->src || !p->src->OpenUrl(url, format, io, &p->info, &err)) {
+        Log("cannot play " + std::string(url) + ": " + (p->src ? err : std::string("no FFmpeg")));
+        delete p;
+        return nullptr;
+    }
+    InitTracks(p);
+    if (info) *info = p->info;
+    p->th = std::thread([p] { p->DecodeLoop(); });
+    return p;
+}
+
 void ApiClose(LspPlayer* p) {
     if (!p) return;
     {
@@ -935,7 +961,7 @@ void ApiSetSubDelay(LspPlayer* p, double s) {
 
 const LspModule kModule = {LSP_API_VERSION, "LunaShare player", "1.5", ApiInit, ApiProbe, ApiOpen, ApiClose, ApiSetPlaying,
                            ApiSeek, ApiReadAudio, ApiVideoFrame, ApiPosition, ApiState, ApiOpenStream,
-                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags, ApiSetSpeed, ApiSetSubDelay, ApiChapters};
+                           ApiTracks, ApiSelectTrack, ApiAddSubtitles, ApiSubtitle, ApiTags, ApiSetSpeed, ApiSetSubDelay, ApiChapters, ApiOpenUrl};
 
 }  // namespace
 }  // namespace lsp

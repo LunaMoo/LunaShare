@@ -83,8 +83,18 @@ struct Now {
     bool follow = false;    // listening together: the host's clock decides
     bool loading = false;   // waiting for it to arrive
     uint64_t extId = 0;
+    bool live = false;      // internet radio
+    int retries = 0;        // (radio: connection attempts that failed in a row)
 };
 
+// internet radio: opens what a URL points to - the stream itself, or an HLS playlist and its segments (any thread;
+// stop: set when the player gives the station up, so a waiting read returns)
+struct UrlFetch {
+    virtual ~UrlFetch() = default;
+    virtual void* Open(const std::string& url, std::atomic<bool>* stop) = 0;
+    virtual int Read(void* h, uint8_t* buf, int len) = 0;  // bytes, 0 at the end, < 0 error
+    virtual void Close(void* h) = 0;
+};
 // a song that isn't in the queue: listening together, or one from a contact's Shared folder
 struct Source {
     uint64_t id = 0;             // another id = another song
@@ -95,6 +105,11 @@ struct Source {
     bool follow = false;         // listening together: Follow() sets the position and play / pause
     double fade = 0;             // blend in from the song that's on over this many seconds (0 = cut)
     int index = -1, count = 0;   // (shown as "3 / 10")
+    // internet radio: a live stream from `url` (format "hls" when known), fetched through `io`. It has no end: when
+    // it stops or can't be reached, it's tried again (at once, then after 2 s, 4 s, ... up to 30 s)
+    std::string url, format;
+    std::shared_ptr<UrlFetch> io;
+    bool live = false;
 };
 
 class Library {
@@ -203,6 +218,7 @@ public:
     void Follow(double pos, bool playing);   // listening together: where the host's clock is
     void EndExternal();                      // back to own music (paused)
     bool ExternalEnded(uint64_t id);         // that song played to its end
+    void SetExternalTrack(uint64_t id, const Track& t);  // radio: the song now on (its title from the stream)
     // while a song from elsewhere is on, the controls go here (1 toggle, 2 next, 3 prev, 6 stop, 7 seek s); true = handled
     std::function<bool(int cmd, double arg)> externalCtl;
 
@@ -220,6 +236,8 @@ private:
     Source ex_;                    // which (m_)
     uint64_t exOpen_ = 0;          // the one open in p_
     bool exOpening_ = false, exEnded_ = false;
+    int64_t exRetryAt_ = 0;        // radio: when to try the station again
+    int exRetries_ = 0;
     double exPos_ = 0;             // Follow(): the clock
     bool exPlay_ = false;
     int64_t exAt_ = 0, exLastSeek_ = 0;

@@ -331,6 +331,55 @@ void AndroidBridgeInit(ls::Engine* engine) {
         env->DeleteLocalRef(r);
         return true;
     };
+    b.netOpen = [](const std::string& url, bool icy, int& status, std::string& headers, std::string& finalUrl, std::string& err) -> int {
+        static jmethodID m = M("netOpen", "(Ljava/lang/String;Z)[Ljava/lang/String;");
+        if (!m) return 0;
+        JNIEnv* env = Env();
+        jstring u = env->NewStringUTF(url.c_str());
+        auto r = (jobjectArray)env->CallStaticObjectMethod(g_cls, m, u, (jboolean)icy);
+        env->DeleteLocalRef(u);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            err = "Java exception";
+            return 0;
+        }
+        if (!r) return 0;
+        auto get = [&](int i) {
+            auto s = (jstring)env->GetObjectArrayElement(r, i);
+            std::string v = JStr(env, s);
+            if (s) env->DeleteLocalRef(s);
+            return v;
+        };
+        int id = atoi(get(0).c_str());  // {id, status, headers, final URL, error}
+        status = atoi(get(1).c_str());
+        headers = get(2);
+        finalUrl = get(3);
+        err = get(4);
+        env->DeleteLocalRef(r);
+        return id;
+    };
+    b.netRead = [](int id, uint8_t* buf, int len) -> int {
+        static jmethodID m = M("netRead", "(I[B)I");
+        if (!m || len <= 0) return -1;
+        JNIEnv* env = Env();
+        jbyteArray a = env->NewByteArray(len);
+        if (!a) return -1;
+        jint n = env->CallStaticIntMethod(g_cls, m, (jint)id, a);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            n = -1;
+        }
+        if (n > 0) env->GetByteArrayRegion(a, 0, n, (jbyte*)buf);
+        env->DeleteLocalRef(a);
+        return n;
+    };
+    b.netClose = [](int id) {
+        static jmethodID m = M("netClose", "(I)V");
+        if (!m) return;
+        JNIEnv* env = Env();
+        env->CallStaticVoidMethod(g_cls, m, (jint)id);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    };
     b.isMetered = []() -> bool {
         if (!g_notify) return false;
         JNIEnv* e = Env();

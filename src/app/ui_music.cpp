@@ -12,6 +12,7 @@
 #include "imgui.h"
 #include "imgui_stdlib.h"
 #include "music.h"
+#include "radio.h"
 #include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
@@ -463,10 +464,17 @@ void App::DrawMusicNow(bool big) {
         sub += (sub.empty() ? "" : "  ·  ") + TF("from %s's Shared folder", Emoji().Display(musicLibWho).c_str());
     }
     ImGui::TextDisabled("%s", sub.c_str());
-    if (n.loading) ImGui::TextDisabled("%s", T("on its way..."));
-    // seek bar
+    if (n.live && n.loading) ImGui::TextDisabled("%s", n.retries > 0 ? T("can't reach the station - trying again...") : T("connecting..."));
+    else if (n.loading) ImGui::TextDisabled("%s", T("on its way..."));
     ImVec2 bp = ImGui::GetCursorScreenPos();
     float bw = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (n.live) {  // internet radio: live, nothing to seek
+        ui::Badge(T("LIVE"), n.loading ? ImGui::GetColorU32(ImGuiCol_FrameBgActive) : IM_COL32(200, 60, 80, 255));
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", Clk(n.pos).c_str());
+    } else {
+    // seek bar
     ImGui::InvisibleButton("##mseek", ImVec2(bw, h * 0.6f));
     double frac = n.dur > 0 ? std::clamp(n.pos / n.dur, 0.0, 1.0) : 0;
     if (ImGui::IsItemActive() && n.dur > 0) {
@@ -477,34 +485,36 @@ void App::DrawMusicNow(bool big) {
         music::Play().Seek(musicDrag * n.dur);
         musicDrag = -1;
     }
-    ImDrawList* dl = ImGui::GetWindowDrawList();
     float cy = bp.y + h * 0.3f;
     dl->AddRectFilled(ImVec2(bp.x, cy - 3), ImVec2(bp.x + bw, cy + 3), ImGui::GetColorU32(ImGuiCol_FrameBg), 3);
     dl->AddRectFilled(ImVec2(bp.x, cy - 3), ImVec2(bp.x + bw * (float)frac, cy + 3), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 3);
     dl->AddCircleFilled(ImVec2(bp.x + bw * (float)frac, cy), mobile ? 10.0f : 7.0f, ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
     ImGui::TextDisabled("%s / %s", Clk(musicDrag >= 0 ? musicDrag * n.dur : n.pos).c_str(), Clk(n.dur).c_str());
-    // the buttons
+    }
+    // the buttons (radio: previous / next station; no shuffle or repeat)
     float sp = ImGui::GetStyle().ItemSpacing.x;
     float bs = std::min(h * 1.1f, (bw - sp * 4) / 5);
     float total = bs * 5 + sp * 4;
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (bw - total) * 0.5f));
     bool together = n.follow && eng.listen.sid;  // listening together: shuffle and repeat are everyone's
     bool sh = together ? eng.listen.shuffle : n.shuffle;
+    ImGui::BeginDisabled(n.live);
     ui::PushAccent(sh);
     if (ui::IconButton("mshuf", Icon::Shuffle, sh ? T("Shuffle: on") : T("Shuffle: off"), bs)) {
         if (together) eng.ListenControl("shuffle", sh ? 0 : 1);
         else music::Play().SetShuffle(!sh);
     }
     ui::PopAccent();
+    ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ui::IconButton("mprev", Icon::Back, T("Previous"), bs)) music::Play().Prev();
+    if (ui::IconButton("mprev", Icon::Back, n.live ? T("Previous station") : T("Previous"), bs)) music::Play().Prev();
     ImGui::SameLine();
     if (ui::IconButton("mplay", n.playing ? Icon::Pause : Icon::Play, n.playing ? T("Pause") : T("Play"), bs)) music::Play().Toggle();
     ImGui::SameLine();
     // "next": the back arrow turned around
     ImVec2 np = ImGui::GetCursorScreenPos();
     if (ImGui::Button("##mnext", ImVec2(bs, bs))) music::Play().Next();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Next"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", n.live ? T("Next station") : T("Next"));
     {
         ImVec2 c(np.x + bs * 0.5f, np.y + bs * 0.5f);
         float s = bs * 0.22f;
@@ -517,12 +527,14 @@ void App::DrawMusicNow(bool big) {
     ui::PushAccent(rp);
     const char* rt = rp == music::RepeatOne ? T("Repeat: this song") : rp == music::RepeatAll ? T("Repeat: the list") : T("Repeat: off");
     ImVec2 rpp = ImGui::GetCursorScreenPos();
+    ImGui::BeginDisabled(n.live);
     if (ui::IconButton("mrep", Icon::Loop, rt, bs)) {
         if (together) eng.ListenControl("repeat", (rp + 1) % 3);
         else music::Play().SetRepeat((rp + 1) % 3);
     }
     if (rp == music::RepeatOne) dl->AddText(ImVec2(rpp.x + bs * 0.68f, rpp.y + bs * 0.05f), ImGui::GetColorU32(ImGuiCol_Text), "1");
     ui::PopAccent();
+    ImGui::EndDisabled();
     if (n.external) {  // a song from elsewhere: keep it / leave
         ImGui::Spacing();
         float aw = (ImGui::GetContentRegionAvail().x - sp * 2) / 3, ah = mobile ? h * 0.85f : ImGui::GetFrameHeight() * 1.2f;
@@ -536,6 +548,14 @@ void App::DrawMusicNow(bool big) {
                 if (ImGui::Button(saved ? T("Saving") : T("Save"), ImVec2(aw, ah))) eng.ListenSave(li->iid);
                 ImGui::EndDisabled();
             }
+        } else if (n.live && radio::R().Active()) {  // radio: the station as a favourite
+            canSave = true;
+            radio::Station st = radio::R().Current();
+            bool fav = radio::R().IsFavourite(st.id);
+            ui::PushAccent(fav);
+            if (ImGui::Button(fav ? T("Saved") : T("Save"), ImVec2(aw, ah))) radio::R().SetFavourite(st, !fav);
+            ui::PopAccent();
+            if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", fav ? T("Remove from favourites") : T("Add to favourites"));
         } else if (!musicLibId.empty()) {
             canSave = true;
             saved = eng.LibStreamSaved(musicLibId);
@@ -619,7 +639,9 @@ void App::DrawMusicMini() {
     ImVec4 clipR(tx, p.y, p.x + w - bs * 2 - 16, p.y + h);
     float lh = ImGui::GetTextLineHeight();
     dl->AddText(nullptr, 0, ImVec2(tx, p.y + h * 0.5f - lh - 1), ImGui::GetColorU32(ImGuiCol_Text), n.track.title.c_str(), nullptr, 0, &clipR);
-    dl->AddText(nullptr, 0, ImVec2(tx, p.y + h * 0.5f + 1), ImGui::GetColorU32(ImGuiCol_TextDisabled), n.track.artist.c_str(), nullptr, 0, &clipR);
+    std::string under = n.track.artist;
+    if (n.live) under = n.loading ? std::string(n.retries > 0 ? T("trying again...") : T("connecting...")) : under.empty() ? std::string(T("live radio")) : under;
+    dl->AddText(nullptr, 0, ImVec2(tx, p.y + h * 0.5f + 1), ImGui::GetColorU32(ImGuiCol_TextDisabled), under.c_str(), nullptr, 0, &clipR);
     if (n.dur > 0)  // a thin progress line
         dl->AddRectFilled(ImVec2(p.x + 6, p.y + h - 3), ImVec2(p.x + 6 + (w - 12) * (float)std::clamp(n.pos / n.dur, 0.0, 1.0), p.y + h - 1),
                           ImGui::GetColorU32(ImGuiCol_SliderGrabActive));
@@ -806,13 +828,13 @@ void App::DrawMusic() {
         ImGui::EndChild();
         return;
     }
-    // the view: songs / artists / albums / genres / folders / playlists
-    const char* views[] = {T("Songs"), T("Artists"), T("Albums"), T("Genres"), T("Folders"), T("Playlists")};
+    // the view: songs / artists / albums / genres / folders / playlists / internet radio
+    const char* views[] = {T("Songs"), T("Artists"), T("Albums"), T("Genres"), T("Folders"), T("Playlists"), T("Radio")};
     if (!musicGroup.empty()) {
         if (ui::IconTextButton(T("Back"), Icon::Back, ImVec2(0, h))) musicGroup.clear();
         ImGui::SameLine();
     }
-    for (int i = 0; i < 6 && musicGroup.empty(); i++) {
+    for (int i = 0; i < 7 && musicGroup.empty(); i++) {
         if (i) ImGui::SameLine();
         bool on = musicView == i;
         ui::PushAccent(on);
@@ -821,7 +843,11 @@ void App::DrawMusic() {
             musicGroup.clear();
         }
         ui::PopAccent();
-        if (mobile && i == 2) ImGui::NewLine();  // (two rows on phones)
+        if (mobile && i == 3) ImGui::NewLine();  // (two rows on phones)
+    }
+    if (musicView == 6 && musicGroup.empty()) {
+        DrawRadio();
+        return;
     }
     // search, sort, folders
     ImGui::SetNextItemWidth(mobile ? ImGui::GetContentRegionAvail().x * 0.55f : ImGui::GetFontSize() * 14);

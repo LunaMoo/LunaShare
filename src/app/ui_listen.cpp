@@ -8,6 +8,7 @@
 #include "i18n.h"
 #include "imgui.h"
 #include "music.h"
+#include "radio.h"
 #include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
@@ -28,6 +29,7 @@ void App::MusicExternalTick() {
     if (!ctlSet) {  // the player's buttons (and the notification's, the media keys) while a song from elsewhere is on
         ctlSet = true;
         music::Play().externalCtl = [this](int cmd, double arg) -> bool {
+            if (radio::R().Active()) return radio::R().Control(cmd);  // internet radio: stations, back to live
             auto lk = eng.Lock();
             if (eng.listen.sid) {
                 switch (cmd) {

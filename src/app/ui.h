@@ -328,6 +328,12 @@ private:
     std::map<std::string, int> musicByPath;
     uint64_t musicVer = 0;
     int musicView = 0, musicSort = 0;
+    // internet radio (ui_radio.cpp): what the list shows (0 popular here, 1 favourites, 2 lately, 3 search, 4 a genre)
+    void DrawRadio();
+    int radioMode = -1;
+    std::string radioSearch, radioGenre, radioUrlBuf, radioNameBuf, radioCountryFilter;
+    bool radioAddOpen = false, radioCountryOpen = false;
+    uint64_t radioSeen = 0;
     std::string musicSearch, musicGroup, musicNewName;
     std::string musicPickPl;  // the playlist (and place) of the song last picked, for its menu from the bar
     int musicPickIdx = -1;

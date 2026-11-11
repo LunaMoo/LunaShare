@@ -660,6 +660,20 @@ struct Player::ExtStream {
     std::function<int(int64_t, uint8_t*, int)> read;
     std::atomic<bool> stop{false};
     std::atomic<bool>* quit = nullptr;
+    // radio: the module asks for URLs through these
+    std::shared_ptr<UrlFetch> io;
+    LspUrlIo lio{};
+    static void* UrlOpen(void* u, const char* url) {
+        auto* x = (ExtStream*)u;
+        if (x->stop || *x->quit) return nullptr;
+        return x->io->Open(url, &x->stop);
+    }
+    static int UrlRead(void* u, void* h, uint8_t* buf, int len) {
+        auto* x = (ExtStream*)u;
+        if (x->stop || *x->quit) return -1;
+        return x->io->Read(h, buf, len);
+    }
+    static void UrlClose(void* u, void* h) { ((ExtStream*)u)->io->Close(h); }
     static int Read(void* u, int64_t off, uint8_t* buf, int len) {
         auto* x = (ExtStream*)u;
         for (;;) {
@@ -753,6 +767,15 @@ void Player::EndExternal() {
     Changed();
 }
 
+void Player::SetExternalTrack(uint64_t id, const Track& t) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        if (!ext_ || ex_.id != id) return;
+        ex_.track = t;
+    }
+    Changed();
+}
+
 bool Player::ExternalEnded(uint64_t id) {
     std::lock_guard<std::mutex> l(m_);
     return ext_ && ex_.id == id && exOpen_ == id && exEnded_;
@@ -789,9 +812,9 @@ void Player::LoopExternal() {
             }
         }
     }
-    if (mod_->state(cur) == LSP_ENDED && !exEnded_) {
+    if ((mod_->state(cur) == LSP_ENDED || mod_->state(cur) == LSP_ERROR) && !exEnded_) {
         exEnded_ = true;
-        if (!ex_.follow) {
+        if (!ex_.follow && !ex_.live) {  // (radio: it's tried again)
             playing_ = wantPlay_ = false;
             if (dev_) SDL_PauseAudioDevice(dev_, 1);
         }
@@ -1339,6 +1362,12 @@ Now Player::GetNow() {
             n.dur = open && dur_ > 0 ? dur_ : ex_.track.duration;
             n.index = ex_.index;
             n.count = ex_.count;
+            n.live = ex_.live;
+            n.retries = exRetries_;
+            if (ex_.live) {
+                n.dur = 0;
+                n.loading = !open || exEnded_;
+            }
             return n;
         }
         n.count = (int)order_.size();
@@ -1388,6 +1417,13 @@ void Player::Loop() {
                     st->s.user = st.get();
                     st->s.size = src.size;
                     st->s.read = ExtStream::Read;
+                    if (!src.url.empty() && src.io) {
+                        st->io = src.io;
+                        st->lio.user = st.get();
+                        st->lio.open = ExtStream::UrlOpen;
+                        st->lio.read = ExtStream::UrlRead;
+                        st->lio.close = ExtStream::UrlClose;
+                    }
                     exPending_ = st;
                 }
             }
@@ -1396,6 +1432,8 @@ void Player::Loop() {
             LspInfo info{};
             LspPlayer* q = nullptr;
             if (!src.path.empty()) q = mod_->open(src.path.c_str(), 48000, 2, &info);
+            else if (!src.url.empty() && st && st->io && mod_->open_url)
+                q = mod_->open_url(src.url.c_str(), src.format.empty() ? nullptr : src.format.c_str(), &st->lio, 48000, 2, &info);
             else if (src.read && mod_->open_stream) q = mod_->open_stream(&st->s, 48000, 2, &info);
             std::lock_guard<std::mutex> l(m_);
             exOpening_ = false;
@@ -1438,7 +1476,9 @@ void Player::Loop() {
                 exStream_ = st;
                 exOpen_ = src.id;
                 exEnded_ = false;
-                dur_ = info.duration > 0 ? info.duration : src.track.duration;
+                exRetryAt_ = 0;
+                if (src.live) exRetries_ = 0;
+                dur_ = src.live ? 0 : info.duration > 0 ? info.duration : src.track.duration;
                 EnsureDevice();
                 bool on;
                 if (src.follow) {
@@ -1480,6 +1520,22 @@ void Player::Loop() {
                 exStreamOld_.reset();
             }
             if (ext_) LoopExternal();
+            // radio: a station that stopped or couldn't be reached is tried again while it's meant to play
+            if (ext_ && ex_.live && exOpen_ == ex_.id && exEnded_ && !exOpening_) {
+                int64_t now = (int64_t)SDL_GetTicks64();
+                if (!wantPlay_) {
+                    exRetryAt_ = 0;
+                } else if (!exRetryAt_) {
+                    // (the first time at once - a stream that played and dropped is usually right back - then 2, 4 ... 30 s)
+                    exRetryAt_ = now + (exRetries_ == 0 ? 300 : std::min<int64_t>(30000, 2000ll << std::min(exRetries_ - 1, 4)));
+                } else if (now >= exRetryAt_) {
+                    exRetryAt_ = 0;
+                    exRetries_++;
+                    exOpen_ = 0;  // (opened again by the loop)
+                    exEnded_ = false;
+                    changed = true;
+                }
+            }
         }
         {
             std::lock_guard<std::mutex> l(m_);

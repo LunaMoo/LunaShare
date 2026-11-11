@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define LSP_API_VERSION 6
+#define LSP_API_VERSION 7
 
 #if defined(_WIN32)
 #define LSP_EXPORT __declspec(dllexport)
@@ -65,6 +65,16 @@ typedef struct LspStream {
     int64_t size;
     int (*read)(void* user, int64_t offset, uint8_t* buf, int len);
 } LspStream;
+
+/* since version 7: the host fetches what a URL points to (internet radio: Icecast / Shoutcast streams and HLS - the
+ * playlist and its segments are each opened through this). open() returns a handle or NULL; read() blocks until
+ * bytes come and returns how many, 0 at the end, < 0 on an error or when the host cancelled. Any thread. */
+typedef struct LspUrlIo {
+    void* user;
+    void* (*open)(void* user, const char* url);
+    int (*read)(void* user, void* handle, uint8_t* buf, int len);
+    void (*close)(void* user, void* handle);
+} LspUrlIo;
 
 /* since version 3: sound tracks (languages) and subtitles */
 enum { LSP_TRACK_AUDIO = 0, LSP_TRACK_SUBTITLE = 1 };
@@ -131,6 +141,9 @@ typedef struct LspModule {
     void (*set_sub_delay)(LspPlayer* p, double seconds);
     /* --- since version 6: the chapters of a film (MKV / MP4 / ...), in order; returns how many */
     int (*chapters)(LspPlayer* p, LspChapter* out, int max);
+    /* --- since version 7: sound from a URL (a live stream: no duration, no seeking). format: "hls" when the host
+       knows it is an HLS playlist, NULL to tell from the content. `io` must stay valid until close */
+    LspPlayer* (*open_url)(const char* url, const char* format, const LspUrlIo* io, int sample_rate, int channels, LspInfo* info);
 } LspModule;
 
 typedef const LspModule* (*LspGetModuleFn)(void);

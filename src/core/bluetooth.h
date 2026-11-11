@@ -60,6 +60,11 @@ struct HostBridge {
     std::function<void()> enterPip;
     std::function<bool()> inPip;
     std::function<bool(const std::string& url, std::string& body)> httpsGet;
+    // Android: a URL read as it comes (internet radio) - open: > 0 handle, with the status, the headers ("name: value"
+    // lines) and the address after redirects; read: bytes, 0 at the end, < 0 on an error; any thread
+    std::function<int(const std::string& url, bool icy, int& status, std::string& headers, std::string& finalUrl, std::string& err)> netOpen;
+    std::function<int(int id, uint8_t* buf, int len)> netRead;
+    std::function<void(int id)> netClose;
     std::function<bool()> biometricAvailable;                                         // Android: fingerprint / face set up
     std::function<void(const std::string& title, const std::string& cancel)> biometricAsk;  // success: notify action "unlock"
     std::function<void(bool on)> secureWindow;  // Android: no screenshots / app switcher preview (the app lock is on)  // Android: a small HTTPS GET (any thread)

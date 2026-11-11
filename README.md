@@ -69,6 +69,8 @@ after receiving, so you know it arrived intact.
   your own playlists; repeat, shuffle, a mini player everywhere.
 - Plays on in the background (Android: media notification, lock screen, headset buttons; Windows: media keys) and
   pauses for movies and calls. Send songs or whole albums (as a folder) to people.
+- **Internet radio**: tens of thousands of stations from the free Radio Browser directory - popular where you are,
+  by name or genre - with favourites, the song now playing and the station's logo; plain streams and HLS.
 
 **Gallery** (see [docs/GALLERY.md](docs/GALLERY.md))
 - The camera's photos and videos, *Pictures*, received files and your folders - **by month** (when they were taken) or

@@ -24,6 +24,7 @@ extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, 
 #include "media_host.h"
 #include "player_host.h"
 #include "music.h"
+#include "radio.h"
 #include "emoji_host.h"
 #include "gl_funcs.h"
 #include "image_cache.h"
@@ -559,6 +560,7 @@ int main(int argc, char** argv) {
     music::Lib().Init(engine.ConfigPath(), Player().Module());
     movpos::Init(engine.ConfigPath());
     music::Play().Init(Player().Module(), &music::Lib());
+    radio::R().Init(engine.ConfigPath());
     music::Play().LoadState(music::Lib().StatePath());
     music::Play().onChange = [] {
         static Uint32 ev = SDL_RegisterEvents(1);
@@ -890,6 +892,7 @@ int main(int argc, char** argv) {
     engine.onEvent = nullptr;
     engine.LeaveWatch();  // (unblocks a movie still being read from another device)
     music::Play().onChange = nullptr;
+    radio::R().Shutdown();
     music::Play().Shutdown();
     music::Lib().Shutdown();
     movpos::Save(true);

@@ -307,7 +307,7 @@ void App::Frame() {
         if (getenv("LUNASHARE_OPENLISTEN")) musicListenOpen = true;
         if (a == "movies") { tab = Tab::Movies; screen = MScreen::Movies; }
         if (a == "music" || a == "musicnow") { tab = Tab::Music; screen = MScreen::Music; musicNowShown = a == "musicnow"; }
-        if (const char* mv = getenv("LUNASHARE_MUSICVIEW")) musicView = std::clamp(atoi(mv), 0, 5);  // dev: songs .. playlists
+        if (const char* mv = getenv("LUNASHARE_MUSICVIEW")) musicView = std::clamp(atoi(mv), 0, 6);  // dev: songs .. playlists, radio
         if (const char* mg = getenv("LUNASHARE_MUSICGROUP")) musicGroup = mg;
         if (a == "home") screen = MScreen::Home;
         tabForce = true;

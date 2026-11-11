@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LunaShare VERSION 1.6.8 LANGUAGES C CXX)
+project(LunaShare VERSION 1.6.9 LANGUAGES C CXX)
 add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -453,6 +453,9 @@ if(LUNASHARE_BUILD_APP)
         src/app/file_assoc.cpp
         src/app/ui_music.cpp
         src/app/music.cpp
+        src/app/radio.cpp
+        src/app/ui_radio.cpp
+        src/app/net_stream.cpp
         src/app/notify.cpp
         src/app/tray.cpp
         src/app/image_cache.cpp
@@ -487,6 +490,18 @@ if(LUNASHARE_BUILD_APP)
         endif()
         # Desktop GL is loaded at runtime (imgui's GL loader + SDL_GL_GetProcAddress): no libGL link needed.
         target_link_libraries(LunaShare PRIVATE ${CMAKE_DL_LIBS})
+        # internet radio over https (Linux / macOS: sockets + OpenSSL; Windows uses WinHTTP)
+        if(NOT WIN32)
+            if(NOT OpenSSL_FOUND)
+                find_package(OpenSSL QUIET)
+            endif()
+            if(OpenSSL_FOUND)
+                target_link_libraries(LunaShare PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+                target_compile_definitions(LunaShare PRIVATE LS_HTTP_OPENSSL)
+            else()
+                message(STATUS "internet radio: OpenSSL not found - http streams only")
+            endif()
+        endif()
         if(LUNASHARE_GL_API STREQUAL "GLES2" OR LUNASHARE_GL_API STREQUAL "GLES3")
             find_library(GLES_LIB NAMES GLESv2 libGLESv2.so.2 REQUIRED)
             target_link_libraries(LunaShare PRIVATE ${GLES_LIB})

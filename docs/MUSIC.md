@@ -30,6 +30,22 @@
   pause and next; tapping it opens the player.
 - Music pauses on its own for a movie, a chat video or voice message, a call or a recording, and goes on afterwards.
 
+## Internet radio
+
+**Radio** (next to Playlists) lists stations from [radio-browser.info](https://www.radio-browser.info) - a free,
+community-run directory, no account needed:
+
+- **Popular in** your country (from the system's language and region; **Country...** picks another, or everywhere),
+  a **search** by name, and **genres** (pop, rock, jazz, news...). **Played lately** keeps the last 30.
+- **★** keeps a station with your **Favourites**; next / previous in the player go through them.
+- **Add by address...**: any stream (http / https), a playlist (.m3u, .pls) or an HLS address (.m3u8) of your own.
+- Playing: the station's logo as the cover, the song now on (when the station sends it) in the player, the
+  notification and the lock screen; **LIVE** instead of a seek bar. Play after a pause goes back to live.
+- When the connection drops it reconnects by itself (at once, then after 2 s, 4 s ... up to 30 s).
+
+Formats: MP3, AAC, Ogg (Vorbis, Opus) and FLAC streams (Icecast, Shoutcast) and **HLS** (live playlists of MPEG-TS,
+AAC or fragmented MP4 segments). Not supported: encrypted HLS (AES) and stations that need a login.
+
 ## Lyrics
 
 A song with a `.lrc` file of the same name next to it (`Song.mp3` + `Song.lrc`) shows its lyrics in the cover's

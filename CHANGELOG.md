@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.6.9
 
+- **Internet radio** in Music: stations from the Radio Browser directory - popular in your country, a search, genres,
+  your favourites and the ones played lately, or any station by its address. The song now on comes from the stream
+  and shows in the player, the notification and the lock screen, with the station's logo as the cover. Plain streams
+  (MP3 / AAC / Ogg over http or https, Icecast and Shoutcast, .pls / .m3u playlists) and HLS. A dropped connection
+  comes back by itself; play after a pause goes back to live; next / previous step through your favourites.
 - Moonlight theme, now the default: a night sky behind everything - a soft moon, faint stars - in cold blues with a
   moonlit blue accent and rounder corners. Text keeps the contrast of the dark theme; the sky is drawn with the
   window, nothing animates. Devices that had the old default (dark) switch to it once; Dark is still in Settings.
