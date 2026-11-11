@@ -37,8 +37,9 @@ typedef struct LstHost {
  *                 "seed" (port 0: one picked once and kept): -1 keep seeding | 0 stop when done | N > 0: until N% of the size was uploaded,
  *                 "dht": bool, "upnp": bool, "agent": "LunaShare/1.5.9",
  *                 "limitLocal": bool (init only: the limits also count for peers on the local network)}
- * options_json (add): {"dir": folder to save into, "paused": bool}
- * list() -> [{"id": 40 hex, "name", "dir", "state": "meta" | "checking" | "down" | "seed" | "done" | "paused" | "error",
+ * options_json (add): {"dir": folder to save into, "paused": bool,
+ *                      "pickFirst": bool - nothing is downloaded until set_wanted (state "pick" once the list is known)}
+ * list() -> [{"id": 40 hex, "name", "dir", "state": "meta" | "checking" | "down" | "seed" | "done" | "paused" | "error" | "pick" | "nospace",
  *             "error", "size" (wanted bytes), "done" (bytes), "downRate", "upRate" (B/s), "uploaded", "peers", "seeds",
  *             "files" (count), "added" (unix s), "paused": bool, "single": bool (one file, saved without a folder),
  *             "path": the file or folder on disk,

@@ -68,7 +68,7 @@ public:
 
     // ---- here (the module)
     const std::vector<Torrent>& List();  // (asked of the module a couple of times a second)
-    bool Add(const std::string& source, const std::string& dir, std::string& id, std::string& err);
+    bool Add(const std::string& source, const std::string& dir, std::string& id, std::string& err, bool pickFirst = false);
     std::vector<File> Files(const std::string& id);
     void SetWanted(const std::string& id, const std::vector<bool>& want);
     void Pause(const std::string& id, bool paused);
@@ -82,7 +82,10 @@ public:
 
     // ---- on one of my computers (from a device without the module)
     std::vector<std::string> Computers();  // my devices that do torrents (seen with the module; online or not)
-    bool RemoteAdd(const std::string& device, const std::string& source, const std::string& then, std::string& err);
+    bool RemoteAdd(const std::string& device, const std::string& source, const std::string& then, std::string& err, bool pickFirst = false);
+    // the files of a torrent on that computer (asked for again while called; nullptr until it answered) and the ticks
+    const std::vector<File>* RemoteFiles(const std::string& device, const std::string& id, int64_t* askedFor = nullptr);
+    void RemoteSetWanted(const std::string& device, const std::string& id, const std::vector<bool>& want);
     void RemoteWatchList(const std::string& device);  // call while its list is on screen
     const std::vector<Torrent>* RemoteList(const std::string& device, bool* fresh = nullptr);
     bool RemoteOff(const std::string& device);  // that computer doesn't take torrents from my devices (its setting)
@@ -158,9 +161,17 @@ private:
         bool off = false;
     };
     std::map<std::string, Remote> remote_;
+    struct RemoteFileList {
+        std::vector<File> files;
+        bool known = false;
+        int64_t asked = 0, firstAsked = 0;
+    };
+    std::map<std::string, RemoteFileList> remoteFiles_;  // device + "/" + torrent id
+    static std::vector<File> FilesFromJson(const nlohmann::json& j);
     struct PendingAdd {
         std::string cid, device, magnet, torrentB64, then;
         int64_t sentAt = 0;
+        bool pick = false;
     };
     std::vector<PendingAdd> pending_;
     std::set<std::string> computers_;

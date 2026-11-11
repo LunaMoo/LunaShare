@@ -252,6 +252,9 @@ private:
     bool torrentAddOpen = false, torrentSettingsOpen = false, torrentFilesOpen = false, torrentRemoveOpen = false, torrentRemoveFiles = false;
     std::string torrentAddSource, torrentAddDir, torrentAddErr, torrentAddDevice, torrentMagnetBuf;
     int torrentAddThen = 0;  // (on a computer: 0 send it here when done, 1 keep it there)
+    bool torrentAddPick = false;  // choose the files before anything downloads
+    std::string torrentFilesDevice;  // (whose torrent the files popup shows: "" here)
+    std::set<std::string> torrentPicked;  // torrents whose "choose the files" popup opened by itself already
     std::string torrentFilesId, torrentRemoveId, torrentRemoveDevice, torrentRemoveName, torrentDevice;
     // the Archives tab (ui_archives.cpp) and comics (ui_comics.cpp)
 public:

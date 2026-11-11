@@ -66,6 +66,9 @@ struct Extra {
     std::int64_t diskFree = -1;
     Clock::time_point lastDiskTry{};
     int diskTries = 0;  // (a disk that keeps failing is not retried forever)
+    // "choose the files first": nothing is downloaded until set_wanted (kept as <id>.pick in the state folder)
+    bool picking = false;
+    Clock::time_point kickUntil{};  // (more files wanted after it was finished: see SetWanted)
 };
 
 struct State {
@@ -186,6 +189,7 @@ void SaveResume(const lt::torrent_handle& h) {
 }
 
 std::string ResumePath(const std::string& id) { return (U8(g.dir) / (id + ".resume")).u8string(); }
+std::string PickPath(const std::string& id) { return (U8(g.dir) / (id + ".pick")).u8string(); }
 
 // alerts: resume data to write, things worth a log line. (g.m is NOT held while waiting.)
 void HandleAlerts() {
@@ -281,6 +285,26 @@ void SeedRules() {
         lt::torrent_status st = h.status(lt::torrent_handle::query_save_path | lt::torrent_handle::query_name);
         bool paused = bool(st.flags & lt::torrent_flags::paused);
         DiskFullRules(id, h, st, paused);
+        bool kick = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            auto it = g.x.find(id);
+            if (it != g.x.end() && it->second.kickUntil != Clock::time_point{}) {
+                if (Clock::now() > it->second.kickUntil) it->second.kickUntil = {};
+                else if (!paused && !st.is_finished && st.state == lt::torrent_status::downloading) kick = true, it->second.kickUntil = {};
+            }
+        }
+        if (kick) {
+            Log("more files wanted: looking for peers again for " + st.name);
+            // its peer list still thinks it's finished (it only rechecks that while looking for peers, and it doesn't
+            // look while every known peer is a seed it "doesn't need") - so it starts over: an empty list, filled
+            // again by the trackers, the DHT and the local network
+            h.clear_peers();
+            h.force_reannounce(0, -1, lt::torrent_handle::ignore_min_interval);
+            h.force_dht_announce();
+            h.force_lsd_announce();
+            continue;
+        }
         if (paused || !st.is_finished || !st.has_metadata || st.total_wanted <= 0) continue;
         if (st.state != lt::torrent_status::finished && st.state != lt::torrent_status::seeding) continue;
         bool stop = seed == 0 || (seed > 0 && st.all_time_upload * 100 >= st.total_wanted * (std::int64_t)seed);
@@ -390,12 +414,15 @@ int Init(const LstHost* host, const char* stateDir, const char* settingsJson) {
         if (ec) continue;
         p.flags &= ~lt::torrent_flags::auto_managed;
         p.flags &= ~lt::torrent_flags::upload_mode;  // (left there by a full disk last time: try again)
+        std::string stem = e.path().stem().u8string();
+        bool pick = fs::exists(U8(PickPath(stem)), fec);
+        if (pick) p.flags |= lt::torrent_flags::default_dont_download;  // (still waiting for the files to be chosen)
         lt::torrent_handle h = g.ses->add_torrent(std::move(p), ec);
         if (ec || !h.is_valid()) continue;
         std::string id = IdOf(h.info_hashes());
         std::lock_guard<std::mutex> l(g.m);
         g.h[id] = h;
-        g.x[id];
+        g.x[id].picking = pick;
         n++;
     }
     g.quit = false;
@@ -463,6 +490,8 @@ int AddParams(lt::add_torrent_params p, const char* optionsJson, char* idOut, ch
     p.save_path = dir;
     p.flags &= ~lt::torrent_flags::auto_managed;
     p.flags &= ~lt::torrent_flags::upload_mode;
+    bool pick = o.value("pickFirst", false);
+    if (pick) p.flags |= lt::torrent_flags::default_dont_download;  // (the file list comes, nothing else until chosen)
     if (o.value("paused", false)) p.flags |= lt::torrent_flags::paused;
     else p.flags &= ~lt::torrent_flags::paused;
     lt::error_code ec;
@@ -475,7 +504,9 @@ int AddParams(lt::add_torrent_params p, const char* optionsJson, char* idOut, ch
         std::lock_guard<std::mutex> l(g.m);
         g.h[id] = h;
         g.x[id].savePath = dir;
+        g.x[id].picking = pick;
     }
+    if (pick) WriteAll(PickPath(id), std::vector<char>{'1'});
     SaveResume(h);
     return 1;
 }
@@ -540,15 +571,16 @@ const char* List() {
                 lt::torrent_status st = h.status(lt::torrent_handle::query_name | lt::torrent_handle::query_save_path | lt::torrent_handle::query_torrent_file);
                 bool paused = bool(st.flags & lt::torrent_flags::paused);
                 std::string state;
-                bool diskFull = false;
+                bool diskFull = false, picking = false;
                 std::int64_t diskFree = -1;
                 {
                     std::lock_guard<std::mutex> l(g.m);
                     auto xi = g.x.find(id);
-                    if (xi != g.x.end()) diskFull = xi->second.diskFull, diskFree = xi->second.diskFree;
+                    if (xi != g.x.end()) diskFull = xi->second.diskFull, diskFree = xi->second.diskFree, picking = xi->second.picking;
                 }
                 if (diskFull) state = "nospace";
                 else if (st.errc) state = "error";
+                else if (picking && st.has_metadata && !paused) state = "pick";
                 else if (paused) state = st.has_metadata && st.is_finished && st.total_wanted > 0 ? "done" : "paused";
                 else if (st.state == lt::torrent_status::checking_files || st.state == lt::torrent_status::checking_resume_data) state = "checking";
                 else if (st.state == lt::torrent_status::downloading_metadata || !st.has_metadata) state = "meta";
@@ -664,15 +696,34 @@ void SetWanted(const char* id, const char* wantedJson) {
             if (!want) prio[i] = lt::dont_download;
             else if (prio[i] == lt::dont_download) prio[i] = lt::default_priority;
         }
+        lt::torrent_status before = h.status({});
         h.prioritize_files(prio);
+        // libtorrent 2.0.15: a finished torrent that wants more again goes back to downloading (once the new
+        // priorities are in - a moment later) but never connects to the seeds it already knows: it sits there with
+        // nobody. SeedRules starts its peer list over once it's downloading. (Not when paused: the user stopped it.)
+        bool kick = before.is_finished && !(before.flags & lt::torrent_flags::paused);
         bool resume = false;
         {
             std::lock_guard<std::mutex> l(g.m);
             auto it = g.x.find(id);
+            if (it != g.x.end() && kick) it->second.kickUntil = Clock::now() + std::chrono::seconds(20);
             if (it != g.x.end() && it->second.autoPaused) {  // (it was done: more to fetch now)
                 it->second.autoPaused = false;
                 resume = true;
             }
+        }
+        bool wasPicking = false;
+        {
+            std::lock_guard<std::mutex> l(g.m);
+            auto it = g.x.find(id);
+            if (it != g.x.end()) wasPicking = it->second.picking, it->second.picking = false;
+        }
+        if (wasPicking) {
+            std::error_code fec;
+            fs::remove(U8(PickPath(id)), fec);
+            // (the trackers / DHT are asked again for whoever is around now)
+            h.force_reannounce(0, -1, lt::torrent_handle::ignore_min_interval);
+            h.force_dht_announce();
         }
         if (resume) h.resume();
         SaveResume(h);
@@ -724,6 +775,7 @@ void Remove(const char* id, int deleteFiles) {
     }
     std::error_code ec;
     fs::remove(U8(ResumePath(id)), ec);
+    fs::remove(U8(PickPath(id)), ec);
 }
 
 void Stream(const char* id, int file, int on) {

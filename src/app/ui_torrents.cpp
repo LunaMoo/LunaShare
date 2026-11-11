@@ -24,7 +24,9 @@ std::string Rate(int bps) { return FormatBytes((double)bps) + "/s"; }
 
 // the files popup: what's ticked, until OK
 struct FilesState {
-    std::string id;
+    std::string id, device;
+    bool picking = false;  // chosen before it starts: everything ticked to begin with
+    bool shown = false;    // (the ticks were set from the list once)
     std::vector<TorrentHost::File> files;
     std::vector<bool> want;
     int64_t at = 0;
@@ -194,12 +196,17 @@ void App::TorrentPopups() {
                 ImGui::RadioButton(T("Keep it on the computer"), &torrentAddThen, 1);
                 if (!eng.OwnOnline(torrentAddDevice)) ImGui::TextDisabled("%s", T("It's offline: the link is kept and handed over when it comes online."));
             }
+            if (here || !comps.empty()) {
+                ImGui::Checkbox(T("Choose the files first"), &torrentAddPick);
+                if (ImGui::IsItemHovered() && !mobile)
+                    ImGui::SetTooltip("%s", T("Nothing downloads until you pick the files (a magnet link first fetches the list)"));
+            }
             if (!torrentAddErr.empty()) ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.4f, 1), "%s", torrentAddErr.c_str());
             ImGui::BeginDisabled(!here && comps.empty());
             if (ImGui::Button(T("Download"), ImVec2(mobile ? ImGui::GetContentRegionAvail().x * 0.5f : 0, h))) {
                 std::string id, err;
-                bool ok = here ? Torrents().Add(torrentAddSource, torrentAddDir, id, err)
-                               : Torrents().RemoteAdd(torrentAddDevice, torrentAddSource, torrentAddThen == 0 ? "send" : "keep", err);
+                bool ok = here ? Torrents().Add(torrentAddSource, torrentAddDir, id, err, torrentAddPick)
+                               : Torrents().RemoteAdd(torrentAddDevice, torrentAddSource, torrentAddThen == 0 ? "send" : "keep", err, torrentAddPick);
                 if (ok) {
                     if (!here) torrentDevice = torrentAddDevice;
                     torrentAddSource.clear();
@@ -225,28 +232,53 @@ void App::TorrentPopups() {
         ImGui::OpenPopup("##tfiles");
         torrentFilesOpen = false;
         g_files.id = torrentFilesId;
-        g_files.files = Torrents().Files(torrentFilesId);
+        g_files.device = torrentFilesDevice;
+        g_files.files.clear();
         g_files.want.clear();
-        for (auto& f : g_files.files) g_files.want.push_back(f.want);
-        g_files.at = SteadyMs();
+        g_files.shown = false;
+        g_files.picking = false;
+        const std::vector<Torrent>* l = g_files.device.empty() ? &Torrents().List() : Torrents().RemoteList(g_files.device);
+        if (l)
+            for (auto& t : *l)
+                if (t.id == g_files.id) g_files.picking = t.state == "pick" || t.state == "meta";
+        g_files.at = 0;
     }
+    // the list (here, or asked of the computer), refreshed while the popup is open; the ticks are set once
+    int64_t filesAsked = 0;
+    auto refreshFiles = [&] {
+        bool remote = !g_files.device.empty();
+        if (!remote && SteadyMs() - g_files.at < 1500) return;
+        std::vector<TorrentHost::File> now;
+        if (remote) {
+            const std::vector<TorrentHost::File>* r = Torrents().RemoteFiles(g_files.device, g_files.id, &filesAsked);
+            if (r) now = *r;
+        } else {
+            now = Torrents().Files(g_files.id);
+        }
+        g_files.at = SteadyMs();
+        if (now.empty()) return;
+        if (!g_files.shown || now.size() != g_files.files.size()) {
+            g_files.files = now;
+            g_files.want.clear();
+            for (auto& f : g_files.files) g_files.want.push_back(g_files.picking ? true : f.want);
+            g_files.shown = true;
+        } else {
+            for (size_t i = 0; i < now.size(); i++) g_files.files[i].done = now[i].done;
+        }
+    };
     place();
     ImGui::SetNextWindowSizeConstraints(ImVec2(mobile ? vp->WorkSize.x * 0.94f : ImGui::GetFontSize() * 30, 0), ImVec2(vp->WorkSize.x * 0.94f, vp->WorkSize.y * 0.8f));
     if (ImGui::BeginPopupModal("##tfiles", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(T("Files to download"));
+        refreshFiles();
+        ImGui::TextUnformatted(g_files.picking ? T("Choose the files to download") : T("Files to download"));
+        if (g_files.picking) ImGui::TextDisabled("%s", T("Nothing is downloaded until you press OK."));
         if (g_files.files.empty()) {
-            ImGui::TextDisabled("%s", T("Not known yet (a magnet link first fetches the list from other people)."));
-            if (SteadyMs() - g_files.at > 1500) {  // (looked at again while the popup is open)
-                g_files.files = Torrents().Files(g_files.id);
-                g_files.want.clear();
-                for (auto& f : g_files.files) g_files.want.push_back(f.want);
-                g_files.at = SteadyMs();
-            }
-        } else if (SteadyMs() - g_files.at > 1500) {  // (the progress moves; the ticks stay as they are)
-            auto now = Torrents().Files(g_files.id);
-            if (now.size() == g_files.files.size())
-                for (size_t i = 0; i < now.size(); i++) g_files.files[i].done = now[i].done;
-            g_files.at = SteadyMs();
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 26));
+            if (!g_files.device.empty() && !eng.OwnOnline(g_files.device)) ImGui::TextDisabled("%s", T("The computer is offline."));
+            else ImGui::TextDisabled("%s", T("Not known yet (a magnet link first fetches the list from other people)."));
+            if (!g_files.device.empty() && filesAsked > 10000 && eng.OwnOnline(g_files.device))
+                ImGui::TextDisabled("%s", T("No answer from the computer - it may need a newer LunaShare (1.6.8 or later)."));
+            ImGui::PopTextWrapPos();
         }
         if (ImGui::Button(T("All"), ImVec2(0, h))) std::fill(g_files.want.begin(), g_files.want.end(), true);
         ImGui::SameLine();
@@ -272,7 +304,8 @@ void App::TorrentPopups() {
                 for (auto& f : g_files.files) n = std::max(n, f.index + 1);
                 std::vector<bool> all((size_t)n, false);
                 for (size_t i = 0; i < g_files.files.size(); i++) all[(size_t)g_files.files[i].index] = g_files.want[i];
-                Torrents().SetWanted(g_files.id, all);
+                if (g_files.device.empty()) Torrents().SetWanted(g_files.id, all);
+                else Torrents().RemoteSetWanted(g_files.device, g_files.id, all);
             }
             ImGui::CloseCurrentPopup();
         }
@@ -454,6 +487,13 @@ void App::DrawTorrents() {
         for (size_t i = 0; i < list->size(); i++) {
             const Torrent& t = (*list)[i];
             ImGui::PushID(t.id.c_str());
+            // added with "choose the files first" and the list is here: the popup opens by itself (once)
+            if (t.state == "pick" && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) &&
+                torrentPicked.insert((here ? std::string() : device) + "/" + t.id).second) {
+                torrentFilesId = t.id;
+                torrentFilesDevice = here ? std::string() : device;
+                torrentFilesOpen = true;
+            }
             ImGui::TextUnformatted(t.name.c_str());
             // the bar, with what's going on written in it
             float frac = t.size > 0 ? (float)((double)t.done / (double)t.size) : 0.0f;
@@ -464,6 +504,7 @@ void App::DrawTorrents() {
                              : t.state == "done"     ? T("done")
                              : t.state == "paused"   ? T("paused")
                              : t.state == "nospace"  ? T("disk full")
+                             : t.state == "pick"     ? T("choose the files")
                                                      : T("error");
             std::string text = t.size > 0 ? TF("%d%% of %s", (int)(frac * 100), FormatBytes((double)t.size).c_str()) : std::string();
             text += (text.empty() ? "" : "  -  ") + std::string(st);
@@ -555,8 +596,9 @@ void App::DrawTorrents() {
             }
             if (here) {
                 next();
-                if (ui::IconTextButton(T("Files..."), Icon::List, ImVec2(bw, h))) {
+                if (ui::IconTextButton(t.state == "pick" ? T("Choose files...") : T("Files..."), Icon::List, ImVec2(bw, h))) {
                     torrentFilesId = t.id;
+                    torrentFilesDevice.clear();
                     torrentFilesOpen = true;
                 }
                 next();
@@ -569,7 +611,15 @@ void App::DrawTorrents() {
                     next();
                     if (ui::IconTextButton(T("Send..."), Icon::Send, ImVec2(bw, h))) OpenSendTo({t.path});
                 }
-            } else if (t.Complete() && !(t.then == "send" && !t.sent)) {
+            } else {
+                next();
+                if (ui::IconTextButton(t.state == "pick" ? T("Choose files...") : T("Files..."), Icon::List, ImVec2(bw, h))) {
+                    torrentFilesId = t.id;
+                    torrentFilesDevice = device;
+                    torrentFilesOpen = true;
+                }
+            }
+            if (!here && t.Complete() && !(t.then == "send" && !t.sent)) {
                 next();
                 if (ui::IconTextButton(t.sent ? T("Send here again") : T("Send here"), Icon::Down, ImVec2(bw, h))) Torrents().RemoteSend(device, t.id);
             }

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.8
 
 - Calls: a new echo canceller - WebRTC's AEC3 (the one in Chrome) instead of speexdsp's. It finds the delay between
   speaker and microphone itself, copes with room reverb and small speakers that distort, and keeps your voice when
@@ -10,6 +10,11 @@
 - Torrents: a full disk no longer leaves a download stuck for good. libtorrent then stops asking for pieces (so the
   seeds drop you) and stays that way, even after a restart; now the torrent says "disk full" with the free space and
   what's left, and carries on by itself within 30 s of space being freed (Resume also does it).
+- Torrents on a computer, from the phone: "Files..." picks what to download there, like on the computer itself.
+- Torrents: "Choose the files first" when adding (here or on a computer) - the file list comes, nothing else, and the
+  file picker opens by itself; the download starts with what you ticked.
+- Torrents: ticking more files of a finished torrent downloads them again (libtorrent never reconnected to the seeds
+  it had dropped, so it sat at 0 peers).
 
 ## 1.6.7
 

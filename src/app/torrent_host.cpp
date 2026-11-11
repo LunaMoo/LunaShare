@@ -144,12 +144,12 @@ void TorrentHost::LoadPending() {
     if (j.contains("pending") && j["pending"].is_array())
         for (auto& p : j["pending"])
             if (p.is_object() && pending_.size() < 50)
-                pending_.push_back({p.value("cid", ""), p.value("device", ""), p.value("magnet", ""), p.value("torrent", ""), p.value("then", "keep"), 0});
+                pending_.push_back({p.value("cid", ""), p.value("device", ""), p.value("magnet", ""), p.value("torrent", ""), p.value("then", "keep"), 0, p.value("pick", false)});
 }
 
 void TorrentHost::SavePending() {
     json j = {{"computers", computers_}, {"pending", json::array()}};
-    for (auto& p : pending_) j["pending"].push_back({{"cid", p.cid}, {"device", p.device}, {"magnet", p.magnet}, {"torrent", p.torrentB64}, {"then", p.then}});
+    for (auto& p : pending_) j["pending"].push_back({{"cid", p.cid}, {"device", p.device}, {"magnet", p.magnet}, {"torrent", p.torrentB64}, {"then", p.then}, {"pick", p.pick}});
     SaveJsonFile(JoinPath(eng_->ConfigPath(), "torrent_remote.json"), j);
 }
 
@@ -253,13 +253,13 @@ const std::vector<TorrentHost::Torrent>& TorrentHost::List() {
     return list_;
 }
 
-bool TorrentHost::Add(const std::string& source, const std::string& dir, std::string& id, std::string& err) {
+bool TorrentHost::Add(const std::string& source, const std::string& dir, std::string& id, std::string& err, bool pickFirst) {
     if (!Available()) {
         err = "no torrent module";
         return false;
     }
     char idb[64] = {0}, eb[512] = {0};
-    json o = {{"dir", dir.empty() ? DefaultDir() : dir}};
+    json o = {{"dir", dir.empty() ? DefaultDir() : dir}, {"pickFirst", pickFirst}};
     if (!mod_->add(source.c_str(), o.dump().c_str(), idb, eb, sizeof eb)) {
         err = eb[0] ? eb : "can't add it";
         return false;
@@ -269,14 +269,18 @@ bool TorrentHost::Add(const std::string& source, const std::string& dir, std::st
     return true;
 }
 
-std::vector<TorrentHost::File> TorrentHost::Files(const std::string& id) {
+std::vector<TorrentHost::File> TorrentHost::FilesFromJson(const json& j) {
     std::vector<File> v;
-    if (!Available()) return v;
-    json j = json::parse(mod_->files(id.c_str()), nullptr, false);
     if (j.is_array())
         for (auto& e : j)
-            if (e.is_object()) v.push_back({e.value("i", 0), e.value("path", ""), e.value("size", (int64_t)0), e.value("done", (int64_t)0), e.value("want", true)});
+            if (e.is_object() && v.size() < 20000)
+                v.push_back({e.value("i", 0), e.value("path", ""), e.value("size", (int64_t)0), e.value("done", (int64_t)0), e.value("want", true)});
     return v;
+}
+
+std::vector<TorrentHost::File> TorrentHost::Files(const std::string& id) {
+    if (!Available()) return {};
+    return FilesFromJson(json::parse(mod_->files(id.c_str()), nullptr, false));
 }
 
 void TorrentHost::SetWanted(const std::string& id, const std::vector<bool>& want) {
@@ -432,6 +436,12 @@ void TorrentHost::HandleCmd(const std::string& from, const json& d) {
         if (changed) SavePending();
         return;
     }
+    if (op == "filelist") {  // (phone: the files of one torrent on a computer of mine)
+        RemoteFileList& r = remoteFiles_[from + "/" + d.value("id", "")];
+        r.files = FilesFromJson(d.value("files", json::array()));
+        r.known = d.value("known", true);
+        return;
+    }
     // ---- the rest is asked of a computer with the module
     if (!mod_) return;
     if (!Available() || !eng_->GetSettings().torrentRemote) {  // (turned off here: said so, nothing done)
@@ -447,7 +457,7 @@ void TorrentHost::HandleCmd(const std::string& from, const json& d) {
         std::string cid = d.value("cid", ""), magnet = d.value("magnet", ""), then = d.value("then", "keep"), err, id;
         bool ok = false;
         char idb[64] = {0}, eb[512] = {0};
-        json o = {{"dir", DefaultDir()}};
+        json o = {{"dir", DefaultDir()}, {"pickFirst", d.value("pick", false)}};
         if (!magnet.empty() && magnet.size() < 16384 && magnet.compare(0, 7, "magnet:") == 0) {
             ok = mod_->add(magnet.c_str(), o.dump().c_str(), idb, eb, sizeof eb) != 0;
         } else {
@@ -472,6 +482,18 @@ void TorrentHost::HandleCmd(const std::string& from, const json& d) {
         listAt_ = 0;
     } else if (op == "pause") {
         Pause(d.value("id", ""), d.value("on", true));
+    } else if (op == "files") {  // (the list is empty until a magnet link brought it)
+        std::string id = d.value("id", "");
+        json files = json::parse(mod_->files(id.c_str()), nullptr, false);
+        bool known = files.is_array() && !files.empty();
+        if (known && files.size() > 5000) files.erase(files.begin() + 5000, files.end());  // (one message stays sane)
+        eng_->OwnSend(from, "torrent", {{"op", "filelist"}, {"id", id}, {"files", known ? files : json::array()}, {"known", known}});
+        return;
+    } else if (op == "want") {
+        std::vector<bool> w;
+        if (d.contains("want") && d["want"].is_array())
+            for (auto& b : d["want"]) w.push_back(b.is_boolean() ? b.get<bool>() : true);
+        if (!w.empty()) SetWanted(d.value("id", ""), w);
     } else if (op == "remove") {
         Remove(d.value("id", ""), d.value("files", false));
     } else if (op == "send") {
@@ -554,6 +576,7 @@ void TorrentHost::Tick() {
         for (auto& p : pending_) {
             if (p.sentAt && now - p.sentAt < 20000) continue;
             json m = {{"op", "add"}, {"cid", p.cid}, {"then", p.then}};
+            if (p.pick) m["pick"] = true;
             if (!p.magnet.empty()) m["magnet"] = p.magnet;
             else m["torrent"] = p.torrentB64;
             if (eng_->OwnSend(p.device, "torrent", m)) p.sentAt = now;
@@ -575,8 +598,9 @@ std::vector<std::string> TorrentHost::Computers() {
     return v;
 }
 
-bool TorrentHost::RemoteAdd(const std::string& device, const std::string& source, const std::string& then, std::string& err) {
+bool TorrentHost::RemoteAdd(const std::string& device, const std::string& source, const std::string& then, std::string& err, bool pickFirst) {
     PendingAdd p;
+    p.pick = pickFirst;
     p.cid = RandomHex(8);
     p.device = device;
     p.then = then;
@@ -599,6 +623,27 @@ bool TorrentHost::RemoteAdd(const std::string& device, const std::string& source
     SavePending();
     pendingAt_ = 0;
     return true;
+}
+
+const std::vector<TorrentHost::File>* TorrentHost::RemoteFiles(const std::string& device, const std::string& id, int64_t* askedFor) {
+    if (!eng_) return nullptr;
+    RemoteFileList& r = remoteFiles_[device + "/" + id];
+    int64_t now = SteadyMs();
+    if (!r.firstAsked) r.firstAsked = now;
+    if (now - r.asked > 1500) {  // (progress moves; a magnet link's list may still be coming)
+        r.asked = now;
+        eng_->OwnSend(device, "torrent", {{"op", "files"}, {"id", id}});
+    }
+    if (askedFor) *askedFor = now - r.firstAsked;
+    return r.known ? &r.files : nullptr;
+}
+
+void TorrentHost::RemoteSetWanted(const std::string& device, const std::string& id, const std::vector<bool>& want) {
+    if (!eng_) return;
+    json w = json::array();
+    for (bool b : want) w.push_back(b);
+    eng_->OwnSend(device, "torrent", {{"op", "want"}, {"id", id}, {"want", w}});
+    remoteFiles_.erase(device + "/" + id);
 }
 
 void TorrentHost::RemoteWatchList(const std::string& device) {
