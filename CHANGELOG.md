@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.3
+
+- OPNsense: *Delete* and *Block* did nothing after updating the plugin - the server that was already running kept the
+  old program, which doesn't know these commands. `install.sh` now restarts a running server; the server logs commands
+  it doesn't know (and a key that matches no one); the page warns when the server hasn't applied a change.
+
 ## 1.6.2
 
 - **Picking and sending the same everywhere.** Movies, music, archives and comics pick like the gallery: a long press

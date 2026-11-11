@@ -9,10 +9,11 @@
         // people who joined with an invite code
         function esc(s) { return $('<div/>').text(s === undefined || s === null ? '' : String(s)).html(); }
         function day(ms) { return ms ? new Date(ms).toLocaleString() : '-'; }
-        function loadInvited() {
+        function loadInvited(done) {
             ajaxGet('/api/lunashare/invited/list', {}, function (data) {
                 const body = $('#invited_rows').empty();
                 const rows = (data && data.rows) ? data.rows : [];
+                if (typeof done === 'function') done(rows);
                 if (!rows.length) {
                     body.append('<tr><td colspan="7">{{ lang._('No one has joined with an invite code yet.') }}</td></tr>');
                     return;
@@ -48,8 +49,23 @@
                 if (!window.confirm(msg.replace('%s', b.data('name') || b.data('key')))) return;
             }
             b.prop('disabled', true);
-            ajaxCall('/api/lunashare/invited/' + b.data('act') + '/' + b.data('key'), {}, function () {
-                setTimeout(loadInvited, 6000);  // (the server applies it within a few seconds)
+            const act = b.data('act'), key = String(b.data('key'));
+            $('#invited_msg').hide();
+            ajaxCall('/api/lunashare/invited/' + act + '/' + key, {}, function (res) {
+                if (!res || res.status !== 'ok') {
+                    $('#invited_msg').text('{{ lang._('The command failed.') }} ' + (res && res.output ? res.output : '')).show();
+                    loadInvited();
+                    return;
+                }
+                // the server applies it within a few seconds: check that it did
+                setTimeout(function () {
+                    loadInvited(function (rows) {
+                        const r = rows.find(function (x) { return String(x.key) === key; });
+                        const ok = act === 'erase' ? !r : act === 'block' ? r && r.blocked : act === 'unblock' ? r && !r.blocked
+                                 : act === 'release' ? r && r.released : act === 'restrict' ? r && !r.released : true;
+                        if (!ok) $('#invited_msg').text('{{ lang._('The server has not applied it. Is the service running, and was it restarted after the plugin was updated? Restart it (Services) and try again.') }}').show();
+                    });
+                }, 7000);
             });
         });
         $('#invited_refresh').click(loadInvited);
@@ -101,5 +117,6 @@
         </thead>
         <tbody id="invited_rows"></tbody>
     </table>
+    <div class="alert alert-warning" id="invited_msg" style="display: none;"></div>
     <button class="btn btn-default btn-xs" id="invited_refresh" type="button">{{ lang._('Refresh') }}</button>
 </div>

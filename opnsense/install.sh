@@ -31,4 +31,8 @@ mkdir -p /usr/local/etc/lunashare
 (cd "$HERE/src" && tar cf - .) | (cd /usr/local && tar xpf -)
 chmod 0755 /usr/local/etc/rc.d/lunashare_rendezvous /usr/local/opnsense/scripts/OPNsense/LunaShare/*.php
 refresh
+# a running server keeps the old program (and ignores commands it doesn't know): start the new one
+if /usr/local/etc/rc.d/lunashare_rendezvous status >/dev/null 2>&1; then
+    /usr/local/etc/rc.d/lunashare_rendezvous restart && echo "Restarted the running server with the new version."
+fi
 echo "Installed. Open Services > LunaShare rendezvous in the web UI, enable it and press Apply."

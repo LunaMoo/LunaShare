@@ -623,6 +623,11 @@ void RendezvousServer::Loop() {
         f.close();
         std::remove(cmdFile.c_str());
         for (auto& [c, k] : cmds) {
+            static const std::set<std::string> known = {"release", "restrict", "forget", "erase", "block", "unblock"};
+            if (!known.count(c)) {
+                log("unknown admin command \"" + c + "\" (written by a newer lunashare-rendezvous? restart the server)");
+                continue;
+            }
             std::set<std::string> accs, hws;
             for (auto& [pub, x] : invited)
                 if (pub.compare(0, k.size(), k) == 0) {
@@ -640,6 +645,7 @@ void RendezvousServer::Loop() {
                 if (hit && (c == "block" || c == "unblock")) { it->second.blocked = c == "block"; invDirty = true; }
                 ++it;
             }
+            if (pubs.empty()) log(c + " " + k + ": no such device among the people who joined with an invite");
             if ((c == "erase" || c == "block") && !pubs.empty()) eraseTraces(pubs, accs, hws);
         }
         saveInvited(true);
