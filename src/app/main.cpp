@@ -17,6 +17,7 @@ extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, 
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl2.h"
+#include "imgui_internal.h"  // (ClearActiveID: Back closes the keyboard and the text field lets go)
 #include "platform.h"
 #include "ui.h"
 #include "ui_widgets.h"
@@ -777,12 +778,17 @@ int main(int argc, char** argv) {
         }
 #endif
         ImGui::NewFrame();
+#ifdef __ANDROID__
+        // Back closed the keyboard (SDL stopped text input): the text field lets go too, or it would ask for the
+        // keyboard again at once (it blinked back). Tapping the field brings it back.
+        if (g_kbOn && !SDL_IsTextInputActive()) {
+            g_kbOn = false;
+            g_kbOffSince = 0;
+            ImGui::ClearActiveID();
+        }
+#endif
         app.discardFrame = false;
         app.Frame();
-#ifdef __ANDROID__
-        // the keyboard closed with Back while the field kept its focus: tapping the field brings it back
-        if (g_kbOn && ImGui::GetIO().WantTextInput && ImGui::IsMouseReleased(0) && !SDL_IsScreenKeyboardShown(window)) SDL_StartTextInput();
-#endif
         Player().SetLoop(engine.settings.playerLoop && !engine.watch.sid);
         Player().Update();  // before Media(): hands it the current video picture to upload
         Media().Update();

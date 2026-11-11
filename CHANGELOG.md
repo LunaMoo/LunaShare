@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.6.6
 
+- Android: Back closes the on-screen keyboard (it used to come straight back); tap the text field to open it again.
 - Android: the on-screen keyboard no longer blinks while typing (it was asked to show again at every letter, and
   hidden for a moment whenever the layout moved), so the first letters aren't lost.
 - Android calls play on the call (voice) stream with the voice-communication microphone: the volume buttons change
