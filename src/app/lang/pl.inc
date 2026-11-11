@@ -1413,3 +1413,8 @@
 {"Forget...", "Zapomnij..."},
 {"No device of this contact is known any more.", "Żadne urządzenie tego kontaktu nie jest już znane."},
 {"Forget %s? Their devices, nicknames and the chat history are removed from this device. If they connect again, they show up as new.", "Zapomnieć %s? Jego urządzenia, nazwy i historia czatu zostaną usunięte z tego urządzenia. Jeśli połączy się ponownie, pojawi się jako nowy."},
+{"Me", "Ja"},
+{"notes, and your other devices (%d)", "notatki i Twoje inne urządzenia (%d)"},
+{"notes for yourself", "notatki dla siebie"},
+{"notes for yourself - files you add stay on this device", "notatki dla siebie - dodane pliki zostają na tym urządzeniu"},
+{"%s (this device)", "%s (to urządzenie)"},

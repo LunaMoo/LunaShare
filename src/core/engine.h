@@ -361,6 +361,14 @@ public:
     // `peer` accept either; device-level actions (files, calls, connect) then pick the best device of that person.
     std::string MyAccount() const { return account_.PubHex(); }
     static bool IsContactKey(const std::string& k) { return !k.empty() && k[0] == '@'; }
+    // My own chat ("@" + my account): always listed - notes for myself, files kept to share later, and my other
+    // devices (messages sync to all of them; calls ring the others). Its messages from my other devices are shown as
+    // theirs (fromDev), so a device given to someone works as a chat with them.
+    std::string SelfKey() { return "@" + MyAccount(); }
+    bool IsSelfKey(const std::string& k) { return !MyAccount().empty() && k == SelfKey(); }
+    std::string selfName = "Me";  // (the app sets it in its language)
+    void MergeOwnChats();         // older chats with one of my devices -> my own chat
+    int64_t lastMerge_ = 0;
     std::string ChatKey(const std::string& device);          // conversation the messages of `device` belong to
     std::vector<std::string> DevicesOf(const std::string& key);  // a person's devices (just `key` for a device id)
     std::string Resolve(const std::string& key);             // best device: connected (fastest link) > online > last seen

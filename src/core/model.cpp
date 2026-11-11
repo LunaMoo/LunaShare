@@ -326,6 +326,7 @@ json ToJson(const ChatMessage& m) {
     if (!m.readSent) j["readPending"] = true;
     if (!m.mentions.empty()) j["men"] = m.mentions;
     if (m.forwarded) j["fwd"] = true;
+    if (!m.fromDev.empty()) j["fdev"] = m.fromDev;
     if (m.pinTs) {
         j["pin"] = m.pinned;
         j["pinTs"] = m.pinTs;
@@ -385,6 +386,7 @@ ChatMessage MessageFromJson(const json& j) {
     m.readSent = !rp;
     Get(j, "re", m.replyTo);
     Get(j, "fwd", m.forwarded);
+    Get(j, "fdev", m.fromDev);
     Get(j, "pin", m.pinned);
     Get(j, "pinTs", m.pinTs);
     Get(j, "star", m.starred);

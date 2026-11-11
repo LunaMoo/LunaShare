@@ -459,6 +459,7 @@ std::string Engine::PeerName(const std::string& peerOrKey) {
         auto g = groups.find(peerOrKey.substr(1));
         return g == groups.end() || g->second.name.empty() ? "Group" : g->second.name;
     }
+    if (IsSelfKey(peerOrKey)) return selfName;
     if (IsContactKey(peerOrKey)) {
         // a person: a nickname given to any of their devices, else the name of the device seen last
         const KnownDevice* best = nullptr;
@@ -521,7 +522,8 @@ static bool LooksLikeJpeg(const std::string& d);
 
 std::string Engine::ChatKey(const std::string& device) {
     auto it = devices.find(device);
-    if (it == devices.end() || it->second.accountPub.empty() || it->second.accountPub == MyAccount()) return device;
+    if (it == devices.end() || it->second.accountPub.empty()) return device;
+    if (it->second.accountPub == MyAccount()) return device == settings.deviceId ? device : SelfKey();  // my other devices: my own chat
     return "@" + it->second.accountPub;
 }
 
@@ -539,7 +541,7 @@ std::vector<std::string> Engine::DevicesOf(const std::string& key) {
     std::vector<std::string> out;
     std::string acc = key.substr(1);
     for (auto& [id, d] : devices)
-        if (d.accountPub == acc && !d.blocked) out.push_back(id);
+        if (d.accountPub == acc && !d.blocked && id != settings.deviceId) out.push_back(id);
     return out;
 }
 
@@ -579,6 +581,7 @@ std::vector<std::string> Engine::MyOtherDevices() {
 
 std::vector<std::string> Engine::Conversations() {
     std::set<std::string> keys;
+    if (!MyAccount().empty()) keys.insert(SelfKey());  // (always there)
     for (auto& [id, d] : devices)
         if (id != settings.deviceId && !d.viaGroup) keys.insert(ChatKey(id));
     for (auto& [id, o] : online) {
@@ -589,7 +592,35 @@ std::vector<std::string> Engine::Conversations() {
         if (!g.left) keys.insert("#" + id);
     for (auto& [k, cv] : chats)
         if (!cv.messages.empty()) keys.insert(k);
+    keys.erase(settings.deviceId);
     return std::vector<std::string>(keys.begin(), keys.end());
+}
+
+void Engine::MergeOwnChats() {
+    // (lock held) a chat kept under one of my devices (from before my own chat existed) moves into my own chat
+    if (MyAccount().empty()) return;
+    std::string self = SelfKey();
+    for (auto it = chats.begin(); it != chats.end();) {
+        auto dv = devices.find(it->first);
+        if (it->first == self || dv == devices.end() || dv->second.accountPub != MyAccount() || it->first == settings.deviceId) {
+            ++it;
+            continue;
+        }
+        Conversation& to = chats[self];
+        to.peer = self;
+        std::set<std::string> have;
+        for (auto& m : to.messages) have.insert(m.mid);
+        for (auto& m : it->second.messages) {
+            if (have.count(m.mid)) continue;
+            ChatMessage x = m;
+            if (!x.outgoing && x.fromDev.empty()) x.fromDev = it->first;
+            to.messages.push_back(x);
+        }
+        to.unread += it->second.unread;
+        std::stable_sort(to.messages.begin(), to.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
+        it = chats.erase(it);
+        MarkDirty();
+    }
 }
 
 // What an account signs about its devices. The text is canonical (sorted), so any device of the account produces
@@ -1881,6 +1912,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 else
                     for (auto& d : DevicesOf(key)) devices[d].viaGroup = false;
                 m.pendingTo = MyOtherDevices();  // my other devices get it too, in case the sender didn't know them
+                if (IsSelfKey(key)) {  // from one of my devices (an older version, writing to this device)
+                    m.fromDev = c->peerId;
+                    m.pendingTo.erase(std::remove(m.pendingTo.begin(), m.pendingTo.end(), c->peerId), m.pendingTo.end());
+                }
                 cv.messages.push_back(m);
                 if (c->mailbox) std::stable_sort(cv.messages.begin(), cv.messages.end(), [](auto& a, auto& b) { return a.ts < b.ts; });
                 cv.unread++;
@@ -1901,7 +1936,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             std::string mid = j.value("mid", ""), key = j.value("chat", "");
             auto dv = devices.find(c->peerId);
             if (dv == devices.end() || dv->second.accountPub != MyAccount() || mid.empty() || key.empty() || key == settings.deviceId) break;
-            if (key == c->peerId) break;  // a chat with that device itself stays separate
+            if (key == c->peerId) key = SelfKey();  // (an older version: its chat with that device itself)
+            bool selfChat = IsSelfKey(key);
             if (IsGroupKey(key)) {
                 auto g = groups.find(key.substr(1));
                 if (g != groups.end() && g->second.left) {
@@ -1919,6 +1955,12 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 ChatMessage m;
                 m.mid = mid;
                 m.outgoing = out;
+                if (selfChat) {  // my own chat: written here, or on which of my other devices
+                    std::string dev = j.value("dev", out ? c->peerId : std::string());
+                    m.outgoing = dev == settings.deviceId;
+                    if (!m.outgoing) m.fromDev = dev.empty() ? c->peerId : dev;
+                    out = m.outgoing;
+                }
                 m.ts = j.value("ts", NowMs());
                 m.text = j.value("text", "");
                 m.from = j.value("from", "");
@@ -3208,6 +3250,11 @@ void Engine::MaintenanceLoop() {
             ListenTick();
         }
         FolderSyncTick();
+        if (now - lastMerge_ > 5000) {
+            lastMerge_ = now;
+            auto lk = Lock();
+            MergeOwnChats();
+        }
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();
         for (auto& c : toClose) CloseConn(c, "timeout");
@@ -3271,7 +3318,10 @@ void Engine::SendChatPoll(const std::string& peerArg, const std::string& text, c
         m.pendingTo.push_back(d);
         if (!IsGroupKey(peer)) devices[d].viaGroup = false;  // a group member I now talk to directly: a contact
     }
-    for (auto& d : MyOtherDevices()) m.pendingTo.push_back(d);
+    if (!IsSelfKey(peer))
+        for (auto& d : MyOtherDevices()) m.pendingTo.push_back(d);
+    else
+        m.delivered = true;  // (my own chat: it's here; my other devices get their copy when they can)
     Conversation& cv = chats[peer];
     cv.peer = peer;
     cv.messages.push_back(m);
@@ -3288,6 +3338,7 @@ void Engine::QueueChatTo(const std::string& device, const std::string& key, Chat
     json j = mine ? json{{"chat", key}, {"mid", m.mid}, {"ts", m.ts}, {"text", m.text}, {"out", m.outgoing}}
                   : KeyField(key, {{"mid", m.mid}, {"ts", m.ts}, {"text", m.text}});
     if (mine && !m.from.empty()) j["from"] = m.from;
+    if (mine && IsSelfKey(key)) j["dev"] = m.outgoing ? settings.deviceId : m.fromDev;  // (who wrote it)
     if (!m.replyTo.empty()) {
         j["re"] = m.replyTo;
         j["ret"] = m.replyText;
@@ -3417,6 +3468,9 @@ uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pa
     uint64_t batch = RandomU64();
     auto lk = Lock();
     std::string key = IsContactKey(peer) ? peer : ChatKey(peer), device = Resolve(peer);
+    // into my own chat: kept here (notes, files to share later) - not copied anywhere
+    bool keep = IsSelfKey(peer);
+    if (keep) device = settings.deviceId;
     ChatMessage m;
     m.mid = "b" + TidHex(batch);
     m.outgoing = true;
@@ -3441,9 +3495,14 @@ uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pa
         t->name = BaseName(t->rel);
         t->size = FileSize(abs);
         t->created = now + i++;  // stable order
-        t->state = TState::Hashing;
+        t->state = keep ? TState::Completed : TState::Hashing;
         transfers[t->tid] = t;
         m.tids.push_back(t->tid);
+        if (keep) {
+            t->done = t->size;
+            t->finished = now;
+            continue;
+        }
         std::lock_guard<std::mutex> l(hashMtx_);
         hashQueue_.push_back(t);
     }
@@ -3564,7 +3623,8 @@ void Engine::RemoveTransfer(uint64_t tid) {
 void Engine::ClearFinishedTransfers() {
     auto lk = Lock();
     for (auto it = transfers.begin(); it != transfers.end();) {
-        if (TStateFinal(it->second->state)) it = transfers.erase(it);
+        // (files kept in my own chat aren't transfers to clear)
+        if (TStateFinal(it->second->state) && it->second->peer != settings.deviceId) it = transfers.erase(it);
         else ++it;
     }
     MarkDirty();

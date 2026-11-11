@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Me - your own chat**, always first in the list, even with nobody else in it: notes for yourself, and files you
+  want to keep at hand to share later (files added there stay on that device, nothing is copied). With several of
+  your devices it's still one chat: texts reach all of them, and each message says which device wrote it (a device
+  given to someone works as a chat with them). Calls from it ring your other devices. Older separate chats with
+  your own devices are merged into it.
 - Opening a chat no longer flickers while pictures and video thumbnails above load: a frame in which the chat would
   show away from its end isn't shown, the next one (back at the end) comes at once.
 

@@ -223,6 +223,7 @@ struct ChatMessage {
     bool pinned = false;                    // pinned in its chat (for everyone in it)
     int64_t pinTs = 0;                      // when it was (un)pinned - the later change wins
     bool starred = false;                   // kept in "Starred messages" (only for me)
+    std::string fromDev;                    // my own chat: which of my other devices wrote it (empty = this one)
     // a poll (the text then lists it too, for older versions): the question, the answers, one or several
     std::string pollQ;
     std::vector<std::string> pollOpts;

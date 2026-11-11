@@ -935,7 +935,43 @@ int main() {
         CHECK(WaitFor([&] { return A->IsConnected(idA2) && A2->IsConnected(idA); }, 5000), "reconnected after linking");
         {
             auto l = A->Lock();
-            CHECK(A->devices[idA2].accountPub == A->MyAccount() && A->ChatKey(idA2) == idA2, "own devices stay separate");
+            CHECK(A->devices[idA2].accountPub == A->MyAccount() && A->ChatKey(idA2) == A->SelfKey(), "my other device: my own chat");
+            auto conv = A->Conversations();
+            CHECK(std::count(conv.begin(), conv.end(), A->SelfKey()) == 1 && std::count(conv.begin(), conv.end(), idA2) == 0,
+                  "one chat with myself, not one per device");
+        }
+        {  // my own chat: notes reach my other devices, shown as written there; files stay here
+            std::string self = A->SelfKey();
+            A->SendChat(self, "a note to myself");
+            auto from = [](Engine& e, const std::string& key, const std::string& text, bool& out, std::string& dev) {
+                auto l = e.Lock();
+                for (auto& m : e.chats[key].messages)
+                    if (m.text == text) { out = m.outgoing; dev = m.fromDev; return true; }
+                return false;
+            };
+            bool out = true;
+            std::string dev;
+            CHECK(WaitFor([&] { return from(*A2, self, "a note to myself", out, dev); }, 3000) && !out && dev == idA,
+                  "a note reaches my other device, from this one (%d %s)", (int)out, dev.c_str());
+            CHECK(from(*A, self, "a note to myself", out, dev) && out && dev.empty(), "here it's mine");
+            A2->SendChat(A2->SelfKey(), "answered on the other device");
+            CHECK(WaitFor([&] { return from(*A, self, "answered on the other device", out, dev); }, 3000) && !out && dev == idA2,
+                  "and back, from that device");
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            {
+                auto l = B->Lock();
+                bool leaked = false;
+                for (auto& [k, cv] : B->chats)
+                    for (auto& m : cv.messages) leaked |= m.text == "a note to myself";
+                CHECK(!leaked, "never to a contact");
+            }
+            std::string note = JoinPath(Root(), "note.bin");
+            WriteRandomFile(note, 1000, 5);
+            A->SendPaths(self, {note});
+            auto l = A->Lock();
+            bool kept = false;
+            for (auto& [id, t] : A->transfers) kept |= t->localPath == note && t->state == TState::Completed && t->peer == A->settings.deviceId;
+            CHECK(kept, "a file in my own chat is kept here, not sent");
         }
         CHECK(WaitFor([&] { auto l = B->Lock(); return B->devices.count(idA2) && B->ChatKey(idA2) == B->ChatKey(idA); }, 3000),
               "the contact learns about the new device");

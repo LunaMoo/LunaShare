@@ -189,7 +189,8 @@ void App::Frame() {
     }
     if (static const char* dc = getenv("LUNASHARE_DEVCHAT"); dc && ImGui::GetFrameCount() == 3) {  // dev: a long chat, open
         auto lk = eng.Lock();
-        auto& cv = eng.chats["devchatpeer00000"];
+        bool self = getenv("LUNASHARE_DEVCHATSELF") != nullptr;  // (or my own chat, written on two devices)
+        auto& cv = eng.chats[self ? eng.SelfKey() : "devchatpeer00000"];
         for (int i = 0; i < atoi(dc); i++) {
             ChatMessage m;
             m.mid = "dev" + std::to_string(i);
@@ -197,9 +198,10 @@ void App::Frame() {
             m.kind = i % 3 ? MsgKind::Text : MsgKind::System;
             m.outgoing = i % 2;
             m.text = "message " + std::to_string(i) + (i % 5 ? "" : " with a longer text that wraps over a couple of lines in the chat window, like a real one");
+            if (self && !m.outgoing) m.fromDev = "phone-of-mine-0001";
             cv.messages.push_back(m);
         }
-        selectedPeer = "devchatpeer00000";
+        selectedPeer = self ? eng.SelfKey() : "devchatpeer00000";
         scrollToBottom = true;
     }
     static const char* devLink = getenv("LUNASHARE_SHARELINK");  // dev: "a link for anyone" for this file (screenshots)
@@ -574,6 +576,7 @@ void App::PullEvents() {
 
 // people: one entry per person (their devices share a conversation); otherwise every device (Devices tab)
 std::vector<std::string> App::SortedPeers(bool people) {
+    eng.selfName = T("Me");
     std::set<std::string> ids;
     if (people) {
         for (auto& k : eng.Conversations()) ids.insert(k);
@@ -602,6 +605,10 @@ std::vector<std::string> App::SortedPeers(bool people) {
         if (lastSeen(a) != lastSeen(b)) return lastSeen(a) > lastSeen(b);
         return eng.PeerName(a) < eng.PeerName(b);
     });
+    if (people) {  // my own chat: always first
+        auto s = std::find(v.begin(), v.end(), eng.SelfKey());
+        if (s != v.end()) std::rotate(v.begin(), s, s + 1);
+    }
     return v;
 }
 
@@ -936,9 +943,11 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     std::string sub;
     if (d) sub = d->platform;
     else if (online) sub = eng.online[dev].platform;
+    bool self = eng.IsSelfKey(peer);
     if (eng.IsContactKey(peer)) {
         size_t n = eng.DevicesOf(peer).size();
         if (n > 1) sub = TF("%d devices", (int)n);
+        if (self) sub = n ? TF("notes, and your other devices (%d)", (int)n) : std::string(T("notes for yourself"));
     }
     const Group* grp = eng.GroupOf(peer);
     auto conn = eng.ReadyConn(peer);
@@ -950,6 +959,8 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         if (on) sub += "  " + TF("%d online", on);
         connected = false;
         online = on > 0;
+    } else if (self && eng.DevicesOf(peer).empty()) {
+        // (nothing to connect to)
     } else if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + TF("via %s", T(TransportName(conn->transport))) + (conn->addr == "relay" ? T(" (relay)") : "");
     else if (online) sub += "  " + TF("online (%s)", TS(eng.online[dev].Via()).c_str());
     else sub += sub.empty() ? T("offline") : std::string("  ") + T("offline");
@@ -993,8 +1004,8 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     // profile picture, or a circle with the initial
     float av = std::min(height * 0.8f, ImGui::GetFontSize() * 2.2f);
     ImVec2 ac(p0.x + pad + av * 0.5f, cy);
-    DrawAvatar(dl, ac, av, peer, name);
-    dl->AddCircleFilled(ImVec2(ac.x + av * 0.35f, ac.y + av * 0.35f), r, dot);
+    DrawAvatar(dl, ac, av, self ? std::string() : peer, self ? eng.settings.displayName : name);  // (mine: my picture)
+    if (!self || !eng.DevicesOf(peer).empty()) dl->AddCircleFilled(ImVec2(ac.x + av * 0.35f, ac.y + av * 0.35f), r, dot);
     float tx = p0.x + pad * 2 + av;
     float textH = ImGui::GetTextLineHeight();
     dl->AddText(ImVec2(tx, cy - textH - 1), ImGui::GetColorU32(blocked ? ImGuiCol_TextDisabled : ImGuiCol_Text), name.c_str());
@@ -1023,26 +1034,27 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     }
     if (ImGui::BeginPopup("peerctx")) {
         float h = ui::M().mobile ? ui::M().rowH * 0.8f : 0;
-        if (ImGui::Selectable(connected ? T("Disconnect") : T("Connect"), false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
+        bool others = !self || !eng.DevicesOf(peer).empty();
+        if (others && ImGui::Selectable(connected ? T("Disconnect") : T("Connect"), false, 0, ImVec2(0, h))) connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
         if (MuteItem(peer, h)) ImGui::CloseCurrentPopup();
-        if (ImGui::Selectable(T("Rename..."), false, 0, ImVec2(0, h))) {
+        if (!self && ImGui::Selectable(T("Rename..."), false, 0, ImVec2(0, h))) {
             renamePeer = peer;
             renameBuf = d ? d->customName : "";
             openRename = true;
         }
         bool trusted = d && d->trusted;
-        if (ImGui::Selectable(trusted ? T("Untrust") : T("Trust (auto-accept files)"), false, 0, ImVec2(0, h))) eng.SetTrusted(peer, !trusted);
+        if (!self && ImGui::Selectable(trusted ? T("Untrust") : T("Trust (auto-accept files)"), false, 0, ImVec2(0, h))) eng.SetTrusted(peer, !trusted);
         if (ImGui::Selectable(T("Send files..."), false, 0, ImVec2(0, h))) {
             SelectPeer(peer);
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", name.c_str()), browser.lastDir);
         }
-        if (d && ImGui::Selectable(T("Device details"), false, 0, ImVec2(0, h))) {
+        if (d && !self && ImGui::Selectable(T("Device details"), false, 0, ImVec2(0, h))) {
             devicesSel = dev;
             if (ui::M().mobile) { backStack.push_back(screen); screen = MScreen::Devices; }
             else { tab = Tab::Devices; tabForce = true; }
         }
-        if (ImGui::Selectable(T("Forget..."), false, 0, ImVec2(0, h))) {
+        if (!self && ImGui::Selectable(T("Forget..."), false, 0, ImVec2(0, h))) {
             forgetPeer = peer;
             openForget = true;
         }
@@ -1443,7 +1455,8 @@ void App::DrawChat(const std::string& peer) {
         float ad = ImGui::GetFontSize() * 1.7f;
         ImVec2 ap = ImGui::GetCursorScreenPos();
         ImGui::Dummy(ImVec2(ad, ad * 0.75f));
-        DrawAvatar(ImGui::GetWindowDrawList(), ImVec2(ap.x + ad * 0.5f, ap.y + ad * 0.4f), ad, peer, eng.PeerName(peer));
+        DrawAvatar(ImGui::GetWindowDrawList(), ImVec2(ap.x + ad * 0.5f, ap.y + ad * 0.4f), ad, eng.IsSelfKey(peer) ? std::string() : peer,
+                   eng.IsSelfKey(peer) ? eng.settings.displayName : eng.PeerName(peer));
         ImGui::SameLine();
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.2f);
         ImGui::TextUnformatted(Emoji().Display(eng.PeerName(peer)).c_str());
@@ -1465,6 +1478,8 @@ void App::DrawChat(const std::string& peer) {
         else if (on) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), "%s", TF("%d online", on).c_str());
         else ImGui::TextDisabled("%s", T("nobody online - messages wait on your server"));
         if (ImGui::IsItemHovered() && !names.empty()) ImGui::SetTooltip("%s", names.c_str());
+    } else if (eng.IsSelfKey(peer) && eng.DevicesOf(peer).empty()) {
+        ImGui::TextDisabled("%s", T("notes for yourself - files you add stay on this device"));
     } else if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
                                       conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
     else if (eng.IsOnline(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
@@ -1498,7 +1513,8 @@ void App::DrawChat(const std::string& peer) {
         bool videoable = callable && Media().VideoAvailable();
         bool webcam = !grp && WebcamButtonShown(peer);
         bool watchable = Player().Available() && !(grp && grp->left);
-        int nb = (grp ? 3 : 5) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
+        bool selfChat = eng.IsSelfKey(peer);  // (my own chat: no connect / device details)
+        int nb = (grp || selfChat ? 3 : 5) + (callable ? 1 : 0) + (videoable ? 1 : 0) + (webcam ? 1 : 0) + (watchable ? 1 : 0);
         ImGui::SameLine(ImGui::GetContentRegionMax().x - bw * (float)nb - ImGui::GetStyle().ItemSpacing.x * (float)(nb - 1));
         if (webcam) {
             WebcamButton(peer, bw);
@@ -1527,6 +1543,7 @@ void App::DrawChat(const std::string& peer) {
             browseFor = BrowseFor::SendFiles;
             browser.Open(FileBrowser::Mode::OpenMulti, TF("Send to %s", eng.PeerName(peer).c_str()), browser.lastDir);
         }
+        if (!selfChat) {
         ImGui::SameLine();
         if (connected ? ui::IconButton("disc", Icon::Cancel, T("Disconnect")) : ui::IconButton("conn", Icon::Link, T("Connect now")))
             connected ? eng.Disconnect(peer) : eng.ConnectPeer(peer);
@@ -1535,6 +1552,7 @@ void App::DrawChat(const std::string& peer) {
             devicesSel = peer;
             tab = Tab::Devices;
             tabForce = true;
+        }
         }
         }
     }
@@ -2041,6 +2059,12 @@ void App::DrawMessages(const std::string& peer) {
 
     int64_t nowMs = SteadyMs();
     bool jumped = false;
+    // my own chat: which of my devices wrote what (once there's more than this one)
+    bool selfChat = eng.IsSelfKey(peer), devLabels = false;
+    if (selfChat) {
+        devLabels = !eng.MyOtherDevices().empty();
+        for (auto& x : cv.messages) devLabels |= !x.fromDev.empty();
+    }
     for (int i = 0; i < (int)cv.messages.size(); i++) {
         ChatMessage& m = cv.messages[(size_t)i];
         ImGui::PushID(m.mid.c_str());
@@ -2078,6 +2102,19 @@ void App::DrawMessages(const std::string& peer) {
         static const char* devGrow = getenv("LUNASHARE_DEVGROW");  // dev: something above grows (a thumbnail loading)
         if (devGrow && i == 5) ImGui::Dummy(ImVec2(1, ImGui::GetTime() > 2.0 ? 300.0f : 10.0f));
         bool sel = selMsgs.count(m.mid) > 0;
+        if (devLabels) {  // the device it was written on (once for a run of messages)
+            const ChatMessage* prev = i > 0 ? &cv.messages[(size_t)i - 1] : nullptr;
+            std::string who = m.outgoing ? std::string() : m.fromDev;
+            if (!prev || prev->kind == MsgKind::System || (prev->outgoing ? std::string() : prev->fromDev) != who || m.ts - prev->ts > 600000) {
+                std::string n = m.outgoing ? TF("%s (this device)", eng.settings.displayName.c_str()) : eng.PeerName(who);
+                ImU32 col = (ImHashStr(who.empty() ? eng.settings.deviceId.c_str() : who.c_str()) & 0x007F7F7F) | 0xFF808080;
+                ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.85f);
+                float tw = ImGui::CalcTextSize(n.c_str()).x;
+                ImGui::SetCursorPosX(m.outgoing ? ImGui::GetCursorPosX() + avail - tw - pad * 0.5f : ImGui::GetCursorPosX() + pad * 0.5f);
+                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(col), "%s", n.c_str());
+                ImGui::PopFont();
+            }
+        }
         if (Engine::IsGroupKey(peer) && !m.outgoing && !m.from.empty()) {  // who wrote it (once for a run of messages)
             const ChatMessage* prev = i > 0 ? &cv.messages[(size_t)i - 1] : nullptr;
             if (!prev || prev->from != m.from || prev->outgoing || prev->kind == MsgKind::System || m.ts - prev->ts > 600000) {
@@ -2783,7 +2820,8 @@ void App::DrawTransfers() {
     ImGui::Separator();
     DrawShareLinksList();
     std::vector<std::shared_ptr<Transfer>> list;
-    for (auto& [id, t] : eng.transfers) list.push_back(t);
+    for (auto& [id, t] : eng.transfers)
+        if (t->peer != eng.settings.deviceId) list.push_back(t);  // (not files kept in my own chat)
     std::sort(list.begin(), list.end(), [](auto& a, auto& b) {
         bool fa = TStateFinal(a->state), fb = TStateFinal(b->state);
         if (fa != fb) return !fa;
