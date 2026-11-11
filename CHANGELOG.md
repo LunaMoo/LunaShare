@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android: the on-screen keyboard no longer blinks while typing (it was asked to show again at every letter, and
+  hidden for a moment whenever the layout moved), so the first letters aren't lost.
+- Android calls play on the call (voice) stream with the voice-communication microphone: the volume buttons change
+  the call's volume, and the phone's own echo canceller and noise suppressor now work on calls (on the media stream
+  they had nothing to work with). LunaShare's echo canceller also suppresses what's left of the echo more.
 - When a voice or video message can't be recorded, the app says why (the system's reason: no microphone, a busy
   one, a call on...). On Android, a microphone permission refused for good opens a window with a button to the app's
   settings, where it can be allowed again (Android doesn't ask any more after "Don't allow" twice).

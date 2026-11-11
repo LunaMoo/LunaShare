@@ -395,7 +395,10 @@ if(LUNASHARE_BUILD_APP)
     if(LUNASHARE_SYSTEM_SDL)
         find_package(SDL2 REQUIRED)
     else()
-        FetchContent_Declare(SDL2 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GIT_TAG release-2.32.8 GIT_SHALLOW TRUE)
+        # (Android: calls use the voice stream and the voice-communication microphone - see the patch)
+        FetchContent_Declare(SDL2 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GIT_TAG release-2.32.8 GIT_SHALLOW TRUE
+            PATCH_COMMAND ${CMAKE_COMMAND} -DPATCH=${CMAKE_CURRENT_SOURCE_DIR}/patches/sdl2-android-voice-audio.patch
+                          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply_patch.cmake)
         set(SDL_TEST OFF CACHE BOOL "" FORCE)
         set(SDL_TESTS OFF CACHE BOOL "" FORCE)
         if(ANDROID)

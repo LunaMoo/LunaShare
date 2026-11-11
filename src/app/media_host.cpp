@@ -800,6 +800,11 @@ bool MediaHost::OpenDevices(bool capture, bool playback) {
         return false;
     }
     Settings s = eng_ ? eng_->GetSettings() : Settings();
+#if defined(__ANDROID__)
+    // calls on the voice stream with the voice-communication microphone (our SDL patch): the call volume buttons
+    // work, and the phone's own echo canceller / noise suppressor get both sides (they didn't on the media stream)
+    SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", mode_ == Mode::Call || mode_ == Mode::Ringback ? "1" : "0");
+#endif
     SDL_AudioSpec want{}, have{};
     want.freq = LSM_SAMPLE_RATE;
     want.format = AUDIO_S16SYS;

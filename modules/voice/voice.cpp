@@ -172,6 +172,11 @@ void ApplySettingsLocked() {
         float level = 20000;
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_AGC_LEVEL, &level);
         speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_ECHO_STATE, g.settings.echo_cancel ? g.echo : nullptr);
+        // what the filter leaves of the echo is suppressed too: a bit more than speexdsp's default while only the
+        // other side talks (-45 dB), and while both do (-25 dB: their voice must still get through)
+        int es = -45, ea = -25;
+        speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_ECHO_SUPPRESS, &es);
+        speex_preprocess_ctl(g.pre, SPEEX_PREPROCESS_SET_ECHO_SUPPRESS_ACTIVE, &ea);
     }
 }
 

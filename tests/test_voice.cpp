@@ -7,6 +7,8 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 #include <opus.h>
 
@@ -200,6 +202,79 @@ static void TestEcho() {
     CHECK(nearOff - nearOn < 10, "own voice preserved");
 }
 
+// Like a phone, in real time: the speaker takes 512 samples every 10.7 ms, the microphone delivers 40 ms at once,
+// sound comes out 60 ms after it's handed over and reaches the microphone 20 ms later.
+static double EchoRunBursty(bool aec) {
+    const LsmModule* m = lunashare_media_module();
+    Net net;
+    LsmHost h{LSM_API_VERSION, &net, HostSend, HostLog};
+    LsmSettings s{aec ? 1 : 0, 0, 0, 32000};
+    m->start(&h, &s);
+    int err;
+    OpusEncoder* farEnc = opus_encoder_create(R, 1, OPUS_APPLICATION_VOIP, &err);
+    OpusDecoder* tap = opus_decoder_create(R, 1, &err);
+    std::vector<int16_t> handed, sentPcm;  // every sample given to the speaker, in order
+    std::mt19937 rng(9);
+    const int outLat = R * 60 / 1000, acoustic = R * 20 / 1000, P = 512, C = R * 40 / 1000;
+    int64_t played = 0, captured = 0, farSent = 0;
+    auto t0 = std::chrono::steady_clock::now();
+    const int64_t total = R * 6;  // 6 s
+    while (captured < total) {
+        int64_t now = (int64_t)(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() * R);
+        while (farSent * F < now + R / 10) {  // the far end keeps ~100 ms ahead (the jitter buffer smooths it)
+            int16_t far[F];
+            for (int i = 0; i < F; i++) {
+                int64_t n = farSent * F + i;
+                double env = 0.5 + 0.5 * std::sin(2 * PI * 3 * n / R);
+                far[i] = (int16_t)(9000 * env * std::sin(2 * PI * 1000 * n / R) + (int)(rng() % 600) - 300);
+            }
+            uint8_t pkt[1500];
+            pkt[0] = 1;
+            pkt[1] = (uint8_t)farSent;
+            pkt[2] = (uint8_t)(farSent >> 8);
+            uint32_t ts = (uint32_t)(farSent * F);
+            memcpy(pkt + 3, &ts, 4);
+            int n = opus_encode(farEnc, far, F, pkt + 7, 1400);
+            m->receive(pkt, (size_t)n + 7);
+            farSent++;
+        }
+        if (played <= now) {  // the speaker wants more
+            int16_t spk[P];
+            m->playback(spk, P);
+            handed.insert(handed.end(), spk, spk + P);
+            played += P;
+        }
+        if (captured + C <= now) {  // the microphone hands over 40 ms
+            std::vector<int16_t> mic((size_t)C);
+            for (int i = 0; i < C; i++) {
+                int64_t at = captured + i, src = at - outLat - acoustic;  // what the speaker sounded then
+                double echo = src >= 0 && src < (int64_t)handed.size() ? handed[(size_t)src] * 0.6 : 0;
+                mic[(size_t)i] = (int16_t)std::clamp(echo + (double)((int)(rng() % 200) - 100), -32767.0, 32767.0);
+            }
+            m->capture(mic.data(), C);
+            captured += C;
+            for (auto& p : net.sent) {
+                int16_t dec[F * 6];
+                int k = opus_decode(tap, p.data() + 7, (opus_int32)p.size() - 7, dec, F * 6, 0);
+                if (k > 0) sentPcm.insert(sentPcm.end(), dec, dec + k);
+            }
+            net.sent.clear();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    m->stop();
+    opus_encoder_destroy(farEnc);
+    opus_decoder_destroy(tap);
+    return Db(Tone(sentPcm, sentPcm.size() / 2, sentPcm.size(), 1000));
+}
+
+static void TestEchoBursty() {
+    printf("[echo cancellation, phone-like timing]\n");
+    double off = EchoRunBursty(false), on = EchoRunBursty(true);
+    printf("  echo in what we send: %.1f dB without AEC, %.1f dB with AEC (-%.1f dB)\n", off, on, off - on);
+    CHECK(off - on > 15, "echo reduced by more than 15 dB with bursty audio callbacks");
+}
+
 static void TestVoiceMessage() {
     printf("[voice message: Ogg Opus file]\n");
     const LsmModule* m = lunashare_media_module();
@@ -359,6 +434,7 @@ int main() {
     TestLoopback(0.10);
     TestLoudness();
     TestEcho();
+    TestEchoBursty();
     TestVoiceMessage();
     TestVideoMessageFile();
     printf(g_fail ? "\n%d FAILURE(S)\n" : "\nALL VOICE TESTS PASSED\n", g_fail);

@@ -292,6 +292,11 @@ static float DetectScale(SDL_Window* window) {
 #endif
 }
 
+#ifdef __ANDROID__
+static bool g_kbOn = false;         // the on-screen keyboard was asked for
+static Uint64 g_kbOffSince = 0;     // ... and no text field has wanted it since then (0 = one does)
+#endif
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     SetProcessDPIAware();
@@ -451,6 +456,25 @@ int main(int argc, char** argv) {
     static std::string iniPath = ls::JoinPath(ls::ConfigDir(), "imgui.ini");
     io.IniFilename = iniPath.c_str();
     ImGui_ImplSDL2_InitForOpenGL(window, gl);
+#ifdef __ANDROID__
+    // The on-screen keyboard. The backend calls SDL_StartTextInput() whenever the text cursor moves (every letter
+    // typed) and SDL_StopTextInput() the moment no field has focus (one frame while the layout moves for the
+    // keyboard): on Android each of those re-creates or hides the keyboard - it blinked and swallowed the first
+    // letters. Here it's shown once when a field wants it, and hidden only when none has for a moment.
+    ImGui::GetPlatformIO().Platform_SetImeDataFn = [](ImGuiContext*, ImGuiViewport*, ImGuiPlatformImeData* data) {
+        if (data->WantVisible) {
+            g_kbOffSince = 0;
+            if (!g_kbOn || !SDL_IsTextInputActive()) {
+                SDL_Rect r{(int)data->InputPos.x, (int)data->InputPos.y, 1, (int)data->InputLineHeight};
+                SDL_SetTextInputRect(&r);
+                SDL_StartTextInput();
+                g_kbOn = true;
+            }
+        } else if (g_kbOn && !g_kbOffSince) {
+            g_kbOffSince = SDL_GetTicks64();
+        }
+    };
+#endif
     ImGui_ImplOpenGL3_Init(glsl);
     Media().SetGlsl(glsl);  // video: YUV -> RGB in a shader
     LoadFonts();
@@ -745,9 +769,20 @@ int main(int argc, char** argv) {
                 }
             }
         }
+#ifdef __ANDROID__
+        if (g_kbOn && g_kbOffSince && SDL_GetTicks64() - g_kbOffSince > 300) {  // (no field wanted it for a moment)
+            SDL_StopTextInput();
+            g_kbOn = false;
+            g_kbOffSince = 0;
+        }
+#endif
         ImGui::NewFrame();
         app.discardFrame = false;
         app.Frame();
+#ifdef __ANDROID__
+        // the keyboard closed with Back while the field kept its focus: tapping the field brings it back
+        if (g_kbOn && ImGui::GetIO().WantTextInput && ImGui::IsMouseReleased(0) && !SDL_IsScreenKeyboardShown(window)) SDL_StartTextInput();
+#endif
         Player().SetLoop(engine.settings.playerLoop && !engine.watch.sid);
         Player().Update();  // before Media(): hands it the current video picture to upload
         Media().Update();
