@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.10
 
 - Calls and music / radio: a call no longer loses its sound when music or the radio was on (on Android the app gets
   one sound output, and the music's - even paused - took it over); the music lets go of it for the call and comes
