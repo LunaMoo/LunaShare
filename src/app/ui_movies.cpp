@@ -222,6 +222,8 @@ void App::DrawMovies() {
             if (ImGui::Selectable(sorts[i], movieSort == i, 0, ImVec2(0, h))) movieSort = i;
         ImGui::EndCombo();
     }
+    ImGui::SameLine();
+    if (ImGui::Checkbox(T("Select"), &moviePick.selecting) && !moviePick.selecting) moviePick.sel.clear();
     if (sc.busy) {
         if (!mobile) ImGui::SameLine();
         ImGui::TextDisabled("%s", T("looking through the folders..."));
@@ -287,6 +289,11 @@ void App::DrawMovies() {
     else if (movieSort == 2) std::sort(list.begin(), list.end(), [](auto a, auto b) { return a->size > b->size; });
     else std::stable_sort(list.begin(), list.end(), [](auto a, auto b) { return a->dir != b->dir ? a->dir < b->dir : NaturalLess(a->name, b->name); });
 
+    if (moviePick.Active()) {  // picked: send (to a chat or as a link), pack, delete
+        std::vector<std::string> all;
+        for (auto* f : list) all.push_back(f->path);
+        DrawPickBar(moviePick, all, nullptr, [this] { MovieRescan(); });
+    }
     ImGui::BeginChild("movies");
     if (mobile) ui::TouchScroll();
     if (list.empty()) {
@@ -315,7 +322,8 @@ void App::DrawMovies() {
         ImGui::PushID((int)i);
         ImVec2 p = ImGui::GetCursorScreenPos();
         bool visible = ImGui::IsRectVisible(p, ImVec2(p.x + cw, p.y + th));
-        if (ImGui::InvisibleButton("##mv", ImVec2(cw, th))) {
+        bool tapped = ImGui::InvisibleButton("##mv", ImVec2(cw, th));
+        if (PickItem(moviePick, f.path, tapped)) {
             watchFailed = false;
             watchLibList.clear();
             if (eng.StartWatch("", f.path)) watchShown = true;
@@ -362,6 +370,7 @@ void App::DrawMovies() {
             }
             if (eng.watch.sid && eng.watch.host.empty() && eng.watch.path == f.path)  // (the one that's on)
                 dl->AddRect(a, b, ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 6.0f, ImDrawFlags_None, 3.0f);
+            PickMark(dl, a, b, moviePick.sel.count(f.path) > 0, 6);
             ImVec4 clip(p.x, b.y, p.x + cw, p.y + th);
             dl->AddText(nullptr, 0, ImVec2(p.x + 2, b.y + 3), ImGui::GetColorU32(ImGuiCol_Text), f.name.c_str(), nullptr, cw - 4, &clip);
         }

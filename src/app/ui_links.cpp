@@ -50,6 +50,14 @@ static std::string LeftText(int64_t ms) {
     return TF("%d days left", (int)(m / 1440));
 }
 
+void App::OpenSendToList(const std::vector<std::pair<std::string, std::string>>& files, const std::string& name) {
+    std::vector<std::string> paths;
+    for (auto& f : files) paths.push_back(f.first);
+    OpenSendTo(paths);
+    pendingSendList = files;
+    pendingSendName = name;
+}
+
 void App::OpenShareLink(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
     if (!shareUi) shareUi = std::make_shared<ShareLinkUi>();
@@ -316,4 +324,111 @@ void App::DrawShareLinksList() {
         ImGui::PopID();
     }
     ImGui::Spacing();
+}
+
+// ---- picking files in a list (gallery, movies, music, archives) ------------------------------------------------------
+
+bool App::PickItem(PickState& st, const std::string& path, bool tapped) {
+    bool held = ImGui::IsItemActive() && ImGui::GetIO().MouseDownDuration[0] >= 0.45f && !ImGui::IsMouseDragging(0, 8.0f);
+    if (ImGui::IsItemClicked() && ImGui::GetIO().KeyCtrl) held = true;  // (desktops: Ctrl+click picks)
+    if (held && st.heldDone != path) {
+        st.heldDone = path;
+        st.selecting = true;
+        if (!st.sel.erase(path)) st.sel.insert(path);
+        return false;
+    }
+    if (!tapped) return false;
+    if (st.heldDone == path) {  // (the end of that long press)
+        st.heldDone.clear();
+        return false;
+    }
+    if (st.selecting) {
+        if (!st.sel.erase(path)) st.sel.insert(path);
+        return false;
+    }
+    return true;
+}
+
+void App::PickMark(ImDrawList* dl, ImVec2 a, ImVec2 b, bool picked, float rounding) {
+    if (!picked) return;
+    dl->AddRectFilled(a, b, IM_COL32(60, 110, 220, 90), rounding);
+    dl->AddRect(a, b, IM_COL32(90, 150, 255, 255), rounding, 0, 3.0f);
+    float r = std::min(b.x - a.x, b.y - a.y) * 0.11f;
+    ImVec2 c(a.x + r + 4, a.y + r + 4);
+    dl->AddCircleFilled(c, r, IM_COL32(60, 120, 230, 255));
+    ui::DrawIcon(dl, Icon::Check, c, r * 1.5f, IM_COL32_WHITE);
+}
+
+void App::DrawPickBar(PickState& st, const std::vector<std::string>& all, const std::function<void()>& extra,
+                      const std::function<void()>& deleted) {
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGui::PushID(&st);
+    std::vector<std::string> sel(st.sel.begin(), st.sel.end());
+    auto allNone = [&] {
+        if (ImGui::Button(T("All"), ImVec2(0, h)))
+            for (auto& p : all) st.sel.insert(p);
+        ImGui::SameLine();
+        if (ImGui::Button(T("None"), ImVec2(0, h))) st.Clear();
+    };
+    // phones: "N picked  All  None", then the three actions sharing the width
+    float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3 : 0;
+    if (mobile) {
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(0, (h - ImGui::GetTextLineHeight()) * 0.5f - ImGui::GetStyle().ItemSpacing.y));
+        ImGui::TextUnformatted(TF("%d picked", (int)sel.size()).c_str());
+        ImGui::EndGroup();
+        ImGui::SameLine();
+        allNone();
+    } else {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(TF("%d picked", (int)sel.size()).c_str());
+        ImGui::SameLine();
+    }
+    ImGui::BeginDisabled(sel.empty());
+    if (ui::IconTextButton(T("Send..."), Icon::Send, ImVec2(bw, h))) {
+        OpenSendTo(sel);  // (to a chat, or as a link for anyone)
+        st.Clear();
+    }
+    ImGui::SameLine();
+    if (ui::IconTextButton(T("Pack..."), Icon::Archive, ImVec2(bw, h))) {
+        StartArchiveCreate(sel);
+        st.Clear();
+    }
+    ImGui::SameLine();
+    if (ui::IconTextButton(T("Delete..."), Icon::Trash, ImVec2(bw, h))) st.deleteAsk = true;
+    ImGui::EndDisabled();
+    if (extra) {
+        if (!mobile) ImGui::SameLine();
+        extra();
+    }
+    if (!mobile) {
+        ImGui::SameLine();
+        allNone();
+    }
+    if (st.deleteAsk) {
+        ImGui::OpenPopup("##pickdel");
+        st.deleteAsk = false;
+    }
+    if (ImGui::BeginPopupModal("##pickdel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(TF("Delete %d file(s) from this device? This can't be undone.", (int)st.sel.size()).c_str());
+        if (ImGui::Button(T("Delete"), ImVec2(0, h))) {
+            for (auto& p : st.sel) RemoveFile(p);
+            st.Clear();
+            if (deleted) deleted();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(T("Cancel"), ImVec2(0, h))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+}
+
+bool App::ClearPicks() {
+    PickState* st = screen == MScreen::Gallery ? &galleryPick : screen == MScreen::Movies ? &moviePick
+                  : screen == MScreen::Music  ? &musicPick   : screen == MScreen::Archives ? &archivePick : nullptr;
+    if (!st || !st->Active()) return false;
+    st->Clear();
+    return true;
 }

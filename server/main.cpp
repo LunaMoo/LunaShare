@@ -53,6 +53,10 @@ static void Usage() {
         "      --release KEY               treat that device (and its account) like everyone else (needs -d)\n"
         "      --restrict KEY              limit it again\n"
         "      --forget KEY                forget it (it is remembered again if it uses an invite)\n"
+        "      --erase KEY                 delete everything kept about that person: the record, offline messages,\n"
+        "                                  usernames, invite codes they made; their devices are signed out\n"
+        "      --block KEY                 erase, and don't let any of their devices use this server again\n"
+        "      --unblock KEY               let them in again (limited, as invited)\n"
         "  KEY is a device key or its first 8+ characters, as --list-invited shows. A running server applies\n"
         "  the change within a few seconds.\n");
 }
@@ -86,7 +90,7 @@ static int ListInvited(const std::string& dir, bool asJson) {
         if (!e.value("byKey", "").empty()) by += " (" + e.value("byKey", "").substr(0, 8) + ")";
         std::string room = e.value("room", "").empty() ? "-" : e.value("room", "");
         printf("%s  %-8s  %-22s  invited by %-30s  room %-16s  first %s  last %s\n", e.value("key", "").substr(0, 16).c_str(),
-               e.value("released", false) ? "released" : "limited", e.value("name", "").c_str(), by.c_str(), room.c_str(),
+               e.value("blocked", false) ? "blocked" : e.value("released", false) ? "released" : "limited", e.value("name", "").c_str(), by.c_str(), room.c_str(),
                day(e.value("first", (int64_t)0)).c_str(), day(e.value("last", (int64_t)0)).c_str());
     }
     return 0;
@@ -118,7 +122,7 @@ int main(int argc, char** argv) {
         else if (a == "--key") key = next();
         else if (a == "--link-url") linkUrl = next();
         else if (a == "--json") asJson = true;
-        else if (a == "--release" || a == "--restrict" || a == "--forget") {
+        else if (a == "--release" || a == "--restrict" || a == "--forget" || a == "--erase" || a == "--block" || a == "--unblock") {
             std::string k = next();
             bool ok = k.size() >= 8 && k.size() <= 64;
             for (char c : k) ok &= isxdigit((unsigned char)c) != 0;

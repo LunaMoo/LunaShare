@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.2
+
+- **Picking and sending the same everywhere.** Movies, music, archives and comics pick like the gallery: a long press
+  (computers: Ctrl+click, or *Select*), then *Send...*, *Pack...* or *Delete...* (music also *To a playlist...*,
+  *Add to listening together* and, for one song, *More...*). *Send...* - here and on albums, artists and playlists in
+  the music player - is the same window everywhere, with **Link for anyone...** in it.
+- **Rendezvous server: Delete and Block** someone who joined with an invite (OPNsense: buttons in *People who joined
+  with an invite code*; `--erase` / `--block` / `--unblock`). Delete removes every trace of them from the server (the
+  record, offline messages, usernames, the invite codes they made) and signs their devices out; Block also keeps all
+  their devices out (same account, same phone or computer).
+
 ## 1.6.1
 
 - **Links for anyone** ([docs/LINKS.md](docs/LINKS.md)): *Send to... → Link for anyone...* makes a link (with a QR

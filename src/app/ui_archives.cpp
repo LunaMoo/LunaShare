@@ -456,9 +456,11 @@ void App::DrawArchives() {
         archivesRescanWanted = false;
         ArchivesRescan();
     }
-    if (ImGui::RadioButton(T("Archives"), !archivesComics)) archivesComics = false;
+    if (ImGui::RadioButton(T("Archives"), !archivesComics) && archivesComics) archivesComics = false, archivePick.Clear();
     ImGui::SameLine();
-    if (ImGui::RadioButton(T("Comics"), archivesComics)) archivesComics = true;
+    if (ImGui::RadioButton(T("Comics"), archivesComics) && !archivesComics) archivesComics = true, archivePick.Clear();
+    ImGui::SameLine();
+    if (ImGui::Checkbox(T("Select"), &archivePick.selecting) && !archivePick.selecting) archivePick.sel.clear();
     if (!mobile) ImGui::SameLine();
     float third = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f : 0;
     if (ui::IconTextButton(T("Open..."), Icon::Folder, ImVec2(third, h))) {
@@ -526,6 +528,11 @@ void App::DrawArchives() {
         if (!q.empty() && Low(f.name).find(q) == std::string::npos) continue;
         list.push_back(&f);
     }
+    if (archivePick.Active()) {  // picked: send (to a chat or as a link), pack, delete
+        std::vector<std::string> all;
+        for (auto* f : list) all.push_back(f->path);
+        DrawPickBar(archivePick, all, nullptr, [this] { ArchivesRescan(); });
+    }
     if (archivesComics) {
         std::vector<std::string> paths;
         for (auto* f : list) paths.push_back(f->path);
@@ -542,8 +549,20 @@ void App::DrawArchives() {
         const Found& f = *list[i];
         ImGui::PushID((int)i);
         ImVec2 p = ImGui::GetCursorScreenPos();
-        if (ImGui::Selectable("##a", false, 0, ImVec2(0, rowH))) OpenArchive(f.path);
+        bool picked = archivePick.sel.count(f.path) > 0;
+        bool tapped = ImGui::Selectable("##a", picked, 0, ImVec2(0, rowH));
+        if (PickItem(archivePick, f.path, tapped)) OpenArchive(f.path);
         ImDrawList* dl = ImGui::GetWindowDrawList();
+        if (archivePick.selecting || picked) {  // a tick instead of the icon
+            float r = rowH * 0.2f;
+            ImVec2 cc(p.x + rowH * 0.45f, p.y + rowH * 0.5f);
+            if (picked) {
+                dl->AddCircleFilled(cc, r, ui::ColAccent());
+                ui::DrawIcon(dl, Icon::Check, cc, r * 1.2f, IM_COL32_WHITE);
+            } else {
+                dl->AddCircle(cc, r, ImGui::GetColorU32(ImGuiCol_Text), 0, 2);
+            }
+        } else
         ui::DrawIcon(dl, Icon::Archive, ImVec2(p.x + rowH * 0.45f, p.y + rowH * 0.5f), rowH * 0.5f, ImGui::GetColorU32(ImGuiCol_Text));
         float x = p.x + rowH;
         dl->AddText(ImVec2(x, p.y + rowH * 0.08f), ImGui::GetColorU32(ImGuiCol_Text), f.name.c_str());

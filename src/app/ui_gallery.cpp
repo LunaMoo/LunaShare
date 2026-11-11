@@ -308,8 +308,8 @@ void App::DrawGallery() {
     if (!galleryAlbum.empty()) {
         if (ui::IconTextButton(T("Albums"), Icon::Back, ImVec2(0, h))) {
             galleryAlbum.clear();
-            gallerySel.clear();
-            gallerySelecting = false;
+            galleryPick.sel.clear();
+            galleryPick.selecting = false;
         }
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
@@ -333,7 +333,7 @@ void App::DrawGallery() {
     ImGui::SetNextItemWidth(mobile ? ImGui::GetContentRegionAvail().x * 0.6f : ImGui::GetFontSize() * 12);
     ImGui::InputTextWithHint("##galsearch", T("search"), &gallerySearch);
     ImGui::SameLine();
-    if (ImGui::Checkbox(T("Select"), &gallerySelecting) && !gallerySelecting) gallerySel.clear();
+    if (ImGui::Checkbox(T("Select"), &galleryPick.selecting) && !galleryPick.selecting) galleryPick.sel.clear();
     if (sc.busy) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", T("looking through the folders..."));
@@ -405,46 +405,10 @@ void App::DrawGallery() {
     const std::vector<const Pic*>& list = g_view.list;
 
     // picked: what to do with them
-    if (gallerySelecting || !gallerySel.empty()) {
-        ImGui::TextUnformatted(TF("%d picked", (int)gallerySel.size()).c_str());
-        ImGui::SameLine();
-        ImGui::BeginDisabled(gallerySel.empty());
-        if (ui::IconTextButton(T("Send..."), Icon::Send, ImVec2(0, h))) {
-            OpenSendTo(std::vector<std::string>(gallerySel.begin(), gallerySel.end()));
-            gallerySel.clear();
-            gallerySelecting = false;
-        }
-        ImGui::SameLine();
-        if (ui::IconTextButton(T("Delete..."), Icon::Trash, ImVec2(0, h))) galleryDeleteAsk = true;
-        ImGui::SameLine();
-        if (ui::IconTextButton(T("Pack..."), Icon::Archive, ImVec2(0, h))) {
-            StartArchiveCreate(std::vector<std::string>(gallerySel.begin(), gallerySel.end()));
-            gallerySel.clear();
-            gallerySelecting = false;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button(T("All"), ImVec2(0, h)))
-            for (auto* p : list) gallerySel.insert(p->path);
-        ImGui::SameLine();
-        if (ImGui::Button(T("None"), ImVec2(0, h))) gallerySel.clear();
-    }
-    if (galleryDeleteAsk) {
-        ImGui::OpenPopup("##galdel");
-        galleryDeleteAsk = false;
-    }
-    if (ImGui::BeginPopupModal("##galdel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(TF("Delete %d file(s) from this device? This can't be undone.", (int)gallerySel.size()).c_str());
-        if (ImGui::Button(T("Delete"), ImVec2(0, h))) {
-            for (auto& p : gallerySel) RemoveFile(p);
-            gallerySel.clear();
-            gallerySelecting = false;
-            GalleryRescan();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(T("Cancel"), ImVec2(0, h))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+    if (galleryPick.Active()) {
+        std::vector<std::string> all;
+        for (auto* p : list) all.push_back(p->path);
+        DrawPickBar(galleryPick, all, nullptr, [this] { GalleryRescan(); });
     }
 
     ImGui::BeginChild("gallery");
@@ -489,7 +453,7 @@ void App::DrawGallery() {
             dl->AddCircleFilled(c, r, IM_COL32(0, 0, 0, 150));
             ui::DrawIcon(dl, Icon::Play, ImVec2(c.x + r * 0.1f, c.y), r * 1.1f, IM_COL32_WHITE);
         }
-        if (gallerySel.count(p.path)) {
+        if (galleryPick.sel.count(p.path)) {
             dl->AddRectFilled(a, b, IM_COL32(60, 110, 220, 90));
             dl->AddRect(a, b, IM_COL32(90, 150, 255, 255), 0.0f, 0, 3.0f);
             float r = side * 0.11f;
@@ -508,21 +472,8 @@ void App::DrawGallery() {
         OpenViewerList(paths, (int)i, caps);
         viewer.canDelete = true;
     };
-    static std::string heldDone;  // (a long press picks once, not every frame)
-    auto handle = [&](const std::vector<const Pic*>& l, size_t i, bool tapped, bool held) {
-        const std::string& path = l[i]->path;
-        if (held && heldDone != path) {
-            heldDone = path;
-            gallerySelecting = true;
-            if (!gallerySel.erase(path)) gallerySel.insert(path);
-        } else if (tapped) {
-            if (heldDone == path) heldDone.clear();
-            else if (gallerySelecting) {
-                if (!gallerySel.erase(path)) gallerySel.insert(path);
-            } else {
-                openAt(l, i);
-            }
-        }
+    auto handle = [&](const std::vector<const Pic*>& l, size_t i, bool tapped) {
+        if (PickItem(galleryPick, l[i]->path, tapped)) openAt(l, i);
     };
 
     if (galleryView == 1 && galleryAlbum.empty()) {
@@ -539,7 +490,7 @@ void App::DrawGallery() {
             tile(*al[i]->cover, side, &tapped, &held);
             if (tapped) {
                 galleryAlbum = al[i]->dir;  // (the view is rebuilt at the next frame: nothing of it is used after this)
-                gallerySel.clear();
+                galleryPick.sel.clear();
                 ImGui::EndGroup();
                 ImGui::PopID();
                 break;
@@ -591,7 +542,7 @@ void App::DrawGallery() {
                     ImGui::PushID((int)i);
                     bool tapped = false, held = false;
                     tile(*list[i], side, &tapped, &held);
-                    handle(list, i, tapped, held);
+                    handle(list, i, tapped);
                     ImGui::PopID();
                 }
             }

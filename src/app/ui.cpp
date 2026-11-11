@@ -738,6 +738,7 @@ void App::HandleOpenPaths() {
 
 void App::OpenSendTo(const std::vector<std::string>& paths) {
     pendingSend = paths;
+    pendingSendList.clear();
     pendingForward.clear();
     pendingShareText = false;
     openSendTo = true;
@@ -1215,9 +1216,9 @@ void App::DrawMobile() {
     if (!root || !backStack.empty()) {
         if (ui::IconButton("back", Icon::Back, nullptr, rowH) || ImGui::IsKeyPressed(ImGuiKey_AppBack)) {
             if (!selMsgs.empty()) { selMsgs.clear(); selectionMode = false; }
-            else if (screen == MScreen::Gallery && (!gallerySel.empty() || !galleryAlbum.empty())) {
-                if (!gallerySel.empty()) { gallerySel.clear(); gallerySelecting = false; }
-                else galleryAlbum.clear();
+            else if (ClearPicks()) {
+            } else if (screen == MScreen::Gallery && !galleryAlbum.empty()) {
+                galleryAlbum.clear();
             } else if (screen == MScreen::Archives && ArchiveBack()) {
             } else if (!backStack.empty()) { screen = backStack.back(); backStack.pop_back(); }
             else screen = MScreen::Home;
@@ -3880,7 +3881,9 @@ void App::DrawPopups() {
             if (const Group* g = eng.GroupOf(p); g && g->left) continue;
             if (DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0)) {
                 for (auto& t : pendingForward) eng.SendChat(p, t, "", {}, !pendingShareText);
-                if (!pendingSend.empty()) SendFilesUI(p, pendingSend);
+                if (!pendingSendList.empty()) eng.SendFileList(p, pendingSendList, pendingSendName);
+                else if (!pendingSend.empty()) SendFilesUI(p, pendingSend);
+                pendingSendList.clear();
                 pendingForward.clear();
                 pendingShareText = false;
                 SelectPeer(p);

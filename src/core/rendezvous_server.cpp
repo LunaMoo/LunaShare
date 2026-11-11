@@ -473,6 +473,7 @@ void RendezvousServer::Loop() {
         std::string byKey, byAcc;  // the inviter's device key and account (by = its current name)
         int64_t first = 0, last = 0;
         bool released = false;
+        bool blocked = false;  // the admin blocked this person: none of their devices may use the server
     };
     std::map<std::string, Invited> invited;       // device key -> record
     std::map<std::string, std::string> owners;    // link token -> key of the device that created the invite
@@ -498,6 +499,7 @@ void RendezvousServer::Loop() {
                 x.first = v.value("first", (int64_t)0);
                 x.last = v.value("last", (int64_t)0);
                 x.released = v.value("released", false);
+                x.blocked = v.value("blocked", false);
                 invited[pub] = x;
             }
             for (auto& [tok, pub] : oj.items())
@@ -520,7 +522,8 @@ void RendezvousServer::Loop() {
         json dj = json::object();
         for (auto& [pub, x] : invited)
             dj[pub] = {{"acc", x.acc}, {"name", x.name}, {"id", x.id}, {"by", x.by}, {"byKey", x.byKey}, {"byAcc", x.byAcc},
-                       {"room", x.room}, {"hw", x.hw}, {"first", x.first}, {"last", x.last}, {"released", x.released}};
+                       {"room", x.room}, {"hw", x.hw}, {"first", x.first}, {"last", x.last}, {"released", x.released},
+                       {"blocked", x.blocked}};
         MakeDirs(opt_.dataDir);
         json gj = json::object();
         for (auto& [owner, gs] : groups)
@@ -538,7 +541,65 @@ void RendezvousServer::Loop() {
             if (!x.released && ((!acc.empty() && x.acc == acc) || (!hw.empty() && x.hw == hw))) return &x;
         return nullptr;
     };
-    // admin commands: lines "release KEY", "restrict KEY", "forget KEY" (KEY: a device key or its first 8+ characters)
+    // blocked by the admin: that device, another device of its account, or another install on its computer / phone
+    auto blockedBy = [&](const std::string& pub, const std::string& acc, const std::string& hw) {
+        for (auto& [p, x] : invited)
+            if (x.blocked && ((!pub.empty() && p == pub) || (!acc.empty() && x.acc == acc) || (!hw.empty() && x.hw == hw))) return true;
+        return false;
+    };
+    // everything the server keeps about these devices / accounts / installs: registrations, offline messages, usernames,
+    // invite codes they made (the invite rooms of them) - not the people they invited (those are others)
+    auto eraseTraces = [&](const std::set<std::string>& pubs, const std::set<std::string>& accs, const std::set<std::string>& hws) {
+        std::set<std::string> all = pubs;
+        for (auto rit = rooms.begin(); rit != rooms.end();) {
+            bool changed = false;
+            for (auto it = rit->second.begin(); it != rit->second.end();) {
+                const Device& d = it->second;
+                if ((!d.pub.empty() && pubs.count(d.pub)) || (!d.acc.empty() && accs.count(d.acc)) || (!d.hw.empty() && hws.count(d.hw))) {
+                    if (!d.pub.empty()) all.insert(d.pub);
+                    it = rit->second.erase(it);
+                    changed = true;
+                } else {
+                    ++it;
+                }
+            }
+            if (changed) pushRoom(rit->first, "");
+            rit = rit->second.empty() ? rooms.erase(rit) : std::next(rit);
+        }
+        for (auto bit = boxes.begin(); bit != boxes.end();) {
+            size_t sl = bit->first.rfind('/');
+            if (sl != std::string::npos && all.count(bit->first.substr(sl + 1))) {
+                for (auto& m : bit->second) mailBytes -= m.data.size();
+                bit = boxes.erase(bit);
+                mailDirty = true;
+            } else {
+                ++bit;
+            }
+        }
+        for (auto lit = linkPubs.begin(); lit != linkPubs.end();) {
+            for (auto& p : all) mailDirty |= lit->second.erase(p) > 0;
+            lit = lit->second.empty() ? linkPubs.erase(lit) : std::next(lit);
+        }
+        for (auto& [room, m] : names)
+            for (auto it = m.begin(); it != m.end();)
+                if (accs.count(it->second)) it = m.erase(it), namesDirty = true;
+                else ++it;
+        for (auto it = owners.begin(); it != owners.end();)
+            if (all.count(it->second)) it = owners.erase(it), invDirty = true;
+            else ++it;
+        for (auto& p : all) {
+            invDirty |= groups.erase(p) > 0;
+            for (auto it = groupNames.begin(); it != groupNames.end();)
+                if (it->first.compare(0, p.size() + 1, p + "/") == 0) it = groupNames.erase(it), invDirty = true;
+                else ++it;
+        }
+        rebuildGroups();
+        saveMail();
+        saveNames();
+        counts();
+    };
+    // admin commands: lines "release KEY", "restrict KEY", "forget KEY", "erase KEY" (everything about that person),
+    // "block KEY" (erase, and keep them out), "unblock KEY" (KEY: a device key or its first 8+ characters)
     bool cmdUnreadable = false;
     auto runAdmin = [&] {
         if (cmdFile.empty()) return;
@@ -568,14 +629,18 @@ void RendezvousServer::Loop() {
                     if (!x.acc.empty()) accs.insert(x.acc);
                     if (!x.hw.empty()) hws.insert(x.hw);
                 }
+            std::set<std::string> pubs;
             for (auto it = invited.begin(); it != invited.end();) {
                 // (the whole account and every install on that computer / phone)
                 bool hit = it->first.compare(0, k.size(), k) == 0 || accs.count(it->second.acc) || hws.count(it->second.hw);
                 if (hit) log(c + " " + it->second.name + " (" + it->first.substr(0, 8) + ")");
-                if (hit && c == "forget") { it = invited.erase(it); invDirty = true; continue; }
+                if (hit) pubs.insert(it->first);
+                if (hit && (c == "forget" || c == "erase")) { it = invited.erase(it); invDirty = true; continue; }
                 if (hit && (c == "release" || c == "restrict")) { it->second.released = c == "release"; invDirty = true; }
+                if (hit && (c == "block" || c == "unblock")) { it->second.blocked = c == "block"; invDirty = true; }
                 ++it;
             }
+            if ((c == "erase" || c == "block") && !pubs.empty()) eraseTraces(pubs, accs, hws);
         }
         saveInvited(true);
     };
@@ -747,6 +812,15 @@ void RendezvousServer::Loop() {
             if (!opt_.allowedRooms.empty() && !opt_.allowedRooms.count(room)) {
                 sendJson(from, {{"t", "error"}, {"msg", "this room is not allowed on this server"}});
                 continue;
+            }
+            {
+                std::string bp = Clip(j.value("pub", ""), 64), acc = Clip(j.value("acc", ""), 64), acs = Clip(j.value("acs", ""), 128);
+                std::string bh = IsHex64(j.value("hw", "")) ? j.value("hw", "") : std::string();
+                if (!acc.empty() && !(IsHex64(bp) && VerifyData(acc, "device", id + "\n" + bp, acs))) acc.clear();
+                if (blockedBy(bp, acc, bh)) {
+                    sendJson(from, {{"t", "error"}, {"msg", "this server's admin doesn't let you use it"}});
+                    continue;
+                }
             }
             auto& r = rooms[room];
             bool isNew = !r.count(id);

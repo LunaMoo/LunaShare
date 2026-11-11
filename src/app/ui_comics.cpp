@@ -322,7 +322,8 @@ void App::DrawComicShelf(const std::vector<std::string>& paths, bool scanning) {
         ImGui::PushID((int)i);
         ImGui::BeginGroup();
         ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + cw, a.y + ch);
-        if (ImGui::InvisibleButton("##c", ImVec2(cw, ch)) && !g_open.running) OpenComic(p);
+        bool tapped = ImGui::InvisibleButton("##c", ImVec2(cw, ch));
+        if (PickItem(archivePick, p, tapped) && !g_open.running) OpenComic(p);
         bool hov = ImGui::IsItemHovered();
         if (ImGui::IsRectVisible(a, b)) {
             dl->AddRectFilled(a, b, ImGui::GetColorU32(hov ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg), 4);
@@ -354,6 +355,7 @@ void App::DrawComicShelf(const std::vector<std::string>& paths, bool scanning) {
                 }
             }
             if (g_open.running && g_open.path == p) dl->AddRect(a, b, ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 4.0f, 0, 3.0f);
+            PickMark(dl, a, b, archivePick.sel.count(p) > 0, 4);
         }
         if (hov && !mobile) {
             Place pl = GetPlace(p);

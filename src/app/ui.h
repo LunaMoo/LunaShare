@@ -218,8 +218,23 @@ private:
     bool galleryScanned = false, galleryRescanWanted = false;
     std::string gallerySearch, galleryAlbum;  // (album: a folder opened; "" = the albums / everything)
     int galleryView = 0;                      // 0 by month, 1 albums
-    std::set<std::string> gallerySel;         // picked (long press / the Select button)
-    bool gallerySelecting = false, galleryDeleteAsk = false;
+    // picking files in a list (long press, Ctrl+click or the Select button), then Send... (to a chat or as a link
+    // for anyone) / Pack... / Delete...: the same in the gallery, movies, music and archives (ui_links.cpp)
+    struct PickState {
+        std::set<std::string> sel;
+        bool selecting = false, deleteAsk = false;
+        std::string heldDone;  // (a long press picks once, not every frame)
+        void Clear() { sel.clear(); selecting = false; }
+        bool Active() const { return selecting || !sel.empty(); }
+    };
+    // after the item's button: true = a plain tap (do the usual thing); a long press / Ctrl+click picks
+    bool PickItem(PickState& st, const std::string& path, bool tapped);
+    void PickMark(ImDrawList* dl, ImVec2 a, ImVec2 b, bool picked, float rounding = 0);  // the tick on a tile
+    // the bar over a list while picking. extra: more buttons (before All / None); deleted: after files were deleted
+    void DrawPickBar(PickState& st, const std::vector<std::string>& all, const std::function<void()>& extra = nullptr,
+                     const std::function<void()>& deleted = nullptr);
+    bool ClearPicks();  // phones' back: drop the current screen's picks (true = there were some)
+    PickState galleryPick, moviePick, musicPick, archivePick;
     // torrents (ui_torrents.cpp): here with the torrent module, or on one of my computers
 public:
     void TorrentOpenSource(const std::string& source);  // a magnet link or a .torrent file: asks where to / on which computer
@@ -302,17 +317,18 @@ private:
     std::vector<std::string> musicListShown;  // (the playlist's songs as shown)
     void MusicGroupButtons(const std::vector<const music::Track*>& list, const std::string& sendFolder);
     void MusicSend(const std::vector<std::string>& paths, const std::string& folder);
-    void MusicSendPopup();
+
     void MusicPlaylistPopup();
     std::vector<music::Track> musicTracks;
     std::map<std::string, int> musicByPath;
     uint64_t musicVer = 0;
     int musicView = 0, musicSort = 0;
-    std::string musicSearch, musicGroup, musicSendName, musicNewName;
-    std::set<std::string> musicSel;
-    std::vector<std::pair<std::string, std::string>> musicSendFiles;
+    std::string musicSearch, musicGroup, musicNewName;
+    std::string musicPickPl;  // the playlist (and place) of the song last picked, for its menu from the bar
+    int musicPickIdx = -1;
+    std::vector<std::string> musicPickAll;  // the songs last listed (for All)
     std::vector<std::string> musicAddPaths;
-    bool musicSendOpen = false, musicAddOpen = false, musicNowShown = false;
+    bool musicAddOpen = false, musicNowShown = false;
     float musicDrag = -1;
     void DrawWatchResume();                 // "the movie is on" strip outside its chat (movie player, library)
     void WatchAddPopup();                   // host: add a person / group to the movie
@@ -421,6 +437,10 @@ private:
     void DrawAudioItems(const std::vector<std::shared_ptr<ls::Transfer>>& items, float width);
     void DrawToasts();
     void OpenSendTo(const std::vector<std::string>& paths);
+    // ... files with the names they arrive under (a music album in its folder, with its picture)
+    void OpenSendToList(const std::vector<std::pair<std::string, std::string>>& files, const std::string& name);
+    std::vector<std::pair<std::string, std::string>> pendingSendList;
+    std::string pendingSendName;
     // "a link for anyone" (ui_links.cpp)
     void OpenShareLink(const std::vector<std::string>& paths);
     void DrawShareLinkPopups();

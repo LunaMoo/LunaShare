@@ -20,8 +20,10 @@
 ## Playing
 
 - Tapping a song plays the list it's in from there (an album, an artist, a playlist, the search result...).
-- A song's menu (right-click, or long-press on a phone): play next, add to the queue, add to a playlist, send,
-  select (then send or add all selected at once).
+- A song's menu (right-click; on a phone *More...* once it's picked): play next, add to the queue, add to a playlist,
+  send, select.
+- **Picking several:** a long press (desktops: Ctrl+click, or *Select*) picks songs, like pictures in the gallery; then
+  *Send...*, *Pack...*, *Delete...*, *To a playlist...* or *Add to listening together*.
 - **Repeat:** off → the list → this song. **Shuffle:** a random order where every song plays once before any comes
   again.
 - The **mini player** at the bottom (above the phone's navigation, in the desktop sidebar) shows the song with play /
@@ -43,7 +45,7 @@ if nobody answers, it stops. The button shows how long is left.
 
 ## Playlist order
 
-In a playlist, drag a song to another place (on a computer), or use its menu (right click / long press): *Move up*,
+In a playlist, drag a song to another place (on a computer), or use its menu (right click / *More...*): *Move up*,
 *Move down*, *Move to the top*, *Move to the bottom*, *Remove from this playlist*.
 
 ## Favourites and the lists that make themselves
@@ -129,6 +131,6 @@ your Shared folder, so it's in your library from then on).
 
 ## Sending
 
-*Send...* on a song, a selection, an album, an artist or a playlist sends it to a person or a group like any files
-(resumable, checked with SHA-256). An album, an artist or a playlist goes as one folder named after it, with the
+*Send...* on a song, a selection, an album, an artist or a playlist opens the same *Send to* as everything else: to a
+person or a group like any files (resumable, checked with SHA-256), or as a [link for anyone](LINKS.md). An album, an artist or a playlist goes as one folder named after it, with the
 album's cover picture when there is one next to the music; single songs and selections go as files.

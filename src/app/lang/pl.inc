@@ -821,8 +821,6 @@
 {"Album", "Album"},
 {"Recently added", "Ostatnio dodane"},
 {"%d songs", "utworów: %d"},
-{"Send \"%s\" to...", "Wyślij \"%s\" do..."},
-{"Sending \"%s\" to %s.", "Wysyłanie \"%s\" do: %s."},
 {"No contacts yet.", "Nie ma jeszcze kontaktów."},
 {"Add %d song(s) to...", "Dodaj utwory (%d) do..."},
 {"Added to \"%s\".", "Dodano do \"%s\"."},
@@ -1411,3 +1409,4 @@
 {"Turn the link off", "Wyłącz link"},
 {"Someone on this network (%s) opened your link to \"%s\". Let them download it?", "Ktoś w tej sieci (%s) otworzył Twój link do „%s”. Pozwolić mu pobrać?"},
 {"Someone on the Internet (%s) opened your link to \"%s\". Let them download it?", "Ktoś w internecie (%s) otworzył Twój link do „%s”. Pozwolić mu pobrać?"},
+{"More...", "Więcej..."},

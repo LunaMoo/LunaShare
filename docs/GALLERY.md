@@ -17,8 +17,9 @@ Tapping a picture opens the full-screen viewer with the rest of that list: swipe
 **Slideshow** (the next one every 4 seconds; a touch or Esc stops it), **Delete**, open with another app, share.
 Videos play in the movie player.
 
-**Picking several:** a long press (desktops: Ctrl+click, or *Select*) picks pictures; then *Send...* (to a chat) or
-*Delete...* (asks first).
+**Picking several:** a long press (desktops: Ctrl+click, or *Select*) picks pictures; then *Send...* (to a chat, or
+as a [link for anyone](LINKS.md)), *Pack...* or *Delete...* (asks first). Movies, music, archives and comics pick the
+same way.
 
 **Back up the camera** (phones, *Back up...*): new photos and videos of `DCIM/Camera` go to one of your devices by
 themselves - a [folder sync](ACCOUNTS.md) to that device's download folder, checked every minute and when it comes

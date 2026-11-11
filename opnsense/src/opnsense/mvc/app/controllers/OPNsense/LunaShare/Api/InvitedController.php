@@ -36,4 +36,21 @@ class InvitedController extends ApiControllerBase
     {
         return $this->run('restrict', $key);
     }
+
+    /** everything the server keeps about that person (record, offline messages, usernames, invite codes they made) */
+    public function eraseAction($key = '')
+    {
+        return $this->run('erase', $key);
+    }
+
+    /** erase, and keep all their devices out */
+    public function blockAction($key = '')
+    {
+        return $this->run('block', $key);
+    }
+
+    public function unblockAction($key = '')
+    {
+        return $this->run('unblock', $key);
+    }
 }

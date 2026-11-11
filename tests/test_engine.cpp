@@ -2194,6 +2194,25 @@ int main() {
                 A->ApplySettings(s);
             }
             CHECK(WaitFor([&] { auto l = A->Lock(); return !A->settings.wanFromInvite; }, 25000), "the released device's app is told (it shows the server now)");
+            // the admin blocks A: signed out at once, and kept out
+            std::ofstream(JoinPath(po.dataDir, "invited-cmd")) << "block " << pubA.substr(0, 12) << "\n";
+            CHECK(WaitFor([&] { return !sees(*C, idA); }, 65000), "a blocked person disappears for the others (within a minute)");
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            CHECK(!sees(*C, idA) && A->WanStatus().find("doesn't let you") != std::string::npos, "and can't come back (A: %s)", A->WanStatus().c_str());
+            CHECK(LoadJsonFile(JoinPath(po.dataDir, "invited.json"), inv) && inv["devices"][pubA].value("blocked", false), "blocked, saved");
+            std::ofstream(JoinPath(po.dataDir, "invited-cmd")) << "unblock " << pubA.substr(0, 12) << "\n";
+            CHECK(WaitFor([&] { return sees(*A, idC) && sees(*C, idA); }, 30000), "unblocked: back as before (released)");
+            // ... and erases every trace of A: the record, the invite codes it made
+            A->Stop();
+            std::ofstream(JoinPath(po.dataDir, "invited-cmd")) << "erase " << pubA.substr(0, 12) << "\n";
+            CHECK(WaitFor([&] {
+                json j;
+                if (!LoadJsonFile(JoinPath(po.dataDir, "invited.json"), j) || j["devices"].contains(pubA)) return false;
+                json ow = j.value("owners", json::object());
+                for (auto& [tok, owner] : ow.items())
+                    if (owner == pubA) return false;
+                return true;
+            }, 15000), "erased from the server");
             L->Stop();
             A->Stop();
             B->Stop();

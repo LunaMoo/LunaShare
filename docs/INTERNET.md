@@ -109,6 +109,13 @@ joined with an invite code*; elsewhere with `lunashare-rendezvous -d DIR --list-
 `lunashare-rendezvous -d DIR --release KEY` (`--restrict KEY` limits them again). A running server applies the change
 within a few seconds; releasing one releases the whole account and every install on that computer or phone.
 
+**Delete** (`--erase KEY`) removes every trace of that person from the server: their record, offline messages for them,
+their usernames and the invite codes they made (with their invite rooms; the people they invited stay, as they are
+others); their devices are signed out. If they use an invite again, they're remembered again as new. **Block**
+(`--block KEY`) does the same and keeps all their devices out - the same account and other installs on the same
+computer or phone too; only a small record stays so the server can recognise them. *Unblock* (`--unblock KEY`) lets
+them in again.
+
 Devices also send the server a fingerprint of the computer or phone itself: a hash of the system's own id (Windows
 MachineGuid, Linux machine-id, macOS hardware UUID, Android ANDROID_ID) together with the server's address, so
 different servers can't match devices with each other. A new install, a new account or a new device key on a

@@ -6,8 +6,8 @@ so it works while LunaShare runs there.
 
 ## Making a link
 
-Wherever you can send something (a file in a chat, the file picker, the gallery, an archive, a torrent...), choose
-*Send to...* and then **Link for anyone...** at the bottom. Several files or a folder go as one `.zip` (packed
+Wherever you can send something (a file in a chat, the file picker, a torrent, or files picked with a long press in
+the gallery, movies, music and archives), choose *Send...* and then **Link for anyone...** at the bottom. Several files or a folder go as one `.zip` (packed
 first). The window shows the link, **Copy**, **Share...** (phones) and a **QR code**. Under *Options*:
 
 - **Valid for** 1 hour, 1 day (default) or 1 week.
