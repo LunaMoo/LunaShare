@@ -1784,7 +1784,11 @@ void App::DrawChat(const std::string& peer) {
         return;
     }
     bool showVmsg = !groupChat && chatInput.empty() && Media().CanRecordVideoMessages() && !Media().Recording();
-    float vmsgW = showVmsg ? inputH + ImGui::GetStyle().ItemSpacing.x : 0;
+    // The video-message button goes away once something is typed; the Send button then takes its place too, so the
+    // text field keeps its width: a field that changes width at the first letter re-wraps its text, and for a frame
+    // it was drawn shifted (a line flashed through the letters on phones)
+    float vmsgW = !groupChat && Media().CanRecordVideoMessages() ? inputH + ImGui::GetStyle().ItemSpacing.x : 0;
+    float sendWide = sendW + (showVmsg ? 0 : vmsgW);
     (void)emojiW;
     bool send = ImGui::InputTextMultiline("##input", &chatInput, ImVec2(ImGui::GetContentRegionAvail().x - sendW - vmsgW - ImGui::GetStyle().ItemSpacing.x, inputH),
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap |
@@ -1809,7 +1813,7 @@ void App::DrawChat(const std::string& peer) {
     }
     if (!groupChat && chatInput.empty() && Media().CanRecordMessages() && !Media().Recording()) {
         // nothing typed: the button records a voice message
-        if (ui::IconTextButton(mobile ? T("Voice") : T("Voice"), Icon::Mic, ImVec2(sendW, inputH))) {
+        if (ui::IconTextButton(mobile ? T("Voice") : T("Voice"), Icon::Mic, ImVec2(sendWide, inputH))) {
             std::string dir = JoinPath(ConfigDir(), "voice");
             MakeDirs(dir);
             time_t now = time(nullptr);
@@ -1820,7 +1824,7 @@ void App::DrawChat(const std::string& peer) {
             if (!Media().StartRecording(recPath)) MicFailed();
         }
         if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Record a voice message"));
-    } else if (ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH))) send = true;
+    } else if (ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendWide, inputH))) send = true;
     if (send) {
         std::string t = chatInput;
         while (!t.empty() && (t.back() == '\n' || t.back() == ' ')) t.pop_back();

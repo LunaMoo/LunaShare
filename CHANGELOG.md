@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Phones: no flash through the text when the first letter is typed or the last one removed - the text field kept
+  changing width (the video-message button goes away while typing); now the Send button takes that space instead.
 - Android calls: the call-audio change in 1.6.6 never reached the Android build (its copy of SDL wasn't patched) -
   it does now: calls play on the call stream (volume buttons) and, with echo cancellation on, use the phone's call
   microphone and its echo canceller - and then LunaShare's own canceller stays out of it (two cancellers in a row
