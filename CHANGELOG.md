@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- When a voice or video message can't be recorded, the app says why (the system's reason: no microphone, a busy
+  one, a call on...). On Android, a microphone permission refused for good opens a window with a button to the app's
+  settings, where it can be allowed again (Android doesn't ask any more after "Don't allow" twice).
 - **Me - your own chat**, always first in the list, even with nobody else in it: notes for yourself, and files you
   want to keep at hand to share later (files added there stay on that device, nothing is copied). With several of
   your devices it's still one chat: texts reach all of them, and each message says which device wrote it (a device

@@ -531,6 +531,8 @@ private:
     int chatSettle = 0;
     std::string forgetPeer;  // "Forget..." asks first (a person: all their devices and the chat)
     bool openForget = false;
+    void MicFailed();  // recording didn't start: say why (or, Android: the permission was refused for good)
+    bool openMicDenied = false;
     bool openRename = false;
 
     std::string manualHost;

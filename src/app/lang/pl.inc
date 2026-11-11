@@ -1418,3 +1418,6 @@
 {"notes for yourself", "notatki dla siebie"},
 {"notes for yourself - files you add stay on this device", "notatki dla siebie - dodane pliki zostają na tym urządzeniu"},
 {"%s (this device)", "%s (to urządzenie)"},
+{"LunaShare isn't allowed to use the microphone. Allow it in the app's settings: Permissions > Microphone.", "LunaShare nie ma dostępu do mikrofonu. Zezwól na to w ustawieniach aplikacji: Uprawnienia > Mikrofon."},
+{"Could not start recording: %s", "Nie udało się rozpocząć nagrywania: %s"},
+{"Open settings", "Otwórz ustawienia"},

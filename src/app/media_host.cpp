@@ -815,7 +815,14 @@ bool MediaHost::OpenDevices(bool capture, bool playback) {
     }
     if (capture) {
 #if defined(__ANDROID__)
-        SDL_AndroidRequestPermission("android.permission.RECORD_AUDIO");
+        if (!SDL_AndroidRequestPermission("android.permission.RECORD_AUDIO")) {
+            // refused (once "don't ask again", Android doesn't ask any more: only the app's settings can allow it)
+            micDenied = true;
+            audioError += std::string(audioError.empty() ? "" : "; ") + "microphone permission refused";
+            if (playDev_) SDL_PauseAudioDevice(playDev_, 0);
+            return false;
+        }
+        micDenied = false;
 #endif
         want.callback = CaptureCb;
         capDev_ = SDL_OpenAudioDevice(s.callInputDevice.empty() ? nullptr : s.callInputDevice.c_str(), 1, &want, &have, 0);
@@ -1024,9 +1031,16 @@ LsmStats MediaHost::Stats() {
 }
 
 bool MediaHost::StartRecording(const std::string& path) {
-    if (!mod_ || recording_ || mode_ == Mode::Call) return false;
+    audioError.clear();
+    if (!mod_ || recording_ || mode_ == Mode::Call) {
+        audioError = !mod_ ? "the voice module isn't installed" : recording_ ? "already recording" : "a call is on";
+        return false;
+    }
     Settings s = eng_ ? eng_->GetSettings() : Settings();
-    if (mod_->rec_start(path.c_str(), std::max(24000, s.callBitrate)) != 0) return false;
+    if (mod_->rec_start(path.c_str(), std::max(24000, s.callBitrate)) != 0) {
+        audioError = "can't write " + path;
+        return false;
+    }
     micTest_ = false;
     recording_ = true;
     recStart_ = SDL_GetTicks();

@@ -576,6 +576,20 @@ public class LunaShareActivity extends SDLActivity {
     }
 
     /** The system's share sheet with a text (an invite code, the link to get the app). */
+    // this app's page in the system settings (to allow a permission that was refused for good)
+    public static void openAppSettings() {
+        ui(() -> {
+            try {
+                Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                      android.net.Uri.fromParts("package", self.getPackageName(), null));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                self.startActivity(i);
+            } catch (Exception e) {
+                toast("Can't open the settings");
+            }
+        });
+    }
+
     public static void shareText(final String text) {
         ui(() -> {
             try {

@@ -110,7 +110,8 @@ public:
     double CloseVideoMessage(bool keep);  // returns the length in seconds (0 when discarded / too short)
     bool VideoMessageOpen() const { return vmsgOpen_; }
     bool VideoMessageRecording() const { return vmsgRec_; }
-    bool StartRecording(const std::string& path);
+    bool StartRecording(const std::string& path);  // false: audioError says why (micDenied: the permission)
+    bool micDenied = false;
     double StopRecording(bool keep);  // returns the length in seconds
     bool Recording() const { return recording_; }  // voice message
     double RecordingSeconds() const;

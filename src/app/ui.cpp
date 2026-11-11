@@ -575,6 +575,18 @@ void App::PullEvents() {
 }
 
 // people: one entry per person (their devices share a conversation); otherwise every device (Devices tab)
+void App::MicFailed() {
+    // why recording didn't start - the system's own words, so a missing / busy / refused microphone can be told apart
+    if (Media().micDenied && Bridge().openAppSettings) {
+        openMicDenied = true;
+        return;
+    }
+    std::string why = Media().audioError.empty() ? std::string(T("Could not start recording (microphone permission?)"))
+                                                 : TF("Could not start recording: %s", Media().audioError.c_str());
+    toasts.push_back({EventType::Error, T("Microphone"), why, "", 0, 6.0f});
+    fprintf(stderr, "recording: %s\n", Media().audioError.c_str());
+}
+
 std::vector<std::string> App::SortedPeers(bool people) {
     eng.selfName = T("Me");
     std::set<std::string> ids;
@@ -1805,8 +1817,7 @@ void App::DrawChat(const std::string& peer) {
             strftime(name, sizeof(name), "Voice message %Y-%m-%d %H-%M-%S.ogg", localtime(&now));
             recPath = JoinPath(dir, name);
             recPeer = peer;
-            if (!Media().StartRecording(recPath))
-                toasts.push_back({EventType::Error, T("Microphone"), T("Could not start recording (microphone permission?)"), "", 0, 4.0f});
+            if (!Media().StartRecording(recPath)) MicFailed();
         }
         if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Record a voice message"));
     } else if (ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH))) send = true;
@@ -1896,8 +1907,7 @@ void App::DrawVideoMessage(const std::string& peer, float inputH) {
     bool send = false;
     if (!rec) {
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 60, 60, 255));
-        if (ui::IconTextButton(T("Record"), Icon::Video, ImVec2(sendW, inputH)) && !Media().RecordVideoMessage())
-            toasts.push_back({EventType::Error, T("Microphone"), T("Could not start recording (microphone permission?)"), "", 0, 4.0f});
+        if (ui::IconTextButton(T("Record"), Icon::Video, ImVec2(sendW, inputH)) && !Media().RecordVideoMessage()) MicFailed();
         ImGui::PopStyleColor();
     } else {
         send = ui::IconTextButton(T("Send"), Icon::Send, ImVec2(sendW, inputH)) || secs > 180;
@@ -4001,6 +4011,23 @@ void App::DrawPopups() {
     }
 
     DrawShareLinkPopups();
+
+    // ---- the microphone refused for good (Android): only the app's settings can allow it now
+    if (openMicDenied) { ImGui::OpenPopup("##micdenied"); openMicDenied = false; }
+    centerNext(0.35f);
+    if (ImGui::BeginPopupModal("##micdenied", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize * !mobile)) {
+        ImGui::PushTextWrapPos(mobile ? 0 : ImGui::GetFontSize() * 26);
+        ImGui::TextUnformatted(T("LunaShare isn't allowed to use the microphone. Allow it in the app's settings: Permissions > Microphone."));
+        ImGui::PopTextWrapPos();
+        float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2 : 0;
+        if (ImGui::Button(T("Open settings"), ImVec2(bw, h))) {
+            if (Bridge().openAppSettings) Bridge().openAppSettings();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(T("Cancel"), ImVec2(bw, h)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
 
     // ---- forgetting a contact (a person: all their devices, their nicknames and the chat)
     if (openForget) { ImGui::OpenPopup("##forgetpeer"); openForget = false; }

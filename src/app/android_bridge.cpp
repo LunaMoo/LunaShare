@@ -161,6 +161,7 @@ void AndroidBridgeInit(ls::Engine* engine) {
     b.openFolder = [](const std::string& path) { CallStr1("openFolder", path); };
     b.shareText = [](const std::string& text) { CallStr1("shareText", text); };
     b.requestPermissions = [] { CallV("requestPermissions", "()V"); };
+    b.openAppSettings = [] { CallV("openAppSettings", "()V"); };
     b.callAudioMode = [](bool on) { CallV("callAudioMode", "(Z)V", (jboolean)on); };
     b.callRoutes = []() -> std::string {
         JNIEnv* env = Env();
