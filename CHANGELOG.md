@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.12
+
+- Android keyboard, properly this time: it no longer goes haywire after a while (words jumping back, letters landing
+  in the middle of other words, text deleted). The keyboard used to work on SDL's private copy of the text, which
+  only knew "typing at the end" - a cursor moved by a tap, autocorrect reaching back a word, an emoji turned into a
+  glyph or a long-pressed letter made it drift from what the field held. Now it works on a copy that is always the
+  field's whole text and cursor, every change goes over whole, and whatever the field changes itself comes back the
+  same way.
+
 ## 1.6.11
 
 - Android keyboard: holding a key for a Polish (or any accented) letter no longer makes the keyboard jump back and

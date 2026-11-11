@@ -16,6 +16,7 @@
 #include <android/log.h>
 #include <jni.h>
 #include <cstdarg>
+#include <mutex>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
@@ -82,6 +83,14 @@ static void CallV(const char* name, const char* sig, ...) {
     va_end(ap);
     if (env->ExceptionCheck()) env->ExceptionClear();
 }
+
+// The latest the on-screen keyboard made of the text field (LunaIme.java, its thread) - for the main loop
+static std::mutex g_imeMu;
+static struct {
+    int gen = 0, s = 0, e = 0, enters = 0;
+    std::string text;
+    bool fresh = false;
+} g_ime;
 
 static void CallStr1(const char* name, const std::string& a) {
     JNIEnv* env = Env();
@@ -373,7 +382,25 @@ void AndroidBridgeInit(ls::Engine* engine) {
         env->DeleteLocalRef(a);
         return n;
     };
-    b.resetTextInput = []() { CallV("resetTextInput", "()V"); };
+    b.imeSetState = [](const std::string& t, int s, int e, int gen, bool restart) {
+        JNIEnv* env = Env();
+        jbyteArray a = env->NewByteArray((jsize)t.size());
+        env->SetByteArrayRegion(a, 0, (jsize)t.size(), (const jbyte*)t.data());
+        CallV("imeSetState", "([BIIIZ)V", a, (jint)s, (jint)e, (jint)gen, (jboolean)restart);
+        env->DeleteLocalRef(a);
+    };
+    b.imeTake = [](int& gen, std::string& text, int& s, int& e, int& enters) {
+        std::lock_guard<std::mutex> lk(g_imeMu);
+        if (!g_ime.fresh) return false;
+        g_ime.fresh = false;
+        gen = g_ime.gen;
+        text = std::move(g_ime.text);
+        s = g_ime.s;
+        e = g_ime.e;
+        enters = g_ime.enters;
+        g_ime.enters = 0;
+        return true;
+    };
     b.netClose = [](int id) {
         static jmethodID m = M("netClose", "(I)V");
         if (!m) return;
@@ -396,6 +423,20 @@ void AndroidBridgeInit(ls::Engine* engine) {
 void AndroidBridgeShutdown() { NotifyV("setNativeRunning", "(Z)V", (jboolean) false); }
 
 extern "C" {
+
+JNIEXPORT void JNICALL Java_org_libsdl_app_LunaIme_nativeImeState(JNIEnv* env, jclass, jint gen, jbyteArray utf8, jint s, jint e, jint enters) {
+    jsize n = utf8 ? env->GetArrayLength(utf8) : 0;
+    std::string t((size_t)n, '\0');
+    if (n) env->GetByteArrayRegion(utf8, 0, n, (jbyte*)&t[0]);
+    std::lock_guard<std::mutex> lk(g_imeMu);
+    if (g_ime.fresh && g_ime.gen != gen) g_ime.enters = 0;  // (made on another state: its Enter goes with it)
+    g_ime.gen = gen;
+    g_ime.text = std::move(t);
+    g_ime.s = s;
+    g_ime.e = e;
+    g_ime.enters += enters;
+    g_ime.fresh = true;
+}
 
 // Java created a Bluetooth socket. We hand back one end of a native socketpair; Java pumps bytes between
 // the BluetoothSocket streams and that fd, the engine sees an ordinary stream socket on the other end.

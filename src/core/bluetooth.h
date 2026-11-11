@@ -65,9 +65,11 @@ struct HostBridge {
     std::function<int(const std::string& url, bool icy, int& status, std::string& headers, std::string& finalUrl, std::string& err)> netOpen;
     std::function<int(int id, uint8_t* buf, int len)> netRead;
     std::function<void(int id)> netClose;
-    // Android: the on-screen keyboard starts over on the text as it is now (after the app itself changed it - sent,
-    // cleared, an emoji put in - or another field took over), so its idea of the text matches ours again
-    std::function<void()> resetTextInput;
+    // Android: the on-screen keyboard works on a copy of the text field (LunaIme.java). imeSetState: the field's text
+    // and selection (UTF-8 bytes) become the copy (restart: the keyboard starts over - the text itself changed / another
+    // field); imeTake: the latest the keyboard made of it (gen: the field state it was made on, enters: Enter pressed)
+    std::function<void(const std::string& text, int selStart, int selEnd, int gen, bool restart)> imeSetState;
+    std::function<bool(int& gen, std::string& text, int& selStart, int& selEnd, int& enters)> imeTake;
     std::function<bool()> biometricAvailable;                                         // Android: fingerprint / face set up
     std::function<void(const std::string& title, const std::string& cancel)> biometricAsk;  // success: notify action "unlock"
     std::function<void(bool on)> secureWindow;  // Android: no screenshots / app switcher preview (the app lock is on)  // Android: a small HTTPS GET (any thread)

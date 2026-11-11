@@ -134,6 +134,7 @@ public class LunaShareActivity extends SDLActivity {
         self = this;
         appCtx = getApplicationContext();
         super.onCreate(savedInstanceState);
+        org.libsdl.app.LunaIme.install(this);  // (the keyboard talks to the text field as it is - see LunaIme)
         handleIntent(getIntent());
     }
 
@@ -457,18 +458,9 @@ public class LunaShareActivity extends SDLActivity {
         }
     }
 
-    // The app changed the text itself (sent, cleared, an emoji) or another field took over: the keyboard starts over,
-    // without hiding. SDL keeps its own copy of the text and turns what the keyboard writes into differences against
-    // it - when that copy (and the keyboard's word in progress) no longer matched, letters came twice or were wiped.
-    public static void resetTextInput() {
-        LunaShareActivity a = self;
-        if (a == null) return;
-        a.runOnUiThread(() -> {
-            if (mTextEdit == null) return;
-            android.view.inputmethod.InputMethodManager imm =
-                (android.view.inputmethod.InputMethodManager) a.getSystemService(INPUT_METHOD_SERVICE);
-            if (imm != null) imm.restartInput(mTextEdit);
-        });
+    // The on-screen keyboard: the text field's state for its copy (org.libsdl.app.LunaIme)
+    public static void imeSetState(byte[] utf8, int selStart, int selEnd, int gen, boolean restart) {
+        org.libsdl.app.LunaIme.setState(utf8, selStart, selEnd, gen, restart);
     }
 
     // internet radio (native threads): a URL read as it comes - see NetStreams

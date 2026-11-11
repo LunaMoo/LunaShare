@@ -338,6 +338,123 @@ static bool g_kbOn = false;         // the on-screen keyboard was asked for
 static Uint64 g_kbOffSince = 0;     // ... and no text field has wanted it since then (0 = one does)
 #endif
 
+#ifdef __ANDROID__
+// The on-screen keyboard works on a copy of the active text field (LunaIme.java) and sends it back whole: text +
+// selection. Here the field is made to match it - through ImGui's own input (the selection set, then the changed part
+// typed over it / a Backspace), so the field's filters and callbacks (emoji glyphs) see it as typing. Whatever the field
+// then holds that the copy doesn't (the app sent / cleared it, an emoji became a glyph, a tap moved the cursor,
+// another field) goes back to the keyboard as a new generation; what the keyboard made on an older one is dropped.
+static int Utf8Back(const std::string& s, int i) {
+    while (i > 0 && i < (int)s.size() && ((unsigned char)s[(size_t)i] & 0xC0) == 0x80) i--;
+    return i;
+}
+
+static void ImeSync(App& app) {
+    static ImGuiID imeId = 0;
+    static int gen = 0;
+    static std::string last;
+    static int lastS = 0, lastE = 0;
+    static bool applying = false;  // (an edit is queued in ImGui's input: wait for it to go through)
+    static std::string apText;
+    static int apS = 0, apE = 0, apEnters = 0;
+    static bool pend = false;
+    static std::string pText;
+    static int pS = 0, pE = 0, pEnters = 0;
+    auto& br = ls::Bridge();
+    int jg = 0, js = 0, je = 0, jn = 0;
+    std::string jt;
+    if (br.imeTake && br.imeTake(jg, jt, js, je, jn) && jg == gen) {
+        pend = true;
+        pText = std::move(jt);
+        pS = js;
+        pE = je;
+        pEnters += jn;
+    }
+    ImGuiID id = ImGui::GetActiveID();
+    ImGuiInputTextState* st = id ? ImGui::GetInputTextState(id) : nullptr;
+    if (st && (st->Flags & ImGuiInputTextFlags_ReadOnly)) st = nullptr;
+    if (!g_kbOn || !st) {  // (no field, even for a moment: the next one - the same one again too - starts over)
+        imeId = 0;
+        applying = pend = false;
+        pEnters = 0;
+        return;
+    }
+    std::string cur(st->GetText(), (size_t)std::max(0, st->TextLen));
+    int len = (int)cur.size();
+    int cs = std::clamp(std::min(st->GetSelectionStart(), st->GetSelectionEnd()), 0, len);
+    int ce = std::clamp(std::max(st->GetSelectionStart(), st->GetSelectionEnd()), 0, len);
+    if (cs == ce) cs = ce = std::clamp(st->GetCursorPos(), 0, len);
+    auto push = [&](bool restart) {
+        gen++;
+        last = cur;
+        lastS = cs;
+        lastE = ce;
+        applying = pend = false;
+        pEnters = apEnters = 0;
+        if (br.imeSetState) br.imeSetState(cur, cs, ce, gen, restart);
+    };
+    ImGuiIO& io = ImGui::GetIO();
+    if (id != imeId || app.imeReset) {
+        imeId = id;
+        app.imeReset = false;
+        push(true);
+        return;
+    }
+    if (applying) {
+        if (GImGui->InputEventsQueue.Size > 0) return;
+        applying = false;
+        if (cur != apText) {  // (the field made it something else - or it was Enter, and the message went)
+            push(true);
+            return;
+        }
+        st->SetSelection(std::min(Utf8Back(cur, apS), len), std::min(Utf8Back(cur, apE), len));
+        st->CursorFollow = true;
+        st->CursorAnimReset();
+        last = cur;
+        lastS = std::min(apS, len);
+        lastE = std::min(apE, len);
+        if (apEnters > 0) {  // (Enter after the text it came with)
+            for (; apEnters > 0; apEnters--) {
+                io.AddKeyEvent(ImGuiKey_Enter, true);
+                io.AddKeyEvent(ImGuiKey_Enter, false);
+            }
+            applying = true;
+        }
+        return;
+    }
+    if (pend) {
+        pend = false;
+        apText = pText;
+        apS = std::clamp(std::min(pS, pE), 0, (int)apText.size());
+        apE = std::clamp(std::max(pS, pE), 0, (int)apText.size());
+        apEnters = pEnters;
+        pEnters = 0;
+        if (cur != apText) {
+            int n = (int)apText.size(), p = 0, q = 0;
+            while (p < len && p < n && cur[(size_t)p] == apText[(size_t)p]) p++;
+            while (q < len - p && q < n - p && cur[(size_t)(len - 1 - q)] == apText[(size_t)(n - 1 - q)]) q++;
+            p = std::min(Utf8Back(cur, p), Utf8Back(apText, p));
+            while (q > 0 && ((len - q < len && ((unsigned char)cur[(size_t)(len - q)] & 0xC0) == 0x80) ||
+                             (n - q < n && ((unsigned char)apText[(size_t)(n - q)] & 0xC0) == 0x80)))
+                q--;
+            st->SetSelection(p, len - q);
+            std::string mid = apText.substr((size_t)p, (size_t)(n - p - q));
+            if (mid.empty()) {
+                io.AddKeyEvent(ImGuiKey_Backspace, true);
+                io.AddKeyEvent(ImGuiKey_Backspace, false);
+            } else {
+                io.AddInputCharactersUTF8(mid.c_str());
+            }
+            applying = true;
+            return;
+        }
+        applying = true;  // (only the selection / Enter: set as the queue is empty)
+        return;
+    }
+    if (cur != last || cs != lastS || ce != lastE) push(cur != last);
+}
+#endif
+
 int main(int argc, char** argv) {
 #ifdef _WIN32
     SetProcessDPIAware();
@@ -883,24 +1000,7 @@ int main(int argc, char** argv) {
             }
         }
 #ifdef __ANDROID__
-        // The keyboard's idea of the text must stay ours: when the app itself changed the text (it says so:
-        // imeReset) or another field took over, the keyboard starts over. (Never guessed from timing: holding a key
-        // for a Polish letter takes longer than any such guess, and a restart in the middle of it wrecked the typing.)
-        {
-            static ImGuiID lastId = 0;
-            ImGuiID id = ImGui::GetActiveID();
-            bool field = id && ImGui::GetInputTextState(id);
-            bool reset = false;
-            if (g_kbOn && field) {
-                reset = (id != lastId && lastId != 0) || app.imeReset;  // (the first field: SDL gives it a fresh start)
-                lastId = id;
-            } else if (!g_kbOn) {
-                lastId = 0;
-            }
-            if (g_kbOn && app.imeReset && !field) reset = true;  // (sent: the field may let go for a frame)
-            app.imeReset = false;
-            if (reset && ls::Bridge().resetTextInput) ls::Bridge().resetTextInput();
-        }
+        ImeSync(app);
 #endif
         SDL_GL_SwapWindow(window);
 
