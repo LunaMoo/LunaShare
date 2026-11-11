@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.11
+
+- Android keyboard: holding a key for a Polish (or any accented) letter no longer makes the keyboard jump back and
+  delete what was typed - 1.6.10 guessed from timing that the app had changed the text and restarted the keyboard
+  in the middle of it; now it restarts only when the app really changes the text (sent, emoji, a mention, editing,
+  another chat) or another field takes over.
+
 ## 1.6.10
 
 - Calls and music / radio: a call no longer loses its sound when music or the radio was on (on Android the app gets
