@@ -149,6 +149,27 @@ Radio& R() {
 }
 
 void Radio::Init(const std::string& configDir) {
+    // (Android: closing the app and opening it again runs this again in the same process - the worker of the last
+    // run has stopped, and everything starts over)
+    if (th_.joinable()) Shutdown();
+    stopping_ = false;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        quit_ = false;
+        jobs_.clear();
+        results_.clear();
+        favs_.clear();
+        recent_.clear();
+        countries_.clear();
+        countriesAsked_ = false;
+        logosAsked_.clear();
+        error_.clear();
+        server_.clear();
+        cur_ = Station();
+        title_.clear();
+    }
+    busy_ = false;
+    playerId_ = 0;
     file_ = ls::JoinPath(configDir, "radio.json");
     logoDir_ = ls::JoinPath(ls::JoinPath(configDir, "cache"), "radio");
     ls::MakeDirs(logoDir_);
@@ -171,12 +192,15 @@ void Radio::Init(const std::string& configDir) {
 }
 
 void Radio::Shutdown() {
+    stopping_ = true;  // (a job waiting on the network gives up)
     {
         std::lock_guard<std::mutex> l(m_);
         quit_ = true;
+        jobs_.clear();
     }
     cv_.notify_all();
     if (th_.joinable()) th_.join();
+    busy_ = false;
 }
 
 void Radio::Load() {
@@ -236,7 +260,7 @@ std::string Radio::Server() {
     }
     std::vector<std::string> names;
     std::string body;
-    if (ls::HttpGetAll("https://all.api.radio-browser.info/json/servers", body, 1u << 20)) {
+    if (ls::HttpGetAll("https://all.api.radio-browser.info/json/servers", body, 1u << 20, nullptr, &stopping_)) {
         json j = json::parse(body, nullptr, false);
         if (j.is_array())
             for (auto& e : j)
@@ -254,7 +278,7 @@ std::string Radio::Server() {
 bool Radio::Query(const std::string& path, std::vector<Station>& out, std::string& err) {
     for (int attempt = 0; attempt < 3; attempt++) {
         std::string body, base = Server();
-        if (ls::HttpGetAll(base + path, body, 8u << 20)) {
+        if (ls::HttpGetAll(base + path, body, 8u << 20, nullptr, &stopping_)) {
             json j = json::parse(body, nullptr, false);
             if (!j.is_array()) {
                 err = "unexpected answer";
@@ -384,7 +408,7 @@ std::vector<Country> Radio::Countries() {
     Job([this] {
         std::string body;
         std::vector<Country> v;
-        if (ls::HttpGetAll(Server() + "/json/countries?hidebroken=true", body, 4u << 20)) {
+        if (ls::HttpGetAll(Server() + "/json/countries?hidebroken=true", body, 4u << 20, nullptr, &stopping_)) {
             json j = json::parse(body, nullptr, false);
             if (j.is_array())
                 for (auto& e : j) {
@@ -463,7 +487,7 @@ void Radio::FetchLogo(const Station& s) {
     std::string url = s.favicon, base = ls::JoinPath(logoDir_, std::to_string(Fnv(s.favicon)));
     Job([this, url, base] {
         std::string body;
-        if (!ls::HttpGetAll(url, body, 1u << 20) || body.size() < 16) return;
+        if (!ls::HttpGetAll(url, body, 1u << 20, nullptr, &stopping_) || body.size() < 16) return;
         const auto* b = (const unsigned char*)body.data();
         const char* ext = b[0] == 0x89 && b[1] == 'P' ? ".png"
                         : b[0] == 0xFF && b[1] == 0xD8 ? ".jpg"
@@ -510,12 +534,13 @@ void Radio::Play(const Station& s) {
     Job([this, st, server] {
         if (st.id.compare(0, 2, "u:") != 0 && !server.empty()) {  // (Radio Browser counts what's listened to)
             std::string ignore;
-            ls::HttpGetAll(server + "/json/url/" + Enc(st.id), ignore, 64 * 1024);
+            ls::HttpGetAll(server + "/json/url/" + Enc(st.id), ignore, 64 * 1024, nullptr, &stopping_);
         }
         std::string url = st.url, fmt = st.hls || PathOf(url).find(".m3u8") != std::string::npos ? "hls" : "";
         if (fmt.empty()) {
             for (int hop = 0; hop < 3; hop++) {
                 auto ns = ls::NewNetStream();
+                ns->cancel = &stopping_;
                 std::string err;
                 if (!ns->Open(url, false, &err)) break;  // (the player tries again, and says so)
                 std::string ct = Lower(ns->Header("content-type"));

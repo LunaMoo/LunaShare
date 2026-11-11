@@ -500,6 +500,18 @@ void App::MusicTick() {
     auto lk = eng.Lock();
     music::Lib().SetImplicitFolders({eng.settings.downloadDir});
     bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
+    // dev: LUNASHARE_FAKECALL=from,to (seconds since start) acts like a call then; ",play" presses play during it
+    if (static const char* fc = getenv("LUNASHARE_FAKECALL"); fc) {
+        static int64_t t0 = SteadyMs();
+        static bool pressed = false;
+        double a = atof(fc), b = strchr(fc, ',') ? atof(strchr(fc, ',') + 1) : a + 5, t = (SteadyMs() - t0) / 1000.0;
+        if (t >= a && t < b) interrupt = true;
+        if (interrupt && strstr(fc, "play") && t >= a + 2 && !pressed) {
+            pressed = true;
+            music::Play().SetInterrupted(true);
+            music::Play().SetPlaying(true);
+        }
+    }
     music::Play().SetInterrupted(interrupt);
     MusicExternalTick();
     SleepTick();

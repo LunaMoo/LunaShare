@@ -373,6 +373,7 @@ void AndroidBridgeInit(ls::Engine* engine) {
         env->DeleteLocalRef(a);
         return n;
     };
+    b.resetTextInput = []() { CallV("resetTextInput", "()V"); };
     b.netClose = [](int id) {
         static jmethodID m = M("netClose", "(I)V");
         if (!m) return;

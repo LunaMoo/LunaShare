@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Calls and music / radio: a call no longer loses its sound when music or the radio was on (on Android the app gets
+  one sound output, and the music's - even paused - took it over); the music lets go of it for the call and comes
+  back afterwards, the radio reconnecting to what's live. Play pressed during a call plays quieter (30%), mixed
+  into the call's sound on phones.
+- Android keyboard: no more letters coming twice or text being wiped while typing - after the app changed the text
+  itself (sent, cleared, an emoji) or another field took over, the keyboard kept working on the old text; it now
+  starts over on the text as it is.
+- Radio: the station list loads again after the app was closed and opened (Android keeps the process: the radio's
+  worker of the last run had stopped).
+
 ## 1.6.9
 
 - **Internet radio** in Music: stations from the Radio Browser directory - popular in your country, a search, genres,

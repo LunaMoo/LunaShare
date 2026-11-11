@@ -1,4 +1,5 @@
 #include "media_host.h"
+#include "music.h"
 #include "i18n.h"
 
 #include <SDL.h>
@@ -777,6 +778,9 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
     Mode m = self->mode_;
     if (m == Mode::Call) {
         self->mod_->playback(out, n);
+#if defined(__ANDROID__)
+        music::Play().MixInto(out, n);  // (music / radio played on purpose during the call: one sound output on a phone)
+#endif
         return;
     }
     // ring (incoming): two-tone 0.4 s bursts; ringback (outgoing): 425 Hz, 1 s on / 4 s off

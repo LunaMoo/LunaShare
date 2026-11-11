@@ -572,8 +572,9 @@ int IcyStream::Read(uint8_t* buf, int len) {
     return n;
 }
 
-bool HttpGetAll(const std::string& url, std::string& body, size_t maxBytes, std::string* contentType) {
+bool HttpGetAll(const std::string& url, std::string& body, size_t maxBytes, std::string* contentType, std::atomic<bool>* cancel) {
     auto s = NewNetStream();
+    s->cancel = cancel;
     std::string err;
     if (!s->Open(url, false, &err)) return false;
     if (contentType) *contentType = s->Header("content-type");

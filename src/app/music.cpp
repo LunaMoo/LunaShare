@@ -703,6 +703,10 @@ void Player::Shutdown() {
 
 bool Player::EnsureDevice() {
     if (dev_) return true;
+#if defined(__ANDROID__)
+    // the phone gives the app one sound output: during a call it's the call's (music is mixed into it - MixInto)
+    if (interrupted_) return false;
+#endif
     if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
     SDL_AudioSpec want{}, have{};
     want.freq = 48000;
@@ -735,6 +739,7 @@ void Player::PlayExternal(const Source& s, double pos, bool playing) {
         ex_ = s;
         exPos_ = pos;
         exPlay_ = playing;
+        if (interrupted_ && playing && !s.follow) playInCall_ = true;  // (a station / song picked during a call)
         exAt_ = (int64_t)SDL_GetTicks64();
         if (!s.follow) wantPlay_ = playing;
     }
@@ -796,7 +801,7 @@ void Player::LoopExternal() {
     int64_t now = (int64_t)SDL_GetTicks64();
     if (ex_.follow) {
         double target = exPos_ + (exPlay_ ? (double)(now - exAt_) / 1000.0 : 0.0);
-        bool on = exPlay_ && target >= 0 && !interrupted_ && !exEnded_;
+        bool on = exPlay_ && target >= 0 && (!interrupted_ || playInCall_) && !exEnded_;
         if (on != playing_) {
             if (pn_) mod_->set_playing(pn_, on ? 1 : 0);
             mod_->set_playing(p_, on ? 1 : 0);
@@ -823,12 +828,28 @@ void Player::LoopExternal() {
 }
 
 void Player::AudioCb(void* u, uint8_t* stream, int len) {
-    auto* self = (Player*)u;
-    float* out = (float*)stream;
-    int frames = len / (int)(sizeof(float) * 2);
+    ((Player*)u)->Render((float*)stream, len / (int)(sizeof(float) * 2));
+}
+
+// Android, during a call: the music played on purpose goes out mixed into the call's sound (one output there)
+void Player::MixInto(int16_t* mono, int frames) {
+    if (!mixIntoCall_ || frames <= 0) return;
+    static thread_local std::vector<float> buf;
+    if ((int)buf.size() < frames * 2) buf.resize((size_t)frames * 2);
+    Render(buf.data(), frames);
+    for (int i = 0; i < frames; i++) {
+        float m = (buf[(size_t)i * 2] + buf[(size_t)i * 2 + 1]) * 0.5f;
+        int v = mono[i] + (int)std::lround(m * 32767.0f);
+        mono[i] = (int16_t)std::clamp(v, -32768, 32767);
+    }
+}
+
+// the sound of what's playing: frames of interleaved stereo float (the audio device's callback, or MixInto)
+void Player::Render(float* out, int frames) {
+    Player* self = this;
     std::lock_guard<std::mutex> l(self->pm_);
     if (self->p_) self->mod_->read_audio(self->p_, out, frames);
-    else memset(stream, 0, (size_t)len);
+    else memset(out, 0, (size_t)frames * 2 * sizeof(float));
     if (self->p_ && !self->pn_) {  // (how loud it is: for levelling it next time)
         double s = 0;
         for (int i = 0; i < frames * 2; i++) s += (double)out[i] * out[i];
@@ -896,8 +917,17 @@ void Player::AudioCb(void* u, uint8_t* stream, int len) {
             }
     }
     float v = self->volume_.load();
+    if (self->inCall_) v *= 0.3f;  // (during a call: quieter, so the conversation stays clear)
     if (v < 0.999f)
         for (int i = 0; i < frames * 2; i++) out[i] *= v;
+}
+
+// (m_ held)
+void Player::UpdateMix() {
+    inCall_ = interrupted_;
+#if defined(__ANDROID__)
+    mixIntoCall_ = interrupted_ && playInCall_ && playing_ && p_ != nullptr;
+#endif
 }
 
 void Player::UpdateEq() {
@@ -1086,23 +1116,15 @@ bool Player::OpenAt(int index, double pos) {
     measPath_ = pos > 1 ? "" : path;  // (measured only when played from the start)
     dur_ = info.duration;
     if (!p) return false;
-    if (!dev_) {
-        if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
-        SDL_AudioSpec want{}, have{};
-        want.freq = 48000;
-        want.format = AUDIO_F32SYS;
-        want.channels = 2;
-        want.samples = 2048;
-        want.callback = AudioCb;
-        want.userdata = this;
-        dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
-    }
+    if (interrupted_ && wantPlay_) playInCall_ = true;  // (a song picked during a call: played, quieter)
+    EnsureDevice();
     fragA_ = pos > 0 ? pos : PickFrag(info.duration);  // (remix: a part of it; resumed: from where it was)
     if (pos <= 0) pos = fragA_;
     if (pos > 0) mod_->seek(p, pos);
     mod_->set_playing(p, wantPlay_ ? 1 : 0);
     if (dev_) SDL_PauseAudioDevice(dev_, wantPlay_ ? 0 : 1);
     playing_ = wantPlay_;
+    UpdateMix();
     return true;
 }
 
@@ -1192,6 +1214,8 @@ void Player::SetPlaying(bool on) {
         std::lock_guard<std::mutex> l(m_);
         wantPlay_ = on;
         pausedByInterrupt_ = false;
+        if (interrupted_) playInCall_ = on;  // (play pressed during a call: it plays, quieter)
+        if (on) EnsureDevice();
         if (!p_ && on && at_ >= 0) OpenAt(at_, savedPos_);  // (remembered from the last run)
         if (pn_) mod_->set_playing(pn_, on ? 1 : 0);
         if (p_) {
@@ -1199,6 +1223,7 @@ void Player::SetPlaying(bool on) {
             playing_ = on;
             if (dev_) SDL_PauseAudioDevice(dev_, on ? 0 : 1);  // (paused: the device rests too - battery)
         }
+        UpdateMix();
     }
     Changed();
     SaveState();
@@ -1323,21 +1348,44 @@ void Player::SetInterrupted(bool on) {
         std::lock_guard<std::mutex> l(m_);
         if (on == interrupted_) return;
         interrupted_ = on;
-        if (on && p_ && playing_) {
-            if (pn_) mod_->set_playing(pn_, 0);
-            mod_->set_playing(p_, 0);
-            playing_ = false;
-            pausedByInterrupt_ = true;
-            if (dev_) SDL_PauseAudioDevice(dev_, 1);
-            changed = true;
-        } else if (!on && p_ && pausedByInterrupt_) {
-            if (pn_) mod_->set_playing(pn_, 1);
-            mod_->set_playing(p_, 1);
-            playing_ = true;
-            pausedByInterrupt_ = false;
-            if (dev_) SDL_PauseAudioDevice(dev_, 0);
-            changed = true;
+        int64_t now = (int64_t)SDL_GetTicks64();
+        if (on) {
+            interruptedAt_ = now;
+            playInCall_ = false;
+            if (p_ && playing_) {
+                if (pn_) mod_->set_playing(pn_, 0);
+                mod_->set_playing(p_, 0);
+                playing_ = false;
+                pausedByInterrupt_ = true;
+                changed = true;
+            }
+            // let the sound output go: on Android the app gets one, and the call needs it (an open one, even
+            // paused, took the call's sound away)
+            if (dev_) {
+                SDL_CloseAudioDevice(dev_);
+                dev_ = 0;
+            }
+        } else {
+            bool wasPaused = pausedByInterrupt_, resume = pausedByInterrupt_ || (playInCall_ && playing_);
+            pausedByInterrupt_ = playInCall_ = false;
+            if (ext_ && ex_.live && wasPaused && now - interruptedAt_ > 5000) {
+                // radio after a call: back to live (what was buffered is old by now) - opened again by the loop
+                exOpen_ = 0;
+                exEnded_ = false;
+                wantPlay_ = true;
+                changed = true;
+            } else if (p_ && resume) {
+                EnsureDevice();
+                if (pn_) mod_->set_playing(pn_, 1);
+                mod_->set_playing(p_, 1);
+                playing_ = true;
+                if (dev_) SDL_PauseAudioDevice(dev_, 0);
+                changed = true;
+            } else if (p_) {
+                EnsureDevice();
+            }
         }
+        UpdateMix();
     }
     if (changed) Changed();
 }
@@ -1484,15 +1532,16 @@ void Player::Loop() {
                 if (src.follow) {
                     double target = exPos_ + (exPlay_ ? (double)((int64_t)SDL_GetTicks64() - exAt_) / 1000.0 : 0.0);
                     if (target > 0.5) mod_->seek(q, target);
-                    on = exPlay_ && target >= 0 && !interrupted_;
+                    on = exPlay_ && target >= 0 && (!interrupted_ || playInCall_);
                     exLastSeek_ = (int64_t)SDL_GetTicks64();
                 } else {
                     if (exPos_ > 0) mod_->seek(q, exPos_);
-                    on = wantPlay_ && !interrupted_;
+                    on = wantPlay_ && (!interrupted_ || playInCall_);
                 }
                 mod_->set_playing(q, on ? 1 : 0);
                 playing_ = on;
                 if (dev_) SDL_PauseAudioDevice(dev_, on ? 0 : 1);
+                UpdateMix();
                 changed = true;
             } else {
                 if (q) mod_->close(q);

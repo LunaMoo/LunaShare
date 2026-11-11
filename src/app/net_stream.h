@@ -46,7 +46,8 @@ private:
 };
 
 // the whole body (directories, playlists); false on an error or when it's larger than maxBytes
-bool HttpGetAll(const std::string& url, std::string& body, size_t maxBytes = 4u << 20, std::string* contentType = nullptr);
+bool HttpGetAll(const std::string& url, std::string& body, size_t maxBytes = 4u << 20, std::string* contentType = nullptr,
+                std::atomic<bool>* cancel = nullptr);
 
 // "a/b/c.m3u8" relative to a base URL
 std::string ResolveUrl(const std::string& base, const std::string& ref);

@@ -65,6 +65,9 @@ struct HostBridge {
     std::function<int(const std::string& url, bool icy, int& status, std::string& headers, std::string& finalUrl, std::string& err)> netOpen;
     std::function<int(int id, uint8_t* buf, int len)> netRead;
     std::function<void(int id)> netClose;
+    // Android: the on-screen keyboard starts over on the text as it is now (after the app itself changed it - sent,
+    // cleared, an emoji put in - or another field took over), so its idea of the text matches ours again
+    std::function<void()> resetTextInput;
     std::function<bool()> biometricAvailable;                                         // Android: fingerprint / face set up
     std::function<void(const std::string& title, const std::string& cancel)> biometricAsk;  // success: notify action "unlock"
     std::function<void(bool on)> secureWindow;  // Android: no screenshots / app switcher preview (the app lock is on)  // Android: a small HTTPS GET (any thread)

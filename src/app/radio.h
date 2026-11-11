@@ -86,7 +86,7 @@ private:
     std::deque<std::function<void()>> jobs_;
     std::thread th_;
     bool quit_ = false;
-    std::atomic<bool> busy_{false};
+    std::atomic<bool> busy_{false}, stopping_{false};
     std::atomic<uint64_t> version_{1};
     std::vector<Station> results_, favs_, recent_;
     std::vector<Country> countries_;

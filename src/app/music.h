@@ -206,6 +206,8 @@ public:
     void SetSound(const Sound& s);
     // a movie / call / chat audio is on: music pauses, and goes on afterwards
     void SetInterrupted(bool on);
+    // Android, during a call: the call's sound output adds the music played on purpose to its own (audio thread)
+    void MixInto(int16_t* mono, int frames);
     Now GetNow();
     std::vector<std::string> Queue();  // in playing order
 
@@ -231,6 +233,11 @@ private:
     void LoopExternal();           // (m_ held)
     bool ExtCtl(int cmd, double arg);
     bool EnsureDevice();           // (m_ held)
+    void Render(float* out, int frames);  // (audio thread)
+    void UpdateMix();              // (m_ held)
+    bool playInCall_ = false;      // play pressed during a call: it plays (quieter) (m_)
+    int64_t interruptedAt_ = 0;
+    std::atomic<bool> inCall_{false}, mixIntoCall_{false};
     struct ExtStream;              // the stream the decoder reads (alive until its player is closed)
     bool ext_ = false;             // a song from elsewhere is on (m_)
     Source ex_;                    // which (m_)
