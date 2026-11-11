@@ -525,6 +525,8 @@ private:
     std::string devicesSel;
     std::string renameBuf;
     std::string renamePeer;
+    bool chatFollow = true;       // the chat stays at its end (until the reader scrolls up)
+    float chatLastScrollY = 0;
     std::string forgetPeer;  // "Forget..." asks first (a person: all their devices and the chat)
     bool openForget = false;
     bool openRename = false;

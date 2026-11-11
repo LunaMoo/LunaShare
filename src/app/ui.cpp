@@ -2025,12 +2025,15 @@ void App::DrawMessages(const std::string& peer) {
     int64_t lastDay = -1;
 
     int64_t nowMs = SteadyMs();
+    bool jumped = false;
     for (int i = 0; i < (int)cv.messages.size(); i++) {
         ChatMessage& m = cv.messages[(size_t)i];
         ImGui::PushID(m.mid.c_str());
         if (!searchJump.empty() && m.mid == searchJump) {  // (a search result: here, lit up for a moment)
             ImGui::SetScrollHereY(0.3f);
             searchJump.clear();
+            chatFollow = false;
+            jumped = true;
             searchFlash = m.mid;
             searchFlashAt = nowMs;
             scrollToBottom = false;
@@ -2326,10 +2329,17 @@ void App::DrawMessages(const std::string& peer) {
         }
         ImGui::PopID();
     }
-    if (scrollToBottom) {
-        ImGui::SetScrollHereY(1.0f);
-        scrollToBottom = false;
+    // Stay at the end while it's where the reader is: pictures, video thumbnails and long texts above keep growing
+    // for a while after a chat opens (the first time after starting most of all). Scrolling up lets go; back at the
+    // end, it holds again.
+    float sy = ImGui::GetScrollY(), maxY = ImGui::GetScrollMaxY();
+    if (!jumped) {
+        if (scrollToBottom || sy >= maxY - 4.0f) chatFollow = true;
+        else if (sy < chatLastScrollY - 1.0f) chatFollow = false;  // the reader scrolled up
+        if (chatFollow && (scrollToBottom || sy < maxY - 0.5f)) ImGui::SetScrollHereY(1.0f);
     }
+    scrollToBottom = false;
+    chatLastScrollY = sy;
     (void)myName;
     (void)theirName;
 }

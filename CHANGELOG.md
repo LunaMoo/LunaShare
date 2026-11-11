@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.5
+
+- A chat opens at its end and stays there while pictures and video thumbnails above it load (it used to end up
+  higher, the first time after starting most of all). Scrolling up lets go; scrolling back to the end holds again.
+- No more "Could not connect" / "Secure handshake failed" / Bluetooth errors for connections the app tries on its own
+  (opening a chat with someone offline, reconnecting): their offline status already says it. Connecting to an
+  address you typed, a QR code or *Via Bluetooth* still says what went wrong.
+
 ## 1.6.4
 
 - Forgotten contacts no longer stay in the list as nameless entries (a code like `257df4af`, "offline"): forgetting

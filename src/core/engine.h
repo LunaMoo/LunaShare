@@ -328,11 +328,14 @@ public:
     void ClearFinishedTransfers();
     void PauseAll(bool pause);
 
-    void ConnectAddress(const std::string& host, uint16_t port);   // async
+    // async; report: tell (an Error event) when it fails - for a connection the user asked for, not one tried on its own
+    // (someone who's offline shows as offline; no need to say we couldn't reach them)
+    void ConnectAddress(const std::string& host, uint16_t port, bool report = true);
     void ConnectPeer(const std::string& peerId);                    // async, uses best known route
-    void ConnectBluetooth(const std::string& btAddr);               // async
+    void ConnectBluetooth(const std::string& btAddr, bool report = true);  // async
     void Disconnect(const std::string& peerId);
     void AdoptSocket(SocketHandle s, Transport t, const std::string& addr, bool initiator);  // Android bridge, BT, tests
+    std::set<std::string> loudAddrs_;  // addresses the user connects to: a failed handshake is reported
 
     void SetCustomName(const std::string& peer, const std::string& name);
     void SetTrusted(const std::string& peer, bool v);

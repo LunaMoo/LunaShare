@@ -1395,7 +1395,12 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
         std::string err;
         int timeout = c->transport == Transport::LAN ? 8000 : 20000;
         if (!running_ || !c->sec->Handshake(c->sock, c->initiator, timeout, &err, &running_)) {
-            if (c->initiator && running_) Emit({EventType::Error, "", "Secure handshake with " + c->addr + " failed: " + err});
+            bool loud;
+            {
+                auto lk = Lock();
+                loud = loudAddrs_.erase(c->addr) > 0;
+            }
+            if (loud && c->initiator && running_) Emit({EventType::Error, "", "Secure handshake with " + c->addr + " failed: " + err});
             CloseSocket(c->sock);
             return;
         }
@@ -1405,6 +1410,7 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
         {
             auto lk = Lock();
             conns.push_back(c);
+            loudAddrs_.erase(c->addr);
             hello = {{"app", kAppId}, {"proto", kProtocolVersion}, {"id", settings.deviceId}, {"name", settings.displayName},
                      {"user", UserName()}, {"host", HostName()}, {"platform", PlatformName()}, {"macs", MacAddresses()},
                      {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}, {"caps", localCaps},
@@ -3205,7 +3211,7 @@ void Engine::MaintenanceLoop() {
         if (restartMdns_.exchange(false)) StartMdns();
         if (restartWan_.exchange(false)) StartWan();
         for (auto& c : toClose) CloseConn(c, "timeout");
-        for (auto& r : reconnect) ConnectAddress(r.first, r.second);
+        for (auto& r : reconnect) ConnectAddress(r.first, r.second, false);
         if (dirty_ && now - lastSave > 1000) {
             Save();
             lastSave = now;
@@ -3571,21 +3577,29 @@ void Engine::PauseAll(bool pause) {
     for (auto id : ids) pause ? Pause(id) : Resume(id);
 }
 
-void Engine::ConnectAddress(const std::string& host, uint16_t port) {
+void Engine::ConnectAddress(const std::string& host, uint16_t port, bool report) {
     std::string key = host + ":" + std::to_string(port);
     {
         auto lk = Lock();
         if (connecting_.count(key)) return;
         connecting_.insert(key);
+        if (report) loudAddrs_.insert(host);
     }
-    Spawn([this, host, port, key] {
+    Spawn([this, host, port, key, report] {
         SocketHandle s = TcpConnect(host, port ? port : kDefaultTcpPort, 3000);
         {
             auto lk = Lock();
             connecting_.erase(key);
         }
-        if (s != kInvalidSocket) AdoptSocket(s, Transport::LAN, host, true);
-        else Emit({EventType::Error, "", "Could not connect to " + key});
+        if (s != kInvalidSocket) {
+            AdoptSocket(s, Transport::LAN, host, true);
+        } else {
+            {
+                auto lk = Lock();
+                loudAddrs_.erase(host);
+            }
+            if (report) Emit({EventType::Error, "", "Could not connect to " + key});
+        }
     });
 }
 
@@ -3604,7 +3618,7 @@ void Engine::ConnectPeer(const std::string& peerOrKey) {
     if (IsConnected(peer)) return;
     auto o = online.find(peer);
     if (o != online.end() && o->second.OnLan()) {
-        ConnectAddress(o->second.ip, o->second.port);
+        ConnectAddress(o->second.ip, o->second.port, false);
         return;
     }
     if (o != online.end() && o->second.lastWan && wan_.Running()) {
@@ -3614,22 +3628,22 @@ void Engine::ConnectPeer(const std::string& peerOrKey) {
     }
     auto d = devices.find(peer);
     if (d == devices.end()) return;
-    if (!d->second.lastIp.empty()) ConnectAddress(d->second.lastIp, d->second.lastPort);
-    if (!d->second.btAddr.empty() && settings.bluetooth) ConnectBluetooth(d->second.btAddr);
+    if (!d->second.lastIp.empty()) ConnectAddress(d->second.lastIp, d->second.lastPort, false);
+    if (!d->second.btAddr.empty() && settings.bluetooth) ConnectBluetooth(d->second.btAddr, false);
 }
 
-void Engine::ConnectBluetooth(const std::string& addr) {
+void Engine::ConnectBluetooth(const std::string& addr, bool report) {
     int channel;
     {
         auto lk = Lock();
         channel = settings.btChannel;
     }
-    Spawn([this, addr, channel] {
+    Spawn([this, addr, channel, report] {
         std::string err;
         bool async = false;
         SocketHandle s = bt_.Connect(addr, channel, &err, &async);
         if (s != kInvalidSocket) AdoptSocket(s, Transport::Bluetooth, addr, true);
-        else if (!async) Emit({EventType::Error, "", "Bluetooth: " + err});
+        else if (!async && report) Emit({EventType::Error, "", "Bluetooth: " + err});
     });
 }
 
