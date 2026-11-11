@@ -61,6 +61,11 @@ struct Extra {
     // watching: the pieces asked for ahead of the place being read
     int winFirst = -1, winEnd = -1;
     int streamFile = -1;
+    // the disk filled up: libtorrent then only uploads ("upload mode") and never fetches again by itself
+    bool diskFull = false;
+    std::int64_t diskFree = -1;
+    Clock::time_point lastDiskTry{};
+    int diskTries = 0;  // (a disk that keeps failing is not retried forever)
 };
 
 struct State {
@@ -221,6 +226,47 @@ void HandleAlerts() {
     }
 }
 
+// A write failed for lack of space: libtorrent switched the torrent to upload mode (no more pieces asked for, so the
+// seeds drop us) and leaves it only for auto-managed torrents, which ours aren't. Show it, and every 30 s, if there
+// is room again (for the rest, or 64 MB), fetch again (if the disk is still full, libtorrent goes back to upload mode on the next write).
+void DiskFullRules(const std::string& id, lt::torrent_handle& h, const lt::torrent_status& st, bool paused) {
+    // a write failed: upload mode (no space, read-only...), or an error that paused it (a full disk can also come
+    // back as an I/O error) - a file of it, not a tracker or the metadata
+    bool uploadOnly = bool(st.flags & lt::torrent_flags::upload_mode) && !st.is_finished && !paused;
+    bool fileError = st.errc && (st.error_file >= lt::file_index_t{0} || st.error_file == lt::torrent_status::error_file_partfile);
+    std::int64_t left = st.total_wanted - st.total_wanted_done, freeB = -1;
+    if (uploadOnly || fileError) {
+        std::error_code ec;
+        auto sp = fs::space(U8(st.save_path), ec);
+        if (!ec) freeB = (std::int64_t)sp.available;
+    }
+    bool room = freeB < 0 || freeB > std::min<std::int64_t>(64ll << 20, left + (1 << 20));
+    bool retry = false;
+    {
+        std::lock_guard<std::mutex> l(g.m);
+        auto it = g.x.find(id);
+        if (it == g.x.end()) return;
+        Extra& x = it->second;
+        bool full = uploadOnly || (fileError && !room);
+        if (full && !x.diskFull) Log("disk full: " + st.name + " waits until there is space again");
+        x.diskFull = full;
+        x.diskFree = freeB;
+        if (!uploadOnly && !fileError) x.diskTries = 0;
+        auto now = Clock::now();
+        if ((uploadOnly || fileError) && room && x.diskTries < 20 && now - x.lastDiskTry > std::chrono::seconds(30)) {
+            x.lastDiskTry = now;
+            x.diskTries++;
+            retry = true;
+        }
+    }
+    if (retry) {
+        Log("space again: downloading " + st.name);
+        if (fileError) h.clear_error();
+        h.unset_flags(lt::torrent_flags::upload_mode);
+        if (fileError) h.resume();
+    }
+}
+
 // done torrents stop (or seed up to the share set); every couple of seconds
 void SeedRules() {
     std::vector<std::pair<std::string, lt::torrent_handle>> hs;
@@ -232,8 +278,9 @@ void SeedRules() {
     }
     for (auto& [id, h] : hs) {
         if (!h.is_valid()) continue;
-        lt::torrent_status st = h.status({});
+        lt::torrent_status st = h.status(lt::torrent_handle::query_save_path | lt::torrent_handle::query_name);
         bool paused = bool(st.flags & lt::torrent_flags::paused);
+        DiskFullRules(id, h, st, paused);
         if (paused || !st.is_finished || !st.has_metadata || st.total_wanted <= 0) continue;
         if (st.state != lt::torrent_status::finished && st.state != lt::torrent_status::seeding) continue;
         bool stop = seed == 0 || (seed > 0 && st.all_time_upload * 100 >= st.total_wanted * (std::int64_t)seed);
@@ -342,6 +389,7 @@ int Init(const LstHost* host, const char* stateDir, const char* settingsJson) {
         lt::add_torrent_params p = lt::read_resume_data(buf, ec);
         if (ec) continue;
         p.flags &= ~lt::torrent_flags::auto_managed;
+        p.flags &= ~lt::torrent_flags::upload_mode;  // (left there by a full disk last time: try again)
         lt::torrent_handle h = g.ses->add_torrent(std::move(p), ec);
         if (ec || !h.is_valid()) continue;
         std::string id = IdOf(h.info_hashes());
@@ -414,6 +462,7 @@ int AddParams(lt::add_torrent_params p, const char* optionsJson, char* idOut, ch
     fs::create_directories(U8(dir), fec);
     p.save_path = dir;
     p.flags &= ~lt::torrent_flags::auto_managed;
+    p.flags &= ~lt::torrent_flags::upload_mode;
     if (o.value("paused", false)) p.flags |= lt::torrent_flags::paused;
     else p.flags &= ~lt::torrent_flags::paused;
     lt::error_code ec;
@@ -491,7 +540,15 @@ const char* List() {
                 lt::torrent_status st = h.status(lt::torrent_handle::query_name | lt::torrent_handle::query_save_path | lt::torrent_handle::query_torrent_file);
                 bool paused = bool(st.flags & lt::torrent_flags::paused);
                 std::string state;
-                if (st.errc) state = "error";
+                bool diskFull = false;
+                std::int64_t diskFree = -1;
+                {
+                    std::lock_guard<std::mutex> l(g.m);
+                    auto xi = g.x.find(id);
+                    if (xi != g.x.end()) diskFull = xi->second.diskFull, diskFree = xi->second.diskFree;
+                }
+                if (diskFull) state = "nospace";
+                else if (st.errc) state = "error";
                 else if (paused) state = st.has_metadata && st.is_finished && st.total_wanted > 0 ? "done" : "paused";
                 else if (st.state == lt::torrent_status::checking_files || st.state == lt::torrent_status::checking_resume_data) state = "checking";
                 else if (st.state == lt::torrent_status::downloading_metadata || !st.has_metadata) state = "meta";
@@ -544,6 +601,7 @@ const char* List() {
                                {"path", path},
                                {"state", state},
                                {"error", st.errc ? st.errc.message() : ""},
+                               {"diskFree", diskFree},
                                {"size", st.total_wanted},
                                {"done", st.total_wanted_done},
                                {"downRate", paused ? 0 : st.download_payload_rate},
@@ -634,9 +692,11 @@ void Pause(const char* id, int paused) {
                 std::lock_guard<std::mutex> l(g.m);
                 Extra& x = g.x[id];
                 x.autoPaused = false;
+                x.diskTries = 0;
                 if (st.has_metadata && st.is_finished) x.forceSeed = true;  // (started by hand: it seeds until stopped by hand)
             }
             h.clear_error();
+            h.unset_flags(lt::torrent_flags::upload_mode);  // (a full disk put it there)
             h.resume();
         }
         SaveResume(h);

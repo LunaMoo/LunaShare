@@ -7,6 +7,9 @@
   both of you talk at once. In a test with speech in a reverberant room it removes 57 dB of echo, speexdsp 9 dB.
   Used on computers and on phones without their own call echo canceller (phones that have one keep using it).
   RNNoise still does the noise suppression.
+- Torrents: a full disk no longer leaves a download stuck for good. libtorrent then stops asking for pieces (so the
+  seeds drop you) and stays that way, even after a restart; now the torrent says "disk full" with the free space and
+  what's left, and carries on by itself within 30 s of space being freed (Resume also does it).
 
 ## 1.6.7
 

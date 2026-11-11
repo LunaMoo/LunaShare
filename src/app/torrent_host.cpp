@@ -179,6 +179,7 @@ TorrentHost::Torrent TorrentHost::FromJson(const json& j) {
     t.swarmPeers = j.contains("swarmPeers") ? (int)I("swarmPeers") : -1;
     t.copies = j.contains("copies") && j["copies"].is_number() ? j["copies"].get<float>() : -1.0f;
     t.incoming = B("incoming");
+    t.diskFree = j.contains("diskFree") ? I("diskFree") : -1;
     t.trackers = (int)I("trackers");
     t.trackersOk = (int)I("trackersOk");
     t.trackerMsg = S("trackerMsg");
@@ -204,7 +205,7 @@ json TorrentHost::ToJson(const Torrent& t) const {
             {"watchName", t.watchName}, {"from", t.from}, {"then", t.then},       {"sent", t.sent},
             {"seedsAll", t.seedsAll}, {"peersAll", t.peersAll}, {"swarmSeeds", t.swarmSeeds}, {"swarmPeers", t.swarmPeers},
             {"copies", t.copies}, {"incoming", t.incoming}, {"trackers", t.trackers}, {"trackersOk", t.trackersOk},
-            {"trackerMsg", t.trackerMsg}, {"port", t.port}, {"mapped", t.mapped}};
+            {"trackerMsg", t.trackerMsg}, {"port", t.port}, {"mapped", t.mapped}, {"diskFree", t.diskFree}};
 }
 
 const std::vector<TorrentHost::Torrent>& TorrentHost::List() {

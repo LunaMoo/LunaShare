@@ -37,6 +37,7 @@ public:
         // why it may be slow (module 2+): known / swarm counts, availability, can others reach us, the trackers
         int seedsAll = 0, peersAll = 0, swarmSeeds = -1, swarmPeers = -1, trackers = 0, trackersOk = 0, port = 0, mapped = 0;
         float copies = -1;
+        int64_t diskFree = -1;  // state "nospace": what's free where it saves (-1: not known)
         bool incoming = false;
         std::string trackerMsg;
         bool paused = false, single = false;

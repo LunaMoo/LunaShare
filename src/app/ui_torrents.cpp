@@ -463,6 +463,7 @@ void App::DrawTorrents() {
                              : t.state == "seed"     ? T("done - sharing")
                              : t.state == "done"     ? T("done")
                              : t.state == "paused"   ? T("paused")
+                             : t.state == "nospace"  ? T("disk full")
                                                      : T("error");
             std::string text = t.size > 0 ? TF("%d%% of %s", (int)(frac * 100), FormatBytes((double)t.size).c_str()) : std::string();
             text += (text.empty() ? "" : "  -  ") + std::string(st);
@@ -475,11 +476,19 @@ void App::DrawTorrents() {
             float w = ImGui::GetContentRegionAvail().x, bh = ImGui::GetFrameHeight();
             ImGui::Dummy(ImVec2(w, bh));
             dl->AddRectFilled(p, ImVec2(p.x + w, p.y + bh), ImGui::GetColorU32(ImGuiCol_FrameBg), 4);
-            ImU32 col = t.state == "error" ? IM_COL32(170, 60, 60, 255) : t.Complete() ? IM_COL32(50, 130, 80, 255) : ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+            ImU32 col = t.state == "error" || t.state == "nospace" ? IM_COL32(170, 60, 60, 255) : t.Complete() ? IM_COL32(50, 130, 80, 255) : ImGui::GetColorU32(ImGuiCol_PlotHistogram);
             if (frac > 0) dl->AddRectFilled(p, ImVec2(p.x + w * std::min(frac, 1.0f), p.y + bh), col, 4);
             ImVec4 clip(p.x + 4, p.y, p.x + w - 4, p.y + bh);
             dl->AddText(nullptr, 0, ImVec2(p.x + 8, p.y + (bh - ImGui::GetTextLineHeight()) * 0.5f), IM_COL32(240, 240, 240, 255), text.c_str(), nullptr, 0, &clip);
             if (t.state == "error" && !t.error.empty()) ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1), "%s", t.error.c_str());
+            if (t.state == "nospace") {
+                std::string msg = T("The disk it saves to is full, so it stopped downloading (and the seeds stopped sending). Free some space - it carries on by itself.");
+                if (t.diskFree >= 0)
+                    msg += " " + TF("Free now: %s, still to download: %s.", FormatBytes((double)t.diskFree).c_str(), FormatBytes((double)std::max<int64_t>(0, t.size - t.done)).c_str());
+                ImGui::PushTextWrapPos(0);
+                ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1), "%s", msg.c_str());
+                ImGui::PopTextWrapPos();
+            }
             // connected seeds / other peers, and the swarm the trackers report
             std::string sub = TF("seeds %d, peers %d", t.seeds, std::max(0, t.peers - t.seeds));
             if (t.swarmSeeds >= 0 || t.swarmPeers >= 0)
