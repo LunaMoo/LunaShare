@@ -362,7 +362,6 @@
 {"Colour emoji: on", "Emoji a colori: attive"},
 {"Colour emoji: off (module not installed)", "Emoji a colori: disattivate (modulo non installato)"},
 {"Advanced", "Avanzate"},
-{"Receiving", "Ricezione"},
 {"Automatically accept files from trusted devices", "Accetta automaticamente i file dai dispositivi fidati"},
 {"Automatically accept files from everyone", "Accetta automaticamente i file da tutti"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "Chiunque nella tua rete potrebbe inviarti file senza chiedere. Attivalo solo su reti fidate."},

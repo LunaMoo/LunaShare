@@ -374,7 +374,6 @@
 {"Colour emoji: on", "彩色表情:开"},
 {"Colour emoji: off (module not installed)", "彩色表情:关(未安装模块)"},
 {"Advanced", "高级"},
-{"Receiving", "接收"},
 {"Automatically accept files from trusted devices", "自动接收受信任设备的文件"},
 {"Automatically accept files from everyone", "自动接收所有人的文件"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "你网络中的任何人都可以不经询问向你发送文件。仅在可信网络中开启。"},

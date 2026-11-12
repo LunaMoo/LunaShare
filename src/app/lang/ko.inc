@@ -374,7 +374,6 @@
 {"Colour emoji: on", "컬러 이모지: 켜짐"},
 {"Colour emoji: off (module not installed)", "컬러 이모지: 꺼짐(모듈 미설치)"},
 {"Advanced", "고급"},
-{"Receiving", "수신"},
 {"Automatically accept files from trusted devices", "신뢰하는 기기의 파일 자동 수락"},
 {"Automatically accept files from everyone", "모든 사람의 파일 자동 수락"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "네트워크의 누구나 묻지 않고 파일을 보낼 수 있게 됩니다. 신뢰하는 네트워크에서만 켜세요."},

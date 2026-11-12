@@ -366,7 +366,6 @@
 {"Colour emoji: on", "Farbige Emoji: an"},
 {"Colour emoji: off (module not installed)", "Farbige Emoji: aus (Modul nicht installiert)"},
 {"Advanced", "Erweitert"},
-{"Receiving", "Empfangen"},
 {"Automatically accept files from trusted devices", "Dateien von vertrauten Geräten automatisch annehmen"},
 {"Automatically accept files from everyone", "Dateien von allen automatisch annehmen"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "Jeder in deinem Netz könnte dir ungefragt Dateien senden. Nur in vertrauenswürdigen Netzen einschalten."},

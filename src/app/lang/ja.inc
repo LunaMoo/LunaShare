@@ -374,7 +374,6 @@
 {"Colour emoji: on", "カラー絵文字: オン"},
 {"Colour emoji: off (module not installed)", "カラー絵文字: オフ(モジュール未インストール)"},
 {"Advanced", "詳細"},
-{"Receiving", "受信"},
 {"Automatically accept files from trusted devices", "信頼済み端末からのファイルを自動受信"},
 {"Automatically accept files from everyone", "すべての相手からのファイルを自動受信"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "ネットワーク上の誰でも確認なしにファイルを送れるようになります。信頼できるネットワークでだけ有効にしてください。"},

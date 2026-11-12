@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.7.0
+
+- **Settings in categories:** Profile & account, Privacy & security, Chats & files, Calls, My devices, Connections,
+  Appearance & language, Backup and About & updates - a column on the left on desktop, a list of pages on phones -
+  with a search that finds any option and jumps to it. Invites moved under Connections, the technical options into
+  Connections > Advanced, long explanations behind (?) (on phones a tap opens them), auto-accept options in one block.
+- Long checkbox labels wrap onto more lines instead of running off the screen (phones, longer languages).
+- **Android notifications:** a chat's last messages together, **Reply** right from the notification and **Mark as
+  read**; the circle behind the icon is white, and the cow is the first design again.
+- Chats opened with unread messages show a **New messages** line above the first of them.
+- Transfers: with several files going, a line per device with what's left, about how long, and pause / resume.
+- The welcome's last page offers linking another device right away.
+
 ## 1.6.14
 
 - Ten more languages: German, French, Spanish, Italian, Portuguese, Russian, Ukrainian, Japanese, Chinese

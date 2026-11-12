@@ -368,7 +368,6 @@
 {"Colour emoji: on", "Кольорові емодзі: увімк."},
 {"Colour emoji: off (module not installed)", "Кольорові емодзі: вимк. (модуль не встановлено)"},
 {"Advanced", "Додатково"},
-{"Receiving", "Отримання"},
 {"Automatically accept files from trusted devices", "Автоматично приймати файли від довірених пристроїв"},
 {"Automatically accept files from everyone", "Автоматично приймати файли від усіх"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "Будь-хто у вашій мережі зможе надсилати вам файли без запиту. Вмикайте лише в довірених мережах."},

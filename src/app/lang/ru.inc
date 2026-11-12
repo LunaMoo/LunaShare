@@ -368,7 +368,6 @@
 {"Colour emoji: on", "Цветные эмодзи: вкл."},
 {"Colour emoji: off (module not installed)", "Цветные эмодзи: выкл. (модуль не установлен)"},
 {"Advanced", "Дополнительно"},
-{"Receiving", "Приём"},
 {"Automatically accept files from trusted devices", "Автоматически принимать файлы от доверенных устройств"},
 {"Automatically accept files from everyone", "Автоматически принимать файлы от всех"},
 {"Anyone on your network could send you files without asking. Only enable on networks you trust.", "Кто угодно в вашей сети сможет присылать вам файлы без спроса. Включайте только в доверенных сетях."},
