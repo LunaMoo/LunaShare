@@ -1505,3 +1505,8 @@
 {"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "Схоже, це той самий телефон, що й старий \"%s\" (востаннє %s) - мабуть, застосунок перевстановили. Об'єднати обидві розмови в цю?"},
 {"Join them", "Об'єднати"},
 {"They're different", "Це різні"},
+{"The microphone isn't allowed for LunaShare - the other side can't hear you.", "LunaShare не має доступу до мікрофона - співрозмовник вас не чує."},
+{"The microphone couldn't be started - the other side can't hear you.", "Не вдалося ввімкнути мікрофон - співрозмовник вас не чує."},
+{"The sound output couldn't be started - you can't hear the other side.", "Не вдалося ввімкнути виведення звуку - ви не чуєте співрозмовника."},
+{"The microphone gives only silence - the other side can't hear you.", "Мікрофон дає лише тишу - співрозмовник вас не чує."},
+{"No sound is arriving from the other side.", "Від співрозмовника не надходить звук."},

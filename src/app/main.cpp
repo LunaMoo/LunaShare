@@ -881,6 +881,10 @@ int main(int argc, char** argv) {
         if (SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) {
             SDL_Delay(ls::IsMobilePlatform() ? 200 : 50);  // (phones in the background: nothing drawn, few wake-ups)
             app.MusicTick();  // (a call coming in pauses the music also now)
+            // calls are followed here too: one that ended while the screen was off kept the microphone and the
+            // phone's one sound output until the app was opened again (the radio "played" without a sound)
+            Media().Update(true);
+            Player().UpdateAudio();
             continue;
         }
 
@@ -953,7 +957,28 @@ int main(int argc, char** argv) {
                     e.button.windowID = SDL_GetWindowID(window);
                     SDL_PushEvent(&e);
                 };
-                if (got >= 3 && stage == 0 && now >= ms) {
+                if (got >= 3 && stage == 0 && now >= ms && x < 0) {  // (x -1: type LUNASHARE_TYPE; -2: Backspace, y times)
+                    if (x == -1) {
+                        SDL_Event e{};
+                        e.type = SDL_TEXTINPUT;
+                        e.text.windowID = SDL_GetWindowID(window);
+                        SDL_strlcpy(e.text.text, SDL_getenv("LUNASHARE_TYPE") ? SDL_getenv("LUNASHARE_TYPE") : "a", sizeof(e.text.text));
+                        SDL_PushEvent(&e);
+                    } else {
+                        for (int k = 0; k < std::max(1, y); k++)
+                            for (Uint32 t : {(Uint32)SDL_KEYDOWN, (Uint32)SDL_KEYUP}) {
+                                SDL_Event e{};
+                                e.type = t;
+                                e.key.windowID = SDL_GetWindowID(window);
+                                e.key.state = t == SDL_KEYDOWN ? SDL_PRESSED : SDL_RELEASED;
+                                e.key.keysym.sym = SDLK_BACKSPACE;
+                                e.key.keysym.scancode = SDL_SCANCODE_BACKSPACE;
+                                SDL_PushEvent(&e);
+                            }
+                    }
+                    taps += n;
+                    while (*taps == ';' || *taps == ' ') taps++;
+                } else if (got >= 3 && stage == 0 && now >= ms) {
                     push(SDL_MOUSEMOTION);
                     push(SDL_MOUSEBUTTONDOWN);
                     stage = 1;
@@ -961,7 +986,7 @@ int main(int argc, char** argv) {
                 } else if (stage == 1 && now >= upAt) {
                     push(SDL_MOUSEBUTTONUP);
                     SDL_Log("tap %d,%d done", x, y);
-                    if (const char* typed = SDL_getenv("LUNASHARE_TYPE")) {  // dev: then type this (once)
+                    if (const char* typed = SDL_getenv("LUNASHARE_TYPE"); typed && !strstr(SDL_getenv("LUNASHARE_TAPS"), "-1,")) {  // dev: then type this (once)
                         static bool done = false;
                         if (!done) {
                             done = true;

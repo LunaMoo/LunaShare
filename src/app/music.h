@@ -239,6 +239,7 @@ private:
     bool playInCall_ = false;      // play pressed during a call: it plays (quieter) (m_)
     int64_t interruptedAt_ = 0;
     std::atomic<bool> inCall_{false}, mixIntoCall_{false};
+    int64_t devTry_ = 0;  // when the sound output was last tried (m_)
     struct ExtStream;              // the stream the decoder reads (alive until its player is closed)
     bool ext_ = false;             // a song from elsewhere is on (m_)
     Source ex_;                    // which (m_)

@@ -22,6 +22,7 @@ public:
     std::string loadInfo;
     void Shutdown();
     void Update();  // UI thread, once per frame
+    void UpdateAudio();  // its sound output only (part of Update; alone while the app is in the background)
 
     static bool IsVideoPath(const std::string& path);
     static bool IsAudioPath(const std::string& path);
@@ -73,6 +74,10 @@ public:
     };
     const Sub& Subtitle() const { return sub_; }
     bool Playing() const;
+    // Phones give the app one sound output (audio_out.h): while a call has it, what plays here is mixed into the
+    // call's sound instead (MixInto: from the call's audio callback), and this player opens no device of its own.
+    void SetCallOutput(bool on);
+    void MixInto(int16_t* mono, int frames);
     double Position() const;
     double Duration() const { return info_.duration; }
     const LspInfo& Info() const { return info_; }
@@ -110,6 +115,8 @@ private:
     std::string cur_;
     LspInfo info_{};
     uint32_t dev_ = 0;
+    std::atomic<bool> callOut_{false};  // a call has the sound output: MixInto plays this one's sound
+    uint64_t openTry_ = 0;              // when the device was last tried (it's tried again while something plays)
     std::mutex pm_;  // guards p_ against the audio callback
     // stream being opened in the background
     std::thread opener_;

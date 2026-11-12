@@ -16,6 +16,7 @@
 #include <cstring>
 #include <random>
 
+#include "audio_out.h"
 #include "lunashare_player.h"
 #include "model.h"
 #include "platform.h"
@@ -750,10 +751,10 @@ void Player::Shutdown() {
 
 bool Player::EnsureDevice() {
     if (dev_) return true;
-#if defined(__ANDROID__)
-    // the phone gives the app one sound output: during a call it's the call's (music is mixed into it - MixInto)
-    if (interrupted_) return false;
-#endif
+    // the phone gives the app one sound output (audio_out.h): during a call it's the call's (music is mixed into it
+    // - MixInto), and a file that plays has it before music does
+    if (audio_out::Single() && interrupted_) return false;
+    devTry_ = (int64_t)SDL_GetTicks64();
     if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
     SDL_AudioSpec want{}, have{};
     want.freq = 48000;
@@ -762,7 +763,7 @@ bool Player::EnsureDevice() {
     want.samples = 2048;
     want.callback = AudioCb;
     want.userdata = this;
-    dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    dev_ = audio_out::Open("music", nullptr, &want, &have);
     return dev_ != 0;
 }
 
@@ -972,9 +973,7 @@ void Player::Render(float* out, int frames) {
 // (m_ held)
 void Player::UpdateMix() {
     inCall_ = interrupted_;
-#if defined(__ANDROID__)
-    mixIntoCall_ = interrupted_ && playInCall_ && playing_ && p_ != nullptr;
-#endif
+    mixIntoCall_ = audio_out::Single() && interrupted_ && playInCall_ && playing_ && p_ != nullptr;
 }
 
 void Player::UpdateEq() {
@@ -1138,7 +1137,7 @@ void Player::CloseLocked() {
     }
     if (p) Retire(p);
     if (dev_) {
-        SDL_CloseAudioDevice(dev_);
+        audio_out::Close(dev_);
         dev_ = 0;
     }
     playing_ = false;
@@ -1409,7 +1408,7 @@ void Player::SetInterrupted(bool on) {
             // let the sound output go: on Android the app gets one, and the call needs it (an open one, even
             // paused, took the call's sound away)
             if (dev_) {
-                SDL_CloseAudioDevice(dev_);
+                audio_out::Close(dev_);
                 dev_ = 0;
             }
         } else {
@@ -1619,6 +1618,11 @@ void Player::Loop() {
                 exStreamOld_.reset();
             }
             if (ext_) LoopExternal();
+            // Playing without a sound output: it couldn't be opened when the song started (a phone has one for the
+            // whole app, and a video or a call still had it), so it is tried again - "playing" with nothing heard,
+            // and the song not moving, was what it looked like.
+            if (playing_ && p_ && !dev_ && !mixIntoCall_ && (int64_t)SDL_GetTicks64() - devTry_ > 500 && EnsureDevice())
+                SDL_PauseAudioDevice(dev_, 0);
             // radio: a station that stopped or couldn't be reached is tried again while it's meant to play
             if (ext_ && ex_.live && exOpen_ == ex_.id && exEnded_ && !exOpening_) {
                 int64_t now = (int64_t)SDL_GetTicks64();

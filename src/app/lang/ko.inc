@@ -1511,3 +1511,8 @@
 {"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "이전의 \"%s\"(마지막 접속 %s)와 같은 휴대폰으로 보입니다. 앱을 다시 설치한 것 같습니다. 두 대화를 이 대화로 합칠까요?"},
 {"Join them", "합치기"},
 {"They're different", "서로 달라요"},
+{"The microphone isn't allowed for LunaShare - the other side can't hear you.", "LunaShare에 마이크 권한이 없어 상대방이 내 소리를 들을 수 없습니다."},
+{"The microphone couldn't be started - the other side can't hear you.", "마이크를 시작하지 못해 상대방이 내 소리를 들을 수 없습니다."},
+{"The sound output couldn't be started - you can't hear the other side.", "소리 출력을 시작하지 못해 상대방 소리가 들리지 않습니다."},
+{"The microphone gives only silence - the other side can't hear you.", "마이크에서 무음만 들어와 상대방이 내 소리를 들을 수 없습니다."},
+{"No sound is arriving from the other side.", "상대방에게서 소리가 오지 않습니다."},

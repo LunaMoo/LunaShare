@@ -1500,3 +1500,8 @@
 {"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "Das sieht aus wie dasselbe Telefon wie das ältere \"%s\" (zuletzt gesehen %s) - die App wurde wohl neu installiert. Beide Unterhaltungen zu dieser zusammenführen?"},
 {"Join them", "Zusammenführen"},
 {"They're different", "Sind verschieden"},
+{"The microphone isn't allowed for LunaShare - the other side can't hear you.", "LunaShare darf das Mikrofon nicht verwenden - die andere Seite hört dich nicht."},
+{"The microphone couldn't be started - the other side can't hear you.", "Das Mikrofon konnte nicht gestartet werden - die andere Seite hört dich nicht."},
+{"The sound output couldn't be started - you can't hear the other side.", "Die Tonausgabe konnte nicht gestartet werden - du hörst die andere Seite nicht."},
+{"The microphone gives only silence - the other side can't hear you.", "Das Mikrofon liefert nur Stille - die andere Seite hört dich nicht."},
+{"No sound is arriving from the other side.", "Von der anderen Seite kommt kein Ton an."},

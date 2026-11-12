@@ -1,5 +1,7 @@
 #include "media_host.h"
 #include "music.h"
+#include "audio_out.h"
+#include "player_host.h"
 #include "i18n.h"
 
 #include <SDL.h>
@@ -757,6 +759,12 @@ void MediaHost::CaptureCb(void* u, uint8_t* stream, int len) {
     auto* self = (MediaHost*)u;
     int n = len / 2;
     auto* pcm = (int16_t*)stream;
+    self->lastCapCb_ = SDL_GetTicks64();
+    {  // (pure silence: what a phone gives an app it doesn't let use the microphone)
+        bool zero = true;
+        for (int i = 0; i < n && zero; i++) zero = pcm[i] == 0;
+        self->capZero_ = zero ? std::min(self->capZero_.load() + n, LSM_SAMPLE_RATE * 3600) : 0;
+    }
     self->ApplyMicGain(pcm, n);
     if (self->mode_ == Mode::Call) {
         self->mod_->capture(pcm, n);
@@ -776,11 +784,13 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
     auto* out = (int16_t*)stream;
     int n = len / 2;
     Mode m = self->mode_;
+    self->lastPlayCb_ = SDL_GetTicks64();
     if (m == Mode::Call) {
         self->mod_->playback(out, n);
-#if defined(__ANDROID__)
-        music::Play().MixInto(out, n);  // (music / radio played on purpose during the call: one sound output on a phone)
-#endif
+        if (audio_out::Single()) {  // (one sound output on a phone: what else plays is heard through the call's)
+            music::Play().MixInto(out, n);  // music / radio played on purpose during the call
+            Player().MixInto(out, n);       // a movie watched together, a voice message
+        }
         return;
     }
     // ring (incoming): two-tone 0.4 s bursts; ringback (outgoing): 425 Hz, 1 s on / 4 s off
@@ -795,6 +805,7 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
         }
         out[i] = (int16_t)(v * 32767);
     }
+    if (audio_out::Single()) Player().MixInto(out, n);
 }
 
 // LunaShare's own echo canceller - not on top of the phone's: one canceller should own the echo (a second one only
@@ -810,67 +821,168 @@ bool MediaHost::SoftwareAec(const Settings& s) const {
 
 bool MediaHost::OpenDevices(bool capture, bool playback) {
     CloseDevices();
+    wantPlay_ = playback;
+    wantCap_ = capture;
+    playErr_.clear();
+    capErr_.clear();
+    audioError.clear();
+    healTick_ = SDL_GetTicks64();
     if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
         audioError = std::string("audio unavailable: ") + SDL_GetError();
         return false;
     }
-    Settings s = eng_ ? eng_->GetSettings() : Settings();
+    if (playback) OpenPlayback();
+    if (capture) OpenCapture();
+    audioError = playErr_ + (playErr_.empty() || capErr_.empty() ? "" : "; ") + capErr_;
 #if defined(__ANDROID__)
-    // calls on the voice stream with the voice-communication microphone (our SDL patch): the call volume buttons
-    // work, and the phone's own echo canceller / noise suppressor get both sides (they didn't on the media stream)
-    // (the microphone's preset only with echo cancellation on: the phone's processing costs some sound quality)
-    bool voice = mode_ == Mode::Call || mode_ == Mode::Ringback;
-    SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", voice ? "1" : "0");
-    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE", voice && s.callEchoCancel ? "1" : "0");
-    SDL_SetHint("SDL_ANDROID_VOICE_PLAYBACK_OK", "");
-    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE_OK", "");
-#endif
-    SDL_AudioSpec want{}, have{};
-    want.freq = LSM_SAMPLE_RATE;
-    want.format = AUDIO_S16SYS;
-    want.channels = 1;
-    want.samples = 512;  // ~10.7 ms at 48 kHz
-    want.userdata = this;
-    audioError.clear();
-    if (playback) {
-        want.callback = PlaybackCb;
-        playDev_ = SDL_OpenAudioDevice(s.callOutputDevice.empty() ? nullptr : s.callOutputDevice.c_str(), 0, &want, &have, 0);
-        if (!playDev_ && !s.callOutputDevice.empty()) playDev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
-        if (!playDev_) audioError = std::string("speaker: ") + SDL_GetError();
-    }
-    if (capture) {
-#if defined(__ANDROID__)
-        if (!SDL_AndroidRequestPermission("android.permission.RECORD_AUDIO")) {
-            // refused (once "don't ask again", Android doesn't ask any more: only the app's settings can allow it)
-            micDenied = true;
-            audioError += std::string(audioError.empty() ? "" : "; ") + "microphone permission refused";
-            if (playDev_) SDL_PauseAudioDevice(playDev_, 0);
-            return false;
-        }
-        micDenied = false;
-#endif
-        want.callback = CaptureCb;
-        capDev_ = SDL_OpenAudioDevice(s.callInputDevice.empty() ? nullptr : s.callInputDevice.c_str(), 1, &want, &have, 0);
-        if (!capDev_ && !s.callInputDevice.empty()) capDev_ = SDL_OpenAudioDevice(nullptr, 1, &want, &have, 0);
-        if (!capDev_) audioError += std::string(audioError.empty() ? "" : "; ") + "microphone: " + SDL_GetError();
-    }
-#if defined(__ANDROID__)
-    if (voice) {  // (logcat: did the phone take the call stream / the call microphone)
+    if (mode_ == Mode::Call || mode_ == Mode::Ringback) {  // (logcat: did the phone take the call stream / the call microphone)
         const char* po = SDL_GetHint("SDL_ANDROID_VOICE_PLAYBACK_OK");
         const char* co = SDL_GetHint("SDL_ANDROID_VOICE_CAPTURE_OK");
         SDL_Log("call audio (%s): voice stream %s, call microphone %s", SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?",
                 po && *po ? (*po == '1' ? "on" : "refused") : "not asked", co && *co ? (*co == '1' ? "on" : "refused") : "not asked");
     }
 #endif
-    if (playDev_) SDL_PauseAudioDevice(playDev_, 0);
-    if (capDev_) SDL_PauseAudioDevice(capDev_, 0);
     return (!playback || playDev_) && (!capture || capDev_);
+}
+
+static SDL_AudioSpec CallSpec(void* user) {
+    SDL_AudioSpec want{};
+    want.freq = LSM_SAMPLE_RATE;
+    want.format = AUDIO_S16SYS;
+    want.channels = 1;
+    want.samples = 512;  // ~10.7 ms at 48 kHz
+    want.userdata = user;
+    return want;
+}
+
+bool MediaHost::OpenPlayback() {
+    Settings s = eng_ ? eng_->GetSettings() : Settings();
+#if defined(__ANDROID__)
+    // calls on the voice stream with the voice-communication microphone (our SDL patch): the call volume buttons
+    // work, and the phone's own echo canceller / noise suppressor get both sides (they didn't on the media stream)
+    bool voice = mode_ == Mode::Call || mode_ == Mode::Ringback;
+    SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", voice ? "1" : "0");
+    SDL_SetHint("SDL_ANDROID_VOICE_PLAYBACK_OK", "");
+#endif
+    if (audio_out::Single()) {
+        // a phone's one sound output: music and a file that plays let go of theirs now (not a frame later - the
+        // call's would fail to open, and stay silent), and are heard through the call's (MixInto)
+        music::Play().SetInterrupted(true);
+        Player().SetCallOutput(true);
+    }
+    SDL_AudioSpec want = CallSpec(this), have{};
+    want.callback = PlaybackCb;
+    playDev_ = audio_out::Open("call", s.callOutputDevice.empty() ? nullptr : s.callOutputDevice.c_str(), &want, &have);
+    if (!playDev_ && !s.callOutputDevice.empty()) playDev_ = audio_out::Open("call", nullptr, &want, &have);
+    if (!playDev_) {
+        playErr_ = std::string("speaker: ") + SDL_GetError();
+        return false;
+    }
+    playErr_.clear();
+    lastPlayCb_ = SDL_GetTicks64();
+    SDL_PauseAudioDevice(playDev_, 0);
+    return true;
+}
+
+bool MediaHost::OpenCapture() {
+    Settings s = eng_ ? eng_->GetSettings() : Settings();
+#if defined(__ANDROID__)
+    if (!SDL_AndroidRequestPermission("android.permission.RECORD_AUDIO")) {
+        // refused (once "don't ask again", Android doesn't ask any more: only the app's settings can allow it)
+        micDenied = true;
+        capErr_ = "microphone permission refused";
+        return false;
+    }
+    micDenied = false;
+    // (the microphone's preset only with echo cancellation on: the phone's processing costs some sound quality)
+    bool voice = mode_ == Mode::Call || mode_ == Mode::Ringback;
+    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE", voice && s.callEchoCancel ? "1" : "0");
+    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE_OK", "");
+    // (the permission may have been given just now: the call's foreground service - what keeps the microphone
+    // when the screen goes off - needs it to start)
+    static bool had = false;
+    if (!had && voice && Bridge().callAudioMode) Bridge().callAudioMode(true);
+    had = true;
+#endif
+    SDL_AudioSpec want = CallSpec(this), have{};
+    want.callback = CaptureCb;
+    capDev_ = SDL_OpenAudioDevice(s.callInputDevice.empty() ? nullptr : s.callInputDevice.c_str(), 1, &want, &have, 0);
+    if (!capDev_ && !s.callInputDevice.empty()) capDev_ = SDL_OpenAudioDevice(nullptr, 1, &want, &have, 0);
+    if (!capDev_) {
+        capErr_ = std::string("microphone: ") + SDL_GetError();
+        SDL_Log("microphone couldn't be opened: %s", SDL_GetError());
+        return false;
+    }
+    capErr_.clear();
+    capZero_ = 0;
+    lastCapCb_ = SDL_GetTicks64();
+    SDL_PauseAudioDevice(capDev_, 0);
+    return true;
+}
+
+// A call used to stay silent to its end when the microphone or the sound output couldn't be opened at its start
+// (something else in the app still had it), or when the phone took one away on the way. Once a second: what's
+// missing is opened again, and a device that stopped asking for sound (3 s) is closed and opened again.
+void MediaHost::HealAudio() {
+    if (mode_ == Mode::Off) return;
+    uint64_t now = SDL_GetTicks64();
+    if (now - healTick_ < 1000) return;
+    healTick_ = now;
+    bool did = false;
+    if (wantPlay_ && (!playDev_ || now - lastPlayCb_ > 3000)) {
+        if (playDev_) {
+            SDL_Log("call sound output went quiet: opened again");
+            audio_out::Close(playDev_);
+            playDev_ = 0;
+        }
+        did |= OpenPlayback();
+    }
+    if (wantCap_ && !micDenied && (!capDev_ || now - lastCapCb_ > 3000)) {
+        if (capDev_) {
+            SDL_Log("microphone went quiet: opened again");
+            SDL_CloseAudioDevice(capDev_);
+            capDev_ = 0;
+        }
+        did |= OpenCapture();
+    }
+    std::string err = playErr_ + (playErr_.empty() || capErr_.empty() ? "" : "; ") + capErr_;
+    if (did || !err.empty()) audioError = err;
+    if (did && mode_ == Mode::Call) ResetEcho();
 }
 
 void MediaHost::CloseDevices() {
     if (capDev_) SDL_CloseAudioDevice(capDev_);
-    if (playDev_) SDL_CloseAudioDevice(playDev_);
+    if (playDev_) audio_out::Close(playDev_);
     capDev_ = playDev_ = 0;
+    wantPlay_ = wantCap_ = false;
+    playErr_.clear();
+    capErr_.clear();
+    Player().SetCallOutput(false);  // (what plays there gets its own sound output back)
+}
+
+// For the call bar: a problem with the call's sound that the person can't see otherwise - "I can't hear him" has
+// four different causes on two devices.
+std::string MediaHost::CallSoundProblem() {
+    if (mode_ != Mode::Call || !eng_) return {};
+    uint64_t now = SDL_GetTicks64();
+    if (now - callSince_ < 4000) return {};  // (everything is still starting)
+    if (micDenied) return T("The microphone isn't allowed for LunaShare - the other side can't hear you.");
+    if (!capDev_) return T("The microphone couldn't be started - the other side can't hear you.");
+    if (!playDev_) return T("The sound output couldn't be started - you can't hear the other side.");
+    if (!mute_ && capZero_ > LSM_SAMPLE_RATE * 5) return T("The microphone gives only silence - the other side can't hear you.");
+    bool group;
+    {
+        auto lk = eng_->Lock();
+        group = !eng_->call.group.empty();
+    }
+    LsmStats st = Stats();
+    if (st.packets_in != inSeen_) {
+        inSeen_ = st.packets_in;
+        inSeenAt_ = now;
+    }
+    // (a muted microphone still sends: nothing at all for seconds means theirs isn't running, or the connection)
+    if (!group && now - inSeenAt_ > 4000) return T("No sound is arriving from the other side.");
+    return {};
 }
 
 void MediaHost::SetMode(Mode m) {
@@ -894,6 +1006,9 @@ void MediaHost::SetMode(Mode m) {
         remoteRotAdj_ = 0;
         mod_->set_mute(mute_ ? 1 : 0);
         mode_ = Mode::Call;
+        callSince_ = SDL_GetTicks64();
+        inSeen_ = -1;
+        inSeenAt_ = callSince_;
         OpenDevices(true, true);
         liveLs_ = ls;
         liveUserAec_ = s.callEchoCancel;
@@ -911,7 +1026,7 @@ void MediaHost::SetMode(Mode m) {
     }
 }
 
-void MediaHost::Update() {
+void MediaHost::Update(bool background) {
     if (!eng_) return;
     if (!vcamChecked_) {  // settings are loaded by now
         vcamChecked_ = true;
@@ -929,7 +1044,8 @@ void MediaHost::Update() {
     }
     Mode want = Mode::Off;
     if (st == CallState::Active && mod_) want = Mode::Call;
-    else if (st == CallState::IncomingRinging) want = Mode::Ring;
+    // (a phone in the background rings through its notification: the app's own ring is for when it's in front)
+    else if (st == CallState::IncomingRinging && (!background || !IsMobilePlatform() || mode_ == Mode::Ring)) want = Mode::Ring;
     else if (st == CallState::OutgoingRinging) want = Mode::Ringback;
     else if (recording_ || vmsgRec_) want = Mode::Record;
     else if (micTest_) want = Mode::MicTest;
@@ -938,7 +1054,8 @@ void MediaHost::Update() {
     if (st == CallState::None) wantCamera_ = false;
     if (want != Mode::Call && mode_ == Mode::Call) mute_ = false;
     SetMode(want);
-    UploadVideo();
+    HealAudio();
+    if (!background) UploadVideo();  // (pictures: only with a window to draw them in)
     if (mode_ == Mode::Call && Bridge().callRoutes && now - routesTick_ > 1500) {
         routesTick_ = now;
         RefreshRoutes();  // follows headsets being plugged in / connected during the call

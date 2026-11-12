@@ -4171,6 +4171,24 @@ void App::DrawCallBar() {
     float stripTile = mobile ? ui::M().rowH * 1.1f : ImGui::GetFontSize() * 2.8f;
     float stripH = strip ? stripTile + ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemSpacing.y * 2 : 0;
     barH += stripH;
+    // something wrong with the call's sound (no microphone, no sound output, nothing arriving): said here - and once
+    // as a notice, for the full-screen video - instead of a call that's just silent
+    std::string prob = c.state == CallState::Active ? Media().CallSoundProblem() : std::string();
+    float probH = 0;
+    if (!prob.empty()) {
+        float w = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().WindowPadding.x * 2;
+        probH = ImGui::CalcTextSize(prob.c_str(), nullptr, false, w).y + ImGui::GetStyle().ItemSpacing.y;
+        barH += probH;
+    }
+    {
+        static std::string told;
+        if (c.state != CallState::Active) told.clear();
+        else if (!prob.empty() && prob != told) {
+            told = prob;
+            toasts.push_back({EventType::Error, T("Calls"), prob, "", 0, 6.0f});
+            fprintf(stderr, "call sound: %s (%s)\n", prob.c_str(), Media().audioError.c_str());
+        }
+    }
     ImGui::PushStyleColor(ImGuiCol_ChildBg, c.state == CallState::Active ? IM_COL32(30, 110, 70, 255) : IM_COL32(60, 70, 120, 255));
     ImGui::BeginChild("callbar", ImVec2(0, barH + ImGui::GetStyle().WindowPadding.y * 2), ImGuiChildFlags_AlwaysUseWindowPadding);
     std::string who = Emoji().Display(eng.PeerName(c.peer));
@@ -4238,11 +4256,16 @@ void App::DrawCallBar() {
     }
     DrawCallButtons(bw, h, true);
     if (strip) {
-        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - stripH + ImGui::GetStyle().ItemSpacing.y));
+        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - probH - stripH + ImGui::GetStyle().ItemSpacing.y));
         GroupCallStrip(stripTile, false);
     }
-    if (!Media().audioError.empty() && c.state == CallState::Active) {
-        ImGui::TextColored(ImVec4(1, 0.8f, 0.6f, 1), "%s", Media().audioError.c_str());
+    if (!prob.empty()) {
+        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - probH + ImGui::GetStyle().ItemSpacing.y));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.85f, 0.55f, 1));
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextUnformatted(prob.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
     }
     ImGui::EndChild();
     ImGui::PopStyleColor();
@@ -5002,14 +5025,37 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
 void App::DrawTextMirror() {
     ImGuiContext& g = *GImGui;
     ImGuiInputTextState* st = ImGui::GetInputTextState(g.ActiveId);
-    bool show = keyboardInset > 0 && ImGui::GetIO().WantTextInput && st && st->Stb;
-    if (show) {  // (only when the field's cursor is out of sight - under the keyboard; a field above it is fine as it is)
+    bool active = keyboardInset > 0 && ImGui::GetIO().WantTextInput && st && st->Stb;
+    bool show = false;
+    static int outOfSight = 0;  // frames in a row the cursor wasn't seen above the keyboard
+    if (active) {  // (only when the field's cursor is out of sight - under the keyboard; a field above it is fine as it is)
         ImGuiViewport* v = ImGui::GetMainViewport();
         float kbTop = v->WorkPos.y + v->WorkSize.y - keyboardInset;
         const ImGuiPlatformImeData& ime = g.PlatformImeData;
-        bool visible = ime.WantVisible && ime.InputPos.y >= v->WorkPos.y && ime.InputPos.y + ime.InputLineHeight <= kbTop;
+        // (WantVisible: the field drew its cursor this frame. It doesn't on the frame it becomes active - going from
+        // one field to another with the keyboard up - nor while it is clipped away)
+        bool inSight = ime.WantVisible && ime.InputPos.y >= v->WorkPos.y && ime.InputPos.y + ime.InputLineHeight <= kbTop;
         bool shownBefore = mirrorRect[2] > mirrorRect[0];
-        if (visible && !(shownBefore && ime.InputPos.y + ime.InputLineHeight > mirrorRect[1])) show = false;
+        if (shownBefore) {
+            // stays while the cursor is behind the strip itself
+            show = !inSight || ime.InputPos.y + ime.InputLineHeight > mirrorRect[1];
+        } else {
+            // A few frames in a row before it comes up: one frame without the cursor (see above), or with the layout
+            // still moving as the keyboard changes height, flashed the strip - its line and background - over the
+            // chat's text box, and with the cursor behind it the strip then stayed.
+            outOfSight = inSight ? 0 : outOfSight + 1;
+            show = outOfSight >= 3;
+        }
+    } else {
+        outOfSight = 0;
+    }
+    if (static const bool log = getenv("LUNASHARE_MIRRORLOG") != nullptr; log) {  // dev: when the strip comes and goes
+        static int was = -1;
+        const ImGuiPlatformImeData& ime = g.PlatformImeData;
+        if ((int)show != was)
+            fprintf(stderr, "mirror %d frame %d inset %.0f imeY %.0f want %d active %08x\n", (int)show, ImGui::GetFrameCount(), keyboardInset, ime.InputPos.y,
+                    (int)ime.WantVisible, g.ActiveId),
+                was = show;
     }
     if (!show) {
         mirrorRect[0] = mirrorRect[1] = mirrorRect[2] = mirrorRect[3] = 0;

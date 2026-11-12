@@ -2,4 +2,5 @@
 <resources>
     <string name="bg_ready">Готов к сообщениям и звонкам</string>
     <string name="bg_stopped">LunaShare закрыт - откройте его снова, чтобы получать сообщения и звонки</string>
+    <string name="call_ongoing">Идёт звонок</string>
 </resources>

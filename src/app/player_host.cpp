@@ -3,11 +3,14 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
+#include "audio_out.h"
 #include "bluetooth.h"
 #include "gl_funcs.h"
 #include "media_host.h"
+#include "music.h"
 #include "platform.h"
 
 using namespace ls;
@@ -215,10 +218,24 @@ void PlayerHost::Update() {
     if (ended && loop_ && cur_.rfind("watch:", 0) != 0 && cur_.rfind("lib:", 0) != 0 && cur_.rfind("movie:", 0) != 0) {
         mod_->seek(p_, 0);
         SetPlaying(true);
-    } else if (ended && dev_ && SDL_GetTicks64() - endedAt_ > 3000) {
-        // (not right away: a movie that starts again - loop - would wait for the phone to reopen its audio device)
-        CloseAudio();
     }
+    UpdateAudio();
+}
+
+// The sound output (also looked after while the app is in the background, when nothing is drawn).
+// A phone has one for the whole app: at the end, or paused, this player lets it go - held, even silent, it kept
+// music and the radio - and calls - from being heard. And while something plays without a device (it was someone
+// else's a moment ago, or couldn't be opened) it is tried again: the player's clock runs on it.
+void PlayerHost::UpdateAudio() {
+    if (!mod_) return;
+    int st = p_ ? mod_->state(p_) : LSP_PAUSED;
+    uint64_t now = SDL_GetTicks64();
+    if (st != LSP_ENDED) endedAt_ = 0;
+    else if (!endedAt_) endedAt_ = now;
+    // (at the end not right away: a movie that starts again - loop - would wait for the device to be opened again)
+    if (dev_ && st == LSP_ENDED && now - endedAt_ > (audio_out::Single() ? 400u : 3000u)) CloseAudio();
+    if (dev_ && audio_out::Single() && st != LSP_PLAYING && st != LSP_ENDED) CloseAudio();
+    if (st == LSP_PLAYING && !dev_ && !callOut_ && now - openTry_ > 300) OpenAudio();
 }
 
 // ---------------------------------------------------------------- playback
@@ -231,6 +248,10 @@ void PlayerHost::AudioCb(void* u, uint8_t* stream, int len) {
 
 bool PlayerHost::OpenAudio() {
     if (dev_) return true;
+    if (callOut_) return true;  // (a call has the phone's one output: heard through it - MixInto)
+    openTry_ = SDL_GetTicks64();
+    // (the phone's one output: music lets go of it for a file that plays - now, not a frame later)
+    if (audio_out::Single()) music::Play().SetInterrupted(true);
     if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return false;
     SDL_AudioSpec want{}, have{};
     want.freq = 48000;
@@ -239,15 +260,42 @@ bool PlayerHost::OpenAudio() {
     want.samples = 1024;
     want.callback = AudioCb;
     want.userdata = this;
-    dev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    dev_ = audio_out::Open("player", nullptr, &want, &have);
     if (!dev_) return false;
     SDL_PauseAudioDevice(dev_, 0);
     return true;
 }
 
 void PlayerHost::CloseAudio() {
-    if (dev_) SDL_CloseAudioDevice(dev_);
+    if (dev_) audio_out::Close(dev_);
     dev_ = 0;
+}
+
+void PlayerHost::SetCallOutput(bool on) {
+    if (!audio_out::Single() || callOut_ == on) return;
+    if (on) {
+        CloseAudio();  // (first: the call opens the output next)
+        callOut_ = true;
+    } else {
+        callOut_ = false;
+        openTry_ = 0;  // (what still plays gets its own device back: Update)
+    }
+}
+
+void PlayerHost::MixInto(int16_t* mono, int frames) {
+    if (!callOut_ || frames <= 0) return;
+    static thread_local std::vector<float> buf;
+    if ((int)buf.size() < frames * 2) buf.resize((size_t)frames * 2);
+    {
+        std::lock_guard<std::mutex> l(pm_);
+        if (!p_ || mod_->state(p_) != LSP_PLAYING) return;
+        mod_->read_audio(p_, buf.data(), frames);
+    }
+    for (int i = 0; i < frames; i++) {
+        float m = (buf[(size_t)i * 2] + buf[(size_t)i * 2 + 1]) * 0.35f;  // (a little under the voices)
+        int v = mono[i] + (int)lroundf(m * 32767.0f);
+        mono[i] = (int16_t)std::clamp(v, -32768, 32767);
+    }
 }
 
 bool PlayerHost::Play(const std::string& path) {
@@ -317,7 +365,7 @@ PlayerHost::Opening PlayerHost::OpenState() {
             speed_ = 1.0;
             subDelay_ = 0.0;
             Media().ClearPlayerVideo();
-            if (!OpenAudio()) SDL_Log("player: no audio device");
+            if (!audio_out::Single() && !OpenAudio()) SDL_Log("player: no audio device");  // (phones: once it plays)
         }
     }
     return s;
@@ -420,6 +468,7 @@ void PlayerHost::UpdateSubtitle() {
 
 void PlayerHost::Pause() {
     if (p_) mod_->set_playing(p_, 0);
+    if (audio_out::Single()) CloseAudio();  // (the phone's one output: free for music or a call)
 }
 
 void PlayerHost::Toggle(const std::string& path) {

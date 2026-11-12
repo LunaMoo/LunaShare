@@ -1511,3 +1511,8 @@
 {"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "以前の \"%s\"(最終確認 %s)と同じ電話のようです。アプリが再インストールされたのかもしれません。2つの会話をこちらにまとめますか?"},
 {"Join them", "まとめる"},
 {"They're different", "別のもの"},
+{"The microphone isn't allowed for LunaShare - the other side can't hear you.", "LunaShare にマイクの使用が許可されていません。相手にあなたの声が聞こえません。"},
+{"The microphone couldn't be started - the other side can't hear you.", "マイクを開始できませんでした。相手にあなたの声が聞こえません。"},
+{"The sound output couldn't be started - you can't hear the other side.", "音声出力を開始できませんでした。相手の声が聞こえません。"},
+{"The microphone gives only silence - the other side can't hear you.", "マイクから無音しか入ってきません。相手にあなたの声が聞こえません。"},
+{"No sound is arriving from the other side.", "相手側から音声が届いていません。"},

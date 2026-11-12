@@ -2,4 +2,5 @@
 <resources>
     <string name="bg_ready">メッセージと通話を受信できます</string>
     <string name="bg_stopped">LunaShare が終了しました - メッセージと通話を受け取るにはもう一度開いてください</string>
+    <string name="call_ongoing">通話中</string>
 </resources>

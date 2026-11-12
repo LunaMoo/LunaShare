@@ -20,7 +20,7 @@ import android.provider.Settings;
  * keeps LunaShare connected to the user's server (see BackgroundService). Called from native code (any thread).
  */
 public final class Notify {
-    static final String CH_MESSAGES = "messages", CH_CALLS = "calls2", CH_SERVICE = "background", CH_MUSIC = "music";
+    static final String CH_MESSAGES = "messages", CH_CALLS = "calls2", CH_SERVICE = "background", CH_MUSIC = "music", CH_ONGOING = "ongoing_call";
     static final String ACTION_OPEN = "org.lunamoo.lunashare.OPEN", ACTION_ANSWER = "org.lunamoo.lunashare.ANSWER",
                         ACTION_DECLINE = "org.lunamoo.lunashare.DECLINE", ACTION_CALL = "org.lunamoo.lunashare.CALL";
     static final int ID_CALL = 2, ID_SERVICE = 1;
@@ -56,6 +56,10 @@ public final class Notify {
         mus.setShowBadge(false);
         mus.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         m.createNotificationChannel(mus);
+        NotificationChannel on = new NotificationChannel(CH_ONGOING, "Call in progress", NotificationManager.IMPORTANCE_LOW);
+        on.setDescription("Shown during a call: keeps the microphone working when the screen is off");
+        on.setShowBadge(false);
+        m.createNotificationChannel(on);
     }
 
     // the little cow (res/drawable/ic_stat_cow.xml) in the status bar; where Android shows colour, its circle is white

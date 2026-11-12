@@ -24,8 +24,13 @@ public:
 
     void Attach(ls::Engine* e);  // hooks engine.onMedia
     // Call once per frame (UI thread): follows the engine's call state (ringing tones, start/stop audio).
-    void Update();
+    // background: the window isn't shown (a phone with the screen off or another app in front) - nothing is drawn,
+    // but calls are still followed: one that ends lets go of the microphone and the sound output.
+    void Update(bool background = false);
     void Shutdown();
+    // What's wrong with the sound of the call right now, as a line for the person ("" = nothing): the microphone or
+    // the sound output couldn't be started, the microphone gives only silence, or nothing arrives from the other side.
+    std::string CallSoundProblem();
 
     void SetMute(bool m);
     bool Muted() const { return mute_; }
@@ -136,7 +141,17 @@ private:
     enum class Mode { Off, Ring, Ringback, Call, MicTest, Record };
     void SetMode(Mode m);
     bool OpenDevices(bool capture, bool playback);
+    bool OpenPlayback();
+    bool OpenCapture();
+    void HealAudio();  // a device that couldn't be opened, or went quiet, is opened again
     void CloseDevices();
+    bool wantPlay_ = false, wantCap_ = false;  // what the mode needs (OpenDevices)
+    std::string playErr_, capErr_;             // why each isn't there
+    std::atomic<uint64_t> lastPlayCb_{0}, lastCapCb_{0};  // when each last asked for / gave sound (SDL ticks)
+    std::atomic<int> capZero_{0};              // samples of pure silence in a row from the microphone
+    uint64_t healTick_ = 0;
+    int inSeen_ = -1;                          // packets received when last looked (CallSoundProblem)
+    uint64_t inSeenAt_ = 0, callSince_ = 0;
     static void CaptureCb(void* u, uint8_t* stream, int len);
     static void PlaybackCb(void* u, uint8_t* stream, int len);
     static void SendCb(void* u, const uint8_t* data, size_t len);

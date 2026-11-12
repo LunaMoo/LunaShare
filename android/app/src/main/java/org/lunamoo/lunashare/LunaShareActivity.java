@@ -140,6 +140,12 @@ public class LunaShareActivity extends SDLActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        CallService.apply();  // (a call answered while the app was in the background: its service can start now)
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -655,6 +661,8 @@ public class LunaShareActivity extends SDLActivity {
             } catch (Exception e) {
                 nativeOnError("audio mode: " + e.getMessage());
             }
+            // the call keeps the microphone when the screen goes off or another app is opened (see CallService)
+            CallService.set(inCall);
         });
     }
 

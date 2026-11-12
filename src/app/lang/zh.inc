@@ -1511,3 +1511,8 @@
 {"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "这看起来和之前的 \"%s\"(最后在线 %s)是同一部手机——应用可能被重新安装了。要把两个对话合并到这里吗?"},
 {"Join them", "合并"},
 {"They're different", "不是同一个"},
+{"The microphone isn't allowed for LunaShare - the other side can't hear you.", "LunaShare 没有麦克风权限，对方听不到你的声音。"},
+{"The microphone couldn't be started - the other side can't hear you.", "无法启动麦克风，对方听不到你的声音。"},
+{"The sound output couldn't be started - you can't hear the other side.", "无法启动声音输出，你听不到对方的声音。"},
+{"The microphone gives only silence - the other side can't hear you.", "麦克风只有静音，对方听不到你的声音。"},
+{"No sound is arriving from the other side.", "没有收到对方的声音。"},

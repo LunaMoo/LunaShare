@@ -2,4 +2,5 @@
 <resources>
     <string name="bg_ready">已准备好接收消息和通话</string>
     <string name="bg_stopped">LunaShare 已关闭 - 重新打开它以接收消息和通话</string>
+    <string name="call_ongoing">通话中</string>
 </resources>
