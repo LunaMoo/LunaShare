@@ -1507,3 +1507,7 @@
 {"Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced (docs/INTERNET.md).", "有服务器的人可以发给你邀请码 - 粘贴到上方。要自建:设置 > 连接 > 高级 (docs/INTERNET.md)。"},
 {"Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking.", "设置 > 个人资料与账户 可以把手机和电脑合而为一:两边是相同的聊天,文件无需询问即可互传。"},
 {"No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button.", "无需注册账户。设置 > 隐私与安全 可添加 PIN;通过“添加联系人”按钮添加他人。"},
+{"last seen %s", "最后在线 %s"},
+{"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "这看起来和之前的 \"%s\"(最后在线 %s)是同一部手机——应用可能被重新安装了。要把两个对话合并到这里吗?"},
+{"Join them", "合并"},
+{"They're different", "不是同一个"},

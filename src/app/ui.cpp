@@ -1048,7 +1048,18 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
         // (nothing to connect to)
     } else if (connected && conn) sub += std::string(sub.empty() ? "" : "  ") + TF("via %s", T(TransportName(conn->transport))) + (conn->addr == "relay" ? T(" (relay)") : "");
     else if (online) sub += "  " + TF("online (%s)", TS(eng.online[dev].Via()).c_str());
-    else sub += sub.empty() ? T("offline") : std::string("  ") + T("offline");
+    else {
+        // when it was last there: tells an old copy of a phone (the app installed again) from the one in use
+        int64_t seen = 0;
+        for (auto& id : eng.DevicesOf(peer))
+            if (auto it = eng.devices.find(id); it != eng.devices.end()) seen = std::max(seen, it->second.lastSeen);
+        std::string off = T("offline");
+        if (seen > 0) {
+            std::string day = FormatTime(seen).substr(0, 10), today = FormatTime(NowMs()).substr(0, 10);
+            off = TF("last seen %s", day == today ? FormatTime(seen, false).c_str() : day.c_str());
+        }
+        sub += sub.empty() ? off : std::string("  ") + off;
+    }
 
     bool muted = eng.ChatMuted(peer);
     if (muted) sub = std::string(T("silent")) + (sub.empty() ? "" : "  ") + sub;
@@ -1654,6 +1665,7 @@ void App::DrawChat(const std::string& peer) {
     DrawWatchBanner(peer);
     DrawListenBanner(peer);
     DrawHistoryAskBanner(peer);
+    DrawTwinBanner(peer);
     DrawPinnedBar(peer);
     // selection toolbar
     if (!selMsgs.empty()) {

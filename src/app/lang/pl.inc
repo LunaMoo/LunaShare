@@ -1517,3 +1517,7 @@
 {"Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced (docs/INTERNET.md).", "Ktoś, kto ma taki serwer, może wysłać Ci kod zaproszenia - wklej go powyżej. Aby postawić własny: Ustawienia > Połączenia > Zaawansowane (docs/INTERNET.md)."},
 {"Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking.", "Ustawienia > Profil i konto łączą telefon i komputer w jedno: te same czaty na obu, a pliki przechodzą między nimi bez pytania."},
 {"No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button.", "Bez zakładania konta. Ustawienia > Prywatność i bezpieczeństwo dodają PIN; ludzi dodajesz przyciskiem \"Dodaj kogoś\"."},
+{"last seen %s", "ostatnio %s"},
+{"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "To wygląda na ten sam telefon co starsze \"%s\" (ostatnio widziane %s) - aplikacja została pewnie zainstalowana od nowa. Połączyć obie rozmowy w tę jedną?"},
+{"Join them", "Połącz je"},
+{"They're different", "To różne osoby"},

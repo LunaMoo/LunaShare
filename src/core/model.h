@@ -193,6 +193,7 @@ struct KnownDevice {
     int64_t profileVer = 0;  // version of the profile we have
     std::string accountPub;  // the account this device belongs to (verified certificate), empty = none / old version
     bool viaGroup = false;   // known only as a member of a group (not listed as a contact by itself)
+    std::vector<std::string> notSame;  // conversations the user said this one is NOT a reinstalled copy of
     std::string DisplayName() const { return customName.empty() ? (name.empty() ? id.substr(0, 8) : name) : customName; }
     std::string Fingerprint() const;  // short, readable form of the identity key (or id if unknown)
 };

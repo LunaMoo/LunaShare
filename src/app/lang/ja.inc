@@ -1507,3 +1507,7 @@
 {"Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced (docs/INTERNET.md).", "サーバーを持っている人から招待コードを送ってもらい、上に貼り付けてください。自分で用意するには: 設定 > 接続 > 詳細 (docs/INTERNET.md)。"},
 {"Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking.", "設定 > プロフィールとアカウント でスマホとパソコンを1つにまとめられます: 両方で同じチャット、ファイルは確認なしで行き来します。"},
 {"No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button.", "登録するアカウントはありません。設定 > プライバシーとセキュリティ で PIN を追加。人は「人を追加」ボタンから追加します。"},
+{"last seen %s", "最終 %s"},
+{"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "以前の \"%s\"(最終確認 %s)と同じ電話のようです。アプリが再インストールされたのかもしれません。2つの会話をこちらにまとめますか?"},
+{"Join them", "まとめる"},
+{"They're different", "別のもの"},

@@ -182,7 +182,16 @@ void Engine::Load() {
     std::string dir = configDir.empty() ? ConfigDir() : configDir;
     MakeDirs(dir);
     json j;
-    if (LoadJsonFile(JoinPath(dir, "settings.json"), j)) {
+    // the last good copy when the file can't be read (cut short by a phone killed mid-save): never a new identity
+    // while an old one may be there
+    std::string sp = JoinPath(dir, "settings.json");
+    bool loaded = LoadJsonFile(sp, j) && j.is_object();
+    if (!loaded && LoadJsonFile(sp + ".bak", j) && j.is_object()) {
+        loaded = true;
+        if (FileExists(sp)) RenameFile(sp, sp + ".broken");
+        fprintf(stderr, "settings.json could not be read: the backup copy was used\n");
+    }
+    if (loaded) {
         FromJson(j.value("settings", json::object()), settings, true);
         if (j.contains("devices") && j["devices"].is_array())
             for (auto& d : j["devices"]) {
@@ -394,7 +403,17 @@ void Engine::Save() {
     }
     std::string dir = configDir.empty() ? ConfigDir() : configDir;
     MakeDirs(dir);
-    SaveJsonFile(JoinPath(dir, "settings.json"), js);
+    {
+        // the first save of a run keeps the file as it was as settings.json.bak (only one that reads: a broken file
+        // never replaces it)
+        std::string sp = JoinPath(dir, "settings.json");
+        json prev;
+        if (!backedUp_.exchange(true) && LoadJsonFile(sp, prev) && prev.is_object() && prev.contains("settings")) {
+            std::string bytes;
+            if (LoadFileBytes(sp, bytes)) SaveFileAtomic(sp + ".bak", bytes);
+        }
+        SaveJsonFile(sp, js);
+    }
     std::string histPub;
     bool histLocked;
     {
@@ -3871,6 +3890,114 @@ void Engine::ForgetDevice(const std::string& peer) {
         if (left && !IsContactKey(peer)) continue;
         accounts.erase(acc);
         chats.erase("@" + acc);
+    }
+    MarkDirty();
+}
+
+std::string Engine::OlderTwin(const std::string& keyArg) {
+    auto lk = Lock();
+    if (keyArg.empty() || IsGroupKey(keyArg) || IsSelfKey(keyArg)) return "";
+    const std::string key = IsContactKey(keyArg) ? keyArg : ChatKey(keyArg);
+    std::vector<const KnownDevice*> mine;
+    int64_t firstSeen = INT64_MAX;
+    std::set<std::string> no;
+    for (auto& id : DevicesOf(key)) {
+        auto it = devices.find(id);
+        if (it == devices.end()) continue;
+        mine.push_back(&it->second);
+        if (it->second.firstSeen > 0) firstSeen = std::min(firstSeen, it->second.firstSeen);
+        no.insert(it->second.notSame.begin(), it->second.notSame.end());
+    }
+    if (mine.empty() || firstSeen == INT64_MAX) return "";
+    std::set<std::string> keys;
+    for (auto& [id, d] : devices)
+        if (id != settings.deviceId && !d.viaGroup && !d.blocked) keys.insert(ChatKey(id));
+    // (Android gives apps a made-up address, the same on every phone: no evidence)
+    auto real = [](const std::string& a) {
+        return !a.empty() && a != "02:00:00:00:00:00" && a != "00:00:00:00:00:00" && a != "020000000000" && a != "000000000000";
+    };
+    std::string best;
+    int64_t bestSeen = -1;
+    for (auto& k : keys) {
+        if (k == key || IsSelfKey(k) || no.count(k)) continue;
+        auto ds = DevicesOf(k);
+        if (ds.empty()) continue;
+        int64_t last = 0;
+        bool live = false, alike = false;
+        for (auto& id : ds) {
+            auto it = devices.find(id);
+            if (it == devices.end()) continue;
+            const KnownDevice& o = it->second;
+            live |= online.count(id) > 0 || IsConnected(id);
+            last = std::max(last, o.lastSeen);
+            for (auto* m : mine) {
+                if (!o.name.empty() && o.name == m->name && o.platform == m->platform) alike = true;
+                if (real(o.btAddr) && o.btAddr == m->btAddr) alike = true;
+                for (auto& mac : o.macs)
+                    if (real(mac) && std::find(m->macs.begin(), m->macs.end(), mac) != m->macs.end()) alike = true;
+            }
+        }
+        // (offline, and gone before this one came: the old copy - never two that are both in use)
+        if (live || !alike || last <= 0 || last > firstSeen + 5 * 60 * 1000) continue;
+        if (last > bestSeen) {
+            best = k;
+            bestSeen = last;
+        }
+    }
+    return best;
+}
+
+void Engine::MergeInto(const std::string& oldKey, const std::string& intoArg) {
+    {
+        auto lk = Lock();
+        const std::string into = IsContactKey(intoArg) ? intoArg : ChatKey(intoArg);
+        if (oldKey.empty() || into.empty() || oldKey == into) return;
+        auto oc = chats.find(oldKey);
+        if (oc != chats.end()) {
+            Conversation& c = chats[into];
+            if (c.peer.empty()) c.peer = into;
+            std::set<std::string> have;
+            for (auto& m : c.messages) have.insert(m.mid);
+            for (auto& m : oc->second.messages)
+                if (m.mid.empty() || !have.count(m.mid)) c.messages.push_back(m);
+            std::stable_sort(c.messages.begin(), c.messages.end(), [](const ChatMessage& a, const ChatMessage& b) { return a.ts < b.ts; });
+            c.unread += oc->second.unread;
+        }
+        // the nickname, trust and notes go with the person
+        const KnownDevice* od = nullptr;
+        for (auto& id : DevicesOf(oldKey))
+            if (auto it = devices.find(id); it != devices.end() && (!od || it->second.lastSeen > od->lastSeen)) od = &it->second;
+        std::string nick = od ? od->customName : "", notes = od ? od->notes : "";
+        bool trusted = od && od->trusted;
+        std::string newest;
+        for (auto& id : DevicesOf(into)) {
+            auto it = devices.find(id);
+            if (it == devices.end()) continue;
+            if (it->second.customName.empty()) it->second.customName = nick;
+            if (it->second.notes.empty()) it->second.notes = notes;
+            it->second.trusted |= trusted;
+            newest = id;
+        }
+        // files sent and received: under the new one
+        std::set<std::string> olds;
+        for (auto& id : DevicesOf(oldKey)) olds.insert(id);
+        if (!newest.empty())
+            for (auto& h : history)
+                if (olds.count(h.peer)) h.peer = newest;
+        if (auto m = settings.mutedChats.find(oldKey); m != settings.mutedChats.end() && !settings.mutedChats.count(into))
+            settings.mutedChats[into] = m->second;
+        MarkDirty();
+    }
+    ForgetDevice(oldKey);
+}
+
+void Engine::NotSame(const std::string& keyArg, const std::string& other) {
+    auto lk = Lock();
+    const std::string key = IsContactKey(keyArg) ? keyArg : ChatKey(keyArg);
+    for (auto& id : DevicesOf(key)) {
+        auto it = devices.find(id);
+        if (it != devices.end() && std::find(it->second.notSame.begin(), it->second.notSame.end(), other) == it->second.notSame.end())
+            it->second.notSame.push_back(other);
     }
     MarkDirty();
 }

@@ -325,6 +325,43 @@ void App::DrawHistoryAskBanner(const std::string& peer) {
     if (send || no) eng.AnswerHistoryAsk(dev, key, send);
 }
 
+// A phone whose app was installed again is a new device to everyone: a second conversation with the same name. When
+// the new one is around and an old one looks like the same phone, offer to join them.
+void App::DrawTwinBanner(const std::string& peer) {
+    static std::string forPeer, twin;
+    static int64_t at = 0;
+    if (peer != forPeer || NowMs() - at > 2000) {  // (looked for every two seconds, not every frame)
+        forPeer = peer;
+        at = NowMs();
+        twin = eng.IsConnected(peer) || eng.IsOnline(peer) ? eng.OlderTwin(peer) : std::string();
+    }
+    if (twin.empty()) return;
+    int64_t seen = 0;
+    for (auto& id : eng.DevicesOf(twin))
+        if (auto it = eng.devices.find(id); it != eng.devices.end()) seen = std::max(seen, it->second.lastSeen);
+    bool mobile = ui::M().mobile;
+    float h = mobile ? ui::M().rowH * 0.8f : 0;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(50, 60, 110, 255));
+    ImGui::BeginChild("twin", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(TF("This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed "
+                              "again. Join the two conversations into this one?",
+                              Emoji().Display(eng.PeerName(twin)).c_str(), seen ? FormatTime(seen).c_str() : "?")
+                               .c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 140, 85, 255));
+    bool join = ImGui::Button(T("Join them"), ImVec2(mobile ? ImGui::GetContentRegionAvail().x * 0.5f : 0, h));
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    bool no = ImGui::Button(T("They're different"), ImVec2(mobile ? -1 : 0, h));
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    std::string old = twin;
+    if (join) eng.MergeInto(old, peer);
+    if (no) eng.NotSame(peer, old);
+    if (join || no) twin.clear(), at = 0;
+}
+
 // ---------------------------------------------------------------- searching messages
 
 static std::string Fold(const std::string& s) {  // (lower case: ASCII, and Polish letters)

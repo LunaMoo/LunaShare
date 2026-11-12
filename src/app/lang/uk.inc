@@ -1501,3 +1501,7 @@
 {"Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced (docs/INTERNET.md).", "Той, хто його має, може надіслати вам код запрошення - вставте його вище. Щоб налаштувати свій: Налаштування > Під'єднання > Додатково (docs/INTERNET.md)."},
 {"Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking.", "Налаштування > Профіль і обліковий запис об'єднує телефон і комп'ютер в одне: ті самі чати на обох, а файли ходять між ними без запитань."},
 {"No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button.", "Не треба реєструватися. Налаштування > Приватність і безпека додає PIN; людей додають кнопкою \"Додати людину\"."},
+{"last seen %s", "був(ла) %s"},
+{"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "Схоже, це той самий телефон, що й старий \"%s\" (востаннє %s) - мабуть, застосунок перевстановили. Об'єднати обидві розмови в цю?"},
+{"Join them", "Об'єднати"},
+{"They're different", "Це різні"},

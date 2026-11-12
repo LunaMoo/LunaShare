@@ -442,6 +442,14 @@ public:
     std::string AvatarPath(const std::string& peer);
     std::string SafetyNumberWith(const std::string& peer);
     void ForgetDevice(const std::string& peer);
+    // A phone whose app was installed again (or lost its data) comes back as a new device - a new conversation, while
+    // the old one stays, offline for good. OlderTwin: for a conversation, an offline one that looks like the same
+    // phone before (same name and system, or the same Wi-Fi / Bluetooth address), last seen before this one appeared;
+    // "" if none. MergeInto moves the old conversation's messages, nickname and trust into the new one and forgets
+    // the old; NotSame remembers that it isn't (not asked again).
+    std::string OlderTwin(const std::string& key);
+    void MergeInto(const std::string& oldKey, const std::string& intoKey);
+    void NotSame(const std::string& key, const std::string& other);
     void ClearChat(const std::string& peer);
     // ---- chat archives (chat_archive.cpp)
     struct ChatArchiveInfo {
@@ -834,6 +842,7 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> dirty_{false};
+    std::atomic<bool> backedUp_{false};  // settings.json.bak written this run
     SocketHandle listener_ = kInvalidSocket;
     SocketHandle udp_ = kInvalidSocket;
     std::thread listenThread_, discoveryThread_, maintThread_, hashThread_;

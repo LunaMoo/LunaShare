@@ -1507,3 +1507,7 @@
 {"Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced (docs/INTERNET.md).", "서버가 있는 사람이 초대 코드를 보내 줄 수 있습니다 - 위에 붙여넣으세요. 직접 만들려면: 설정 > 연결 > 고급 (docs/INTERNET.md)."},
 {"Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking.", "설정 > 프로필 및 계정에서 휴대전화와 컴퓨터를 하나로 연결합니다: 양쪽에 같은 채팅, 파일은 묻지 않고 오갑니다."},
 {"No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button.", "가입할 계정이 없습니다. 설정 > 개인정보 및 보안으로 PIN을 추가하고, 사람은 \"사람 추가\" 버튼으로 추가합니다."},
+{"last seen %s", "마지막 %s"},
+{"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "이전의 \"%s\"(마지막 접속 %s)와 같은 휴대폰으로 보입니다. 앱을 다시 설치한 것 같습니다. 두 대화를 이 대화로 합칠까요?"},
+{"Join them", "합치기"},
+{"They're different", "서로 달라요"},

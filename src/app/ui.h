@@ -113,6 +113,7 @@ public:
     std::string muteKey;
     bool muteOpen = false;
     void DrawHistoryAskBanner(const std::string& peer);
+    void DrawTwinBanner(const std::string& peer);  // an old copy of this phone (the app installed again): join them?
     // search in a chat / all chats (ui_archive.cpp)
     void DrawChatSearch(const std::string& peer);
     void OpenChatSearch() { searchOn = true; searchFocus = true; }

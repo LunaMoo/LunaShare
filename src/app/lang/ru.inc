@@ -1501,3 +1501,7 @@
 {"Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced (docs/INTERNET.md).", "Тот, у кого он есть, может прислать вам код приглашения - вставьте его выше. Чтобы настроить свой: Настройки > Подключения > Дополнительно (docs/INTERNET.md)."},
 {"Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking.", "Настройки > Профиль и аккаунт объединяет телефон и компьютер в одно: одни и те же чаты на обоих, а файлы ходят между ними без вопросов."},
 {"No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button.", "Не нужно регистрироваться. Настройки > Приватность и безопасность добавляет PIN; людей добавляют кнопкой \"Добавить человека\"."},
+{"last seen %s", "был(а) %s"},
+{"This looks like the same phone as the older \"%s\" (last seen %s) - the app was probably installed again. Join the two conversations into this one?", "Похоже, это тот же телефон, что и старый \"%s\" (последний раз %s) - видимо, приложение переустановили. Объединить оба разговора в этот?"},
+{"Join them", "Объединить"},
+{"They're different", "Это разные"},

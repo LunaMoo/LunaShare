@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own backup (Google account): the identity, contacts and chats - so a phone set up again, or the app
+     installed again, comes back as the same device instead of a new one. Not the cache (pictures, unpacked files,
+     radio logos): over Android's 25 MB limit nothing would be backed up at all. -->
+<full-backup-content>
+    <exclude domain="file" path="cache/" />
+</full-backup-content>

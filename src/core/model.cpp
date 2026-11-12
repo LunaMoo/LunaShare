@@ -3,6 +3,11 @@
 
 #include "crypto.h"
 #include "platform.h"
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace ls {
 
@@ -286,7 +291,8 @@ json ToJson(const KnownDevice& d) {
             {"platform", d.platform}, {"macs", d.macs}, {"lastIp", d.lastIp}, {"lastPort", d.lastPort},
             {"btAddr", d.btAddr}, {"firstSeen", d.firstSeen}, {"lastSeen", d.lastSeen}, {"trusted", d.trusted},
             {"blocked", d.blocked}, {"notes", d.notes}, {"pubKey", d.pubKey}, {"verified", d.verified},
-            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}, {"accountPub", d.accountPub}, {"viaGroup", d.viaGroup}};
+            {"pendingKey", d.pendingKey}, {"avatarHash", d.avatarHash}, {"profileVer", d.profileVer}, {"accountPub", d.accountPub}, {"viaGroup", d.viaGroup},
+            {"notSame", d.notSame}};
 }
 
 KnownDevice DeviceFromJson(const json& j) {
@@ -313,6 +319,7 @@ KnownDevice DeviceFromJson(const json& j) {
     Get(j, "profileVer", d.profileVer);
     Get(j, "accountPub", d.accountPub);
     Get(j, "viaGroup", d.viaGroup);
+    Get(j, "notSame", d.notSame);
     return d;
 }
 
@@ -477,6 +484,14 @@ bool SaveFileAtomic(const std::string& path, const std::string& s) {
     FILE* f = OpenFile(tmp, "wb");
     if (!f) return false;
     bool ok = fwrite(s.data(), 1, s.size(), f) == s.size();
+    // on the disk before the rename: otherwise a phone killed (or switched off) right after can be left with an empty
+    // file under the real name - for settings.json that was a new identity, and every other device saw a new one
+    ok = fflush(f) == 0 && ok;
+#ifdef _WIN32
+    ok = _commit(_fileno(f)) == 0 && ok;
+#else
+    ok = fsync(fileno(f)) == 0 && ok;
+#endif
     ok = (fclose(f) == 0) && ok;
     if (!ok) { RemoveFile(tmp); return false; }
     if (RenameFile(tmp, path)) return true;
