@@ -466,6 +466,8 @@ public class LunaShareActivity extends SDLActivity {
 
     // internet radio (native threads): a URL read as it comes - see NetStreams
     public static String[] netOpen(String url, boolean icy) { return NetStreams.open(url, icy); }
+    public static String[] netOpenWait(int token) { return NetStreams.openWait(token); }
+    public static void netOpenAbort(int token) { NetStreams.openAbort(token); }
     public static int netRead(int id, byte[] buf) { return NetStreams.read(id, buf); }
     public static void netClose(int id) { NetStreams.close(id); }
 

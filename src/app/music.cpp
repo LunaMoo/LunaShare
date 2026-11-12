@@ -688,17 +688,64 @@ void Player::Init(const LspModule* mod, Library* lib) {
     mod_ = mod;
     lib_ = lib;
     if (!mod_) return;
+    {
+        std::lock_guard<std::mutex> l(cm_);
+        closerQuit_ = false;
+    }
+    if (!closerTh_.joinable()) closerTh_ = std::thread([this] { Closer(); });
     th_ = std::thread([this] { Loop(); });
+}
+
+void Player::Retire(LspPlayer* p, std::shared_ptr<ExtStream> also) {
+    if (!p) return;
+    Retired r{p, {}};
+    if (also) r.keep.push_back(std::move(also));
+    for (auto* s : {&exStream_, &exStreamOld_, &exPending_})
+        if (*s) r.keep.push_back(*s);
+    if (!closerTh_.joinable()) {  // (no closer: at once)
+        mod_->close(p);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> l(cm_);
+        retired_.push_back(std::move(r));
+    }
+    ccv_.notify_one();
+}
+
+void Player::Closer() {
+    for (;;) {
+        Retired r{nullptr, {}};
+        {
+            std::unique_lock<std::mutex> l(cm_);
+            ccv_.wait(l, [&] { return closerQuit_ || !retired_.empty(); });
+            if (retired_.empty()) return;  // (quitting: the last ones are closed first)
+            r = std::move(retired_.front());
+            retired_.pop_front();
+        }
+        mod_->close(r.p);
+    }
 }
 
 void Player::Shutdown() {
     SaveState();
     quit_ = true;
+    {
+        std::lock_guard<std::mutex> l(m_);  // (whatever is being read or connected to gives up at once)
+        for (auto* s : {&exStream_, &exStreamOld_, &exPending_})
+            if (*s) (*s)->stop = true;
+    }
     if (th_.joinable()) th_.join();
     std::lock_guard<std::mutex> l(m_);
     if (exStream_) exStream_->stop = true;
     CloseLocked();
     exStream_.reset();
+    {
+        std::lock_guard<std::mutex> l(cm_);
+        closerQuit_ = true;
+    }
+    ccv_.notify_all();
+    if (closerTh_.joinable()) closerTh_.join();
 }
 
 bool Player::EnsureDevice() {
@@ -1060,7 +1107,7 @@ void Player::FinishFade() {
         msN_ = 0;
     }
     measPath_ = measNext_;
-    if (old) mod_->close(old);
+    if (old) Retire(old);
     at_ = nextAt_;
     dur_ = nextDur_;
     fragA_ = fragB_;
@@ -1076,7 +1123,7 @@ void Player::CancelFade() {
         fadeDone_ = false;
         gapless_ = false;
     }
-    if (q) mod_->close(q);
+    if (q) Retire(q);
     nextAt_ = -1;
 }
 
@@ -1089,7 +1136,7 @@ void Player::CloseLocked() {
         p = p_;
         p_ = nullptr;
     }
-    if (p) mod_->close(p);
+    if (p) Retire(p);
     if (dev_) {
         SDL_CloseAudioDevice(dev_);
         dev_ = 0;
@@ -1111,7 +1158,7 @@ bool Player::OpenAt(int index, double pos) {
         LspPlayer* old = p_;
         p_ = p;
         gainA_ = g;
-        if (old) mod_->close(old);
+        if (old) Retire(old);
     }
     measPath_ = pos > 1 ? "" : path;  // (measured only when played from the start)
     dur_ = info.duration;
@@ -1519,7 +1566,7 @@ void Player::Loop() {
                 }
                 if (exStream_) exStream_->stop = true;
                 if (exStreamOld_) exStreamOld_->stop = true;
-                if (old) mod_->close(old);
+                if (old) Retire(old);
                 exStreamOld_.reset();
                 exStream_ = st;
                 exOpen_ = src.id;
@@ -1544,7 +1591,10 @@ void Player::Loop() {
                 UpdateMix();
                 changed = true;
             } else {
-                if (q) mod_->close(q);
+                if (q) {
+                    if (st) st->stop = true;
+                    Retire(q, st);
+                }
                 if (ext_ && ex_.id == src.id && !q) {  // (can't be played: counts as played out)
                     exOpen_ = src.id;
                     exEnded_ = true;
@@ -1565,7 +1615,7 @@ void Player::Loop() {
                     fadeDone_ = false;
                 }
                 if (exStreamOld_) exStreamOld_->stop = true;
-                if (old) mod_->close(old);
+                if (old) Retire(old);
                 exStreamOld_.reset();
             }
             if (ext_) LoopExternal();

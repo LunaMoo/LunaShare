@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.1
+
+- **Fixed: the app froze with internet radio** (black screen on returning to it, Android asking to close it) when a
+  station's connection stalled: changing or stopping the station, and closing the app, waited for the network.
+  Connections are now given up on at once, and a player let go of is closed in the background.
+- Stations without a logo (and songs without a cover) show their **initials on a colour** in the media notification,
+  instead of the app's icon twice.
+
 ## 1.7.0
 
 - **Settings in categories:** Profile & account, Privacy & security, Chats & files, Calls, My devices, Connections,

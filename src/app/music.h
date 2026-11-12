@@ -5,6 +5,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -251,6 +252,20 @@ private:
     std::shared_ptr<ExtStream> exStream_, exPending_, exStreamOld_;  // (old: the song fading out)
     bool OpenAt(int index, double pos);  // (m_ held)
     void CloseLocked();
+    // a player let go of is closed on a thread of its own: closing waits for its decoder, which may be waiting on the
+    // network (a station) - never with m_ held, where the screen would wait too. The streams it may still be reading
+    // through are kept with it until then. (m_ held)
+    void Retire(LspPlayer* p, std::shared_ptr<ExtStream> also = nullptr);
+    void Closer();
+    struct Retired {
+        LspPlayer* p;
+        std::vector<std::shared_ptr<ExtStream>> keep;
+    };
+    std::thread closerTh_;
+    std::mutex cm_;
+    std::condition_variable ccv_;
+    std::deque<Retired> retired_;
+    bool closerQuit_ = false;
     // transitions (m_ held): the next song starts while this one fades out
     int NextIndex();
     std::atomic<bool> stopAfter_{false};

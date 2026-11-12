@@ -344,32 +344,50 @@ void AndroidBridgeInit(ls::Engine* engine) {
         env->DeleteLocalRef(r);
         return true;
     };
-    b.netOpen = [](const std::string& url, bool icy, int& status, std::string& headers, std::string& finalUrl, std::string& err) -> int {
+    b.netOpen = [](const std::string& url, bool icy, const std::atomic<bool>* cancel, int& status, std::string& headers,
+                   std::string& finalUrl, std::string& err) -> int {
+        // Java connects on a thread of its own and answers within a quarter of a second: a negative id is "still
+        // connecting" (asked again with netOpenWait), so a cancel - a station changed, the app closing - is noticed
         static jmethodID m = M("netOpen", "(Ljava/lang/String;Z)[Ljava/lang/String;");
-        if (!m) return 0;
+        static jmethodID mw = M("netOpenWait", "(I)[Ljava/lang/String;");
+        static jmethodID ma = M("netOpenAbort", "(I)V");
+        if (!m || !mw || !ma) return 0;
         JNIEnv* env = Env();
         jstring u = env->NewStringUTF(url.c_str());
         auto r = (jobjectArray)env->CallStaticObjectMethod(g_cls, m, u, (jboolean)icy);
         env->DeleteLocalRef(u);
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            err = "Java exception";
-            return 0;
+        for (;;) {
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                err = "Java exception";
+                return 0;
+            }
+            if (!r) return 0;
+            auto get = [&](int i) {
+                auto s = (jstring)env->GetObjectArrayElement(r, i);
+                std::string v = JStr(env, s);
+                if (s) env->DeleteLocalRef(s);
+                return v;
+            };
+            int id = atoi(get(0).c_str());  // {id, status, headers, final URL, error}
+            if (id < 0) {
+                env->DeleteLocalRef(r);
+                if (cancel && *cancel) {
+                    env->CallStaticVoidMethod(g_cls, ma, (jint)-id);
+                    if (env->ExceptionCheck()) env->ExceptionClear();
+                    err = "cancelled";
+                    return 0;
+                }
+                r = (jobjectArray)env->CallStaticObjectMethod(g_cls, mw, (jint)-id);
+                continue;
+            }
+            status = atoi(get(1).c_str());
+            headers = get(2);
+            finalUrl = get(3);
+            err = get(4);
+            env->DeleteLocalRef(r);
+            return id;
         }
-        if (!r) return 0;
-        auto get = [&](int i) {
-            auto s = (jstring)env->GetObjectArrayElement(r, i);
-            std::string v = JStr(env, s);
-            if (s) env->DeleteLocalRef(s);
-            return v;
-        };
-        int id = atoi(get(0).c_str());  // {id, status, headers, final URL, error}
-        status = atoi(get(1).c_str());
-        headers = get(2);
-        finalUrl = get(3);
-        err = get(4);
-        env->DeleteLocalRef(r);
-        return id;
     };
     b.netRead = [](int id, uint8_t* buf, int len) -> int {
         static jmethodID m = M("netRead", "(I[B)I");

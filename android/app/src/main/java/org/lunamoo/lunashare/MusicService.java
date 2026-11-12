@@ -47,6 +47,42 @@ public class MusicService extends Service {
     private static boolean hasFocus, resumeOnGain, noisyRegistered;
     private static String coverLoaded = "";
     private static Bitmap coverBmp;
+    private static String letterKey = "";
+    private static Bitmap letterBmp;
+
+    // no cover (a station without a logo, a song without a picture): the name's initials on a colour of its own -
+    // without any picture the phone shows the app's small icon there, blown up, next to the same icon as a badge
+    static Bitmap lettersFor(String name) {
+        StringBuilder in = new StringBuilder();
+        boolean start = true;
+        for (int i = 0; i < name.length() && in.length() < 4;) {
+            int cp = name.codePointAt(i);
+            i += Character.charCount(cp);
+            if (Character.isLetterOrDigit(cp)) {
+                if (start) in.appendCodePoint(Character.toUpperCase(cp));
+                start = false;
+            } else start = true;
+            if (in.codePointCount(0, in.length()) >= 2) break;
+        }
+        if (in.length() == 0) in.append('\u266A');  // (a note)
+        int[] colours = {0xFF7E57C2, 0xFF5C6BC0, 0xFF1E88E5, 0xFF00897B, 0xFF43A047, 0xFFF4511E, 0xFFD81B60, 0xFF6D4C41, 0xFF546E7A, 0xFF8E24AA};
+        int c = colours[(name.hashCode() & 0x7fffffff) % colours.length];
+        int sz = 256;
+        Bitmap b = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas cv = new android.graphics.Canvas(b);
+        cv.drawColor(c);
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0xFFFFFFFF);
+        p.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD));
+        p.setTextAlign(android.graphics.Paint.Align.CENTER);
+        String t = in.toString();
+        p.setTextSize(sz * 0.42f);
+        float w = p.measureText(t);
+        if (w > sz * 0.8f) p.setTextSize(p.getTextSize() * sz * 0.8f / w);
+        android.graphics.Paint.FontMetrics fm = p.getFontMetrics();
+        cv.drawText(t, sz / 2f, sz / 2f - (fm.ascent + fm.descent) / 2f, p);
+        return b;
+    }
 
     private static final BroadcastReceiver noisy = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
@@ -178,7 +214,16 @@ public class MusicService extends Service {
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, album)
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, durMs);
-        if (coverBmp != null) md.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, coverBmp);
+        Bitmap art = coverBmp;
+        if (art == null) {
+            String who = !artist.isEmpty() ? artist : title;
+            if (!who.equals(letterKey) || letterBmp == null) {
+                letterKey = who;
+                try { letterBmp = lettersFor(who); } catch (Throwable t) { letterBmp = null; }
+            }
+            art = letterBmp;
+        }
+        if (art != null) md.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art);
         session.setMetadata(md.build());
         session.setPlaybackState(new PlaybackState.Builder()
                 .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE |
@@ -201,7 +246,7 @@ public class MusicService extends Service {
                         playing ? "Pause" : "Play", action(A_TOGGLE, 22)).build())
                 .addAction(new Notification.Action.Builder(android.R.drawable.ic_media_next, "Next", action(A_NEXT, 23)).build())
                 .setStyle(new Notification.MediaStyle().setMediaSession(session.getSessionToken()).setShowActionsInCompactView(0, 1, 2));
-        if (coverBmp != null) b.setLargeIcon(coverBmp);
+        if (art != null) b.setLargeIcon(art);
         Notification n = b.build();
         try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);

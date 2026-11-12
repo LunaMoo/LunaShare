@@ -209,7 +209,7 @@ public:
             return false;
         }
         std::string hdrs, fu, e;
-        id_ = Bridge().netOpen(url, icy, status, hdrs, fu, e);
+        id_ = Bridge().netOpen(url, icy, cancel, status, hdrs, fu, e);
         if (id_ <= 0) {
             if (err) *err = e.empty() ? "cannot connect" : e;
             return false;
@@ -231,10 +231,16 @@ public:
         return true;
     }
     int Read(uint8_t* buf, int len) override {
-        if (id_ <= 0 || (cancel && *cancel) || !Bridge().netRead) return -1;
-        int n = Bridge().netRead(id_, buf, len);
-        if (cancel && *cancel) return -1;
-        return n;
+        if (id_ <= 0 || !Bridge().netRead) return -1;
+        // (Java waits a quarter of a second at most: -2 is "nothing yet", so a cancel is noticed at once; a stalled
+        // connection is given up on after Java's own read timeout)
+        for (;;) {
+            if (cancel && *cancel) return -1;
+            int n = Bridge().netRead(id_, buf, len);
+            if (n == -2) continue;
+            if (cancel && *cancel) return -1;
+            return n;
+        }
     }
 
 private:

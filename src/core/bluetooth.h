@@ -64,7 +64,10 @@ struct HostBridge {
     std::function<bool(const std::string& url, std::string& body)> httpsGet;
     // Android: a URL read as it comes (internet radio) - open: > 0 handle, with the status, the headers ("name: value"
     // lines) and the address after redirects; read: bytes, 0 at the end, < 0 on an error; any thread
-    std::function<int(const std::string& url, bool icy, int& status, std::string& headers, std::string& finalUrl, std::string& err)> netOpen;
+    // (cancel: set from another thread - the connection being made is given up on at once)
+    std::function<int(const std::string& url, bool icy, const std::atomic<bool>* cancel, int& status, std::string& headers, std::string& finalUrl,
+                      std::string& err)>
+        netOpen;
     std::function<int(int id, uint8_t* buf, int len)> netRead;
     std::function<void(int id)> netClose;
     // Android: the on-screen keyboard works on a copy of the text field (LunaIme.java). imeSetState: the field's text
