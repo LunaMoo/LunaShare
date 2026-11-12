@@ -37,7 +37,7 @@ Devices of older versions (no account) keep a conversation of their own, keyed b
 ## Linking a device
 
 1. Both devices are connected (LAN, hotspot, Bluetooth or the internet server).
-2. On the device that has the account: *Settings → Your account → Link another device…*, pick the other device.
+2. On the device that has the account: *Settings → Profile & account → Link another device…*, pick the other device.
 3. The other device asks *"Link this device?"*. Both show the same 6-digit code, derived from this connection's
    key exchange; a man in the middle would produce different codes.
 4. After *Link*, the account device adds the new device to its signed device list and sends it the account key, the
@@ -46,7 +46,7 @@ Devices of older versions (no account) keep a conversation of their own, keyed b
 
 ## The same playlists and settings everywhere
 
-*Settings > Your account > The same playlists and settings on my devices* (on by default). Linked devices keep
+*Settings > My devices > The same playlists and settings on my devices* (on by default). Linked devices keep
 these the same whenever they are connected to each other:
 
 - music playlists - each one separately: the later change wins, a deleted one stays deleted. Songs are matched by
@@ -71,7 +71,7 @@ Not synced: how a screen looks (theme, size), folders and ports - those belong t
 
 ## App lock
 
-*Settings > App lock > Set a PIN...* (4 - 12 digits): LunaShare asks for it when it starts and when you come back
+*Settings > Privacy & security > Set a PIN...* (4 - 12 digits): LunaShare asks for it when it starts and when you come back
 to it - right away, or after 1 / 5 / 15 / 60 minutes away. On Android 10+ the fingerprint / face can unlock it too.
 While it's locked, messages and files keep arriving, notifications say only *New message*, an incoming call can
 still be answered, and on Android the app switcher shows no preview (and screenshots are blocked). Five wrong PINs

@@ -2956,6 +2956,51 @@ void App::DrawTransfers() {
         if (fa != fb) return !fa;
         return a->created > b->created;
     });
+    {
+        // per device: how much is still to go, about how long, and pause / resume just theirs
+        struct Dev {
+            int files = 0;
+            int64_t left = 0;
+            double speed = 0;
+            bool running = false, paused = false;
+        };
+        std::vector<std::pair<std::string, Dev>> devs;
+        for (auto& t : list) {
+            if (TStateFinal(t->state) || t->state == TState::Pending) continue;
+            auto it = std::find_if(devs.begin(), devs.end(), [&](auto& d) { return d.first == t->peer; });
+            if (it == devs.end()) it = devs.insert(devs.end(), {t->peer, Dev()});
+            Dev& d = it->second;
+            d.files++;
+            d.left += std::max<int64_t>(0, t->size - t->done.load());
+            if (t->state == TState::Active) d.speed += t->speed;
+            if (t->state == TState::Paused || t->state == TState::Interrupted) d.paused = true;
+            else d.running = true;
+        }
+        bool show = devs.size() > 1 || (devs.size() == 1 && devs[0].second.files > 1);
+        for (auto& [peer, d] : show ? devs : decltype(devs)()) {
+            ImGui::PushID(peer.c_str());
+            float sz = mobile ? ui::M().rowH * 0.8f : ImGui::GetFrameHeight();
+            if (d.running) {
+                if (ui::IconButton("dpause", Icon::Pause, T("Pause"), sz))
+                    for (auto& t : list)
+                        if (t->peer == peer && !TStateFinal(t->state) && t->state != TState::Paused && t->state != TState::Pending) eng.Pause(t->tid);
+            } else if (ui::IconButton("dresume", Icon::Play, T("Resume"), sz)) {
+                for (auto& t : list)
+                    if (t->peer == peer && (t->state == TState::Paused || t->state == TState::Interrupted)) eng.Resume(t->tid);
+            }
+            ImGui::SameLine();
+            std::string line = Emoji().Display(eng.PeerName(peer)) + "  -  " + TF("%d file(s), %s to go", d.files, FormatBytes((double)d.left).c_str());
+            if (d.speed > 1024 && d.left > 0) {
+                int64_t secs = (int64_t)((double)d.left / d.speed);
+                line += "  -  " + (secs >= 3600 ? TF("%dh %dmin left", (int)(secs / 3600), (int)(secs % 3600 / 60))
+                                   : secs >= 60 ? TF("%d min left", (int)(secs / 60)) : TF("%d s left", (int)secs));
+            }
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (sz - ImGui::GetTextLineHeight()) * 0.5f);
+            ImGui::TextUnformatted(line.c_str());
+            ImGui::PopID();
+        }
+        if (show) ImGui::Separator();
+    }
     if (list.empty()) {
         ImGui::PushTextWrapPos(0);
         ImGui::TextDisabled("%s", T("No transfers. Drop files on the window or use the + button in a chat."));
@@ -3371,7 +3416,7 @@ void App::DrawNearby() {
     ImGui::TextDisabled("%s", T("Devices on the same network find each other automatically:"));
     ImGui::BulletText(T("Bonjour / mDNS (_lunashare._tcp): %s"), eng.settings.discovery && eng.settings.mdns ? eng.MdnsStatus().c_str() : "off");
     ImGui::BulletText(T("UDP broadcast beacons (port %u): %s"), kDiscoveryPort, eng.settings.discovery && eng.settings.broadcast ? "on" : "off");
-    ImGui::BulletText(T("Internet rendezvous: %s"), eng.settings.wanEnabled ? TDynamic(eng.WanStatus()).c_str() : T("off (Settings > Advanced > Internet)"));
+    ImGui::BulletText(T("Internet rendezvous: %s"), eng.settings.wanEnabled ? TDynamic(eng.WanStatus()).c_str() : T("off (Settings > Connections > Advanced)"));
     if (ui::IconTextButton(T("Search again"), Icon::Retry, ImVec2(0, h))) eng.RefreshDiscovery();
     if (!eng.online.empty()) {
         ImGui::TextDisabled("%s", T("Found on the network:"));

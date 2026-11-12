@@ -356,7 +356,7 @@ bool App::DrawAddPersonBody(float width) {
                             "need a server of your own (below).")
                         : T("Over the Internet two devices need a meeting point: a small rendezvous server (yours or a friend's) that only "
                             "introduces them - messages and files stay encrypted between you."));
-            Wrapped(T("Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Advanced > Internet "
+            Wrapped(T("Someone who has one can send you an invite code - paste it above. To set up your own: Settings > Connections > Advanced "
                       "(docs/INTERNET.md)."));
         }
     } else {
@@ -562,9 +562,27 @@ void App::DrawWelcome() {
         ImGui::Dummy(ImVec2(0, fs * 0.6f));
         IconLine(Icon::Attach, T("Sending"), mobile ? T("Open a chat and tap the paperclip - or share to LunaShare from any app.")
                                                      : T("Drop files on the window, or open a chat and press the paperclip."));
-        IconLine(Icon::Link, T("Your other devices"), T("Settings > Your account links a phone and a computer into one: the same chats on both, and files go between them without asking."));
+        IconLine(Icon::Link, T("Your other devices"), T("Settings > Profile & account links a phone and a computer into one: the same chats on both, and files go between them without asking."));
+        {
+            // someone connected already who isn't one of my devices: linking it is one tap away
+            bool canLink = false;
+            for (auto& p : SortedPeers()) {
+                bool mine = false;
+                for (auto& ad : eng.settings.accountDevices) mine |= ad.id == p;
+                canLink |= !mine && eng.IsConnected(p);
+            }
+            if (canLink) {
+                float iw = ImGui::GetFontSize() * 2.2f;
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + iw);
+                if (ImGui::Button(T("Link another device..."), ImVec2(mobile ? ImGui::GetContentRegionAvail().x : 0, h))) {
+                    WelcomeDone();
+                    openLinkPick = true;
+                    linkTarget.clear();
+                }
+            }
+        }
         IconLine(Icon::Image, T("More than chat"), T("Gallery, movies and music, archives and comics have their own pages - also to watch or listen together."));
-        IconLine(Icon::Gear, T("Private by default"), T("No account to sign up for. Settings > App lock adds a PIN; people are added from the \"Add someone\" button."));
+        IconLine(Icon::Gear, T("Private by default"), T("No account to sign up for. Settings > Privacy & security adds a PIN; people are added from the \"Add someone\" button."));
         ImGui::Dummy(ImVec2(0, fs * 0.6f));
         if (ImGui::Button(T("Back"), ImVec2(half, h))) welcomeStep = 1;
         ImGui::SameLine();

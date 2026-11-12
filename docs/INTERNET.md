@@ -57,10 +57,10 @@ systemd unit in `server/lunashare-rendezvous.service`. Open UDP 47830 in front o
 
 ## In LunaShare (each device)
 
-*Settings → Internet*: enter the **server** (your public address or DynDNS name, e.g. `home.example.com`; add
+*Settings → Connections → Internet*: enter the **server** (your public address or DynDNS name, e.g. `home.example.com`; add
 `:port` only if it isn't 47830). That's all - everything else works automatically.
 
-Under *Settings → Advanced → Internet*:
+Under *Settings → Connections → Advanced*:
 - **Room name** and **room password:** the same on all your devices. Without them, every device using that server is
   in one shared room; set them on a server other people use.
 - *Copy room hash* to put it on the server's allow-list.
@@ -74,7 +74,7 @@ If a device is also on the same LAN, the LAN connection is preferred.
 Everyone in a room sees everyone else in it. To stay in touch with people who must never learn about each other,
 invite them with a code instead of giving them the room:
 
-1. *Settings → Invites* (also: click your own name at the top of the device list; on phones *Invite someone / use an invite code* on the main screen): type who it is for (only you see that) and press **Create invite code**.
+1. *Settings → Connections → Invites* (also: click your own name at the top of the device list; on phones *Invite someone / use an invite code* on the main screen): type who it is for (only you see that) and press **Create invite code**.
    The code is copied; send it to that one person. Make a new code for each person.
 2. They paste it under *invite code you got* and press **Use code**. If they hadn't set up the internet yet, this
    also sets the server and turns on **private mode** for them.
@@ -140,7 +140,7 @@ like OPNsense/pfSense with default outbound NAT. Fixes, any one is enough:
   carries the packets. This is what makes it work on networks you can't configure at all (a router you have no
   access to, carrier-grade NAT, a hotel or office firewall). It is slower than a direct connection and uses the
   server's bandwidth. The chat header shows *via Internet (relay through the server)*.
-- **Forward a port:** in *Settings → Advanced → Internet* set a fixed local UDP port (e.g. 47831) and
+- **Forward a port:** in *Settings → Connections → Advanced* set a fixed local UDP port (e.g. 47831) and
   forward that UDP port on your router to the device. Enter the external port as *Port forwarded on the router*.
 - On OPNsense you can also make outbound NAT keep source ports for the device (Firewall → NAT → Outbound,
   hybrid mode, a rule with *Static port* for that device's address).

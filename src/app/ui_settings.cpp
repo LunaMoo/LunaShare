@@ -23,6 +23,11 @@
 using namespace ls;
 using ui::Icon;
 
+// Strings that reach T() from the tables below (picked up by tools/i18n_keys.py):
+// i18n-keys: "Profile & account", "Privacy & security", "Chats & files", "Calls", "My devices", "Connections", "Appearance & language",
+// i18n-keys: "Backup", "About & updates", "Profile", "Your account", "App lock", "History & privacy", "Received files",
+// i18n-keys: "Accept files without asking", "Sending", "Opening files", "In the background", "Internet", "Invites", "Bluetooth",
+// i18n-keys: "Appearance", "Backup / move to another device", "About", "Advanced", "Profile picture"
 namespace {
 
 enum Cat { kAccount, kPrivacy, kFiles, kCalls, kSync, kConnections, kAppearance, kBackup, kAbout, kCatCount };
@@ -274,7 +279,7 @@ void App::DrawSettings() {
         ImGui::SameLine();
         ImGui::BeginChild("settings");
         if (!settingsQuery.empty()) SettingsSearchResults(h);
-        else SettingsCategory(settingsCat, ImGui::GetFontSize() * 22, h, changed);
+        else SettingsCategory(settingsCat, std::min(ImGui::GetFontSize() * 22, ImGui::GetContentRegionAvail().x * 0.6f), h, changed);
         ImGui::Dummy(ImVec2(0, ImGui::GetFrameHeight()));
         ImGui::EndChild();
     }

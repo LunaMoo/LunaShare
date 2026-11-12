@@ -73,7 +73,7 @@ starts with lists that keep themselves up to date: *Favourites*, *Most played*, 
 
 ## Keeping playlists
 
-Playlists follow you to your other linked devices (see [ACCOUNTS.md](ACCOUNTS.md)). *Settings > Export settings...*
+Playlists follow you to your other linked devices (see [ACCOUNTS.md](ACCOUNTS.md)). *Settings > Backup > Export settings...*
 also saves them - with the music folders, the sound settings and where you stopped in movies - and *Import
 settings...* brings them back (a playlist that is newer on the device stays as it is; songs are found by name and
 tags, so the file works on another device too).

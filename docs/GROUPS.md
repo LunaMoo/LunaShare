@@ -44,7 +44,7 @@ for phones. Group video is limited to 720p / 30 fps.
 
 ### Directly or through the server
 
-*Settings → Internet → Group chats and calls through the server* decides how a call you start travels:
+*Settings → Connections → Advanced → Group chats and calls through the server* decides how a call you start travels:
 
 - **Directly** (off): every device sends to every other one over the normal encrypted connections. With four people
   your phone uploads your voice three times (and your video to everyone watching you).

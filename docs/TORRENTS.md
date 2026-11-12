@@ -8,7 +8,7 @@ themselves - they use a computer of yours (below).
 ## On the computer
 
 The **Torrents** page (*Tools → Torrents*): *Add a torrent...* takes a **magnet link** (typed or pasted) or a **.torrent file**; both can also
-be opened with LunaShare from the browser or the file manager (*Settings → Opening files* registers `.torrent` and
+be opened with LunaShare from the browser or the file manager (*Settings → Chats & files → Opening files* registers `.torrent` and
 `magnet:`), or given on the command line. Pick the folder (by default `Torrents` in the folder for received files)
 and it starts.
 

@@ -38,7 +38,7 @@ after receiving, so you know it arrived intact.
 
 **People, accounts and profile pictures** (see [docs/ACCOUNTS.md](docs/ACCOUNTS.md))
 - Your **account** is a key that belongs to you; no sign-up, no server account. Link your phone and computer to it
-  (*Settings → Your account → Link another device…*, both screens show the same 6-digit code): messages to you reach all
+  (*Settings → Profile & account → Link another device…*, both screens show the same 6-digit code): messages to you reach all
   your devices, what you write on one appears on the others, and your contacts see one person instead of several devices.
 - A **profile picture** (crop it in a round preview) is shared with, and cached by, everyone you connect to.
 - Keep your account safe with the **24-word recovery phrase** or a password-protected **backup file**.
@@ -93,7 +93,7 @@ after receiving, so you know it arrived intact.
 **Opening files with LunaShare**
 - **Android:** LunaShare is in the system's *Open with* for pictures, movies, songs, archives and comics, and in
   *Share* for any file (or text): pick a chat and it's sent.
-- **Windows / Linux:** *Settings → Opening files* adds LunaShare to the file manager's *Open with* (for you only, no
+- **Windows / Linux:** *Settings → Chats & files → Opening files* adds LunaShare to the file manager's *Open with* (for you only, no
   administrator; Windows also lists it in *Default apps*, where it can become the default). `LunaShare <files>` opens
   them too; `--send` shares them to a chat instead.
 - One copy per settings folder: starting LunaShare again (or opening a file with it) brings up the running one and
@@ -149,8 +149,8 @@ after receiving, so you know it arrived intact.
   any Linux or Windows machine. Devices with the same room name and password find each other through it and then connect
   **directly peer-to-peer** (UDP hole punching + KCP, helped by UPnP / NAT-PMP port mappings). When no direct path
   exists (a router you can't configure, carrier-grade NAT on both sides), the server relays the still end-to-end
-  encrypted packets. Only the server address needs to be set; everything else is under *Settings → Advanced*.
-- **Invites (private contacts):** instead of sharing your room, invite people with a code (*Settings → Invites*, or click
+  encrypted packets. Only the server address needs to be set; everything else is under *Settings → Connections → Advanced*.
+- **Invites (private contacts):** instead of sharing your room, invite people with a code (*Settings → Connections → Invites*, or click
   your own name above the device list; on phones the button on the main screen). Each of them reaches only you - or
   the others in the same *invite room* - and never learns about the rest. They don't see the server's address, and
   the server remembers them (even after a reinstall) until its admin releases them.
@@ -158,7 +158,7 @@ after receiving, so you know it arrived intact.
 
 **Languages**
 - English, Polish, German, French, Spanish, Italian, Portuguese, Russian, Ukrainian, Japanese, Chinese (simplified)
-  and Korean. *Settings → Appearance → Language* switches right away; *automatic* follows the system language.
+  and Korean. *Settings → Appearance & language* switches right away; *automatic* follows the system language.
 - Adding a language: copy `src/app/lang/pl.inc` to `<code>.inc`, translate the second string of every line (keep
   `%s`/`%d` in the same order), and add it to the two lists in `src/app/i18n.cpp`. `tools/i18n_keys.py src/app/lang/<code>.inc`
   shows strings that are missing or no longer used.
@@ -195,6 +195,9 @@ after receiving, so you know it arrived intact.
   for 👍 ❤️ 😂 😮 😢 🙏 or **+** for any emoji. Each side has one reaction per message; picking it again or clicking your
   pill under the bubble removes it, and clicking the other person's pill reacts the same. Reactions reach a device that
   is offline once it is back, and you get a notification when someone reacts while you're in another chat.
+- A chat opened with unread messages shows a **New messages** line above the first of them.
+- **Android notifications** show a chat's last messages together, with **Reply** (answer without opening the app) and
+  **Mark as read**.
 - The module (`lunashare_emoji`) is tiny, because it ships no font. Without it, emoji show as plain characters.
 - On Android, characters none of the app's fonts has (Japanese track names, for example) are drawn with the phone's own
   fonts.
@@ -284,13 +287,15 @@ after receiving, so you know it arrived intact.
 ![Camera panel](docs/video-camera-panel.png)
 
 **Settings**
-- The top of the settings has what most people need: invites, profile, account, the server, the download folder and the
-  look. Everything technical (discovery, ports, speed limit, chunk size, parallel files, Bluetooth, rooms...) is under *Advanced*.
+- In categories: *Profile & account*, *Privacy & security*, *Chats & files*, *Calls*, *My devices*, *Connections*,
+  *Appearance & language*, *Backup* and *About & updates* - a column on the left on desktop, a list of pages on phones -
+  and a search box that finds any option and jumps to it. Everything technical (discovery, ports, rooms, relay, chunk
+  size, parallel files...) is under *Connections → Advanced*. The longer explanations are behind (?) (a tap on phones).
 - **Windows:** can keep running in the tray when the window is closed. **Android:** can keep running in the background
   (with notifications and a ringing call screen).
 - Layout: *automatic*, *desktop*, or *phone*. Phones get a vertical UI with large buttons, a bottom navigation bar, drag-to-scroll with inertia, and long-press menus.
   A narrow, tall desktop window switches to the phone layout automatically.
-- **Export/import** settings to a JSON file. The export includes known devices and their custom names. Chat and file history are optional, and so is the device identity (only for restoring the same device).
+- **Export/import** settings to a JSON file (*Backup*). The export includes known devices and their custom names. Chat and file history are optional, and so is the device identity (only for restoring the same device).
 
 ## Building
 
