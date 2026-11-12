@@ -66,7 +66,8 @@ std::string SystemCountry() {
 #endif
     if (cc.empty() && lang.size() == 2) {
         static const char* map[][2] = {{"pl", "PL"}, {"de", "DE"}, {"fr", "FR"}, {"es", "ES"}, {"it", "IT"}, {"cs", "CZ"},
-                                       {"uk", "UA"}, {"ja", "JP"}, {"nl", "NL"}, {"sv", "SE"}, {"pt", "PT"}, {"ru", "RU"}};
+                                       {"uk", "UA"}, {"ja", "JP"}, {"nl", "NL"}, {"sv", "SE"}, {"pt", "PT"}, {"ru", "RU"},
+                                       {"zh", "CN"}, {"ko", "KR"}};
         for (auto& m : map)
             if (lang == m[0]) cc = m[1];
     }

@@ -21,13 +21,44 @@ struct Pair {
 const Pair kPolish[] = {
 #include "lang/pl.inc"
 };
+const Pair kGerman[] = {
+#include "lang/de.inc"
+};
+const Pair kFrench[] = {
+#include "lang/fr.inc"
+};
+const Pair kSpanish[] = {
+#include "lang/es.inc"
+};
+const Pair kItalian[] = {
+#include "lang/it.inc"
+};
+const Pair kPortuguese[] = {
+#include "lang/pt.inc"
+};
+const Pair kRussian[] = {
+#include "lang/ru.inc"
+};
+const Pair kUkrainian[] = {
+#include "lang/uk.inc"
+};
+const Pair kJapanese[] = {
+#include "lang/ja.inc"
+};
+const Pair kChinese[] = {
+#include "lang/zh.inc"
+};
+const Pair kKorean[] = {
+#include "lang/ko.inc"
+};
 
 struct Table {
     const char* code;
     const Pair* pairs;
     size_t count;
 };
-const Table kTables[] = {{"pl", kPolish, sizeof(kPolish) / sizeof(kPolish[0])}};
+#define LS_TABLE(code, t) {code, t, sizeof(t) / sizeof(t[0])}
+const Table kTables[] = {LS_TABLE("pl", kPolish), LS_TABLE("de", kGerman), LS_TABLE("fr", kFrench), LS_TABLE("es", kSpanish), LS_TABLE("it", kItalian), LS_TABLE("pt", kPortuguese), LS_TABLE("ru", kRussian), LS_TABLE("uk", kUkrainian), LS_TABLE("ja", kJapanese), LS_TABLE("zh", kChinese), LS_TABLE("ko", kKorean)};
 
 std::unordered_map<std::string_view, const char*> g_map;  // English -> current language
 std::unordered_map<const char*, const char*> g_cache;     // literal address -> result
@@ -62,7 +93,7 @@ const char* Lookup(std::string_view en) {
 }  // namespace
 
 const std::vector<Language>& Languages() {
-    static const std::vector<Language> v = {{"en", "English"}, {"pl", "Polski"}};
+    static const std::vector<Language> v = {{"en", "English"}, {"pl", "Polski"}, {"de", "Deutsch"}, {"fr", "Français"}, {"es", "Español"}, {"it", "Italiano"}, {"pt", "Português"}, {"ru", "Русский"}, {"uk", "Українська"}, {"ja", "日本語"}, {"zh", "简体中文"}, {"ko", "한국어"}};
     return v;
 }
 

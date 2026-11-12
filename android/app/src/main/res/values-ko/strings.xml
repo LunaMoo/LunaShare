@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bg_ready">메시지와 통화를 받을 준비가 되었습니다</string>
+    <string name="bg_stopped">LunaShare가 종료되었습니다 - 메시지와 통화를 받으려면 다시 여세요</string>
+</resources>

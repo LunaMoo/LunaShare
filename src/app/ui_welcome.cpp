@@ -496,7 +496,9 @@ void App::DrawWelcome() {
         ImGui::SetNextItemWidth(mobile ? -1 : fs * 18);
         ImGui::InputTextWithHint("##wname", T("your name"), &welcomeName);
         DrawProfilePicture(mobile ? ui::M().rowH * 0.8f : 0);
+        ImGui::PushTextWrapPos(0.0f);  // (longer in some languages)
         ImGui::TextDisabled("%s", T("(both can be changed later in Settings)"));
+        ImGui::PopTextWrapPos();
         ImGui::Dummy(ImVec2(0, fs * 0.6f));
         if (ImGui::Button(T("Skip"), ImVec2(half, h))) WelcomeDone();
         ImGui::SameLine();

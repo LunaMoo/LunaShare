@@ -117,6 +117,38 @@ static std::vector<std::pair<std::string, int>> AndroidFallbackFonts() {
 }
 #endif
 
+// How tall a font's line is compared with its em (hhea ascent - descent over unitsPerEm). ImGui sizes every font by
+// that line height, so a font with a tall line (Noto CJK: ~1.45 em, against ~1.17 for the main fonts) comes out
+// smaller - Japanese, Chinese and Korean text looked a size too small next to Latin. Returns 0 when it can't tell.
+static float FontLineToEm(const char* path, int fontNo) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    auto rd = [&](long at, int n) -> uint32_t {
+        unsigned char b[4] = {};
+        if (fseek(f, at, SEEK_SET) != 0 || fread(b, 1, (size_t)n, f) != (size_t)n) return 0;
+        uint32_t v = 0;
+        for (int i = 0; i < n; i++) v = (v << 8) | b[i];
+        return v;
+    };
+    long base = 0;
+    if (rd(0, 4) == 0x74746366) base = (long)rd(12 + 4 * fontNo, 4);  // 'ttcf': the font's own offset table
+    int tables = (int)rd(base + 4, 2);
+    long head = 0, hhea = 0;
+    for (int i = 0; i < tables && i < 64; i++) {
+        uint32_t tag = rd(base + 12 + 16 * i, 4), off = rd(base + 12 + 16 * i + 8, 4);
+        if (tag == 0x68656164) head = (long)off;  // 'head'
+        if (tag == 0x68686561) hhea = (long)off;  // 'hhea'
+    }
+    float r = 0;
+    if (head && hhea) {
+        uint32_t upem = rd(head + 18, 2);
+        int asc = (int16_t)rd(hhea + 4, 2), desc = (int16_t)rd(hhea + 6, 2);
+        if (upem > 0 && asc - desc > 0) r = (float)(asc - desc) / (float)upem;
+    }
+    fclose(f);
+    return r;
+}
+
 static void LoadFonts() {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->Clear();
@@ -150,16 +182,26 @@ static void LoadFonts() {
 #endif
         nullptr};
     ImFont* f = nullptr;
+    float mainLine = 0;
     for (int i = 0; main[i] && !f; i++)
-        if (ls::FileExists(main[i])) f = io.Fonts->AddFontFromFileTTF(main[i]);
+        if (ls::FileExists(main[i])) {
+            f = io.Fonts->AddFontFromFileTTF(main[i]);
+            if (f) mainLine = FontLineToEm(main[i], 0);
+        }
     if (!f) {
         io.Fonts->AddFontDefaultVector();
         return;
     }
+    // a merged font's letters drawn as big as the main font's (see FontLineToEm)
+    auto sizeLike = [&](ImFontConfig& cfg, const char* path, int no) {
+        float line = FontLineToEm(path, no);
+        if (mainLine > 0 && line > 0) cfg.ExtraSizeScale = std::clamp(line / mainLine, 0.8f, 1.4f);
+    };
     for (int i = 0; extra[i]; i++) {
         if (!ls::FileExists(extra[i])) continue;
         ImFontConfig cfg;
         cfg.MergeMode = true;
+        sizeLike(cfg, extra[i], 0);
         io.Fonts->AddFontFromFileTTF(extra[i], 0.0f, &cfg);
     }
 #if defined(__ANDROID__)
@@ -168,6 +210,7 @@ static void LoadFonts() {
         ImFontConfig cfg;
         cfg.MergeMode = true;
         cfg.FontNo = index;
+        sizeLike(cfg, path.c_str(), index);
         io.Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &cfg);
     }
 #endif

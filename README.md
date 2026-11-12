@@ -157,7 +157,8 @@ after receiving, so you know it arrived intact.
   See [docs/INTERNET.md](docs/INTERNET.md).
 
 **Languages**
-- English and Polish. *Settings → Appearance → Language* switches right away; *automatic* follows the system language.
+- English, Polish, German, French, Spanish, Italian, Portuguese, Russian, Ukrainian, Japanese, Chinese (simplified)
+  and Korean. *Settings → Appearance → Language* switches right away; *automatic* follows the system language.
 - Adding a language: copy `src/app/lang/pl.inc` to `<code>.inc`, translate the second string of every line (keep
   `%s`/`%d` in the same order), and add it to the two lists in `src/app/i18n.cpp`. `tools/i18n_keys.py src/app/lang/<code>.inc`
   shows strings that are missing or no longer used.

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bg_ready">Bereit für Nachrichten und Anrufe</string>
+    <string name="bg_stopped">LunaShare wurde geschlossen - öffne es wieder, um Nachrichten und Anrufe zu bekommen</string>
+</resources>
