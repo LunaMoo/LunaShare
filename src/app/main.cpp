@@ -965,7 +965,7 @@ int main(int argc, char** argv) {
                         SDL_strlcpy(e.text.text, SDL_getenv("LUNASHARE_TYPE") ? SDL_getenv("LUNASHARE_TYPE") : "a", sizeof(e.text.text));
                         SDL_PushEvent(&e);
                     } else {
-                        for (int k = 0; k < std::max(1, y); k++)
+                        for (int k = 0; k < (y > 1 ? y : 1); k++)
                             for (Uint32 t : {(Uint32)SDL_KEYDOWN, (Uint32)SDL_KEYUP}) {
                                 SDL_Event e{};
                                 e.type = t;
