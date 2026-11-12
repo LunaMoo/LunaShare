@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.3
+
+- **Calls without sound on phones, fixed:** calls, music / radio and the video and voice-message player now share
+  the phone's one sound output in a fixed order - a call first (music and a playing file are mixed into it), and
+  a paused video no longer holds it. Whatever couldn't start its sound tries again.
+- During a call a **"Call in progress"** notification keeps the microphone working when the screen goes off or
+  another app is opened.
+- A call that ends while the app is in the background lets go of the microphone and the sound output right away.
+- The call bar says **what's wrong with the sound** (microphone not allowed or not starting, only silence from it,
+  no sound output, nothing arriving from the other side), and the microphone / output are restarted when they fail.
+- The line over the chat's text box after using the emoji search is gone.
+
 ## 1.7.2
 
 - **Fewer duplicate contacts:** settings are written to the disk safely, and a backup copy is used when the file
