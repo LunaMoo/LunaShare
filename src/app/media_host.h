@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -144,6 +145,13 @@ private:
     bool OpenPlayback();
     bool OpenCapture();
     void HealAudio();  // a device that couldn't be opened, or went quiet, is opened again
+    // Computers: headphones connected during a call take it over - their sound and their microphone - and the call
+    // comes back to where it was when they go (unless a device was picked in the call settings). The system doesn't
+    // always make new headphones its default, and a call keeps the device it opened. (Phones: CallRouter.java.)
+    void FollowHotplug();
+    std::set<std::string> knownOut_, knownIn_;  // devices there at the start of the call / when last looked
+    std::string autoOut_, autoIn_;              // ones connected during the call, in use
+    uint64_t hotplugTick_ = 0;
     void CloseDevices();
     bool wantPlay_ = false, wantCap_ = false;  // what the mode needs (OpenDevices)
     std::string playErr_, capErr_;             // why each isn't there

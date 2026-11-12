@@ -872,8 +872,9 @@ bool MediaHost::OpenPlayback() {
     }
     SDL_AudioSpec want = CallSpec(this), have{};
     want.callback = PlaybackCb;
-    playDev_ = audio_out::Open("call", s.callOutputDevice.empty() ? nullptr : s.callOutputDevice.c_str(), &want, &have);
-    if (!playDev_ && !s.callOutputDevice.empty()) playDev_ = audio_out::Open("call", nullptr, &want, &have);
+    std::string out = !autoOut_.empty() && mode_ == Mode::Call ? autoOut_ : s.callOutputDevice;
+    playDev_ = audio_out::Open("call", out.empty() ? nullptr : out.c_str(), &want, &have);
+    if (!playDev_ && !out.empty()) playDev_ = audio_out::Open("call", nullptr, &want, &have);
     if (!playDev_) {
         playErr_ = std::string("speaker: ") + SDL_GetError();
         return false;
@@ -906,8 +907,9 @@ bool MediaHost::OpenCapture() {
 #endif
     SDL_AudioSpec want = CallSpec(this), have{};
     want.callback = CaptureCb;
-    capDev_ = SDL_OpenAudioDevice(s.callInputDevice.empty() ? nullptr : s.callInputDevice.c_str(), 1, &want, &have, 0);
-    if (!capDev_ && !s.callInputDevice.empty()) capDev_ = SDL_OpenAudioDevice(nullptr, 1, &want, &have, 0);
+    std::string in = !autoIn_.empty() && mode_ == Mode::Call ? autoIn_ : s.callInputDevice;
+    capDev_ = SDL_OpenAudioDevice(in.empty() ? nullptr : in.c_str(), 1, &want, &have, 0);
+    if (!capDev_ && !in.empty()) capDev_ = SDL_OpenAudioDevice(nullptr, 1, &want, &have, 0);
     if (!capDev_) {
         capErr_ = std::string("microphone: ") + SDL_GetError();
         SDL_Log("microphone couldn't be opened: %s", SDL_GetError());
@@ -948,6 +950,66 @@ void MediaHost::HealAudio() {
     std::string err = playErr_ + (playErr_.empty() || capErr_.empty() ? "" : "; ") + capErr_;
     if (did || !err.empty()) audioError = err;
     if (did && mode_ == Mode::Call) ResetEcho();
+}
+
+static std::set<std::string> DeviceNames(bool capture) {
+    std::set<std::string> r;
+    int n = SDL_GetNumAudioDevices(capture ? 1 : 0);
+    for (int i = 0; i < n; i++)
+        if (const char* nm = SDL_GetAudioDeviceName(i, capture ? 1 : 0)) r.insert(nm);
+    return r;
+}
+
+void MediaHost::FollowHotplug() {
+#if !defined(__ANDROID__)
+    if (mode_ != Mode::Call || !eng_ || !SDL_WasInit(SDL_INIT_AUDIO)) return;
+    uint64_t now = SDL_GetTicks64();
+    if (now - hotplugTick_ < 1000) return;
+    bool first = hotplugTick_ == 0;
+    hotplugTick_ = now;
+    Settings s = eng_->GetSettings();
+    std::set<std::string> outs = DeviceNames(false), ins = DeviceNames(true);
+    bool reOut = false, reIn = false;
+    if (!first) {
+        // (a device that wasn't there a moment ago, in the middle of a call: someone just connected headphones)
+        for (auto& n : outs)
+            if (!knownOut_.count(n) && s.callOutputDevice.empty() && n != autoOut_) {
+                autoOut_ = n;
+                reOut = true;
+            }
+        for (auto& n : ins)
+            if (!knownIn_.count(n) && s.callInputDevice.empty() && n != autoIn_) {
+                autoIn_ = n;
+                reIn = true;
+            }
+        // ... and gone again: back to where the call was
+        if (!autoOut_.empty() && !outs.count(autoOut_)) {
+            autoOut_.clear();
+            reOut = true;
+        }
+        if (!autoIn_.empty() && !ins.count(autoIn_)) {
+            autoIn_.clear();
+            reIn = true;
+        }
+        if (!s.callOutputDevice.empty()) reOut |= !autoOut_.empty(), autoOut_.clear();  // (picked in the settings)
+        if (!s.callInputDevice.empty()) reIn |= !autoIn_.empty(), autoIn_.clear();
+    }
+    knownOut_ = std::move(outs);
+    knownIn_ = std::move(ins);
+    if (reOut) {
+        SDL_Log("call sound output: %s", autoOut_.empty() ? "back to before" : autoOut_.c_str());
+        if (playDev_) audio_out::Close(playDev_);
+        playDev_ = 0;
+        OpenPlayback();
+    }
+    if (reIn) {
+        SDL_Log("call microphone: %s", autoIn_.empty() ? "back to before" : autoIn_.c_str());
+        if (capDev_) SDL_CloseAudioDevice(capDev_);
+        capDev_ = 0;
+        OpenCapture();
+    }
+    if (reOut || reIn) ResetEcho();
+#endif
 }
 
 void MediaHost::CloseDevices() {
@@ -1009,6 +1071,11 @@ void MediaHost::SetMode(Mode m) {
         callSince_ = SDL_GetTicks64();
         inSeen_ = -1;
         inSeenAt_ = callSince_;
+        autoOut_.clear();
+        autoIn_.clear();
+        knownOut_.clear();
+        knownIn_.clear();
+        hotplugTick_ = 0;
         OpenDevices(true, true);
         liveLs_ = ls;
         liveUserAec_ = s.callEchoCancel;
@@ -1054,6 +1121,7 @@ void MediaHost::Update(bool background) {
     if (st == CallState::None) wantCamera_ = false;
     if (want != Mode::Call && mode_ == Mode::Call) mute_ = false;
     SetMode(want);
+    FollowHotplug();
     HealAudio();
     if (!background) UploadVideo();  // (pictures: only with a window to draw them in)
     if (mode_ == Mode::Call && Bridge().callRoutes && now - routesTick_ > 1500) {

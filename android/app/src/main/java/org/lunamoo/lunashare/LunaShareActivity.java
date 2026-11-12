@@ -663,6 +663,8 @@ public class LunaShareActivity extends SDLActivity {
             }
             // the call keeps the microphone when the screen goes off or another app is opened (see CallService)
             CallService.set(inCall);
+            // headphones (and their microphone) take the call when there, or when connected during it (CallRouter)
+            CallRouter.set(inCall);
         });
     }
 
@@ -742,6 +744,7 @@ public class LunaShareActivity extends SDLActivity {
         ui(() -> {
             try {
                 android.media.AudioManager am = (android.media.AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
+                CallRouter.picked();
                 if (Build.VERSION.SDK_INT >= 31) {
                     for (android.media.AudioDeviceInfo d : am.getAvailableCommunicationDevices())
                         if (d.getId() == id) { am.setCommunicationDevice(d); return; }
