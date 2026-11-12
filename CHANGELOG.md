@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.2
+
+- **Fewer duplicate contacts:** settings are written to the disk safely, and a backup copy is used when the file
+  can't be read - a phone killed while saving no longer comes back as a new device. Android's own backup leaves
+  out the cache (over 25 MB nothing was backed up), so reinstalling can bring the same identity back.
+- **Join a reinstalled phone with its old conversation:** when a contact looks like a new copy of an offline one
+  (same name and system, last seen before the new one appeared), its chat offers to join them - messages,
+  nickname and trust move over and the old one goes. "They're different" isn't asked again.
+- Offline contacts show when they were **last seen**.
+
 ## 1.7.1
 
 - **Fixed: the app froze with internet radio** (black screen on returning to it, Android asking to close it) when a
