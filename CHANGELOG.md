@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.4
+
+- **Calls follow headphones.** On phones a call starts on headphones that are connected (wired / USB first, then
+  Bluetooth - before, Bluetooth earbuds were left out), headphones connected during the call take it over, sound
+  and microphone, and when they're disconnected the call goes back to the earpiece or loudspeaker it was on. A
+  loudspeaker picked by hand stays.
+- On computers a sound device connected during a call is used for it, and the call goes back when it's removed
+  (unless a microphone / speaker is picked in the call settings).
+
 ## 1.7.3
 
 - **Calls without sound on phones, fixed:** calls, music / radio and the video and voice-message player now share
