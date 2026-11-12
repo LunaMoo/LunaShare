@@ -446,7 +446,7 @@ void App::Frame() {
     DrawViewer();
     ImGui::End();
     if (eng.call.state != CallState::Active) {
-        videoFull = videoAutoOpened = false;
+        videoFull = videoAutoOpened = videoSwapped = false;
         camPanel = false;
     } else if (m.mobile && VideoVisible() && !videoAutoOpened) {
         videoFull = videoAutoOpened = true;  // a video call opens full screen on phones
@@ -4384,6 +4384,7 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             ui::PushAccent(camPanel);  // (pushes the same count on or off)
             if (ui::IconButton("camset", Icon::Sliders, T("Call settings (sound, camera, quality...)"), bw, false, cap ? T("Settings##cap") : nullptr))
                 camPanel = !camPanel;
+            camButtonHovered = ImGui::IsItemHovered();  // (its own click toggles: not a click "outside" the panel)
             ui::PopAccent();
             ImGui::SameLine();
         }
@@ -4538,7 +4539,10 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
             if (p.dev == eng.call.spotlight) who = CallPeerName(p);
         if (eng.call.peers.empty()) remote = false;
     }
-    if (remote) {
+    bool swapped = videoSwapped && remote && local;  // (only while both pictures are there)
+    if (swapped) {
+        Media().DrawVideo(dl, lv, p0, p1, false);
+    } else if (remote) {
         Media().DrawVideo(dl, rv, p0, p1, false, Media().RemoteRotation());
     } else if (local) {
         Media().DrawVideo(dl, lv, p0, p1, false);  // nothing from them: show yourself big
@@ -4566,14 +4570,23 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         dl->AddText(ImVec2(a.x + m, a.y + m), IM_COL32(230, 230, 230, 255), t);
     }
     if (remote && local) {
-        // self-view in the corner
+        // the other picture in the corner (yourself, or them when swapped): a tap swaps the two, as in Messenger
+        const auto& sv = swapped ? rv : lv;
+        int sw = sv.w, sh = sv.h;
+        if (swapped && (Media().RemoteRotation() % 180) != 0) std::swap(sw, sh);
         float pw = size.x * (phone ? 0.3f : 0.22f);
-        float ph = pw * (float)lv.h / std::max(1, lv.w);
-        if (ph > size.y * 0.4f) { ph = size.y * 0.4f; pw = ph * (float)lv.w / std::max(1, lv.h); }
+        float ph = pw * (float)sh / std::max(1, sw);
+        if (ph > size.y * 0.4f) { ph = size.y * 0.4f; pw = ph * (float)sw / std::max(1, sh); }
         float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
         ImVec2 a(p1.x - pw - m, p1.y - ph - m - (phone ? ui::M().rowH * 1.6f : 0)), b(a.x + pw, a.y + ph);
         dl->AddRectFilled(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), IM_COL32(255, 255, 255, 90), 6);
-        Media().DrawVideo(dl, lv, a, b, true);
+        if (swapped) Media().DrawVideo(dl, rv, a, b, true, Media().RemoteRotation());
+        else Media().DrawVideo(dl, lv, a, b, true);
+        ImVec2 keep = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(a);
+        if (ImGui::InvisibleButton("swapvid", ImVec2(pw, ph))) videoSwapped = !videoSwapped;
+        if (ImGui::IsItemHovered() && !phone) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        ImGui::SetCursorScreenPos(keep);
     }
     if (groupCall) {  // everyone in the call along the top: tap to watch someone else
         float tile = phone ? ui::M().rowH * 1.1f : ImGui::GetFontSize() * 2.6f;
@@ -4696,8 +4709,13 @@ void App::DrawCameraPanel() {
         ImGui::End();
         return;
     }
-    if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
-        ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());  // not over its own dropdowns (white balance, size...)
+    bool popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    if (!popup) ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());  // not over its own dropdowns (white balance, size...)
+    // a click / tap anywhere outside closes it (not while one of its dropdowns is open: that click closes the dropdown)
+    if (!popup && !camButtonHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+        camPanel = false;
+    camButtonHovered = false;
     if (mobile) ui::TouchScroll();
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     float w = ImGui::GetContentRegionAvail().x;

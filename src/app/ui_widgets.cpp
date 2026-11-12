@@ -271,13 +271,21 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
             break;
         case Icon::RotateLeft:
         case Icon::RotateRight: {
+            // a picture (a framed mountain) with a curved arrow over it, turning to the right / left
             float d = icon == Icon::RotateRight ? 1.f : -1.f;
-            dl->PathArcTo(P(0, 0.05f), h * 0.6f, d > 0 ? -2.6f : -0.54f, d > 0 ? 1.2f : 3.74f, 14);
+            auto Q = [&](float x, float y) { return P(d * x * 1.2f, (y - 0.1f) * 1.2f); };  // (mirrored for left; centred, filling the box)
+            ImVec2 r0 = Q(-0.52f, 0.1f), r1 = Q(0.52f, 0.82f);
+            dl->AddRect(ImVec2(std::min(r0.x, r1.x), r0.y), ImVec2(std::max(r0.x, r1.x), r1.y), col, h * 0.1f, 0, t * 0.9f);
+            dl->AddTriangleFilled(Q(-0.34f, 0.7f), Q(-0.05f, 0.36f), Q(0.34f, 0.7f), col);
+            const float cy = 0.25f, r = 0.82f, a1 = -175.f * 3.14159265f / 180.f, a2 = -35.f * 3.14159265f / 180.f;
+            for (int i = 0; i <= 16; i++) {
+                float a = a1 + (a2 - a1) * (float)i / 16.f;
+                dl->PathLineTo(Q(r * cosf(a), cy + r * sinf(a)));
+            }
             dl->PathStroke(col, 0, t);
-            // arrow head at the start of the arc (top)
-            ImVec2 tip = P(d * -0.5f, -0.55f);
-            dl->AddTriangleFilled(ImVec2(tip.x - d * h * 0.05f, tip.y - h * 0.3f), ImVec2(tip.x + d * h * 0.3f, tip.y + h * 0.02f),
-                                  ImVec2(tip.x - d * h * 0.3f, tip.y + h * 0.15f), col);
+            // the arrow head, along the arc where it ends
+            float ex = r * cosf(a2), ey = cy + r * sinf(a2), tx = -sinf(a2), ty = cosf(a2), nx = cosf(a2), ny = sinf(a2);
+            dl->AddTriangleFilled(Q(ex + tx * 0.36f, ey + ty * 0.36f), Q(ex + nx * 0.26f, ey + ny * 0.26f), Q(ex - nx * 0.26f, ey - ny * 0.26f), col);
             break;
         }
         case Icon::Webcam:

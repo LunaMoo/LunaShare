@@ -411,6 +411,8 @@ private:
     bool videoFull = false;       // phone: full-screen video shown
     bool videoAutoOpened = false; // opened once per call
     bool videoBig = false;        // desktop: video takes the whole chat area
+    bool camButtonHovered = false;  // the call bar's settings button, under the mouse this frame
+    bool videoSwapped = false;    // video call: yourself big, them in the corner (a tap on the corner swaps)
     bool camPanel = false;
     std::vector<LsvControl> camCtl;
     double camCtlTime = -1;
