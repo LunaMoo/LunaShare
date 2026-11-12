@@ -430,6 +430,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/android_bridge.cpp
         src/app/ui_viewer.cpp
         src/app/ui_account.cpp
+        src/app/ui_settings.cpp
         src/app/ui_library.cpp
         src/app/ui_groups.cpp
         src/app/ui_watch.cpp

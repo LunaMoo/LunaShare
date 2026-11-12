@@ -223,7 +223,7 @@ void App::DrawMovies() {
         ImGui::EndCombo();
     }
     ImGui::SameLine();
-    if (ImGui::Checkbox(T("Select"), &moviePick.selecting) && !moviePick.selecting) moviePick.sel.clear();
+    if (ui::Checkbox(T("Select"), &moviePick.selecting) && !moviePick.selecting) moviePick.sel.clear();
     if (sc.busy) {
         if (!mobile) ImGui::SameLine();
         ImGui::TextDisabled("%s", T("looking through the folders..."));

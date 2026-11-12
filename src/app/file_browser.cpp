@@ -426,7 +426,7 @@ bool FileBrowser::Draw() {
         if (toggle("vgrid", ui::Icon::Grid, T("Gallery (thumbnails)"), prefs.grid)) prefs.grid = true;
         ImGui::SameLine();
         if (mode_ == Mode::OpenMulti) {
-            if (ImGui::Checkbox(T("Pictures only"), &prefs.picturesOnly)) Refresh();
+            if (ui::Checkbox(T("Pictures only"), &prefs.picturesOnly)) Refresh();
             ImGui::SameLine();
         }
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * (mobile ? 7.5f : 8.5f));

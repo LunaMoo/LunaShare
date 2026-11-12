@@ -183,7 +183,7 @@ void App::DrawShareLinkPopups() {
             ImGui::Combo(T("For"), &s.people, people, 3);
             ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 12);
             ImGui::InputTextWithHint(T("PIN"), T("none"), &s.pin, ImGuiInputTextFlags_CharsDecimal);
-            ImGui::Checkbox(T("Ask me before each download"), &s.ask);
+            ui::Checkbox(T("Ask me before each download"), &s.ask);
             ImGui::TreePop();
         }
         if (!s.err.empty()) {

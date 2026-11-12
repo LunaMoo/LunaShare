@@ -52,7 +52,7 @@ void Attach(ls::Engine* eng) {
                 std::string text = e.text.size() > 300 ? e.text.substr(0, 297) + "..." : e.text;
                 if (mention) text = std::string(T("(mentioned you)")) + " " + text;
                 if (!eng->settings.lockHash.empty()) text = T("New message");  // (the app lock: no text outside the app)
-                if (b.notifyMessage) b.notifyMessage(e.peer, eng->PeerName(e.peer), text, eng->AvatarPath(e.peer));
+                if (b.notifyMessage) b.notifyMessage(e.peer, eng->PeerName(e.peer), text, eng->AvatarPath(e.peer), eng->settings.lockHash.empty());
                 else if (g_tray) g_tray(eng->PeerName(e.peer), text);
                 break;
             }
@@ -60,7 +60,7 @@ void Attach(ls::Engine* eng) {
                 if (g_bg && b.notifyMessage && !eng->ChatMuted(e.peer))
                     b.notifyMessage(e.peer, eng->PeerName(e.peer),
                                     eng->settings.lockHash.empty() ? TF("reacted %s", e.text.c_str()) + "  " + e.a : std::string(T("New reaction")),
-                                    eng->AvatarPath(e.peer));
+                                    eng->AvatarPath(e.peer), eng->settings.lockHash.empty());
                 break;
             case ls::EventType::CallIncoming: {
                 if (!g_bg) return;
@@ -78,17 +78,17 @@ void Attach(ls::Engine* eng) {
                 bool missed = e.text.rfind("Missed call", 0) == 0;
                 if (missed && g_bg && b.notifyMessage) {
                     std::string key = eng->ChatKey(e.peer);
-                    b.notifyMessage(key, eng->PeerName(key), TDynamic(e.text), eng->AvatarPath(key));
+                    b.notifyMessage(key, eng->PeerName(key), TDynamic(e.text), eng->AvatarPath(key), false);
                 }
                 break;
             }
             case ls::EventType::ShareAsk:
                 if (!g_bg) return;
-                if (b.notifyMessage) b.notifyMessage("", T("Someone wants your file"), e.text, "");
+                if (b.notifyMessage) b.notifyMessage("", T("Someone wants your file"), e.text, "", false);
                 else if (g_tray) g_tray(T("Someone wants your file"), e.text);
                 break;
             case ls::EventType::LinkRequest:
-                if (g_bg && b.notifyMessage) b.notifyMessage(e.peer, e.a, T("Link this device?"), "");
+                if (g_bg && b.notifyMessage) b.notifyMessage(e.peer, e.a, T("Link this device?"), "", false);
                 break;
             default:
                 break;

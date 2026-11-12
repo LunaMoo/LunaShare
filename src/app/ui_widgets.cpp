@@ -138,6 +138,35 @@ void DrawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float s, ImU32 col) {
                             ImVec2(c.x + cosf(a) * h * 0.85f, c.y + sinf(a) * h * 0.85f), col, t * 1.4f);
             }
             break;
+        case Icon::Lock:  // a padlock
+            dl->PathArcTo(P(0, -0.25f), h * 0.42f, 3.14159f, 6.28318f, 12);
+            dl->PathStroke(col, 0, t * 1.2f);
+            dl->AddLine(P(-0.42f, -0.25f), P(-0.42f, 0.05f), col, t * 1.2f);
+            dl->AddLine(P(0.42f, -0.25f), P(0.42f, 0.05f), col, t * 1.2f);
+            dl->AddRectFilled(P(-0.68f, 0.0f), P(0.68f, 0.85f), col, h * 0.14f);
+            break;
+        case Icon::Info:  // an "i" in a circle
+            dl->AddCircle(c, h * 0.82f, col, 24, t);
+            dl->AddCircleFilled(P(0, -0.38f), h * 0.12f, col);
+            dl->AddRectFilled(P(-0.09f, -0.12f), P(0.09f, 0.48f), col, h * 0.05f);
+            break;
+        case Icon::Palette:  // a painter's palette with dabs of paint
+            dl->AddCircleFilled(c, h * 0.82f, col, 24);
+            dl->AddCircleFilled(P(0.35f, 0.38f), h * 0.2f, IM_COL32(0, 0, 0, 255), 12);
+            dl->AddCircleFilled(P(-0.38f, -0.18f), h * 0.13f, IM_COL32(0, 0, 0, 160), 10);
+            dl->AddCircleFilled(P(0.0f, -0.45f), h * 0.13f, IM_COL32(0, 0, 0, 160), 10);
+            dl->AddCircleFilled(P(0.4f, -0.2f), h * 0.13f, IM_COL32(0, 0, 0, 160), 10);
+            dl->AddCircleFilled(P(-0.35f, 0.28f), h * 0.13f, IM_COL32(0, 0, 0, 160), 10);
+            break;
+        case Icon::Bell:  // a bell
+            dl->PathArcTo(P(0, -0.2f), h * 0.5f, 3.14159f, 6.28318f, 12);
+            dl->PathLineTo(P(0.5f, 0.35f));
+            dl->PathLineTo(P(0.75f, 0.55f));
+            dl->PathLineTo(P(-0.75f, 0.55f));
+            dl->PathLineTo(P(-0.5f, 0.35f));
+            dl->PathFillConvex(col);
+            dl->AddCircleFilled(P(0, 0.72f), h * 0.16f, col);
+            break;
         case Icon::Users:
             dl->AddCircleFilled(P(0, -0.35f), h * 0.32f, col);
             dl->PathArcTo(P(0, 0.85f), h * 0.7f, 3.4f, 6.0f, 16);
@@ -420,12 +449,51 @@ void Badge(const char* text, ImU32 bg) {
 void HelpMarker(const char* text) {
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
+    if (M().mobile) {  // a finger doesn't hover: a tap opens the text, a tap anywhere closes it
+        ImGui::PushID(text);
+        if (ImGui::IsItemClicked()) ImGui::OpenPopup("##help");
+        ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(vp->WorkSize.x * 0.9f, vp->WorkSize.y * 0.7f));
+        if (ImGui::BeginPopup("##help")) {
+            ImGui::PushTextWrapPos(vp->WorkSize.x * 0.85f);
+            ImGui::TextUnformatted(text);
+            ImGui::PopTextWrapPos();
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+        return;
+    }
     if (ImGui::BeginItemTooltip()) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
         ImGui::TextUnformatted(text);
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
+}
+
+bool Checkbox(const char* label, bool* v) {
+    ImGuiWindow* win = ImGui::GetCurrentWindow();
+    const char* end = ImGui::FindRenderedTextEnd(label);
+    float box = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+    float reserve = ImGui::GetFontSize() * 2.2f;  // room for a (?) after it
+    float avail = ImGui::GetContentRegionAvail().x;
+    bool autoSize = (win->Flags & ImGuiWindowFlags_AlwaysAutoResize) || (win->Flags & ImGuiWindowFlags_Popup) || win->AutoFitFramesX > 0;
+    if (autoSize || end == label || box + ImGui::CalcTextSize(label, end).x <= avail - reserve * 0.5f)
+        return ImGui::Checkbox(label, v);
+    ImGui::PushID(label);
+    bool changed = ImGui::Checkbox("##cb", v);
+    ImGui::SameLine(0, ImGui::GetStyle().ItemInnerSpacing.x);
+    float y = ImGui::GetCursorPosY();
+    ImGui::SetCursorPosY(y + ImGui::GetStyle().FramePadding.y);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::max(ImGui::GetFontSize() * 6, avail - box - reserve));
+    ImGui::TextUnformatted(label, end);
+    ImGui::PopTextWrapPos();
+    if (ImGui::IsItemClicked()) {
+        *v = !*v;
+        changed = true;
+    }
+    ImGui::PopID();
+    return changed;
 }
 
 void TouchScroll() {}  // kept for call sites; scrolling is handled globally by TouchScrollUpdate()

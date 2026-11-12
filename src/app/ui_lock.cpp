@@ -244,12 +244,6 @@ void App::DrawLockScreen() {
 // ---- Settings > App lock
 void App::DrawLockSettings(float h) {
     bool mobile = ui::M().mobile;
-    ImGui::SeparatorText(T("App lock"));
-    ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("%s", T("A PIN before LunaShare shows anything - when it starts and when you come back to it. Messages still "
-                                "arrive; notifications don't show their text. (It keeps out someone holding your unlocked device; the "
-                                "files are encrypted only with the option below.)"));
-    ImGui::PopTextWrapPos();
     bool on = LockOn(eng.settings);
     if (!on) {
         if (ImGui::Button(T("Set a PIN..."), ImVec2(mobile ? -1 : 0, h))) {
@@ -278,14 +272,14 @@ void App::DrawLockSettings(float h) {
         }
         ImGui::EndCombo();
     }
-    if (BioAvailable()) ch |= ImGui::Checkbox(T("Unlock with the fingerprint / face too"), &s.lockBio);
+    if (BioAvailable()) ch |= ui::Checkbox(T("Unlock with the fingerprint / face too"), &s.lockBio);
     if (ch) {
         eng.ApplySettings(s);
         edit.lockAfter = s.lockAfter;
         edit.lockBio = s.lockBio;
     }
     bool enc = eng.HistoryEncrypted();
-    if (ImGui::Checkbox(T("Encrypt the chat history with the PIN"), &enc)) {
+    if (ui::Checkbox(T("Encrypt the chat history with the PIN"), &enc)) {
         if (enc) {
             lockEncOpen = true;
             lockEncPin.clear();

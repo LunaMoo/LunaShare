@@ -38,7 +38,8 @@ struct HostBridge {
     std::function<void()> openAppSettings;  // Android: this app's page in the system settings (permissions)
     std::function<void(bool inCall)> callAudioMode;   // Android: MODE_IN_COMMUNICATION (earpiece routing, system AEC)
     // system notifications (Android) and running in the background
-    std::function<void(const std::string& key, const std::string& title, const std::string& text, const std::string& avatar)> notifyMessage;
+    // chat: a message of a chat (Android adds Reply / Mark as read to it)
+    std::function<void(const std::string& key, const std::string& title, const std::string& text, const std::string& avatar, bool chat)> notifyMessage;
     std::function<void(const std::string& key)> clearChatNotification;
     std::function<void(const std::string& key, const std::string& title, bool video, const std::string& avatar)> notifyCall;
     std::function<void()> cancelCallNotification;

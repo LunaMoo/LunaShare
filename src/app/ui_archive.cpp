@@ -232,10 +232,10 @@ void App::DrawChatHistoryPopup() {
     ImGui::TextDisabled("%s", T("Saves this chat to a compressed archive on this device. Files aren't copied: the messages keep their links, so "
                                 "files still on the disk open from a restored chat like before."));
     ImGui::PopTextWrapPos();
-    ImGui::Checkbox(T("Then clear the chat"), &histClear);
+    ui::Checkbox(T("Then clear the chat"), &histClear);
     if (histClear) {
         ImGui::Indent();
-        ImGui::Checkbox(T("Keep yesterday's and today's messages"), &histKeep);
+        ui::Checkbox(T("Keep yesterday's and today's messages"), &histKeep);
         ImGui::Unindent();
     }
     ImGui::BeginDisabled(count == 0);
@@ -250,7 +250,7 @@ void App::DrawChatHistoryPopup() {
     // ---- the archives
     auto list = eng.ChatArchives(histAll ? "" : histPeer);
     ImGui::SeparatorText(TF("Archives (%d)", (int)list.size()).c_str());
-    ImGui::Checkbox(T("Show the archives of all chats"), &histAll);
+    ui::Checkbox(T("Show the archives of all chats"), &histAll);
     float listH = std::min((mobile ? ui::M().rowH * 2.2f : ImGui::GetFrameHeight() * 2.6f) * (float)std::max<size_t>(1, list.size()),
                            vp->WorkSize.y * (mobile ? 0.36f : 0.32f));
     ImGui::BeginChild("##archlist", ImVec2(0, listH), ImGuiChildFlags_Borders);
@@ -403,7 +403,7 @@ void App::DrawChatSearch(const std::string& peer) {
         searchText.clear();
     }
     // all chats: a list of what's found elsewhere
-    ImGui::Checkbox(T("in all chats"), &searchAll);
+    ui::Checkbox(T("in all chats"), &searchAll);
     if (searchAll && !q.empty()) {
         struct Hit {
             std::string key, mid, text;

@@ -197,7 +197,7 @@ void App::TorrentPopups() {
                 if (!eng.OwnOnline(torrentAddDevice)) ImGui::TextDisabled("%s", T("It's offline: the link is kept and handed over when it comes online."));
             }
             if (here || !comps.empty()) {
-                ImGui::Checkbox(T("Choose the files first"), &torrentAddPick);
+                ui::Checkbox(T("Choose the files first"), &torrentAddPick);
                 if (ImGui::IsItemHovered() && !mobile)
                     ImGui::SetTooltip("%s", T("Nothing downloads until you pick the files (a magnet link first fetches the list)"));
             }
@@ -289,7 +289,7 @@ void App::TorrentPopups() {
             auto& f = g_files.files[i];
             ImGui::PushID((int)i);
             bool w = g_files.want[i];
-            if (ImGui::Checkbox("##w", &w)) g_files.want[i] = w;
+            if (ui::Checkbox("##w", &w)) g_files.want[i] = w;
             ImGui::SameLine();
             ImGui::TextUnformatted(f.path.c_str());
             ImGui::SameLine();
@@ -325,7 +325,7 @@ void App::TorrentPopups() {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 24));
         ImGui::TextUnformatted(TF("Remove \"%s\" from the list?", torrentRemoveName.c_str()).c_str());
         ImGui::PopTextWrapPos();
-        ImGui::Checkbox(torrentRemoveDevice.empty() ? T("Also delete its files") : T("Also delete its files on the computer"), &torrentRemoveFiles);
+        ui::Checkbox(torrentRemoveDevice.empty() ? T("Also delete its files") : T("Also delete its files on the computer"), &torrentRemoveFiles);
         if (ImGui::Button(T("Remove"), ImVec2(mobile ? ImGui::GetContentRegionAvail().x * 0.5f : 0, h))) {
             if (watchExtTorrent == torrentRemoveId && eng.watch.sid) eng.LeaveWatch();
             if (torrentRemoveDevice.empty()) Torrents().Remove(torrentRemoveId, torrentRemoveFiles);
@@ -378,7 +378,7 @@ void App::TorrentPopups() {
         }
         ImGui::SetNextItemWidth(iw);
         if (ImGui::InputInt(T("Port (0 = any)"), &s.torrentPort, 0)) ch = true;
-        if (ImGui::Checkbox(T("My other devices can add torrents here"), &s.torrentRemote)) ch = true;
+        if (ui::Checkbox(T("My other devices can add torrents here"), &s.torrentRemote)) ch = true;
         ImGui::SameLine();
         ui::HelpMarker(T("A phone linked to your account can hand a magnet link or .torrent file to this computer, see how far it is, get the "
                          "files sent when it's done, or watch them from here."));

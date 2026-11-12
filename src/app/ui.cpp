@@ -54,7 +54,7 @@ static void OpenPath(const std::string& p) {
     else OpenWithDefaultApp(p);
 }
 
-static void RevealPath(const std::string& p) {
+void RevealPath(const std::string& p) {
     if (Bridge().openFolder) Bridge().openFolder(p);
     else OpenInFileManager(p);
 }
@@ -1328,7 +1328,7 @@ void App::DrawMobile() {
     float rowH = ui::M().rowH;
     // ---- top bar
     bool root = screen == MScreen::Home || screen == MScreen::Transfers || screen == MScreen::History ||
-                screen == MScreen::Nearby || screen == MScreen::Settings;
+                screen == MScreen::Nearby || (screen == MScreen::Settings && settingsCat < 0);
     if (!root || !backStack.empty()) {
         if (ui::IconButton("back", Icon::Back, nullptr, rowH) || ImGui::IsKeyPressed(ImGuiKey_AppBack)) {
             if (!selMsgs.empty()) { selMsgs.clear(); selectionMode = false; }
@@ -1336,6 +1336,8 @@ void App::DrawMobile() {
             } else if (screen == MScreen::Gallery && !galleryAlbum.empty()) {
                 galleryAlbum.clear();
             } else if (screen == MScreen::Archives && ArchiveBack()) {
+            } else if (screen == MScreen::Settings && settingsCat >= 0) {
+                settingsCat = -1;  // a settings page: back to the list of them
             } else if (!backStack.empty()) { screen = backStack.back(); backStack.pop_back(); }
             else screen = MScreen::Home;
         }
@@ -1360,7 +1362,7 @@ void App::DrawMobile() {
         case MScreen::Archives: title = T("Archives"); break;
         case MScreen::Torrents: title = T("Torrents"); break;
         case MScreen::Nearby: title = T("Connect"); break;
-        case MScreen::Settings: title = T("Settings"); break;
+        case MScreen::Settings: title = settingsCat >= 0 ? SettingsTitle(settingsCat) : T("Settings"); break;
         case MScreen::Devices: title = T("Device"); break;
     }
     // chat: buttons on the right; the title gets what's left (shortened with "..."), buttons shrink on tiny screens
@@ -1927,6 +1929,7 @@ void App::DrawChat(const std::string& peer) {
         replyMid.clear();
         editMid.clear();
         chatInput.clear();
+        newMarkMid.clear();  // (answered: the "New messages" line has done its job)
         imeReset = true;
         Emoji().SetInputCursor(-1);
         if (!mobile) focusInput = true;
@@ -2138,6 +2141,15 @@ void App::DrawMessages(const std::string& peer) {
         return;
     }
     Conversation& cv = it->second;
+    if (lastMsgPeer != peer) {
+        // opened with unread messages: a "New messages" line above the first of them, scrolled to when there are many
+        newMarkMid.clear();
+        newMarkScroll = false;
+        int n = cv.unread;
+        for (int i = (int)cv.messages.size() - 1; i >= 0 && n > 0; i--)
+            if (!cv.messages[(size_t)i].outgoing && cv.messages[(size_t)i].kind != MsgKind::System && --n == 0) newMarkMid = cv.messages[(size_t)i].mid;
+        newMarkScroll = !newMarkMid.empty() && cv.unread > 4;
+    }
     if (cv.unread || cv.readPending) eng.MarkRead(peer);  // (sends read receipts)
     if (lastMsgPeer != peer || lastMsgCount != cv.messages.size()) {
         bool atBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 40;
@@ -2189,6 +2201,24 @@ void App::DrawMessages(const std::string& peer) {
             ImVec2 ts = ImGui::CalcTextSize(ds.c_str());
             ImGui::SetCursorPosX((avail - ts.x) * 0.5f);
             ImGui::TextDisabled("%s", ds.c_str());
+        }
+        if (!newMarkMid.empty() && m.mid == newMarkMid) {  // the first unread message
+            if (newMarkScroll) {
+                ImGui::SetScrollHereY(0.15f);
+                newMarkScroll = false;
+                scrollToBottom = false;
+                chatFollow = false;
+            }
+            const char* nm = T("New messages");
+            ImVec2 ts = ImGui::CalcTextSize(nm);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            float y = p.y + ts.y * 0.5f;
+            ImU32 col = ImGui::GetColorU32(ImGuiCol_CheckMark);
+            float cx = p.x + avail * 0.5f;
+            dl->AddLine(ImVec2(p.x, y), ImVec2(cx - ts.x * 0.5f - pad, y), col, 1.5f);
+            dl->AddLine(ImVec2(cx + ts.x * 0.5f + pad, y), ImVec2(p.x + avail, y), col, 1.5f);
+            dl->AddText(ImVec2(cx - ts.x * 0.5f, p.y), col, nm);
+            ImGui::Dummy(ImVec2(avail, ts.y));
         }
         if (m.kind == MsgKind::System) {
             ImGui::PushTextWrapPos(avail);
@@ -3063,7 +3093,7 @@ void App::DrawHistory() {
             auto& e = eng.history[(size_t)idx];
             ImGui::PushID(idx);
             bool sel = historySel.count(e.tid) > 0;
-            if (ImGui::Checkbox("##sel", &sel)) { if (sel) historySel.insert(e.tid); else historySel.erase(e.tid); }
+            if (ui::Checkbox("##sel", &sel)) { if (sel) historySel.insert(e.tid); else historySel.erase(e.tid); }
             ImGui::SameLine();
             ImGui::TextUnformatted(e.name.c_str());
             ImGui::TextDisabled("%s %s  -  %s  -  %s %s", e.outgoing ? T("Sent to") : T("From"), eng.PeerName(e.peer).c_str(), FormatBytes((double)e.size).c_str(),
@@ -3100,7 +3130,7 @@ void App::DrawHistory() {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 bool sel = historySel.count(e.tid) > 0;
-                if (ImGui::Checkbox("##sel", &sel)) { if (sel) historySel.insert(e.tid); else historySel.erase(e.tid); }
+                if (ui::Checkbox("##sel", &sel)) { if (sel) historySel.insert(e.tid); else historySel.erase(e.tid); }
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
                 bool exists = FileExists(e.path);
@@ -3218,7 +3248,7 @@ void App::DrawDeviceDetails(const std::string& peer) {
         ImGui::TextUnformatted(safety.size() > 18 ? safety.substr(18).c_str() : "");
         ImGui::PopFont();
         bool ver = d.verified;
-        if (ImGui::Checkbox(T("I compared it - mark as verified"), &ver)) eng.SetVerified(peer, ver);
+        if (ui::Checkbox(T("I compared it - mark as verified"), &ver)) eng.SetVerified(peer, ver);
         // or by QR code: each scans the other's
         if (ImGui::Button(T("Verify with QR codes..."), ImVec2(0, ui::M().mobile ? ui::M().rowH * 0.8f : 0))) {
             verifyQrOpen = true;
@@ -3231,8 +3261,8 @@ void App::DrawDeviceDetails(const std::string& peer) {
     }
     ImGui::Spacing();
     bool trusted = d.trusted, blocked = d.blocked;
-    if (ImGui::Checkbox(T("Trusted - accept files automatically"), &trusted)) eng.SetTrusted(peer, trusted);
-    if (ImGui::Checkbox(T("Blocked"), &blocked)) eng.SetBlocked(peer, blocked);
+    if (ui::Checkbox(T("Trusted - accept files automatically"), &trusted)) eng.SetTrusted(peer, trusted);
+    if (ui::Checkbox(T("Blocked"), &blocked)) eng.SetBlocked(peer, blocked);
     ImGui::Spacing();
     if (ImGui::BeginTable("devinfo", 2, ImGuiTableFlags_None)) {
         ImGui::TableSetupColumn("k", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 8.5f);
@@ -3411,7 +3441,7 @@ void App::DrawNearby() {
         ImGui::TextDisabled(T("Bluetooth is not available here (no adapter or not supported on %s yet)."), PlatformName());
     } else {
         bool bt = eng.settings.bluetooth;
-        if (ImGui::Checkbox(T("Accept Bluetooth connections"), &bt)) {
+        if (ui::Checkbox(T("Accept Bluetooth connections"), &bt)) {
             Settings s = eng.settings;
             s.bluetooth = bt;
             eng.ApplySettings(s);
@@ -3495,359 +3525,6 @@ void App::DrawNearby() {
 }
 
 // ============================================================================ settings
-
-void App::DrawSettings() {
-    settingsShownFrame = ImGui::GetFrameCount();
-    bool mobile = ui::M().mobile;
-    float h = mobile ? ui::M().rowH : 0;
-    ImGui::BeginChild("settings");
-    if (mobile) ui::TouchScroll();
-    bool changed = false;
-    float fieldW = mobile ? -1 : ImGui::GetFontSize() * 22;
-
-    DrawPrivateContacts(fieldW, h, changed);  // first: using / making an invite code is what new users need
-
-    ImGui::SeparatorText(T("Profile"));
-    DrawProfilePicture(h);
-    ImGui::TextUnformatted(T("Name shown to other devices"));
-    ImGui::SetNextItemWidth(fieldW);
-    ImGui::InputText("##dname", &edit.displayName);
-    if (ImGui::IsItemActive()) editDirty = true;
-    if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-
-    DrawAccountSettings(fieldW, h);
-    DrawLockSettings(h);
-
-    ImGui::SeparatorText(T("Internet"));
-    if (edit.wanFromInvite) {
-        // joined with someone's invite: their server's address isn't shown (nor its rooms and usernames)
-        std::string who = edit.wanLinks.empty() ? std::string() : edit.wanLinks[0].label;
-        ImGui::PushTextWrapPos(0);
-        if (who.empty()) ImGui::TextUnformatted(T("Connected to the internet through an invite."));
-        else ImGui::TextUnformatted(TF("Connected to the internet through %s's invite.", who.c_str()).c_str());
-        ImGui::PopTextWrapPos();
-        if (ImGui::Button(T("Use my own server instead"), ImVec2(0, h))) {
-            edit.wanServer.clear();
-            edit.wanEnabled = false;
-            edit.wanHidden = false;
-            edit.wanLinks.clear();
-            edit.wanFromInvite = false;
-            changed = true;
-        }
-        ui::HelpMarker(T("Removes the invite (and any other invites to the same server): you lose touch with those people "
-                       "over the internet, and can enter a server of your own."));
-    } else {
-    ImGui::TextUnformatted(T("Rendezvous server (optional)"));
-    ImGui::SetNextItemWidth(fieldW);
-    ImGui::InputTextWithHint("##wanserver", "home.example.com", &edit.wanServer);
-    if (ImGui::IsItemActive()) editDirty = true;
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        edit.wanEnabled = !edit.wanServer.empty();  // a server set = use it
-        changed = true;
-    }
-    }
-    if (!edit.wanFromInvite) ui::HelpMarker(T("Lets your devices find each other outside the local network. The server only introduces them; chat and "
-                   "files are end-to-end encrypted and go directly between the devices (through the server only when no direct "
-                   "path is possible). Leave empty for local network, hotspot and Bluetooth only."));
-    if (eng.settings.wanEnabled && !eng.settings.wanServer.empty()) {
-        ImGui::TextDisabled(T("Status: %s"), TDynamic(eng.WanStatus()).c_str());
-        std::string mp = eng.WanMappedEndpoint();
-        if (!mp.empty()) ImGui::TextDisabled(T("Reachable through the router at %s"), mp.c_str());
-    }
-
-    // running in the background: phones keep a connection (foreground service), computers can close to the tray
-    if (IsMobilePlatform()) {
-        if (ImGui::Checkbox(T("Keep running in the background"), &edit.backgroundRun)) {
-            changed = true;
-            if (Bridge().backgroundService) Bridge().backgroundService(edit.backgroundRun);
-        }
-        ui::HelpMarker(T("Messages and calls arrive while LunaShare is in the background (a small notification shows that it is connected). Uses a little battery."));
-        static double lastCheck = -10;
-        static bool restricted = false;
-        if (ImGui::GetTime() - lastCheck > 2) {
-            lastCheck = ImGui::GetTime();
-            restricted = Bridge().batteryRestricted && Bridge().batteryRestricted();
-        }
-        if (edit.backgroundRun && restricted) {
-            ImGui::PushTextWrapPos(0);
-            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1), "%s", T("Battery optimisation may cut the connection while the screen is off."));
-            ImGui::PopTextWrapPos();
-            if (ImGui::Button(T("Allow running in the background..."), ImVec2(mobile ? -1 : 0, h)) && Bridge().requestBatteryExemption)
-                Bridge().requestBatteryExemption();
-        }
-    } else {
-        changed |= ImGui::Checkbox(T("Keep running when the window is closed"), &edit.closeToTray);
-#if defined(_WIN32)
-        ui::HelpMarker(T("Closing the window keeps LunaShare connected for messages and calls (in the tray next to the clock). Quit it from the tray icon."));
-#else
-        ui::HelpMarker(T("Closing the window only minimises it, so LunaShare stays connected for messages and calls."));
-#endif
-    }
-
-    ImGui::SeparatorText(T("Received files"));
-    ImGui::TextUnformatted(T("Save received files to"));
-    ImGui::SetNextItemWidth(mobile ? -1 : fieldW);
-    ImGui::InputText("##dldir", &edit.downloadDir);
-    if (ImGui::IsItemActive()) editDirty = true;
-    if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-    if (!mobile) ImGui::SameLine();
-    if (ImGui::Button(T("Browse..."), ImVec2(0, h))) {
-        browseFor = BrowseFor::DownloadDir;
-        browser.Open(FileBrowser::Mode::SelectDir, T("Folder for received files"), edit.downloadDir);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(T("Open folder"), ImVec2(0, h))) RevealPath(edit.downloadDir);
-    if (assoc::Supported()) {  // "Open with" (desktops; Android always has it)
-        ImGui::SeparatorText(T("Opening files"));
-        static int assocState = -1;  // (asked once, not every frame)
-        if (assocState < 0) assocState = assoc::Registered() ? 1 : 0;
-        bool on = assocState == 1;
-        if (ImGui::Checkbox(T("Offer LunaShare for pictures, movies, songs, archives and comics"), &on)) {
-            std::string err;
-            if (on) {
-                if (!assoc::Register(err)) {
-                    infoMessage = TF("Couldn't register LunaShare: %s", err.c_str());
-                    openInfo = true;
-                }
-            } else {
-                assoc::Unregister();
-            }
-            assocState = assoc::Registered() ? 1 : 0;
-        }
-        ImGui::SameLine();
-        ui::HelpMarker(T("LunaShare shows up in the file manager's \"Open with\" for these files (for you only). Started again while it "
-                         "runs, it shows them in the running one. To open them with LunaShare on a double click, pick it as the "
-                         "default app for them."));
-        if (on && assoc::CanOpenSystemSettings() && ImGui::Button(T("Default apps..."), ImVec2(0, h))) assoc::OpenSystemSettings();
-    }
-    ImGui::SeparatorText(T("Appearance"));
-    int layout = (int)edit.layout;
-    ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::Combo("##layout", &layout, TItems("Layout: automatic\0Layout: desktop\0Layout: phone (vertical, big buttons)\0"))) {
-        edit.layout = (UiLayout)layout;
-        changed = true;
-        styleGeneration++;
-    }
-    ImGui::SetNextItemWidth(fieldW);
-    float sc = edit.uiScale <= 0 ? 0.0f : edit.uiScale;
-    if (ImGui::SliderFloat("##scale", &sc, 0.0f, 3.0f, sc < 0.5f ? T("UI scale: automatic") : T("UI scale: %.2fx"))) {
-        edit.uiScale = sc < 0.5f ? 0.0f : sc;
-        editDirty = true;
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) { changed = true; styleGeneration++; }
-    ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::Combo("##theme", &edit.theme, TItems("Theme: dark\0Theme: light\0Theme: classic\0Theme: twilight\0Theme: moonlight\0"))) { changed = true; styleGeneration++; }
-    {
-        // language: automatic (the system's) or one of the translations
-        const auto& langs = Languages();
-        std::string cur = T("Language: automatic");
-        for (auto& l : langs)
-            if (edit.language == l.code) cur = std::string(T("Language: ")) + l.name;
-        ImGui::SetNextItemWidth(fieldW);
-        if (ImGui::BeginCombo("##lang", cur.c_str())) {
-            auto pick = [&](const std::string& code) {
-                edit.language = code;
-                SetLanguage(code);
-                changed = true;
-            };
-            if (ImGui::Selectable(T("Automatic (system language)"), edit.language.empty(), 0, ImVec2(0, h))) pick("");
-            for (auto& l : langs)
-                if (ImGui::Selectable(l.name, edit.language == l.code, 0, ImVec2(0, h))) pick(l.code);
-            ImGui::EndCombo();
-        }
-    }
-    ImGui::TextDisabled("%s", Emoji().Available() ? T("Colour emoji: on") : T("Colour emoji: off (module not installed)"));
-
-    ImGui::Spacing();
-    // everything below works automatically: hidden until asked for
-    static bool advEnv = getenv("LUNASHARE_ADVANCED") != nullptr;  // dev: start with Advanced open (screenshots)
-    if (advEnv) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-    if (ImGui::CollapsingHeader(T("Advanced"), ImGuiTreeNodeFlags_None)) {
-        ImGui::SeparatorText(T("Receiving"));
-        changed |= ImGui::Checkbox(T("Automatically accept files from trusted devices"), &edit.autoAcceptTrusted);
-        changed |= ImGui::Checkbox(T("Automatically accept files from everyone"), &edit.autoAcceptAll);
-        ui::HelpMarker(T("Anyone on your network could send you files without asking. Only enable on networks you trust."));
-        ImGui::BeginDisabled(!edit.autoAcceptTrusted && !edit.autoAcceptAll);
-        ImGui::Indent();
-        {
-            const int sizes[] = {0, 10, 50, 100, 500, 1024, 4096};
-            auto name = [](int mb) {
-                return mb == 0 ? std::string(T("any size")) : mb >= 1024 ? TF("up to %d GB", mb / 1024) : TF("up to %d MB", mb);
-            };
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(T("Without asking:"));
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-            if (ImGui::BeginCombo("##aamax", name(edit.autoAcceptMaxMB).c_str())) {
-                for (int mb : sizes)
-                    if (ImGui::Selectable(name(mb).c_str(), edit.autoAcceptMaxMB == mb)) {
-                        edit.autoAcceptMaxMB = mb;
-                        changed = true;
-                    }
-                ImGui::EndCombo();
-            }
-            ImGui::SameLine();
-            ui::HelpMarker(T("A bigger file asks first, even from a trusted device."));
-            if (Bridge().isMetered) changed |= ImGui::Checkbox(T("On mobile data, always ask first"), &edit.autoAcceptNotMetered);
-        }
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-        changed |= ImGui::Checkbox(T("Resume interrupted transfers automatically"), &edit.autoResume);
-        ImGui::SeparatorText(T("Sending"));
-        changed |= ImGui::Checkbox(T("Send photos smaller"), &edit.photosSmaller);
-        ImGui::SameLine();
-        ui::HelpMarker(T("Photos (JPEG, PNG) over 0.7 MB go as a JPEG at most 2048 pixels wide - a few times smaller, still sharp on "
-                         "a screen. Their EXIF data (camera, location) isn't copied. Videos and other files go as they are."));
-
-        ImGui::SeparatorText(T("Network"));
-        changed |= ImGui::Checkbox(T("Find devices on the local network"), &edit.discovery);
-        ImGui::BeginDisabled(!edit.discovery);
-        ImGui::Indent();
-        changed |= ImGui::Checkbox(T("Bonjour / mDNS"), &edit.mdns);
-        ui::HelpMarker(T("Standard service discovery (_lunashare._tcp). Works on most routers and is the only method iPhones/iPads can use."));
-        changed |= ImGui::Checkbox(T("UDP broadcast beacons"), &edit.broadcast);
-        ui::HelpMarker(T("Fast discovery that also works on networks without multicast. Not available on iOS."));
-        ImGui::Unindent();
-        ImGui::EndDisabled();
-        changed |= ImGui::Checkbox(T("Connect to found devices automatically"), &edit.autoConnect);
-        int port = edit.tcpPort;
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt(T("TCP port"), &port, 0)) { edit.tcpPort = (uint16_t)std::clamp(port, 1, 65535); editDirty = true; }
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ImGui::SameLine();
-        ImGui::TextDisabled(T("(listening on %u)"), eng.boundPort);
-
-        ImGui::SeparatorText(T("Transfers"));
-        int limit = (int)(edit.speedLimitKBs / 1024);
-        ImGui::SetNextItemWidth(fieldW);
-        if (ImGui::SliderInt("##limit", &limit, 0, 200, limit == 0 ? T("Upload speed: unlimited") : T("Upload limit: %d MB/s"))) { edit.speedLimitKBs = (int64_t)limit * 1024; changed = true; }
-        ImGui::SetNextItemWidth(fieldW);
-        changed |= ImGui::SliderInt("##par", &edit.maxParallel, 1, 8, T("Files at once per device: %d"));
-        ImGui::SetNextItemWidth(fieldW);
-        changed |= ImGui::SliderInt("##chunk", &edit.chunkKB, 16, 2048, T("Chunk size: %d KB"), ImGuiSliderFlags_Logarithmic);
-
-        DrawCallSettings(fieldW, h, changed);
-
-        ImGui::SeparatorText(T("Internet"));
-        bool invited = edit.wanFromInvite;
-        if (!invited) {
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", T("Devices that use the same server, room name and password see each other. Without a room name, every "
-                            "device on the server is in one shared room - set a name and password to keep your devices to yourself."));
-        ImGui::PopTextWrapPos();
-        }
-        changed |= ImGui::Checkbox(T("Use the rendezvous server"), &edit.wanEnabled);
-        ImGui::BeginDisabled(!edit.wanEnabled);
-        auto wanField = [&](const char* label, const char* hint, std::string* v, ImGuiInputTextFlags f) {
-            ImGui::TextUnformatted(label);
-            ImGui::SetNextItemWidth(fieldW);
-            ImGui::InputTextWithHint((std::string("##") + label).c_str(), hint, v, f);
-            if (ImGui::IsItemActive()) editDirty = true;
-            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        };
-        if (!invited) {
-            wanField(T("Room name"), T("family"), &edit.wanRoom, 0);
-            wanField(T("Room password"), T("shared by your devices"), &edit.wanPassword, ImGuiInputTextFlags_Password);
-        }
-        changed |= ImGui::Checkbox(T("Relay through the server when a direct connection fails"), &edit.wanRelay);
-        ui::HelpMarker(T("Some networks can't be reached directly at all (mobile data and other carrier-grade NAT on both sides, "
-                       "strict firewalls). The server then passes the data along. It stays end-to-end encrypted, the server can't read it."));
-        changed |= ImGui::Checkbox(T("Group chats and calls through the server"), &edit.groupsViaServer);
-        ui::HelpMarker(T("People in your groups whom you don't know otherwise don't connect to your device directly, so they don't "
-                       "learn your internet address. Messages go through the server's mailbox and calls through the server, "
-                       "end-to-end encrypted. In a group call everyone also sends their voice and video only once, to the "
-                       "server, instead of to every person - easier on phones."));
-        changed |= ImGui::Checkbox(T("Ask the router for a port mapping (UPnP / NAT-PMP)"), &edit.wanNatPmp);
-        ui::HelpMarker(T("Most home routers allow this automatically. It makes direct connections work behind routers that change the "
-                       "port for every destination."));
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt(T("Fixed local UDP port"), &edit.wanLocalPort, 0)) { edit.wanLocalPort = std::clamp(edit.wanLocalPort, 0, 65535); editDirty = true; }
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        if (ImGui::InputInt(T("Port forwarded on the router"), &edit.wanForwardedPort, 0)) { edit.wanForwardedPort = std::clamp(edit.wanForwardedPort, 0, 65535); editDirty = true; }
-        if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
-        ui::HelpMarker(T("Only if you forward a UDP port on your router to this device by hand: the local port above, the external port here."));
-        ImGui::EndDisabled();
-        if (eng.settings.wanEnabled) {
-            std::string ep = eng.WanPublicEndpoint();
-            if (!ep.empty()) ImGui::TextDisabled(T("Seen by the server as %s"), ep.c_str());
-            if (!invited && ImGui::Button(T("Copy room hash (for the server's allow-list)"), ImVec2(0, h)))
-                ImGui::SetClipboardText(RoomHash(eng.settings.wanRoom, eng.settings.wanPassword).c_str());
-        }
-        if (!edit.wanFromInvite) {
-            changed |= ImGui::Checkbox(T("Private mode: don't list me in the room"), &edit.wanHidden);
-            ui::HelpMarker(T("Others in the room don't see this device. You still see them and can contact them; your own devices "
-                           "and people with one of your invite codes still find you."));
-        }
-        if (eng.WanServerLacksLinks())
-            ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s", T("The server is too old for private contacts: update it."));
-
-
-        ImGui::SeparatorText(T("Bluetooth"));
-        changed |= ImGui::Checkbox(T("Accept Bluetooth connections##s"), &edit.bluetooth);
-    #if defined(__linux__) && !defined(__ANDROID__)
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8);
-        changed |= ImGui::SliderInt(T("RFCOMM channel"), &edit.btChannel, 1, 30);
-        ui::HelpMarker(T("Linux uses a fixed RFCOMM channel. Use the same channel on both Linux machines."));
-    #endif
-
-        ImGui::SeparatorText(T("History & privacy"));
-        changed |= ImGui::Checkbox(T("Keep chat and shared-file history"), &edit.keepHistory);
-        if (ImGui::Button(T("Clear shared files history"), ImVec2(0, h))) eng.ClearHistory();
-
-        ImGui::SeparatorText(T("Backup / move to another device"));
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextDisabled("%s", T("Exports all settings plus your list of known devices with their nicknames, trust and block state, the "
-                                    "music playlists, folders and sound settings, and where you stopped in movies."));
-        ImGui::PopTextWrapPos();
-        ImGui::Checkbox(T("Include chat & shared files history"), &exportHistory);
-        ImGui::Checkbox(T("Include this device's identity (only for restoring THIS device)"), &exportIdentity);
-        if (ui::IconTextButton(T("Export settings..."), Icon::Up, ImVec2(0, h))) {
-            browseFor = BrowseFor::Export;
-            std::string name = "lunashare-settings-" + FormatTime(NowMs(), true).substr(0, 10) + ".json";
-            browser.Open(FileBrowser::Mode::SaveFile, T("Export settings"), eng.settings.downloadDir, name, ".json");
-        }
-        ImGui::SameLine();
-        if (ui::IconTextButton(T("Import settings..."), Icon::Down, ImVec2(0, h))) {
-            browseFor = BrowseFor::Import;
-            browser.Open(FileBrowser::Mode::OpenFile, T("Import settings"), eng.settings.downloadDir, "", ".json");
-        }
-        ImGui::Checkbox(T("When importing, also take over the device identity"), &importIdentity);
-
-    }
-
-    ImGui::SeparatorText(T("About"));
-    ImGui::TextDisabled(T("LunaShare %s  -  %s  -  protocol v%d"), LUNASHARE_VERSION, PlatformName(), kProtocolVersion);
-    {
-        Settings us = eng.settings;
-        if (ImGui::Checkbox(T("Check for a new version once a day"), &us.updateCheck)) {
-            eng.ApplySettings(us);
-            edit.updateCheck = us.updateCheck;
-        }
-        ImGui::SameLine();
-        ui::HelpMarker(T("Asks GitHub (where LunaShare is published) about the newest release - nothing else is sent, and nothing is "
-                         "downloaded by itself: a newer version shows a window with a button to its download page."));
-        if (ImGui::Button(T("Check now"), ImVec2(0, h))) {
-            updateAsked = true;
-            UpdateCheckNow();
-        }
-        if (!updateTag.empty() && UpdateIsNewer(updateTag, LUNASHARE_VERSION)) {
-            ImGui::SameLine();
-            if (ImGui::Button(TF("Get %s", updateTag.c_str()).c_str(), ImVec2(0, h))) SDL_OpenURL(updateUrl.c_str());
-        }
-    }
-    ImGui::TextDisabled(T("Settings folder: %s"), (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());
-    ImGui::TextDisabled("%s", T("Every file is hashed with SHA-256 before sending and again after receiving; transfers can be paused, resumed, and survive restarts."));
-    ImGui::TextDisabled("%s", T("All connections are end-to-end encrypted (X25519 key exchange, XChaCha20-Poly1305, EdDSA device keys pinned on first contact)."));
-    ImGui::TextDisabled(T("This device's key fingerprint: %s"), KeyFingerprint(eng.MyPublicKey()).c_str());
-    ImGui::Dummy(ImVec2(0, h));
-    ImGui::EndChild();
-
-    if (changed) {
-        eng.ApplySettings(edit);
-        editDirty = false;
-    }
-}
 
 // ============================================================================ popups & toasts
 
@@ -4773,12 +4450,12 @@ void App::DrawCameraPanel() {
         Media().ApplyVideoQuality();
         camCtlTime = -1;
     }
-    if (ImGui::Checkbox(T("Lower quality when slow"), &s.callVideoAdaptive)) {
+    if (ui::Checkbox(T("Lower quality when slow"), &s.callVideoAdaptive)) {
         eng.ApplySettings(s);
         edit.callVideoAdaptive = s.callVideoAdaptive;
         Media().ApplyVideoQuality();
     }
-    if (ImGui::Checkbox(T("My picture in full quality"), &s.callFullPreview)) {
+    if (ui::Checkbox(T("My picture in full quality"), &s.callFullPreview)) {
         eng.ApplySettings(s);
         edit.callFullPreview = s.callFullPreview;
         Media().RestartCamera();  // the self-view size is chosen when the camera starts
@@ -4806,7 +4483,7 @@ void App::DrawCameraPanel() {
     bool aeAuto = !ae || ae->value > 0.5f;
     if (ae) {
         bool v = aeAuto;
-        if (ImGui::Checkbox(T("Automatic exposure"), &v)) set(ae, v ? 1.f : 0.f);
+        if (ui::Checkbox(T("Automatic exposure"), &v)) set(ae, v ? 1.f : 0.f);
         aeAuto = v;
     }
     if (LsvControl* ev = find(LSV_CTL_EXPOSURE_COMP); ev && aeAuto) {
@@ -4832,7 +4509,7 @@ void App::DrawCameraPanel() {
     bool afAuto = !af || af->value > 0.5f;
     if (af) {
         bool v = afAuto;
-        if (ImGui::Checkbox(T("Automatic focus"), &v)) set(af, v ? 1.f : 0.f);
+        if (ui::Checkbox(T("Automatic focus"), &v)) set(af, v ? 1.f : 0.f);
         afAuto = v;
     }
     if (LsvControl* fo = find(LSV_CTL_FOCUS); fo && !afAuto) {
@@ -4858,11 +4535,11 @@ void App::DrawCameraPanel() {
     }
     if (LsvControl* t = find(LSV_CTL_TORCH)) {
         bool v = t->value > 0.5f;
-        if (ImGui::Checkbox(T("Flashlight"), &v)) set(t, v ? 1.f : 0.f);
+        if (ui::Checkbox(T("Flashlight"), &v)) set(t, v ? 1.f : 0.f);
     }
     if (LsvControl* st = find(LSV_CTL_STABILIZATION)) {
         bool v = st->value > 0.5f;
-        if (ImGui::Checkbox(T("Stabilization"), &v)) set(st, v ? 1.f : 0.f);
+        if (ui::Checkbox(T("Stabilization"), &v)) set(st, v ? 1.f : 0.f);
     }
     ImGui::Separator();
     LsvStats vs = Media().VideoStats();
@@ -4986,10 +4663,10 @@ void App::AudioCallControls(float fieldW, float h, bool& changed) {
     };
     deviceCombo("Microphone", true, edit.callInputDevice);
     deviceCombo("Speaker", false, edit.callOutputDevice);
-    changed |= ImGui::Checkbox(T("Echo cancellation"), &edit.callEchoCancel);
+    changed |= ui::Checkbox(T("Echo cancellation"), &edit.callEchoCancel);
     ui::HelpMarker(T("Removes your speaker's sound from the microphone so the other side does not hear themselves. Keep it on unless you use headphones."));
-    changed |= ImGui::Checkbox(T("Noise suppression"), &edit.callNoiseSuppress);
-    changed |= ImGui::Checkbox(T("Automatic microphone level"), &edit.callAutoGain);
+    changed |= ui::Checkbox(T("Noise suppression"), &edit.callNoiseSuppress);
+    changed |= ui::Checkbox(T("Automatic microphone level"), &edit.callAutoGain);
     int kbps = edit.callBitrate / 1000;
     ImGui::SetNextItemWidth(fieldW);
     if (ImGui::SliderInt("##callbr", &kbps, 16, 128, T("Voice quality: %d kbps"))) { edit.callBitrate = kbps * 1000; editDirty = true; }
@@ -5046,11 +4723,6 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
         i.room = roomName(l.room);
         return MakeInviteCode(i);
     };
-    ImGui::SeparatorText(T("Invites"));
-    ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("%s", T("Invite people with a code instead of sharing the room: each of them can reach you through the "
-                                "server, and they only see each other if you invite them into the same invite room."));
-    ImGui::PopTextWrapPos();
     ImGui::SetNextItemWidth(fieldW * 0.6f);
     ImGui::InputTextWithHint("##inviteCode", T("invite code you got (LSI1-...)"), &code);
     if (ImGui::GetContentRegionAvail().x - ImGui::GetItemRectSize().x > ImGui::CalcTextSize(T("Use code")).x + 40) ImGui::SameLine();
@@ -5192,7 +4864,6 @@ void App::DrawPrivateContacts(float fieldW, float h, bool& changed) {
 }
 
 void App::DrawCallSettings(float fieldW, float h, bool& changed) {
-    ImGui::SeparatorText(T("Calls"));
     if (!Media().Available()) {
         ImGui::PushTextWrapPos(0);
         ImGui::TextDisabled(T("Voice calls are an optional module and are not installed (%s). To enable them, put the "
@@ -5206,17 +4877,17 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     if (Media().VideoAvailable()) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker(T("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call."));
-        changed |= ImGui::Checkbox(T("Lower video quality automatically when the connection is slow"), &edit.callVideoAdaptive);
-        changed |= ImGui::Checkbox(T("Show my own picture in full quality"), &edit.callFullPreview);
-        ui::HelpMarker(T("Your self-view (in calls and when recording a video message) in the camera's full size and frame rate, like "
-                       "the recording, instead of a lighter preview. Uses a bit more battery."));
+        changed |= ui::Checkbox(T("Lower video quality automatically when the connection is slow"), &edit.callVideoAdaptive);
         ui::HelpMarker(T("Keeps the picture smooth: less bitrate first, then a lower frame rate and a smaller picture while the "
                        "connection is slow, back up when it recovers."));
-        changed |= ImGui::Checkbox(T("Use only H.264 (if HEVC/AV1 video shows problems)"), &edit.callVideoH264Only);
+        changed |= ui::Checkbox(T("Show my own picture in full quality"), &edit.callFullPreview);
+        ui::HelpMarker(T("Your self-view (in calls and when recording a video message) in the camera's full size and frame rate, like "
+                       "the recording, instead of a lighter preview. Uses a bit more battery."));
+        changed |= ui::Checkbox(T("Use only H.264 (if HEVC/AV1 video shows problems)"), &edit.callVideoH264Only);
         if (Media().VcamAvailable()) {
             bool v = edit.virtualCamera;
             ImGui::BeginDisabled(Media().VcamBusy());
-            if (ImGui::Checkbox(T("Virtual camera: use received video as a webcam (\"LunaShare Camera\")"), &v)) {
+            if (ui::Checkbox(T("Virtual camera: use received video as a webcam (\"LunaShare Camera\")"), &v)) {
                 edit.virtualCamera = v;
                 changed = true;
                 Media().SetVirtualCamera(v);

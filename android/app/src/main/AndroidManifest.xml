@@ -117,6 +117,7 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the connection to the user's own LunaShare server so messages and calls arrive while the app is in the background" />
         </service>
         <receiver android:name="org.lunamoo.lunashare.CallActionReceiver" android:exported="false" />
+        <receiver android:name="org.lunamoo.lunashare.NotifyActionReceiver" android:exported="false" />
         <service
             android:name="org.lunamoo.lunashare.MusicService"
             android:exported="false"

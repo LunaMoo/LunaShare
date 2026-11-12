@@ -239,11 +239,15 @@ void AndroidBridgeInit(ls::Engine* engine) {
     }
     NotifyV("setNativeRunning", "(Z)V", (jboolean) true);
     auto str = [](JNIEnv* e, const std::string& s) { return e->NewStringUTF(s.c_str()); };
-    b.notifyMessage = [str](const std::string& key, const std::string& title, const std::string& text, const std::string& av) {
+    b.notifyMessage = [str](const std::string& key, const std::string& title, const std::string& text, const std::string& av, bool chat) {
         JNIEnv* e = Env();
-        jstring a = str(e, key), t = str(e, title), x = str(e, text), v = str(e, av);
-        NotifyV("message", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", a, t, x, v);
+        // a chat's message: Reply and Mark as read under it (labels in the UI's language; none while the app lock is on)
+        jstring a = str(e, key), t = str(e, title), x = str(e, text), v = str(e, av), rl = str(e, chat && !key.empty() ? T("Reply") : ""),
+                ml = str(e, chat && !key.empty() ? T("Mark as read") : ""), me = str(e, T("You"));
+        NotifyV("message", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+                a, t, x, v, rl, ml, me);
         e->DeleteLocalRef(a); e->DeleteLocalRef(t); e->DeleteLocalRef(x); e->DeleteLocalRef(v);
+        e->DeleteLocalRef(rl); e->DeleteLocalRef(ml); e->DeleteLocalRef(me);
     };
     b.clearChatNotification = [str](const std::string& key) {
         JNIEnv* e = Env();
@@ -478,6 +482,14 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnInte
         return;
     }
     notify::Push({what == "ANSWER" ? "answer" : what == "CALL" ? "call" : what == "UNLOCK" ? "unlock" : "open", key});
+}
+
+// Reply / Mark as read under a message's notification (NotifyActionReceiver.java; the Java main thread)
+JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeQuickReply(JNIEnv* env, jclass, jstring jkey, jstring jtext) {
+    std::string key = JStr(env, jkey), text = JStr(env, jtext);
+    if (!g_engine || key.empty()) return;
+    if (!text.empty()) g_engine->SendChat(key, text);
+    g_engine->MarkRead(key);  // (answering it = read it)
 }
 
 // the music notification, lock screen, headset buttons, audio focus (see MusicService.java)

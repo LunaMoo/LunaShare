@@ -121,6 +121,7 @@ public class LunaShareActivity extends SDLActivity {
     static native void nativeOnHotspot(boolean active, String ssid, String pass, String error);
     static native void nativeOnError(String message);
     static native void nativeOnIntent(String action, String key);  // a notification was tapped (or "decline")
+    static native void nativeQuickReply(String key, String text);  // Reply / Mark as read (text empty) under a message's notification
     static native void nativeMusic(int cmd, long arg);             // the music notification / lock screen / headset buttons
     static Context appCtx;
 

@@ -680,7 +680,7 @@ void App::MusicSoundPopup() {
     bool ch = false;
     float h = mobile ? ui::M().rowH * 0.8f : 0;
     ImGui::SeparatorText(T("Equalizer"));
-    ch |= ImGui::Checkbox(T("On"), &s.eqOn);
+    ch |= ui::Checkbox(T("On"), &s.eqOn);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 9);
     std::string cur = s.preset.empty() ? std::string(T("Custom")) : std::string(T(s.preset.c_str()));
@@ -735,7 +735,7 @@ void App::MusicSoundPopup() {
     if (!s.eqOn) ImGui::EndDisabled();
 
     ImGui::SeparatorText(T("Volume"));
-    ch |= ImGui::Checkbox(T("Even out the volume between songs"), &s.level);
+    ch |= ui::Checkbox(T("Even out the volume between songs"), &s.level);
     ImGui::PushTextWrapPos(0);
     ImGui::TextDisabled("%s", T("Uses the songs' ReplayGain; songs without it are measured the first time they play through."));
     ImGui::PopTextWrapPos();
@@ -751,7 +751,7 @@ void App::MusicSoundPopup() {
             l.crossfade = xf;  // (shown at once; sent when let go)
         if (ImGui::IsItemDeactivatedAfterEdit()) eng.ListenControl("crossfade", l.crossfade);
         if (rx) ImGui::EndDisabled();
-        if (ImGui::Checkbox(T("Remix: only a part of every song"), &rx)) eng.ListenControl("remix", rx ? 1 : 0);
+        if (ui::Checkbox(T("Remix: only a part of every song"), &rx)) eng.ListenControl("remix", rx ? 1 : 0);
         ImGui::TextDisabled("%s", T("skips the beginnings and ends, flowing from part to part"));
         if (l.remix) {
             const int lens[] = {30, 45, 60, 90};
@@ -779,13 +779,13 @@ void App::MusicSoundPopup() {
     ImGui::SetNextItemWidth(mobile ? -1 : ImGui::GetFontSize() * 16);
     ch |= ImGui::SliderInt("##xf", &s.crossfade, 0, 12, s.crossfade ? T("smooth transition: %d s") : T("smooth transition: off"));
     if (s.crossfade == 0) {
-        ch |= ImGui::Checkbox(T("No gap between songs"), &s.gapless);
+        ch |= ui::Checkbox(T("No gap between songs"), &s.gapless);
         ImGui::SameLine();
         ui::HelpMarker(T("The next song is ready a few seconds early and starts the very moment this one ends - albums recorded "
                          "as one piece (live, mixes) play on without a click."));
     }
     if (s.remix) ImGui::EndDisabled();
-    ch |= ImGui::Checkbox(T("Remix: only a part of every song"), &s.remix);
+    ch |= ui::Checkbox(T("Remix: only a part of every song"), &s.remix);
     ImGui::TextDisabled("%s", T("skips the beginnings and ends, flowing from part to part"));
     if (s.remix) {
         const int lens[] = {30, 45, 60, 90};
@@ -870,7 +870,7 @@ void App::DrawMusic() {
         ImGui::SameLine();
         if (ImGui::Button(SleepLabel().c_str())) sleepOpen = true;
         ImGui::SameLine();
-        if (ImGui::Checkbox(T("Select"), &musicPick.selecting) && !musicPick.selecting) musicPick.sel.clear();
+        if (ui::Checkbox(T("Select"), &musicPick.selecting) && !musicPick.selecting) musicPick.sel.clear();
         if (!eng.listen.sid) {
             ImGui::SameLine();
             if (ImGui::Button(T("Listen together..."))) musicListenOpen = true;

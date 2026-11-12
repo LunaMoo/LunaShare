@@ -20,14 +20,53 @@ static void CenterNext(float wFrac) {
     else if (wFrac > 0) ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x * wFrac, 0), ImGuiCond_Appearing);
 }
 
-void App::DrawAccountSettings(float fieldW, float h) {
+void App::DrawAccountSettings(float fieldW, float h, int part) {
     bool mobile = ui::M().mobile;
     float bw = mobile ? -1 : 0;
-    ImGui::SeparatorText(T("Your account"));
-    ImGui::PushTextWrapPos(0);
-    ImGui::TextDisabled("%s", T("Your account belongs to you, not to a server. Link your phone and computer to it: messages then reach all "
-                                "of them and your contacts see one person."));
-    ImGui::PopTextWrapPos();
+    if (part == 1) {  // sync between my devices
+        Settings s = eng.settings;
+        if (ui::Checkbox(T("The same playlists and settings on my devices"), &s.syncOwn)) {
+            eng.ApplySettings(s);
+            edit.syncOwn = s.syncOwn;
+        }
+        ui::HelpMarker(T("Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's "
+                         "options, silent chats and the language follow you to your other linked devices. A playlist changed on two "
+                         "devices: the later change counts. Songs are found by their name and tags, wherever they are on each device."));
+        s = eng.settings;
+        if (ui::Checkbox(T("Share the clipboard with my devices"), &s.clipShare)) {
+            eng.ApplySettings(s);
+            edit.clipShare = s.clipShare;
+        }
+        ui::HelpMarker(T("Text copied on one of your linked devices can be pasted on the others (while LunaShare is open on both; "
+                         "on a phone, while it's in front). Off by default: a clipboard often holds passwords."));
+        ImGui::Spacing();
+        DrawFolderSyncSettings(h);
+        return;
+    }
+    if (part == 2) {  // backup of the account
+        if (!eng.settings.accountBackedUp) {
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1),
+                               "%s", T("Make a backup: if you lose all your devices, only the recovery phrase or a backup file can bring your account back."));
+            ImGui::PopTextWrapPos();
+        }
+        if (ImGui::Button(T("Recovery phrase..."), ImVec2(bw, h))) {
+            phraseShown = eng.RecoveryPhrase();
+            openPhrase = true;
+        }
+        if (!mobile) ImGui::SameLine();
+        if (ImGui::Button(T("Save backup file..."), ImVec2(bw, h))) {
+            browseFor = BrowseFor::BackupSave;
+            browser.Open(FileBrowser::Mode::SaveFile, T("Save account backup"), eng.settings.downloadDir, "lunashare-account.lunabackup", ".lunabackup");
+        }
+        if (!mobile) ImGui::SameLine();
+        if (ImGui::Button(T("Restore account..."), ImVec2(bw, h))) {
+            restoreBuf.clear();
+            accountError.clear();
+            openRestore = true;
+        }
+        return;
+    }
     std::string me = eng.settings.deviceId;
     for (auto& ad : eng.settings.accountDevices) {
         ImGui::PushID(ad.id.c_str());
@@ -55,47 +94,6 @@ void App::DrawAccountSettings(float fieldW, float h) {
     if (ImGui::Button(T("Link another device..."), ImVec2(fieldW > 0 ? fieldW : -1, h))) {
         openLinkPick = true;
         linkTarget.clear();
-    }
-    {
-        Settings s = eng.settings;
-        if (ImGui::Checkbox(T("The same playlists and settings on my devices"), &s.syncOwn)) {
-            eng.ApplySettings(s);
-            edit.syncOwn = s.syncOwn;
-        }
-        ImGui::SameLine();
-        ui::HelpMarker(T("Music playlists, the sound settings (equalizer, transitions, remix, volume levelling), the movie player's "
-                         "options, silent chats and the language follow you to your other linked devices. A playlist changed on two "
-                         "devices: the later change counts. Songs are found by their name and tags, wherever they are on each device."));
-        s = eng.settings;
-        if (ImGui::Checkbox(T("Share the clipboard with my devices"), &s.clipShare)) {
-            eng.ApplySettings(s);
-            edit.clipShare = s.clipShare;
-        }
-        ImGui::SameLine();
-        ui::HelpMarker(T("Text copied on one of your linked devices can be pasted on the others (while LunaShare is open on both; "
-                         "on a phone, while it's in front). Off by default: a clipboard often holds passwords."));
-        DrawFolderSyncSettings(h);
-    }
-    if (!eng.settings.accountBackedUp) {
-        ImGui::PushTextWrapPos(0);
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1),
-                           "%s", T("Make a backup: if you lose all your devices, only the recovery phrase or a backup file can bring your account back."));
-        ImGui::PopTextWrapPos();
-    }
-    if (ImGui::Button(T("Recovery phrase..."), ImVec2(bw, h))) {
-        phraseShown = eng.RecoveryPhrase();
-        openPhrase = true;
-    }
-    if (!mobile) ImGui::SameLine();
-    if (ImGui::Button(T("Save backup file..."), ImVec2(bw, h))) {
-        browseFor = BrowseFor::BackupSave;
-        browser.Open(FileBrowser::Mode::SaveFile, T("Save account backup"), eng.settings.downloadDir, "lunashare-account.lunabackup", ".lunabackup");
-    }
-    if (!mobile) ImGui::SameLine();
-    if (ImGui::Button(T("Restore account..."), ImVec2(bw, h))) {
-        restoreBuf.clear();
-        accountError.clear();
-        openRestore = true;
     }
     ImGui::TextDisabled(T("Account fingerprint: %s"), KeyFingerprint(eng.MyAccount()).c_str());
     // username on the internet server: others can find you by it
@@ -333,7 +331,7 @@ void App::DrawFolderSyncSettings(float h) {
     for (size_t i = 0; i < s.folderSyncs.size(); i++) {
         auto& f = s.folderSyncs[i];
         ImGui::PushID((int)i);
-        changed |= ImGui::Checkbox("##on", &f.on);
+        changed |= ui::Checkbox("##on", &f.on);
         ImGui::SameLine();
         ImGui::TextUnformatted(f.path.c_str());
         std::string to = f.to.empty() ? std::string(T("(choose a device)")) : Emoji().Display(eng.PeerName(f.to));

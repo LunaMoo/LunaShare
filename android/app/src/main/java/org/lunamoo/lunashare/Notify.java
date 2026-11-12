@@ -58,8 +58,8 @@ public final class Notify {
         m.createNotificationChannel(mus);
     }
 
-    // the little cow (res/drawable/ic_stat_cow.xml) in the status bar, tinted soft pink where Android shows colour
-    static final int ACCENT = 0xFFF2A3BD;
+    // the little cow (res/drawable/ic_stat_cow.xml) in the status bar; where Android shows colour, its circle is white
+    static final int ACCENT = 0xFFFFFFFF;  // the circle behind the small icon: white
 
     static Notification.Builder builder(Context c, String channel) {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, channel) : new Notification.Builder(c);
@@ -86,18 +86,51 @@ public final class Notify {
     static int idFor(String key) { return 1000 + (key.hashCode() & 0x7fffff); }
 
     // ---- called from native code
-    public static void message(String key, String title, String text, String avatarPath) {
+    // the last messages of each chat, shown together in its notification (cleared when the chat is opened)
+    static final java.util.HashMap<String, java.util.ArrayList<Object[]>> recent = new java.util.HashMap<>();
+    static final String ACTION_REPLY = "org.lunamoo.lunashare.REPLY", ACTION_READ = "org.lunamoo.lunashare.READ";
+    static final String EXTRA_REPLY = "reply";
+
+    public static void message(String key, String title, String text, String avatarPath, String replyLabel, String readLabel, String you) {
         try {
             Context c = ctx();
             channels(c);
+            java.util.ArrayList<Object[]> lines;
+            synchronized (recent) {
+                lines = recent.get(key);
+                if (lines == null) recent.put(key, lines = new java.util.ArrayList<>());
+                lines.add(new Object[] {text, System.currentTimeMillis(), title});
+                while (lines.size() > 7) lines.remove(0);
+                lines = new java.util.ArrayList<>(lines);
+            }
             Notification.Builder b = builder(c, CH_MESSAGES)
                     .setSmallIcon(R.drawable.ic_stat_cow)
                     .setContentTitle(title)
                     .setContentText(text)
-                    .setStyle(new Notification.BigTextStyle().bigText(text))
                     .setAutoCancel(true)
                     .setCategory(Notification.CATEGORY_MESSAGE)
                     .setContentIntent(activityIntent(c, ACTION_OPEN, key, idFor(key)));
+            if (key.isEmpty() || lines.size() < 2) {
+                b.setStyle(new Notification.BigTextStyle().bigText(text));
+            } else {  // several messages of the chat: one under the other
+                Notification.MessagingStyle st = new Notification.MessagingStyle(you == null || you.isEmpty() ? "You" : you);
+                for (Object[] l : lines) st.addMessage((String) l[0], (Long) l[1], (String) l[2]);
+                b.setStyle(st);
+            }
+            if (replyLabel != null && !replyLabel.isEmpty() && !key.isEmpty()) {
+                int req = idFor(key);
+                Intent ri = new Intent(c, NotifyActionReceiver.class).setAction(ACTION_REPLY).putExtra("key", key);
+                // (mutable: the system puts the typed text into it)
+                PendingIntent rp = PendingIntent.getBroadcast(c, req, ri, PendingIntent.FLAG_UPDATE_CURRENT |
+                        (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0));
+                android.app.RemoteInput input = new android.app.RemoteInput.Builder(EXTRA_REPLY).setLabel(replyLabel).build();
+                b.addAction(new Notification.Action.Builder(null, replyLabel, rp).addRemoteInput(input).build());
+                if (readLabel != null && !readLabel.isEmpty()) {
+                    Intent mi = new Intent(c, NotifyActionReceiver.class).setAction(ACTION_READ).putExtra("key", key);
+                    PendingIntent mp = PendingIntent.getBroadcast(c, req + 1, mi, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                    b.addAction(new Notification.Action.Builder(null, readLabel, mp).build());
+                }
+            }
             Bitmap av = avatar(avatarPath);
             if (av != null) b.setLargeIcon(av);
             if (Build.VERSION.SDK_INT < 26) b.setPriority(Notification.PRIORITY_HIGH).setDefaults(Notification.DEFAULT_ALL);
@@ -108,6 +141,7 @@ public final class Notify {
     }
 
     public static void clearChat(String key) {
+        synchronized (recent) { recent.remove(key); }
         try { nm(ctx()).cancel(idFor(key)); } catch (Throwable ignored) {}
     }
 

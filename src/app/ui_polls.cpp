@@ -127,7 +127,7 @@ void App::DrawPollNewPopup() {
     }
     if (remove >= 0) pollOpts.erase(pollOpts.begin() + remove);
     if (pollOpts.size() < 12 && ui::IconTextButton(T("Another answer"), ui::Icon::Plus, ImVec2(mobile ? -1 : 0, h))) pollOpts.push_back("");
-    ImGui::Checkbox(T("Several answers allowed"), &pollMulti);
+    ui::Checkbox(T("Several answers allowed"), &pollMulti);
     ImGui::Separator();
     std::vector<std::string> opts;
     for (auto& o : pollOpts)

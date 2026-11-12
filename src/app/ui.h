@@ -16,6 +16,7 @@ bool UpdateIsNewer(const std::string& tag, const std::string& mine);  // ("v1.6.
 void UpdateShutdown();
 void DrawPin(ImDrawList* dl, ImVec2 c, float size, ImU32 col);  // a pushpin mark
 bool LockOn(const ls::Settings& s);
+void RevealPath(const std::string& p);  // the file manager at this folder (or the folder of this file)
 
 namespace movpos {
 struct Mark {
@@ -187,6 +188,15 @@ private:
     int verifyQrResult = 0;  // after a scan: 1 the same keys, -1 different, 2 not a LunaShare code
     void DrawNearby();
     void DrawSettings();
+    // Settings, in categories (ui_settings.cpp): a list on the left (desktop) or a list of pages (phone), and a search
+    int settingsCat = -1;          // the category shown (-1: phone - the list of them)
+    std::string settingsQuery;     // the search box
+    std::string settingsGoto;      // a section to scroll to (English heading), from a search result
+    void SettingsCategory(int cat, float fieldW, float h, bool& changed);
+    void SettingsSearchResults(float h);
+    bool SettingsSection(const char* en, const char* help = nullptr);  // a heading (+ (?)); scrolls there if asked
+    std::string SettingsSummary(int cat);
+    const char* SettingsTitle(int cat);
     void DrawLibrary();  // ui_library.cpp
     // groups (ui_groups.cpp)
     void OpenNewGroup();
@@ -412,7 +422,9 @@ private:
     bool videoAutoOpened = false; // opened once per call
     bool videoBig = false;        // desktop: video takes the whole chat area
     bool camButtonHovered = false;  // the call bar's settings button, under the mouse this frame
-    bool videoSwapped = false;    // video call: yourself big, them in the corner (a tap on the corner swaps)
+    bool videoSwapped = false;
+    std::string newMarkMid;       // chat: the first message that was unread when it was opened ("New messages" above it)
+    bool newMarkScroll = false;    // video call: yourself big, them in the corner (a tap on the corner swaps)
     bool camPanel = false;
     std::vector<LsvControl> camCtl;
     double camCtlTime = -1;
@@ -514,7 +526,7 @@ private:
     FileBrowser browser;
     enum class BrowseFor { None, SendFiles, DownloadDir, Export, Import, Avatar, BackupSave, BackupOpen, Watch, WatchSubs, Movie, MusicFolder, MovieFolder, SyncFolder, GalleryFolder, ArchiveOpen, ArchiveInputs, ArchiveDest, ArchiveCreateDest, ArchiveFolder, TorrentFile, TorrentDir, TorrentSaveDir } browseFor = BrowseFor::None;
     // account (ui_account.cpp): Settings section, linking a device, recovery phrase, backup files
-    void DrawAccountSettings(float fieldW, float h);
+    void DrawAccountSettings(float fieldW, float h, int part);  // part 0: the account, 1: sync between my devices, 2: backup
     void DrawAccountPopups();
     void DrawFolderSyncSettings(float h);  // folders that go to my other devices by themselves
     bool openLinkPick = false, openLinkAsk = false, openPhrase = false, openRestore = false, openBackupPass = false;

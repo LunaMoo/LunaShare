@@ -6,7 +6,7 @@
 
 namespace ui {
 
-enum class Icon { Pause, Play, Cancel, Check, Folder, File, Retry, Send, Attach, Back, Up, Down, Trash, Copy, Share, Bluetooth, Wifi, Link, Gear, Users, History, Transfers, Edit, Star, Open, Plus, ZoomIn, ZoomOut, Fit, Image, List, Grid, Phone, HangUp, Mic, MicOff, Speaker, Video, VideoOff, FlipCamera, Sliders, Expand, RotateLeft, RotateRight, Webcam, Library, Loop, Shuffle, Archive, Book };
+enum class Icon { Pause, Play, Cancel, Check, Folder, File, Retry, Send, Attach, Back, Up, Down, Trash, Copy, Share, Bluetooth, Wifi, Link, Gear, Users, History, Transfers, Edit, Star, Open, Plus, ZoomIn, ZoomOut, Fit, Image, List, Grid, Phone, HangUp, Mic, MicOff, Speaker, Video, VideoOff, FlipCamera, Sliders, Expand, RotateLeft, RotateRight, Webcam, Library, Loop, Shuffle, Archive, Book, Lock, Info, Palette, Bell };
 
 // Global UI metrics (set every frame by the app).
 struct Metrics {
@@ -29,6 +29,8 @@ void ProgressBarText(float frac, const char* overlay, ImVec2 size, ImU32 col = 0
 void StatusDot(ImU32 col, float radius = 0);
 void Badge(const char* text, ImU32 bg);
 void HelpMarker(const char* text);
+// ImGui::Checkbox whose label wraps onto more lines when it doesn't fit the width (phones, long translations)
+bool Checkbox(const char* label, bool* v);
 
 // Legacy per-window hook (no-op).
 void TouchScroll();

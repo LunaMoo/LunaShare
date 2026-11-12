@@ -333,7 +333,7 @@ void App::DrawGallery() {
     ImGui::SetNextItemWidth(mobile ? ImGui::GetContentRegionAvail().x * 0.6f : ImGui::GetFontSize() * 12);
     ImGui::InputTextWithHint("##galsearch", T("search"), &gallerySearch);
     ImGui::SameLine();
-    if (ImGui::Checkbox(T("Select"), &galleryPick.selecting) && !galleryPick.selecting) galleryPick.sel.clear();
+    if (ui::Checkbox(T("Select"), &galleryPick.selecting) && !galleryPick.selecting) galleryPick.sel.clear();
     if (sc.busy) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", T("looking through the folders..."));
@@ -357,7 +357,7 @@ void App::DrawGallery() {
         ImGui::SameLine();
         if (ui::IconTextButton(T("Look again"), Icon::Retry, ImVec2(half, h))) GalleryRescan();
         bool vids = eng.settings.galleryVideos;
-        if (ImGui::Checkbox(T("Videos too"), &vids)) {
+        if (ui::Checkbox(T("Videos too"), &vids)) {
             Settings s = eng.GetSettings();
             s.galleryVideos = vids;
             eng.ApplySettings(s);

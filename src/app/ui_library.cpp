@@ -114,9 +114,9 @@ void App::DrawLibrary() {
     if (!mobile) ImGui::SameLine();
     if (ui::IconTextButton(T("Look again"), Icon::Retry, ImVec2(mobile ? -1 : 0, h))) eng.RescanShared();
     bool changed = false;
-    changed |= ImGui::Checkbox(T("Let my contacts download from my Shared folder"), &edit.shareLibrary);
+    changed |= ui::Checkbox(T("Let my contacts download from my Shared folder"), &edit.shareLibrary);
     ui::HelpMarker(T("Contacts are your own devices, devices you trust, and people you have exchanged messages or files with."));
-    if (IsMobilePlatform()) changed |= ImGui::Checkbox(T("Also on mobile data"), &edit.shareOnMobileData);
+    if (IsMobilePlatform()) changed |= ui::Checkbox(T("Also on mobile data"), &edit.shareOnMobileData);
     if (changed) {
         eng.ApplySettings(edit);
         editDirty = false;

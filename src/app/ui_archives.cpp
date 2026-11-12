@@ -278,7 +278,7 @@ void App::ArchiveExtractPopup() {
         browseFor = BrowseFor::ArchiveDest;
         browser.Open(FileBrowser::Mode::SelectDir, T("Unpack to"), archiveExtractTo);
     }
-    ImGui::Checkbox(T("Into a folder named after the archive"), &archiveExtractSub);
+    ui::Checkbox(T("Into a folder named after the archive"), &archiveExtractSub);
     if (ImGui::Button(T("Unpack"), ImVec2(mobile ? ImGui::GetContentRegionAvail().x * 0.5f : 0, h))) {
         std::string dest = archiveExtractSub ? FreeName(archiveExtractTo, StemOf(o.path)) : archiveExtractTo;
         std::string path = o.path, pw = o.password, strip = some ? o.dir : "";
@@ -460,7 +460,7 @@ void App::DrawArchives() {
     ImGui::SameLine();
     if (ImGui::RadioButton(T("Comics"), archivesComics) && !archivesComics) archivesComics = true, archivePick.Clear();
     ImGui::SameLine();
-    if (ImGui::Checkbox(T("Select"), &archivePick.selecting) && !archivePick.selecting) archivePick.sel.clear();
+    if (ui::Checkbox(T("Select"), &archivePick.selecting) && !archivePick.selecting) archivePick.sel.clear();
     if (!mobile) ImGui::SameLine();
     float third = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f : 0;
     if (ui::IconTextButton(T("Open..."), Icon::Folder, ImVec2(third, h))) {
@@ -713,7 +713,7 @@ void App::DrawArchiveOpen() {
         ImGui::PushID((int)i);
         bool pk = o.picked.count(e.path) > 0;
         ImGui::SetNextItemWidth(rowH);
-        if (ImGui::Checkbox("##pk", &pk)) {
+        if (ui::Checkbox("##pk", &pk)) {
             if (pk) o.picked.insert(e.path);
             else o.picked.erase(e.path);
         }

@@ -360,16 +360,16 @@ void App::WatchTracksPopup() {
     {  // remembered for every movie
         Settings s = eng.GetSettings();
         bool ch = false;
-        ch |= ImGui::Checkbox(T("Autoplay (every movie starts on its own)"), &s.playerAutoplay);
-        ch |= ImGui::Checkbox(T("Play the next one automatically (in the folder)"), &s.playerAutoNext);
-        ch |= ImGui::Checkbox(T("Hide the controls while playing (a tap brings them back)"), &s.playerHideUi);
-        if (IsMobilePlatform()) ch |= ImGui::Checkbox(T("Turn the screen by the movie's shape (tall: upright)"), &s.playerOrientByAspect);
+        ch |= ui::Checkbox(T("Autoplay (every movie starts on its own)"), &s.playerAutoplay);
+        ch |= ui::Checkbox(T("Play the next one automatically (in the folder)"), &s.playerAutoNext);
+        ch |= ui::Checkbox(T("Hide the controls while playing (a tap brings them back)"), &s.playerHideUi);
+        if (IsMobilePlatform()) ch |= ui::Checkbox(T("Turn the screen by the movie's shape (tall: upright)"), &s.playerOrientByAspect);
         if (ImGui::Button(SleepLabel().c_str(), ImVec2(mobile ? -1 : 0, h))) {
             sleepOpen = true;
             ImGui::CloseCurrentPopup();
         }
         if (Bridge().moviePip) {
-            ch |= ImGui::Checkbox(T("Keep playing in a small window when leaving the app"), &s.playerPip);
+            ch |= ui::Checkbox(T("Keep playing in a small window when leaving the app"), &s.playerPip);
             if (ImGui::Button(T("Small window now"), ImVec2(mobile ? -1 : 0, h)) && Bridge().enterPip) {
                 ImGui::CloseCurrentPopup();
                 Bridge().enterPip();
@@ -538,14 +538,14 @@ void App::WatchTracksPopup() {
     if (w.sid && w.host.empty() && w.libId.empty()) {  // my movie: may the others keep a copy?
         ImGui::Separator();
         bool b = w.allowSave;
-        if (ImGui::Checkbox(T("Let the others save a copy"), &b)) eng.WatchSetAllowSave(b);
+        if (ui::Checkbox(T("Let the others save a copy"), &b)) eng.WatchSetAllowSave(b);
         if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Remembered for the next movies too."));
     }
 #ifdef _WIN32
     {  // full screen that Windows / the graphics driver don't treat as a game (their HDR for games stays off)
         ImGui::Separator();
         bool b = eng.settings.fullscreenBorderless;
-        if (ImGui::Checkbox(T("Full screen without HDR (borderless window)"), &b)) {
+        if (ui::Checkbox(T("Full screen without HDR (borderless window)"), &b)) {
             Settings st = eng.GetSettings();
             st.fullscreenBorderless = b;
             eng.ApplySettings(st);
