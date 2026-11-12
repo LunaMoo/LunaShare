@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.14
+
+- Ten more languages: German, French, Spanish, Italian, Portuguese, Russian, Ukrainian, Japanese, Chinese
+  (simplified) and Korean - Settings > Appearance > Language, or automatic from the system language.
+- Japanese, Chinese and Korean text is drawn as big as the rest (it came out a size too small).
+- Video calls: tap the small picture in the corner to swap it with the big one (yourself big), as in Messenger.
+- Call settings close with a click / tap outside them.
+- New buttons for turning the other side's picture: a picture with a curved arrow.
+
 ## 1.6.13
 
 - Android keyboard: no more lag after every letter. Since 1.6.12 the keyboard's text reached the app without waking
