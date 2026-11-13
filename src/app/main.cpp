@@ -400,6 +400,8 @@ static bool ImeSync(App& app) {
     static bool applying = false;  // (an edit is queued in ImGui's input: wait for it to go through)
     static std::string apText;
     static int apS = 0, apE = 0, apEnters = 0;
+    static bool apSelOnly = false;   // what's being applied changes only the cursor ...
+    static int apFromS = 0, apFromE = 0;  // ... from where it was then
     static bool pend = false;
     static std::string pText;
     static int pS = 0, pE = 0, pEnters = 0;
@@ -450,6 +452,11 @@ static bool ImeSync(App& app) {
             push(true);
             return false;
         }
+        if (apSelOnly && apEnters == 0 && (cs != apFromS || ce != apFromE)) {
+            // the cursor was moved in the field meanwhile (a tap): that's newer than the keyboard's - it stands
+            push(false);
+            return false;
+        }
         st->SetSelection(std::min(Utf8Back(cur, apS), len), std::min(Utf8Back(cur, apE), len));
         st->CursorFollow = true;
         st->CursorAnimReset();
@@ -465,6 +472,15 @@ static bool ImeSync(App& app) {
         }
         return true;
     }
+    // The cursor was moved in the field itself (a tap, a drag) since the keyboard was last told, and what the keyboard
+    // sent changes no text: it was sent before the keyboard knew of the move (finishing the word being typed, its
+    // suggestions) and carries the old cursor - applied, the cursor jumped back after every tap. The field's place
+    // stands, and the keyboard is told it. (Enter pressed with it still goes through.)
+    if (pend && cur == last && (cs != lastS || ce != lastE) && pText == last && pEnters == 0) {
+        pend = false;
+        push(false);
+        return false;
+    }
     if (pend) {
         pend = false;
         apText = pText;
@@ -472,6 +488,9 @@ static bool ImeSync(App& app) {
         apE = std::clamp(std::max(pS, pE), 0, (int)apText.size());
         apEnters = pEnters;
         pEnters = 0;
+        apSelOnly = cur == apText;
+        apFromS = cs;
+        apFromE = ce;
         if (cur != apText) {
             int n = (int)apText.size(), p = 0, q = 0;
             while (p < len && p < n && cur[(size_t)p] == apText[(size_t)p]) p++;
