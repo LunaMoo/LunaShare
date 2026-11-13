@@ -174,6 +174,15 @@ void UpnpMapper::Stop() {
     if (thread_.joinable()) thread_.join();
 }
 
+void UpnpMapper::Rediscover() {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        rediscover_ = true;
+        mapping_.clear();  // (that was the old router's)
+    }
+    cv_.notify_all();
+}
+
 std::string UpnpMapper::Mapping() {
     std::lock_guard<std::mutex> l(m_);
     return mapping_;
@@ -188,7 +197,8 @@ void UpnpMapper::Loop() {
     NetInit();
     auto wait = [&](int seconds) {
         std::unique_lock<std::mutex> l(m_);
-        return !cv_.wait_for(l, std::chrono::seconds(seconds), [&] { return stop_; });
+        cv_.wait_for(l, std::chrono::seconds(seconds), [&] { return stop_ || rediscover_; });
+        return !stop_;
     };
     auto set = [&](const std::string& st, const std::string& mapping) {
         std::lock_guard<std::mutex> l(m_);
@@ -203,6 +213,19 @@ void UpnpMapper::Loop() {
     uint16_t extPort = 0;
     bool stopped = false;
     while (!stopped) {
+        {
+            // another network: the router found before (and the port it gave) is not this one's
+            std::lock_guard<std::mutex> l(m_);
+            if (rediscover_) {
+                rediscover_ = false;
+                control.clear();
+                service.clear();
+                localIp.clear();
+                extIp.clear();
+                extPort = 0;
+                status_ = "searching";
+            }
+        }
         if (control.empty()) {
             // ---- discovery
             SocketHandle u = UdpOpen(0);

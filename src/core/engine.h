@@ -331,6 +331,10 @@ public:
     // async; report: tell (an Error event) when it fails - for a connection the user asked for, not one tried on its own
     // (someone who's offline shows as offline; no need to say we couldn't reach them)
     void ConnectAddress(const std::string& host, uint16_t port, bool report = true);
+    // The device's network changed (Wi-Fi <-> mobile data, another Wi-Fi, the network back after none). Computers:
+    // noticed by themselves (the addresses are looked at every 2 s); Android calls this from its network callback -
+    // force: its default network switched, which the addresses don't always show. Any thread.
+    void NetworkChanged(bool force);
     void ConnectPeer(const std::string& peerId);                    // async, uses best known route
     void ConnectBluetooth(const std::string& btAddr, bool report = true);  // async
     void Disconnect(const std::string& peerId);
@@ -864,6 +868,20 @@ private:
     std::atomic<uint64_t> nextCid_{1};
     std::set<std::string> connecting_;
     std::map<std::string, int64_t> lastAutoConnect_;
+    // ---- a new network (NetworkChanged): instead of waiting for timeouts (25 s silence, the server's next round,
+    // only the smaller id dialling), every connection is pinged at once - one that doesn't answer within a few
+    // seconds is closed - and the devices this one was connected to are dialled again (from this side too).
+    void CheckNetwork(int64_t now);
+    void OnNetworkChanged(int64_t now, const std::vector<std::string>& ips);
+    std::atomic<bool> netCheckNow_{false}, netForce_{false};
+    std::string netSig_;
+    bool netSigSet_ = false;
+    int64_t netCheckAt_ = 0, netProbeAt_ = 0;
+    struct Rejoin {
+        int64_t until = 0, next = 0;
+        int tries = 0;
+    };
+    std::map<std::string, Rejoin> rejoin_;  // (lock)
     Bluetooth bt_;
     Mdns mdns_;
     void StartMdns();

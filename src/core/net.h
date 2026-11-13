@@ -33,5 +33,6 @@ int UdpRecvFrom(SocketHandle s, void* buf, size_t len, std::string* fromIp, int 
 
 // Creates a connected local socket pair (used to bridge Java Bluetooth streams on Android).
 bool LocalSocketPair(SocketHandle out[2]);
+std::string SocketLocalIp(SocketHandle s);  // the IPv4 address this socket is bound to ("" if none / not IPv4)
 
 }  // namespace ls

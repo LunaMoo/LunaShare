@@ -419,6 +419,26 @@ void WanTransport::Loop() {
     SetStatus("connecting to server");
     while (running_) {
         int64_t now = SteadyMs();
+        if (netChanged_.exchange(false)) {
+            // A new network: the server's address may resolve differently, the router (and with it any port
+            // mapping) is another, and the server must learn where this device is now - all at once.
+            lastResolve = -100000;
+            lastReg = -100000;
+            natGwKnown = false;
+            natExtIp.clear();
+            natExtPort = 0;
+            natLifetimeMs = 0;
+            natGwRefresh = -1000000;
+            natNext = 0;
+            {
+                std::lock_guard<std::mutex> l(m_);
+                mappedEp_.clear();
+            }
+            if (cfg_.natpmp) {
+                upnpEp.clear();
+                upnp.Rediscover();  // (doesn't wait: its own thread looks for the new router)
+            }
+        }
         if (now - lastResolve > 120000 || (!serverOk && now - lastResolve > 10000)) {
             resolve();
             lastResolve = now;

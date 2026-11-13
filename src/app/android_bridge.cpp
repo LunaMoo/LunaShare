@@ -1,6 +1,7 @@
 // Android glue: connects the engine's HostBridge hooks to Java (org.lunamoo.lunashare.LunaShareActivity)
 // for Bluetooth RFCOMM, LocalOnlyHotspot, joining Wi-Fi networks, multicast lock and opening files.
 // On other platforms these functions are no-ops.
+#include <atomic>
 #include <string>
 
 #include "engine.h"
@@ -28,7 +29,7 @@
 
 using namespace ls;
 
-static ls::Engine* g_engine = nullptr;
+static std::atomic<ls::Engine*> g_engine{nullptr};
 static jclass g_cls = nullptr;
 static jclass g_notify = nullptr;
 static jclass g_musicSvc = nullptr;  // org.lunamoo.lunashare.MusicService  // org.lunamoo.lunashare.Notify (looked up once: other threads can't FindClass app classes)
@@ -127,6 +128,7 @@ void AndroidBridgeInit(ls::Engine* engine) {
     g_cls = (jclass)env->NewGlobalRef(c);
     env->DeleteLocalRef(c);
     CallV("acquireMulticastLock", "()V");
+    CallV("startNetWatch", "()V");  // (network switches reported at once: Engine::NetworkChanged)
     if (jmethodID mid = M("machineId", "()Ljava/lang/String;")) {  // (before the engine starts the internet)
         jstring s = (jstring)env->CallStaticObjectMethod(g_cls, mid);
         if (env->ExceptionCheck()) env->ExceptionClear();
@@ -450,7 +452,15 @@ void AndroidBridgeInit(ls::Engine* engine) {
     CallV("requestPermissions", "()V");
 }
 
-void AndroidBridgeShutdown() { NotifyV("setNativeRunning", "(Z)V", (jboolean) false); }
+void AndroidBridgeShutdown() {
+    NotifyV("setNativeRunning", "(Z)V", (jboolean) false);
+    g_engine = nullptr;  // (it ends next: notification buttons and network changes after this find no engine, not a freed one)
+}
+
+// The phone's network changed (NetWatch.java; Android's connectivity thread)
+extern "C" JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_NetWatch_nativeNetworkChanged(JNIEnv*, jclass, jboolean force) {
+    if (ls::Engine* e = g_engine.load()) e->NetworkChanged(force != JNI_FALSE);
+}
 
 // The background service starts the engine without a screen (the process was ended and started again by Android,
 // the phone was restarted, the app updated): see core.h.
@@ -486,7 +496,7 @@ JNIEXPORT jint JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeAdoptB
     if (!g_engine) return -1;
     SocketHandle sv[2];
     if (!LocalSocketPair(sv)) return -1;
-    g_engine->AdoptSocket(sv[0], Transport::Bluetooth, JStr(env, jaddr), initiator);
+    g_engine.load()->AdoptSocket(sv[0], Transport::Bluetooth, JStr(env, jaddr), initiator);
     return (jint)sv[1];
 }
 
@@ -498,7 +508,7 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnHots
     h.ssid = JStr(env, ssid);
     h.pass = JStr(env, pass);
     h.error = JStr(env, error);
-    g_engine->SetHotspotInfo(h);
+    g_engine.load()->SetHotspotInfo(h);
 }
 
 // a notification was tapped ("open" a chat, "answer" / show a call) or "decline" pressed
@@ -507,7 +517,7 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnInte
     size_t dot = a.rfind('.');
     std::string what = dot == std::string::npos ? a : a.substr(dot + 1);  // OPEN / ANSWER / DECLINE / CALL
     if (what == "DECLINE") {
-        if (g_engine) g_engine->EndCall("declined");
+        if (g_engine) g_engine.load()->EndCall("declined");
         return;
     }
     if (what == "VIEW" || what == "SEND" || what == "SENDTEXT") {  // (opened / shared with LunaShare)
@@ -521,8 +531,8 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnInte
 JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeQuickReply(JNIEnv* env, jclass, jstring jkey, jstring jtext) {
     std::string key = JStr(env, jkey), text = JStr(env, jtext);
     if (!g_engine || key.empty()) return;
-    if (!text.empty()) g_engine->SendChat(key, text);
-    g_engine->MarkRead(key);  // (answering it = read it)
+    if (!text.empty()) g_engine.load()->SendChat(key, text);
+    g_engine.load()->MarkRead(key);  // (answering it = read it)
 }
 
 // the music notification, lock screen, headset buttons, audio focus (see MusicService.java)
@@ -545,11 +555,11 @@ JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeOnErro
     if (!g_engine) return;
     HotspotInfo h;
     {
-        auto lk = g_engine->Lock();
-        h = g_engine->hotspot;
+        auto lk = g_engine.load()->Lock();
+        h = g_engine.load()->hotspot;
     }
     h.error = JStr(env, msg);
-    g_engine->SetHotspotInfo(h);
+    g_engine.load()->SetHotspotInfo(h);
 }
 
 }  // extern "C"

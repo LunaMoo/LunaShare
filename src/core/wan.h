@@ -89,6 +89,9 @@ public:
     // Leaves an envelope for the device with public key `toPub` (retried until the server confirms).
     void MailPut(const std::string& toPub, const std::string& id, const std::string& dataB64);
     bool Registered() const { return registered_.load(); }  // the server answers (mail can be left)
+    // The device's network changed (Wi-Fi <-> mobile data, another Wi-Fi): the server is looked up and told the new
+    // address at once, and the router's port mapping is asked for again - instead of at the next round (15 s and more).
+    void NetworkChanged() { netChanged_ = true; }
     std::function<std::string(const std::string& challenge)> signMail;  // identity signature (context "mailbox")
     // An envelope from my mailbox (network thread). Return true when it was taken (it is then deleted on the server).
     std::function<bool(const std::string& id, const std::string& dataB64)> onMail;
@@ -117,6 +120,7 @@ private:
     std::string status_, publicEp_, mappedEp_;
     std::atomic<bool> registered_{false};
     std::atomic<bool> serverLinks_{false};
+    std::atomic<bool> netChanged_{false};
     struct MailOut {
         std::string to, id, data;
         int tries = 0;

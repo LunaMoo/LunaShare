@@ -318,4 +318,13 @@ bool LocalSocketPair(SocketHandle out[2]) {
 #endif
 }
 
+std::string SocketLocalIp(SocketHandle s) {
+    sockaddr_in a{};
+    socklen_t l = sizeof(a);
+    if (getsockname(s, (sockaddr*)&a, &l) != 0 || a.sin_family != AF_INET) return "";
+    char ip[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &a.sin_addr, ip, sizeof(ip))) return "";
+    return ip;
+}
+
 }  // namespace ls

@@ -3228,6 +3228,8 @@ void Engine::MaintenanceLoop() {
         int64_t now = SteadyMs();
         std::vector<std::shared_ptr<Connection>> toClose;
         std::vector<std::pair<std::string, uint16_t>> reconnect;
+        std::vector<std::string> wanRejoin;
+        CheckNetwork(now);
         {
             auto lk = Lock();
             SwarmTick();  // shared-library downloads: ask for pieces
@@ -3251,13 +3253,58 @@ void Engine::MaintenanceLoop() {
             }
             bool ping = now - lastPing > 5000;
             if (ping) lastPing = now;
+            // after a network change: what didn't answer the ping sent then is gone (the old network's path)
+            bool probeDone = netProbeAt_ && now - netProbeAt_ > 8000;  // (8 s: a ping can wait behind file data on a slow link)
             for (auto& c : conns) {
                 if (c->closed) continue;
+                if (probeDone && c->ready && !c->mailbox && c->lastRecv.load() < netProbeAt_) {
+                    fprintf(stderr, "net: %s didn't answer after the network change: closed\n", c->peerId.substr(0, 8).c_str());
+                    toClose.push_back(c);
+                    continue;
+                }
                 if (!c->ready && now - c->connectedAt > 10000) toClose.push_back(c);
                 else if (c->ready && now - c->lastRecv.load() > 25000) toClose.push_back(c);
                 else if (ping && c->ready) Queue(c, Msg::Ping, json::object());
             }
+            if (probeDone) netProbeAt_ = 0;
             conns.erase(std::remove_if(conns.begin(), conns.end(), [](auto& c) { return c->closed && c->alive == 0; }), conns.end());
+            // the devices connected before the network changed: dialled again (by this side - the other one doesn't
+            // know yet where this device is now), sooner first, then less and less often
+            std::set<std::string> closing;  // (closed just below: not up, though still open this moment)
+            for (auto& c : toClose)
+                if (!c->peerId.empty()) closing.insert(c->peerId);
+            for (auto it = rejoin_.begin(); it != rejoin_.end();) {
+                const std::string& peer = it->first;
+                Rejoin& r = it->second;
+                bool up = IsConnected(peer) && !closing.count(peer);
+                if (now > r.until || (up && !netProbeAt_)) {
+                    if (up && r.tries) fprintf(stderr, "net: %s found again\n", peer.substr(0, 8).c_str());
+                    it = rejoin_.erase(it);
+                    continue;
+                }
+                if (!up && now >= r.next && !connecting_.count(peer)) {
+                    r.next = now + std::min<int64_t>(60000, 2000LL << std::min(r.tries, 5));
+                    r.tries++;
+                    fprintf(stderr, "net: looking for %s again (try %d)\n", peer.substr(0, 8).c_str(), r.tries);
+                    auto o = online.find(peer);
+                    auto d = devices.find(peer);
+                    if (d != devices.end() && d->second.blocked) {
+                        it = rejoin_.erase(it);
+                        continue;
+                    }
+                    if (o != online.end() && o->second.OnLan()) reconnect.emplace_back(o->second.ip, o->second.port);
+                    else if (wan_.Running() && o != online.end() && o->second.lastWan) {
+                        lastWanConnect_[peer] = now;
+                        wanRejoin.push_back(peer);
+                    } else if (d != devices.end() && !d->second.lastIp.empty()) {  // (where it was last: the same network again)
+                        reconnect.emplace_back(d->second.lastIp, d->second.lastPort ? d->second.lastPort : kDefaultTcpPort);
+                    } else if (wan_.Running()) {
+                        lastWanConnect_[peer] = now;
+                        wanRejoin.push_back(peer);
+                    }
+                }
+                ++it;
+            }
             for (auto it = online.begin(); it != online.end();) {
                 OnlinePeer& op = it->second;
                 if (op.lastBeacon && now - op.lastBeacon > 8000) op.lastBeacon = 0;  // beacons every 2 s
@@ -3309,11 +3356,90 @@ void Engine::MaintenanceLoop() {
         if (restartWan_.exchange(false)) StartWan();
         for (auto& c : toClose) CloseConn(c, "timeout");
         for (auto& r : reconnect) ConnectAddress(r.first, r.second, false);
+        for (auto& p : wanRejoin) wan_.Connect(p);
         if (dirty_ && now - lastSave > 1000) {
             Save();
             lastSave = now;
         }
     }
+}
+
+void Engine::NetworkChanged(bool force) {
+    if (force) netForce_ = true;
+    netCheckNow_ = true;
+}
+
+void Engine::CheckNetwork(int64_t now) {
+    bool asked = netCheckNow_.exchange(false);
+    if (!asked && now - netCheckAt_ < 2000) return;
+    netCheckAt_ = now;
+    std::vector<std::string> ips;
+    for (auto& a : LocalIPv4Addresses()) ips.push_back(a.ip);
+    if (const char* f = getenv("LUNASHARE_TEST_EXTRA_IPS")) {  // tests: addresses that come and go (a file, one per line)
+        std::string t;
+        if (LoadFileBytes(f, t)) {
+            size_t a = 0;
+            while (a < t.size()) {
+                size_t e = t.find('\n', a);
+                if (e == std::string::npos) e = t.size();
+                std::string ip = t.substr(a, e - a);
+                if (!ip.empty()) ips.push_back(ip);
+                a = e + 1;
+            }
+        }
+    }
+    std::sort(ips.begin(), ips.end());
+    std::string sig;
+    for (auto& ip : ips) sig += ip + ",";
+    bool changed = netForce_.exchange(false);
+    if (!netSigSet_) {
+        netSigSet_ = true;  // (the first look: what there is at the start)
+        netSig_ = sig;
+        return;
+    }
+    if (sig != netSig_) {
+        netSig_ = sig;
+        changed = true;
+    }
+    if (changed) OnNetworkChanged(now, ips);
+}
+
+void Engine::OnNetworkChanged(int64_t now, const std::vector<std::string>& ips) {
+    std::vector<std::shared_ptr<Connection>> gone;
+    {
+        auto lk = Lock();
+        // whom to find again: the devices connected now, and those still being looked for after an earlier change
+        for (auto& [peer, r] : rejoin_) {
+            r.until = now + 10 * 60 * 1000;
+            r.next = now;
+            r.tries = 0;
+        }
+        for (auto& c : conns) {
+            if (c->closed || !c->ready || c->mailbox || c->peerId.empty()) continue;
+            Rejoin& r = rejoin_[c->peerId];
+            r.until = now + 10 * 60 * 1000;
+            r.next = now + 2000;  // (after the ping's answer has had a moment)
+            r.tries = 0;
+        }
+        lastWanConnect_.clear();
+        lastAutoConnect_.clear();
+        // every connection is asked at once whether it still works
+        netProbeAt_ = now;
+        for (auto& c : conns)
+            if (!c->closed && c->ready && !c->mailbox) Queue(c, Msg::Ping, json::object());
+        // a direct (LAN) connection from an address this device doesn't have any more is surely gone: closed now
+        for (auto& c : conns) {
+            if (c->closed || c->transport != Transport::LAN || c->sock == kInvalidSocket) continue;
+            std::string ip = SocketLocalIp(c->sock);
+            if (!ip.empty() && ip.rfind("127.", 0) != 0 && !std::binary_search(ips.begin(), ips.end(), ip)) gone.push_back(c);
+        }
+    }
+    fprintf(stderr, "net: the network changed (%s): checking %d connection(s), %d device(s) to find again\n", netSig_.c_str(),
+            (int)conns.size(), (int)rejoin_.size());
+    for (auto& c : gone) CloseConn(c, "network changed");
+    wan_.NetworkChanged();  // the server learns the new address now
+    mdns_.Stop();           // (its sockets were joined to the old network's interfaces)
+    restartMdns_ = true;
 }
 
 void Engine::StartBtServer() {

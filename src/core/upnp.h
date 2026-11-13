@@ -16,6 +16,9 @@ public:
     ~UpnpMapper() { Stop(); }
     void Start(uint16_t localPort);
     void Stop();                 // removes the mapping
+    // The network changed: the router is looked for again now (not after the usual wait of up to 20 minutes).
+    // Doesn't wait for anything.
+    void Rediscover();
     std::string Mapping();       // "public-ip:port" once the router granted it, else ""
     std::string Status();
 
@@ -28,6 +31,7 @@ private:
     std::mutex m_;
     std::condition_variable cv_;
     bool stop_ = false;
+    bool rediscover_ = false;
     uint16_t port_ = 0;
     std::string mapping_, status_;
 };
