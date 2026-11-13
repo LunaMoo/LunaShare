@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.7
+
+- **Music and radio sound much better:** most stations and music files are 44.1 kHz, and the sound was converted
+  to the player's 48 kHz in the crudest way, which added false tones to the high frequencies - a harsh, metallic
+  edge, worse than the stream's bitrate. A proper resampler now does it: the false tones are gone (about 100 dB
+  quieter instead of 11-26 dB).
+- Android: **tapping in a text field moves the cursor there** again (the keyboard could put it back where it was).
+
 ## 1.7.6
 
 - **Clearer call voice, on Wi-Fi and especially on mobile data.** A late voice packet is now waited for instead
