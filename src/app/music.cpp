@@ -787,7 +787,9 @@ void Player::PlayExternal(const Source& s, double pos, bool playing) {
         ex_ = s;
         exPos_ = pos;
         exPlay_ = playing;
-        if (interrupted_ && playing && !s.follow) playInCall_ = true;  // (a station / song picked during a call)
+        if (interrupted_ && (playing || s.follow)) playInCall_ = true;  // (a station / song picked during a call)
+        // (listening together follows the host: during a call too - it's something done with the people in it - and
+        // on a phone it's heard through the call's sound, a little under the voices)
         exAt_ = (int64_t)SDL_GetTicks64();
         if (!s.follow) wantPlay_ = playing;
     }
@@ -1396,7 +1398,15 @@ void Player::SetInterrupted(bool on) {
         if (on == interrupted_) return;
         interrupted_ = on;
         int64_t now = (int64_t)SDL_GetTicks64();
-        if (on) {
+        if (on && ext_ && ex_.follow) {
+            // listening together goes on through a call (it's paused for everyone, if anyone wants: not here alone)
+            interruptedAt_ = now;
+            playInCall_ = true;
+            if (dev_ && audio_out::Single()) {  // (the call takes the phone's one output; heard through it)
+                audio_out::Close(dev_);
+                dev_ = 0;
+            }
+        } else if (on) {
             interruptedAt_ = now;
             playInCall_ = false;
             if (p_ && playing_) {

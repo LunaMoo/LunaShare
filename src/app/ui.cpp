@@ -283,7 +283,7 @@ void App::Frame() {
     static const char* autoRead = getenv("LUNASHARE_AUTOREAD");  // dev: join the first comic invitation (screenshots)
     if (autoRead && !eng.read.sid && !eng.readInvites.empty()) JoinReadNow(eng.readInvites.back().sid);
     static const char* devReadWith = getenv("LUNASHARE_READWITH");  // dev: the next comic opened is read with the first contact
-    if (devReadWith && !eng.conns.empty()) {
+    if (devReadWith && !eng.conns.empty() && (!getenv("LUNASHARE_AUTOANSWER") || (eng.call.state == CallState::Active && SteadyMs() - eng.call.answered > 1500))) {
         for (auto& c : eng.conns)
             if (c->ready) {
                 readWith = eng.ChatKey(c->peerId);
@@ -291,6 +291,24 @@ void App::Frame() {
                 if (const char* f = getenv("LUNASHARE_READFILE")) OpenComic(f);
                 break;
             }
+    }
+    // dev (two apps in a call): LUNASHARE_LISTENWITH starts listening together with the one in the call (what plays
+    // goes on for both); LUNASHARE_AUTOLISTEN joins the first invitation to listen; LUNASHARE_WATCHWITH=<movie> shares
+    // a movie with the one in the call
+    static const char* devListenWith = getenv("LUNASHARE_LISTENWITH");
+    if (devListenWith && eng.call.state == CallState::Active && SteadyMs() - eng.call.answered > 1500 && music::Play().GetNow().active) {
+        devListenWith = nullptr;
+        ListenWith(CallChatKey());
+    }
+    static const char* devAutoListen = getenv("LUNASHARE_AUTOLISTEN");
+    if (devAutoListen && !eng.listen.sid && !eng.listenInvites.empty()) JoinListenNow(eng.listenInvites.back().sid);
+    static const char* devWatchWith = getenv("LUNASHARE_WATCHWITH");
+    if (devWatchWith && eng.call.state == CallState::Active && SteadyMs() - eng.call.answered > 1500) {
+        std::string mv = devWatchWith;
+        devWatchWith = nullptr;
+        TogetherSwitch(1);
+        watchFailed = false;
+        if (eng.StartWatch(CallChatKey(), mv)) watchShown = true;
     }
     static const char* devTogether = getenv("LUNASHARE_TOGETHER");  // dev: the call's Together menu (screenshots)
     if (devTogether && eng.call.state == CallState::Active) {
@@ -381,6 +399,12 @@ void App::Frame() {
     }
     static const char* autoCall = getenv("LUNASHARE_AUTOCALL");
     static int64_t autoCallAt = 0;
+    if (autoCall && selectedPeer.empty())  // (nothing selected - a phone's layout: the first one connected)
+        for (auto& c : eng.conns)
+            if (c->ready && !c->closed) {
+                selectedPeer = eng.ChatKey(c->peerId);
+                break;
+            }
     if (autoCall && !selectedPeer.empty() && eng.IsConnected(selectedPeer) && eng.call.state == CallState::None) {
         if (!autoCallAt) autoCallAt = SteadyMs() + 1500;
         if (SteadyMs() > autoCallAt) {
@@ -473,6 +497,9 @@ void App::Frame() {
     } else if (m.mobile && VideoVisible() && !videoAutoOpened) {
         videoFull = videoAutoOpened = true;  // a video call opens full screen on phones
     }
+    // a movie on screen (watching together) is what's looked at: the call's full-screen picture (kept above the
+    // app) would cover it - it steps aside to the call bar; one tap there brings it back
+    if (watchShown && videoFull) videoFull = false;
     static bool devAvatar = getenv("LUNASHARE_AVATAR") != nullptr;  // dev hook: crop dialog for this picture
     if (devAvatar && ImGui::GetFrameCount() > 5) {
         devAvatar = false;

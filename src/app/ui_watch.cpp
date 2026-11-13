@@ -6,6 +6,7 @@
 
 #include "i18n.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "emoji_host.h"
 #include "media_host.h"
 #include "platform.h"
@@ -692,6 +693,9 @@ void App::DrawWatch() {
     ImGui::Begin("##watch", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
+    // the movie is above the app - always (a call's picture or its settings could end up over it) - but under its own
+    // menus and the app's popups
+    if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGuiIO& io = ImGui::GetIO();
     float sp = ImGui::GetStyle().ItemSpacing.x, pad = ImGui::GetStyle().WindowPadding.x + sp;
@@ -920,7 +924,7 @@ void App::DrawWatch() {
         bool inCall = eng.call.state == CallState::Active;
         bool ext = w.libId.compare(0, 4, "ext:") == 0;  // (a torrent: it saves itself)
         bool canAdd = host && !lib, canSave = ((!host && w.allowSave) || (lib && !ext)) && !w.saving;
-        int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 3 : 0);
+        int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall && !mobile ? 3 : 0);
         float rightW = (bh + sp) * (float)right;
         ImGui::SameLine();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1004,7 +1008,24 @@ void App::DrawWatch() {
                 Bridge().setFullscreen(watchFullscreen, eng.settings.fullscreenBorderless);
             }
         }
-        if (inCall) {  // talking while watching: mute / hang up right here
+        if (inCall && mobile) {  // phones: talking while watching - mute, together, hang up on a row of their own above
+            ImVec2 keep = ImGui::GetCursorScreenPos();
+            float cw = bh * 3 + sp * 2;
+            ImGui::SetCursorScreenPos(ImVec2(b.x - pad - cw, y0 - bh - sp * 2));
+            bool muted = Media().Muted();
+            if (ui::IconButton("wmute", muted ? Icon::MicOff : Icon::Mic, muted ? T("Unmute") : T("Mute"), bh)) Media().SetMute(!muted);
+            ImGui::SameLine();
+            std::string ck = CallChatKey();
+            ui::PushAccent(TogetherInvited(ck));
+            if (ui::IconButton("wtogether", Icon::Users, T("Together: watch, listen, read"), bh)) OpenTogether(ck);
+            ui::PopAccent();
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 50, 50, 255));
+            if (ui::IconButton("whang", Icon::HangUp, T("Hang up"), bh)) eng.EndCall();
+            ImGui::PopStyleColor();
+            ImGui::SetCursorScreenPos(keep);
+        }
+        if (inCall && !mobile) {  // talking while watching: mute / hang up right here
             ImGui::SameLine();
             bool muted = Media().Muted();
             if (ui::IconButton("wmute", muted ? Icon::MicOff : Icon::Mic, muted ? T("Unmute") : T("Mute"), bh)) Media().SetMute(!muted);
