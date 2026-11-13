@@ -194,8 +194,35 @@ final class CallRouter {
         }, 300);
     }
 
+    // Wi-Fi without power saving during a call: with it, the phone's Wi-Fi sleeps between beacons and hands packets
+    // over in bursts (100 ms and more) - the voice breaks up and the gaps are filled in with guessed, metallic sound.
+    private static android.net.wifi.WifiManager.WifiLock wifiLock;
+
+    private static void wifi(boolean on) {
+        try {
+            if (on) {
+                if (wifiLock == null) {
+                    Context c = Notify.ctx();
+                    if (c == null) return;
+                    android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wm == null) return;
+                    int mode = Build.VERSION.SDK_INT >= 29 ? android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                                                           : android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                    wifiLock = wm.createWifiLock(mode, "LunaShare:call");
+                    wifiLock.setReferenceCounted(false);
+                }
+                if (!wifiLock.isHeld()) wifiLock.acquire();
+            } else if (wifiLock != null && wifiLock.isHeld()) {
+                wifiLock.release();
+            }
+        } catch (Throwable t) {
+            android.util.Log.e("LunaShare", "wifi lock: " + t);
+        }
+    }
+
     /** A call started / ended. */
     static void set(boolean inCall) {
+        wifi(inCall);
         AudioManager am = am();
         if (am == null || Build.VERSION.SDK_INT < 23) return;
         if (inCall == on) return;

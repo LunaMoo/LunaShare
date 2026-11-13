@@ -117,6 +117,9 @@ public:
     bool VideoMessageOpen() const { return vmsgOpen_; }
     bool VideoMessageRecording() const { return vmsgRec_; }
     bool StartRecording(const std::string& path);
+    // the phone's own voice processing runs on the microphone (Android's call preset: echo canceller and noise
+    // suppressor) - then LunaShare's don't: a second pass over a voice already cleaned makes it sound metallic
+    bool PhoneVoiceProcessing() const;
     bool SoftwareAec(const ls::Settings& s) const;  // LunaShare's echo canceller (not when the phone's does it)
     bool liveUserAec_ = true;  // false: audioError says why (micDenied: the permission)
     bool micDenied = false;

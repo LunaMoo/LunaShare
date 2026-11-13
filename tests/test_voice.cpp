@@ -88,6 +88,80 @@ static void TestLoopback(double loss) {
     CHECK(st.buffered_ms < 250, "bounded latency (%d ms)", st.buffered_ms);
 }
 
+// Wi-Fi with power saving (phones): nothing is lost, but packets are held back for 120-160 ms twice a second and
+// then come all at once. The playout must wait for them (not guess the voice and throw the real packets away).
+static void TestBursty() {
+    printf("[voice over bursty Wi-Fi: 120-160 ms holds twice a second, no loss]\n");
+    const LsmModule* m = lunashare_media_module();
+    Net net;
+    LsmHost h{LSM_API_VERSION, &net, HostSend, HostLog};
+    LsmSettings s{0, 0, 0, 24000};
+    CHECK(m->start(&h, &s) == 0, "start");
+    std::mt19937 rng(7);
+    std::vector<std::vector<uint8_t>> held;
+    std::vector<int16_t> out;
+    int16_t frame[F];
+    int holdUntil = -1;
+    for (int step = 0; step < 750; step++) {  // 15 s
+        for (int i = 0; i < F; i++) frame[i] = (int16_t)(8000 * std::sin(2 * PI * 440 * (step * F + i) / R));
+        m->capture(frame, F);
+        for (auto& p : net.sent) held.push_back(p);
+        net.sent.clear();
+        if (holdUntil < 0 && step % 25 == 10) holdUntil = step + 6 + (int)(rng() % 3);  // 120..160 ms
+        if (holdUntil < 0 || step >= holdUntil) {
+            for (auto& p : held) m->receive(p.data(), p.size());
+            held.clear();
+            if (step >= holdUntil) holdUntil = -1;
+        }
+        int16_t spk[F];
+        m->playback(spk, F);
+        out.insert(out.end(), spk, spk + F);
+    }
+    LsmStats st;
+    m->get_stats(&st);
+    // then the Wi-Fi calms down (a call where power saving is off), with pauses between words: the delay the bursts
+    // needed comes down again
+    for (int step = 750; step < 2250; step++) {  // 30 s
+        bool voiced = (step % 15) < 10;  // 200 ms on, 100 ms off
+        int16_t f2[F];
+        for (int i = 0; i < F; i++) f2[i] = voiced ? (int16_t)(8000 * std::sin(2 * PI * 440 * (step * F + i) / R)) : 0;
+        m->capture(f2, F);
+        for (auto& p : held) m->receive(p.data(), p.size());
+        held.clear();
+        for (auto& p : net.sent) m->receive(p.data(), p.size());
+        net.sent.clear();
+        int16_t spk[F];
+        m->playback(spk, F);
+    }
+    LsmStats calm;
+    m->get_stats(&calm);
+    printf("  after 30 s of a calm network: buffered %d ms (was %d ms)\n", calm.buffered_ms, st.buffered_ms);
+    CHECK(calm.buffered_ms <= 80, "the delay comes back down (%d ms)", calm.buffered_ms);
+    m->stop();
+    size_t a = (size_t)R * 5, b = out.size();  // after 5 s (it has learnt the bursts)
+    double sig = Tone(out, a, b, 440), other = Tone(out, a, b, 1234) + Tone(out, a, b, 2000) + Tone(out, a, b, 3100) + 1e-12;
+    // frames that aren't the clean tone: concealment (guessed sound) or silence
+    long bad = 0, frames = 0;
+    for (size_t i = a; i + F <= b; i += F, frames++) {
+        double e = 0, ref = 0, cross = 0;
+        for (int k = 0; k < F; k++) e += (double)out[i + k] * out[i + k];
+        // correlation with a 440 Hz sine of any phase
+        double cs = 0, sn = 0;
+        for (int k = 0; k < F; k++) {
+            double w = 2 * PI * 440 * (double)(i + k) / R;
+            cs += out[i + k] * std::cos(w);
+            sn += out[i + k] * std::sin(w);
+        }
+        cross = (cs * cs + sn * sn) * 2.0 / F;
+        ref = e;
+        if (ref < 1e5 * F || cross < 0.9 * ref) bad++;
+    }
+    printf("  440 Hz: %.1f dB above other tones, frames not clean %ld/%ld, stats: loss %.1f%% jitter %d ms buffered %d ms\n",
+           Db(sig) - Db(other), bad, frames, st.loss_percent, st.jitter_ms, st.buffered_ms);
+    CHECK(bad < frames / 50, "the bursts are waited for, not guessed (%ld of %ld frames not clean)", bad, frames);
+    CHECK(st.buffered_ms < 400, "bounded latency (%d ms)", st.buffered_ms);
+}
+
 // quiet microphone (laptop / phone at arm's length): default call settings must bring speech to a normal level
 static double SentLevelDb(int micAmp, double* inDb) {
     const LsmModule* m = lunashare_media_module();
@@ -547,6 +621,7 @@ int main() {
     CHECK(m && m->api_version == LSM_API_VERSION && strcmp(m->caps, "voice") == 0, "module descriptor");
     TestLoopback(0.0);
     TestLoopback(0.10);
+    TestBursty();
     TestLoudness();
     TestEcho();
     TestEchoBursty();

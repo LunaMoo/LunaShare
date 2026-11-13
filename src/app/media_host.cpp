@@ -814,13 +814,15 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
 
 // LunaShare's own echo canceller - not on top of the phone's: one canceller should own the echo (a second one only
 // distorts a signal that's already been cleaned)
-bool MediaHost::SoftwareAec(const Settings& s) const {
-    if (!s.callEchoCancel) return false;
+bool MediaHost::SoftwareAec(const Settings& s) const { return s.callEchoCancel && !PhoneVoiceProcessing(); }
+
+bool MediaHost::PhoneVoiceProcessing() const {
 #if defined(__ANDROID__)
     const char* co = SDL_GetHint("SDL_ANDROID_VOICE_CAPTURE_OK");
-    if (co && *co == '1') return false;
+    return co && *co == '1';
+#else
+    return false;
 #endif
-    return true;
 }
 
 bool MediaHost::OpenDevices(bool capture, bool playback) {
@@ -1063,7 +1065,7 @@ void MediaHost::SetMode(Mode m) {
     if (m == Mode::Call && mod_) {
         Settings s = eng_->GetSettings();
         LsmHost h{LSM_API_VERSION, this, SendCb, LogCb};
-        LsmSettings ls{SoftwareAec(s) ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
+        LsmSettings ls{SoftwareAec(s) ? 1 : 0, s.callNoiseSuppress && !PhoneVoiceProcessing() ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
         mod_->start(&h, &ls);
         {
             auto lk = eng_->Lock();
@@ -1156,7 +1158,7 @@ void MediaHost::ResetEcho() {
 // the echo canceller start over (what it learned about the old sound path only gets in the way).
 void MediaHost::ApplyLiveAudio() {
     Settings s = eng_->GetSettings();
-    LsmSettings ls{SoftwareAec(s) ? 1 : 0, s.callNoiseSuppress ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
+    LsmSettings ls{SoftwareAec(s) ? 1 : 0, s.callNoiseSuppress && !PhoneVoiceProcessing() ? 1 : 0, s.callAutoGain ? 1 : 0, s.callBitrate};
     if (memcmp(&ls, &liveLs_, sizeof(ls)) != 0) {
         bool aecOn = ls.echo_cancel && !liveLs_.echo_cancel;
         liveLs_ = ls;

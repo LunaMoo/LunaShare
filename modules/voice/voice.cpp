@@ -95,6 +95,14 @@ struct Stream {
     uint16_t lastArrivalSeq = 0;
     int underruns = 0;
     int64_t lastPacketUs = 0;
+    // A packet not there yet while nothing after it has come either is late, not lost (Wi-Fi delivering in bursts,
+    // a retransmission): the playout waits for it - a frame of concealment, its place kept - instead of skipping it
+    // and throwing it away when it comes. Each such stall raises the playout delay for the next ones; the delay
+    // comes down again slowly, by quiet frames left out.
+    int waits = 0;          // frames waited for the current packet
+    int stallMax = 0;       // the longest recent stall (frames), decaying
+    bool stalledWindow = false;
+    int sinceTrim = 0;
     Stream() = default;
     Stream(const Stream&) = delete;
     Stream& operator=(const Stream&) = delete;
@@ -332,6 +340,8 @@ void EndStream(int stream) {
 }
 
 // Decodes the next 20 ms of a stream into its out buffer (lock held).
+constexpr int kMaxWait = 8;  // frames (160 ms) a late packet is waited for before it counts as lost
+
 void DecodeNextLocked(Stream& st) {
     int16_t pcm[kFrame * 6];
     int n = 0;
@@ -340,40 +350,67 @@ void DecodeNextLocked(Stream& st) {
     if (it != st.jitter.end()) {
         n = opus_decode(st.dec, it->second.data(), (opus_int32)it->second.size(), pcm, kFrame * 6, 0);
         st.jitter.erase(it);
+        st.nextSeq++;
+        if (st.waits) {  // it came after all: the delay is now that much longer - kept for the next burst
+            st.stallMax = std::max(st.stallMax, st.waits);
+            st.stalledWindow = true;
+            st.waits = 0;
+        }
+    } else if (st.jitter.empty() && st.waits < kMaxWait) {
+        // late, not lost: conceal one frame and wait for it (the place is kept)
+        n = opus_decode(st.dec, nullptr, 0, pcm, kFrame, 0);
+        st.waits++;
     } else {
+        // lost: later packets are here (or it's been waited for long enough)
         st.lostWindow++;
+        st.waits = 0;
         auto nx = st.jitter.find((uint16_t)(st.nextSeq + 1));
         if (nx != st.jitter.end())  // recover the lost frame from the next packet's forward error correction
             n = opus_decode(st.dec, nx->second.data(), (opus_int32)nx->second.size(), pcm, kFrame, 1);
         else
             n = opus_decode(st.dec, nullptr, 0, pcm, kFrame, 0);  // packet loss concealment
+        st.nextSeq++;
     }
-    st.nextSeq++;
+    // Too much waiting in the buffer (after a burst - more than the recent stalls need): a quiet frame is left out,
+    // now and then, until it's back to the target. Unheard, unlike a jump.
+    st.sinceTrim++;
+    if (n > 0 && (int)st.jitter.size() > st.targetFrames + 1 && st.sinceTrim >= 5) {
+        double e = 0;
+        for (int i = 0; i < n; i++) e += (double)pcm[i] * pcm[i];
+        if (std::sqrt(e / n) < 300.0) {  // (about -40 dBFS: a pause between words)
+            st.sinceTrim = 0;
+            n = 0;
+        }
+    }
     if (n > 0) st.out.insert(st.out.end(), pcm, pcm + n);
     if (st.recvWindow >= 100) {  // every ~2 s
         st.lossPct = 100.0f * (float)st.lostWindow / (float)st.recvWindow;
         st.recvWindow = st.lostWindow = 0;
-        // adapt playout delay to jitter (20 ms frames), 40..300 ms
-        int want = std::clamp((int)std::ceil((st.jitterMs * 2.0 + 20.0) / 20.0) + (st.lossPct > 5 ? 1 : 0), 2, 15);
-        st.targetFrames = want;
+        if (!st.stalledWindow && st.stallMax > 0) st.stallMax--;  // (calm for 2 s: a little less delay)
+        st.stalledWindow = false;
+        // playout delay: what the jitter and the recent stalls need, 40..300 ms
+        int fromJitter = (int)std::ceil((st.jitterMs * 2.0 + 20.0) / 20.0) + (st.lossPct > 5 ? 1 : 0);
+        st.targetFrames = std::clamp(std::max(fromJitter, st.stallMax + 2), 2, 15);
     }
 }
 
 // Fills `samples` of one stream (silence where nothing arrived).
 void PullLocked(Stream& st, int16_t* outBuf, int samples) {
     if (st.playing) {
-        // keep latency bounded: if far too much is buffered (e.g. after a stall), skip ahead
+        // keep latency bounded: if far too much is buffered (a long stall), skip ahead (the gentle way: above)
         int buffered = (int)st.jitter.size();
-        if (buffered > st.targetFrames + 8) {
+        if (buffered > st.targetFrames + 15) {
             while ((int)st.jitter.size() > st.targetFrames) st.jitter.erase(st.jitter.begin());
             st.nextSeq = st.jitter.begin()->first;
+            st.waits = 0;
         }
         while ((int)st.out.size() < samples) {
             if (st.jitter.empty()) {
                 // nothing at all arrived: conceal a little, then fall silent and re-buffer
-                if (++st.underruns > 10) {
+                if (++st.underruns > kMaxWait + 2) {
                     st.playing = false;
                     st.underruns = 0;
+                    st.waits = 0;
                     break;
                 }
             } else {
