@@ -1142,7 +1142,7 @@ int main(int argc, char** argv) {
             SDL_Log("dev: started without the screen: %s", ok ? "yes" : "no");
             SDL_Delay((Uint32)atoi(hf));
         }
-        int rounds = rn ? std::max(1, atoi(rn)) : 1, r = 0;
+        int rounds = rn && atoi(rn) > 1 ? atoi(rn) : 1, r = 0;
         for (int i = 0; i < rounds; i++) {
             SDL_Log("dev: screen %d of %d (engine %s)", i + 1, rounds, core::Running() ? "running" : "not running");
             r = RunScreen(argc, argv);
