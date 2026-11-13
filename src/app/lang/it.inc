@@ -735,7 +735,6 @@
 {"Watch", "Guarda"},
 {"Not now", "Non ora"},
 {"Watch together", "Guarda insieme"},
-{"Not connected to the device with the movie - trying again...", "Non connesso al dispositivo con il film - nuovo tentativo..."},
 {"Back to the chat (the movie goes on)", "Torna alla chat (il film continua)"},
 {"Leave", "Esci"},
 {"Waiting for %s...", "In attesa di %s..."},
@@ -1529,3 +1528,5 @@
 {"You stopped reading together.", "Hai smesso di leggere insieme."},
 {"Reading together ended.", "La lettura insieme è finita."},
 {"Reading together ended: the host is gone.", "La lettura insieme è finita: l'host se n'è andato."},
+{"Read this comic together", "Leggere insieme questo fumetto"},
+{"Read another comic together", "Leggere insieme un altro fumetto"},

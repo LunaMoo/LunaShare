@@ -557,9 +557,12 @@ void App::DrawViewer() {
         ImGui::EndGroup();
         // action buttons: top-right on desktop, bottom bar on phones
         bool comicish = !viewer.comic.empty() || viewer.together;
-        bool shareRead = !viewer.comic.empty() && !viewer.together;  // (a comic of mine: read it together with someone)
-        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0) + (comicish ? 1 : 0) + (shareRead ? 1 : 0);
+        std::string callKey = CallChatKey();
+        bool togetherBtn = !callKey.empty();  // in a call: Together (this comic, or something else) right here
+        bool shareRead = !viewer.comic.empty() && !viewer.together && !togetherBtn;  // (a comic of mine: read it with someone)
+        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0) + (comicish ? 1 : 0) + (shareRead ? 1 : 0) + (togetherBtn ? 1 : 0);
         if (mobile) {
+            bh = std::min(bh, areaSize.x / ((float)nb + 0.6f));  // (all of them fit across: smaller when there are many)
             float by = viewer.areaMax.y - barH;
             dl->AddRectFilled(ImVec2(viewer.areaMin.x, by), viewer.areaMax, IM_COL32(0, 0, 0, (int)(150 * a)));
             float gap = (areaSize.x - bh * (float)nb) / (float)(nb + 1);
@@ -601,6 +604,13 @@ void App::DrawViewer() {
             ui::PopAccent();
         }
         ReadWhoPopup();
+        if (togetherBtn) {
+            ImGui::SameLine(0, sameGap);
+            ui::PushAccent(TogetherInvited(callKey) || (!viewer.comic.empty() && !viewer.together));
+            if (ui::IconButton("vtogether", Icon::Users, T("Together: watch, listen, read"), bh)) OpenTogether(callKey);
+            ui::PopAccent();
+        }
+        DrawTogetherPopup();  // (here while the viewer is open: it's on top of everything)
         if (comicish) {
             ImGui::SameLine(0, sameGap);
             if (viewer.rtl) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 110, 200, 255));

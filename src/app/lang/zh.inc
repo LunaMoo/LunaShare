@@ -747,7 +747,6 @@
 {"Watch", "观看"},
 {"Not now", "以后再说"},
 {"Watch together", "一起看"},
-{"Not connected to the device with the movie - trying again...", "未连接到有这部电影的设备 - 正在重试..."},
 {"Back to the chat (the movie goes on)", "返回聊天(电影继续播放)"},
 {"Leave", "离开"},
 {"Waiting for %s...", "正在等待 %s..."},
@@ -1544,3 +1543,5 @@
 {"You stopped reading together.", "你结束了一起阅读。"},
 {"Reading together ended.", "一起阅读已结束。"},
 {"Reading together ended: the host is gone.", "一起阅读已结束：发起人已离开。"},
+{"Read this comic together", "一起读这本漫画"},
+{"Read another comic together", "一起读另一本漫画"},

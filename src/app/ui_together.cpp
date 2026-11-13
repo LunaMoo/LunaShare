@@ -33,6 +33,82 @@ bool App::TogetherInvited(const std::string& key) {
     return false;
 }
 
+// ---- joining what they started (the menu, the call bar's invitation, the chat's banners)
+void App::JoinWatchNow(uint64_t sid) {
+    TogetherSwitch(1);
+    if (eng.JoinWatch(sid)) watchShown = true;
+    else toasts.push_back({EventType::Error, T("Watch together"), T("Not connected to them - trying again..."), "", 0, 4.0f});
+}
+
+void App::JoinListenNow(uint64_t sid) {
+    TogetherSwitch(2);
+    if (!musicLibList.empty()) MusicLibEnd();
+    if (!eng.JoinListen(sid)) {
+        toasts.push_back({EventType::Error, T("Listening together"), T("Not connected to them - trying again..."), "", 0, 4.0f});
+        return;
+    }
+    ShowMusicNow();
+}
+
+void App::ShowMusicNow() {
+    if (ui::M().mobile) {
+        if (screen != MScreen::Music) backStack.push_back(screen);
+        screen = MScreen::Music;
+        musicNowShown = true;
+    } else {
+        tab = Tab::Music;
+        tabForce = true;
+    }
+}
+
+// going from one thing done together to another (1 a movie, 2 music, 3 a comic): what's on steps aside - the movie
+// pauses (for everyone: its sound would cover the music) and its screen goes, the comic's viewer closes (the
+// reading goes on: "Back to the comic"), the music pauses for a movie
+void App::TogetherSwitch(int to) {
+    videoFull = false;  // (a video call's full-screen picture steps aside too; it's one tap away in the call bar)
+    if (to != 1) {
+        if (eng.watch.sid && eng.watch.playing) eng.WatchControl(false, -1);
+        watchShown = false;
+    }
+    if (to != 3 && viewer.open) {
+        if (viewer.together) readKeep = true;
+        viewer.closeRequest = true;
+    }
+    if (to == 1) {
+        if (eng.listen.sid && eng.listen.playing) eng.ListenControl("pause");
+        else if (music::Play().GetNow().playing) music::Play().SetPlaying(false);
+    }
+}
+
+// what they invited me to, in words ("" = nothing): the first of a movie, music, a comic
+std::string App::TogetherInviteLine(const std::string& key, int* kind, uint64_t* sid) {
+    for (auto& i : eng.watchInvites)
+        if (i.key == key && i.sid != eng.watch.sid && SteadyMs() - i.at < 6 * 3600 * 1000LL) {
+            if (kind) *kind = 1;
+            if (sid) *sid = i.sid;
+            return TF("%s invites you to watch \"%s\"", Emoji().Display(eng.PeerName(eng.ChatKey(i.host))).c_str(), i.name.c_str());
+        }
+    for (auto& i : eng.listenInvites)
+        if (i.key == key && i.sid != eng.listen.sid) {
+            if (kind) *kind = 2;
+            if (sid) *sid = i.sid;
+            return TF("%s invites you to listen to music together", Emoji().Display(eng.PeerName(eng.ChatKey(i.host))).c_str());
+        }
+    for (auto& i : eng.readInvites)
+        if (i.key == key && i.sid != eng.read.sid) {
+            if (kind) *kind = 3;
+            if (sid) *sid = i.sid;
+            return TF("%s invites you to read \"%s\" together", Emoji().Display(eng.PeerName(eng.ChatKey(i.host))).c_str(), i.name.c_str());
+        }
+    return {};
+}
+
+void App::TogetherJoin(int kind, uint64_t sid) {
+    if (kind == 1) JoinWatchNow(sid);
+    else if (kind == 2) JoinListenNow(sid);
+    else if (kind == 3) JoinReadNow(sid);
+}
+
 void App::OpenTogether(const std::string& key) {
     if (key.empty()) return;
     togetherKey = key;
@@ -42,6 +118,7 @@ void App::OpenTogether(const std::string& key) {
 // listening together with them: what's playing goes on for both (then the rest of my queue); with nothing on, the
 // music list opens - songs tapped there go to the shared queue
 void App::ListenWith(const std::string& key) {
+    TogetherSwitch(2);
     if (!musicLibList.empty()) MusicLibEnd();
     music::Now now = music::Play().GetNow();
     bool haveNow = now.active && !now.external;
@@ -68,6 +145,8 @@ void App::ListenWith(const std::string& key) {
 
 // reading together with them: the comics open, and the one picked is shared
 void App::ReadWithPick(const std::string& key) {
+    TogetherSwitch(3);
+    if (viewer.open) viewer.closeRequest = true;  // (another comic: picked from the shelf)
     readWith = key;
     archivesComics = true;
     archivePick.Clear();
@@ -106,8 +185,7 @@ void App::DrawTogetherPopup() {
     for (auto& i : eng.watchInvites) {
         if (i.key != key || i.sid == eng.watch.sid || SteadyMs() - i.at >= 6 * 3600 * 1000LL) continue;
         if (item(("jw" + std::to_string(i.sid)).c_str(), Icon::Play, TF("Join: watching \"%s\"", i.name.c_str()), true)) {
-            if (eng.JoinWatch(i.sid)) watchShown = true;
-            else toasts.push_back({EventType::Error, T("Watch together"), T("Not connected to them - trying again..."), "", 0, 4.0f});
+            JoinWatchNow(i.sid);
             done = true;
         }
         break;
@@ -115,19 +193,7 @@ void App::DrawTogetherPopup() {
     for (auto& i : eng.listenInvites) {
         if (i.key != key || i.sid == eng.listen.sid) continue;
         if (item(("jl" + std::to_string(i.sid)).c_str(), Icon::Speaker, T("Join: listening to music"), true)) {
-            if (!musicLibList.empty()) MusicLibEnd();
-            if (eng.JoinListen(i.sid)) {
-                if (mobile) {
-                    if (screen != MScreen::Music) backStack.push_back(screen);
-                    screen = MScreen::Music;
-                    musicNowShown = true;
-                } else {
-                    tab = Tab::Music;
-                    tabForce = true;
-                }
-            } else {
-                toasts.push_back({EventType::Error, T("Listening together"), T("Not connected to them - trying again..."), "", 0, 4.0f});
-            }
+            JoinListenNow(i.sid);
             done = true;
         }
         break;
@@ -142,13 +208,16 @@ void App::DrawTogetherPopup() {
     }
     // what's on with them already: back to it
     if (eng.watch.sid && (eng.watch.key == key || std::find(eng.watchKeys.begin(), eng.watchKeys.end(), key) != eng.watchKeys.end())) {
-        if (item("ow", Icon::Play, T("Back to the movie"))) {
+        if (!watchShown && item("ow", Icon::Play, T("Back to the movie"))) {
+            TogetherSwitch(1);
             watchShown = true;
             done = true;
         }
     }
-    if (eng.read.sid && eng.read.key == key && !viewer.open) {
+    if (eng.read.sid && eng.read.key == key && !(viewer.open && viewer.together)) {
         if (item("or", Icon::Book, T("Back to the comic"))) {
+            TogetherSwitch(3);
+            if (viewer.open) viewer.closeRequest = true;
             readOpenPending = true;
             done = true;
         }
@@ -156,26 +225,32 @@ void App::DrawTogetherPopup() {
     // start something
     bool media = Player().Available();
     if (media && item("w", Icon::Play, T("Watch a movie together"))) {
+        TogetherSwitch(1);
         OpenWatchPicker(key);
         done = true;
     }
     if (eng.listen.sid && eng.listen.key == key) {
         if (item("l", Icon::Speaker, T("Back to the music"))) {
-            if (mobile) {
-                if (screen != MScreen::Music) backStack.push_back(screen);
-                screen = MScreen::Music;
-                musicNowShown = true;
-            } else {
-                tab = Tab::Music;
-                tabForce = true;
-            }
+            TogetherSwitch(2);
+            ShowMusicNow();
             done = true;
         }
     } else if (item("l", Icon::Speaker, T("Listen to music together"))) {
         ListenWith(key);
         done = true;
     }
-    if (item("r", Icon::Book, T("Read a comic together"))) {
+    if (viewer.open && !viewer.comic.empty() && !viewer.together) {  // (a comic of mine is open: this one)
+        if (item("rt", Icon::Book, T("Read this comic together"))) {
+            std::string title = viewer.captions.empty() ? std::string() : viewer.captions[0];
+            if (eng.StartRead(key, title, viewer.paths, viewer.index)) {
+                viewer.together = true;
+                readJoined = false;
+                readLocal = viewer.index;
+            }
+            done = true;
+        }
+    }
+    if (item("r", Icon::Book, viewer.open && !viewer.comic.empty() ? T("Read another comic together") : T("Read a comic together"))) {
         ReadWithPick(key);
         done = true;
     }
@@ -189,6 +264,8 @@ void App::DrawTogetherPopup() {
 // ---------------------------------------------------------------- reading a comic together
 
 void App::JoinReadNow(uint64_t sid) {
+    TogetherSwitch(3);
+    if (viewer.open && !viewer.together) viewer.closeRequest = true;
     if (eng.JoinRead(sid)) {
         readOpenPending = true;
     } else {
@@ -224,8 +301,9 @@ void App::ReadFrame() {
     if (!viewer.open || !viewer.together) {
         if (viewer.together && !viewer.open) {  // the viewer was closed: I stop reading (the host: for everyone)
             viewer.together = false;
-            eng.LeaveRead();
+            if (!readKeep) eng.LeaveRead();  // (switched to something else: it goes on - "Back to the comic")
         }
+        readKeep = false;
         return;
     }
     // pages that have come since

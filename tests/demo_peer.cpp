@@ -120,6 +120,20 @@ int main(int argc, char** argv) {
                 }
 #endif
             }
+            static bool readOffered = false;  // DEMO_READ during the call: offer the comic a moment after it's answered
+            if (started && !readOffered && getenv("DEMO_READ") && i % 150 == 0) {
+                readOffered = true;
+                std::string them;
+                {
+                    auto l = e.Lock();
+                    them = e.ChatKey(peer);
+                }
+                std::vector<std::string> pages;
+                for (auto& d : ListDir(getenv("DEMO_READ")))
+                    if (!d.isDir) pages.push_back(JoinPath(getenv("DEMO_READ"), d.name));
+                std::sort(pages.begin(), pages.end());
+                e.StartRead(them, "Demo comic.cbz", pages, 0);
+            }
             if (started) {
                 int16_t f[320];
                 for (int k = 0; k < 320; k++, t++)

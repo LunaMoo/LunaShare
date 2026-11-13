@@ -319,8 +319,7 @@ void App::DrawWatchBanner(const std::string& peer) {
             auto& v = eng.watchInvites;
             v.erase(std::remove_if(v.begin(), v.end(), [&](const WatchInviteInfo& x) { return x.sid == sid; }), v.end());
         } else if (go) {
-            if (eng.JoinWatch(sid)) watchShown = true;
-            else toasts.push_back({EventType::Error, T("Watch together"), T("Not connected to the device with the movie - trying again..."), "", 0, 4.0f});
+            JoinWatchNow(sid);  // (the music pauses, a comic's viewer steps aside)
         }
     }
     ImGui::EndChild();
@@ -921,7 +920,7 @@ void App::DrawWatch() {
         bool inCall = eng.call.state == CallState::Active;
         bool ext = w.libId.compare(0, 4, "ext:") == 0;  // (a torrent: it saves itself)
         bool canAdd = host && !lib, canSave = ((!host && w.allowSave) || (lib && !ext)) && !w.saving;
-        int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 2 : 0);
+        int right = 2 + (canAdd ? 1 : 0) + (canSave ? 1 : 0) + (Bridge().setFullscreen && !mobile ? 1 : 0) + (inCall ? 3 : 0);
         float rightW = (bh + sp) * (float)right;
         ImGui::SameLine();
         ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1010,6 +1009,13 @@ void App::DrawWatch() {
             bool muted = Media().Muted();
             if (ui::IconButton("wmute", muted ? Icon::MicOff : Icon::Mic, muted ? T("Unmute") : T("Mute"), bh)) Media().SetMute(!muted);
             ImGui::SameLine();
+            {  // listening or reading together instead (the movie pauses) - or what they've started
+                std::string ck = CallChatKey();
+                ui::PushAccent(TogetherInvited(ck));
+                if (ui::IconButton("wtogether", Icon::Users, T("Together: watch, listen, read"), bh)) OpenTogether(ck);
+                ui::PopAccent();
+                ImGui::SameLine();
+            }
             ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(190, 50, 50, 255));
             if (ui::IconButton("whang", Icon::HangUp, T("Hang up"), bh)) eng.EndCall();
             ImGui::PopStyleColor();

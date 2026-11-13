@@ -223,6 +223,13 @@ private:
     void ReadWhoPopup();
     void ReadComicOpened(const std::string& name);
     void DrawReadBanner(const std::string& peer);
+    void JoinWatchNow(uint64_t sid);
+    void JoinListenNow(uint64_t sid);
+    void ShowMusicNow();
+    void TogetherSwitch(int to);
+    std::string TogetherInviteLine(const std::string& key, int* kind = nullptr, uint64_t* sid = nullptr);
+    void TogetherJoin(int kind, uint64_t sid);
+    bool readKeep = false;
     bool togetherOpen = false, togetherClose = false, readOpenPending = false, readJoined = false, readWhoOpen = false;
     std::string togetherKey, readWith;
     int readLocal = 0;

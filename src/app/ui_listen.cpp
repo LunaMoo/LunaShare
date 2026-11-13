@@ -443,9 +443,7 @@ void App::DrawListenBanner(const std::string& peer) {
             auto& v = eng.listenInvites;
             v.erase(std::remove_if(v.begin(), v.end(), [&](const ListenInviteInfo& x) { return x.sid == sid; }), v.end());
         } else if (go) {
-            if (!musicLibList.empty()) MusicLibEnd();
-            if (eng.JoinListen(sid)) open = true;
-            else toasts.push_back({EventType::Error, T("Listening together"), T("Not connected to them - trying again..."), "", 0, 4.0f});
+            JoinListenNow(sid);  // (a movie that's on pauses; the music screen opens)
         }
     }
     if (open) {

@@ -741,7 +741,6 @@
 {"Watch", "Смотреть"},
 {"Not now", "Не сейчас"},
 {"Watch together", "Смотреть вместе"},
-{"Not connected to the device with the movie - trying again...", "Нет связи с устройством, где фильм - пробую снова..."},
 {"Back to the chat (the movie goes on)", "Назад в чат (фильм идёт дальше)"},
 {"Leave", "Выйти"},
 {"Waiting for %s...", "Ждём %s..."},
@@ -1538,3 +1537,5 @@
 {"You stopped reading together.", "Вы закончили читать вместе."},
 {"Reading together ended.", "Совместное чтение закончено."},
 {"Reading together ended: the host is gone.", "Совместное чтение закончено: ведущий ушёл."},
+{"Read this comic together", "Читать этот комикс вместе"},
+{"Read another comic together", "Читать другой комикс вместе"},

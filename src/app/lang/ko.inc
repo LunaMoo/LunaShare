@@ -747,7 +747,6 @@
 {"Watch", "보기"},
 {"Not now", "나중에"},
 {"Watch together", "함께 보기"},
-{"Not connected to the device with the movie - trying again...", "영화가 있는 기기에 연결되지 않음 - 다시 시도 중..."},
 {"Back to the chat (the movie goes on)", "채팅으로 돌아가기(영화는 계속)"},
 {"Leave", "나가기"},
 {"Waiting for %s...", "%s 님을 기다리는 중..."},
@@ -1544,3 +1543,5 @@
 {"You stopped reading together.", "함께 읽기를 끝냈습니다."},
 {"Reading together ended.", "함께 읽기가 끝났습니다."},
 {"Reading together ended: the host is gone.", "함께 읽기가 끝났습니다: 호스트가 나갔습니다."},
+{"Read this comic together", "이 만화 함께 읽기"},
+{"Read another comic together", "다른 만화 함께 읽기"},

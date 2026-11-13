@@ -496,7 +496,7 @@ void App::Frame() {
     DrawLockEncPopup();
     ArchiveTick();
     ReadFrame();
-    DrawTogetherPopup();
+    if (!viewer.open) DrawTogetherPopup();  // (the viewer draws it itself)
     TorrentPopups();
     Torrents().Tick();
     SleepPopup();
@@ -4215,6 +4215,12 @@ void App::DrawCallBar() {
     // something wrong with the call's sound (no microphone, no sound output, nothing arriving): said here - and once
     // as a notice, for the full-screen video - instead of a call that's just silent
     std::string prob = c.state == CallState::Active ? Media().CallSoundProblem() : std::string();
+    // they've started something to do together (a movie, music, a comic): said right here, with Join
+    int invKind = 0;
+    uint64_t invSid = 0;
+    std::string inv = c.state == CallState::Active ? TogetherInviteLine(CallChatKey(), &invKind, &invSid) : std::string();
+    float invH = inv.empty() ? 0 : h + ImGui::GetStyle().ItemSpacing.y;
+    barH += invH;
     float probH = 0;
     if (!prob.empty()) {
         float w = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().WindowPadding.x * 2;
@@ -4297,8 +4303,29 @@ void App::DrawCallBar() {
     }
     DrawCallButtons(bw, h, true);
     if (strip) {
-        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - probH - stripH + ImGui::GetStyle().ItemSpacing.y));
+        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - probH - invH - stripH + ImGui::GetStyle().ItemSpacing.y));
         GroupCallStrip(stripTile, false);
+    }
+    if (!inv.empty()) {
+        float y = ImGui::GetStyle().WindowPadding.y + barH - probH - invH + ImGui::GetStyle().ItemSpacing.y;
+        const char* jl = T("Join");
+        float jw = ImGui::CalcTextSize(jl).x + ImGui::GetStyle().FramePadding.x * 2 + (mobile ? h * 0.6f : h * 0.3f);
+        float avail = ImGui::GetContentRegionMax().x - ImGui::GetStyle().WindowPadding.x - jw - ImGui::GetStyle().ItemSpacing.x;
+        std::string t = inv;
+        while (t.size() > 4 && ImGui::CalcTextSize(t.c_str()).x > avail) {
+            t.pop_back();
+            while (!t.empty() && ((unsigned char)t.back() & 0xC0) == 0x80) t.pop_back();
+        }
+        if (t != inv) t += "...";
+        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, y + (h - ImGui::GetTextLineHeight()) * 0.5f));
+        ImGui::TextUnformatted(t.c_str());
+        ImGui::SetCursorPos(ImVec2(ImGui::GetContentRegionMax().x - jw, y));
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 140, 85, 255));
+        ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 160));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+        if (ImGui::Button((std::string(jl) + "##calljoin").c_str(), ImVec2(jw, h))) TogetherJoin(invKind, invSid);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(2);
     }
     if (!prob.empty()) {
         ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x, ImGui::GetStyle().WindowPadding.y + barH - probH + ImGui::GetStyle().ItemSpacing.y));
@@ -4445,6 +4472,33 @@ void App::DrawVideoOverlay() {
     int nb = CallButtonCount(true);
     float bb = std::min(bw * 1.05f, (full.x - pad * (float)(nb + 1)) / (float)nb);  // always fits the screen width
     float rowW = bb * (float)nb + pad * (float)(nb - 1);
+    {  // they've started something to do together: said over the picture, with Join (the chat isn't on screen)
+        int kind = 0;
+        uint64_t sid = 0;
+        std::string inv = TogetherInviteLine(CallChatKey(), &kind, &sid);
+        if (!inv.empty()) {
+            float rh = bb * 0.8f, y = top.y + full.y - bb - pad * 3 - rh;
+            const char* jl = T("Join");
+            float jw = ImGui::CalcTextSize(jl).x + ImGui::GetStyle().FramePadding.x * 2 + rh * 0.6f;
+            ImDrawList* odl = ImGui::GetWindowDrawList();
+            ImVec2 wp = ImGui::GetWindowPos();
+            odl->AddRectFilled(ImVec2(wp.x + top.x + pad, wp.y + y - pad * 0.5f), ImVec2(wp.x + top.x + full.x - pad, wp.y + y + rh + pad * 0.5f),
+                               IM_COL32(20, 90, 55, 220), 10);
+            float avail = full.x - pad * 4 - jw - ImGui::GetStyle().ItemSpacing.x;
+            std::string t = inv;
+            while (t.size() > 4 && ImGui::CalcTextSize(t.c_str()).x > avail) {
+                t.pop_back();
+                while (!t.empty() && ((unsigned char)t.back() & 0xC0) == 0x80) t.pop_back();
+            }
+            if (t != inv) t += "...";
+            ImGui::SetCursorPos(ImVec2(top.x + pad * 2, y + (rh - ImGui::GetTextLineHeight()) * 0.5f));
+            ImGui::TextUnformatted(t.c_str());
+            ImGui::SetCursorPos(ImVec2(top.x + full.x - pad * 2 - jw, y));
+            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(40, 140, 85, 255));
+            if (ImGui::Button((std::string(jl) + "##vjoin").c_str(), ImVec2(jw, rh))) TogetherJoin(kind, sid);
+            ImGui::PopStyleColor();
+        }
+    }
     ImGui::SetCursorPos(ImVec2(top.x + (full.x - rowW) * 0.5f, top.y + full.y - bb - pad * 2));
     DrawCallButtons(bb, bb, true);
     ImGui::PopStyleColor();
