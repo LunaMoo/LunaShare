@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.6
+
+- **Clearer call voice, on Wi-Fi and especially on mobile data.** A late voice packet is now waited for instead
+  of being replaced with guessed sound (which sounds metallic and broken) and thrown away when it arrives; the
+  delay grows a little while the network is uneven and comes back down when it calms. In tests that imitate a
+  phone's Wi-Fi and mobile data, 15-25% of the sound used to be guessed - now none.
+- On phones, LunaShare no longer runs its own noise suppression on top of the phone's (a second pass made voices
+  metallic), and Wi-Fi power saving is off during calls (it delivered the voice in bursts).
+
 ## 1.7.5
 
 - **Messages and calls keep arriving when Android closes the app's screen** (swiped away from the recent apps,

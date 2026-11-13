@@ -162,6 +162,61 @@ static void TestBursty() {
     CHECK(st.buffered_ms < 400, "bounded latency (%d ms)", st.buffered_ms);
 }
 
+// Mobile data, through a reliable connection (internet calls run over KCP): a lost packet is sent again after
+// about a round trip, and everything after it waits behind it (head-of-line). 3% loss, 150-250 ms to recover,
+// 20-60 ms jitter on top.
+static void TestMobile() {
+    printf("[voice over mobile data: 3%% loss recovered after 150-250 ms (everything behind waits), jitter]\n");
+    const LsmModule* m = lunashare_media_module();
+    Net net;
+    LsmHost h{LSM_API_VERSION, &net, HostSend, HostLog};
+    LsmSettings s{0, 0, 0, 24000};
+    CHECK(m->start(&h, &s) == 0, "start");
+    std::mt19937 rng(11);
+    std::deque<std::pair<int, std::vector<uint8_t>>> q;  // in order: (earliest step it can arrive, packet)
+    std::vector<int16_t> out;
+    int16_t frame[F];
+    int blockedUntil = -1;
+    for (int step = 0; step < 1500; step++) {  // 30 s
+        for (int i = 0; i < F; i++) frame[i] = (int16_t)(8000 * std::sin(2 * PI * 440 * (step * F + i) / R));
+        m->capture(frame, F);
+        for (auto& p : net.sent) {
+            int at = step + 1 + (int)(rng() % 3);
+            if (std::uniform_real_distribution<>(0, 1)(rng) < 0.03) at = step + 8 + (int)(rng() % 6);  // resent
+            q.push_back({at, p});
+        }
+        net.sent.clear();
+        // in order: nothing passes a packet that is still waiting
+        while (!q.empty() && q.front().first <= step) {
+            m->receive(q.front().second.data(), q.front().second.size());
+            q.pop_front();
+        }
+        (void)blockedUntil;
+        int16_t spk[F];
+        m->playback(spk, F);
+        out.insert(out.end(), spk, spk + F);
+    }
+    LsmStats st;
+    m->get_stats(&st);
+    m->stop();
+    size_t a = (size_t)R * 5, b = out.size();
+    long bad = 0, frames = 0;
+    for (size_t i = a; i + F <= b; i += F, frames++) {
+        double e = 0, cs = 0, sn = 0;
+        for (int k = 0; k < F; k++) {
+            double w = 2 * PI * 440 * (double)(i + k) / R;
+            e += (double)out[i + k] * out[i + k];
+            cs += out[i + k] * std::cos(w);
+            sn += out[i + k] * std::sin(w);
+        }
+        if (e < 1e5 * F || (cs * cs + sn * sn) * 2.0 / F < 0.9 * e) bad++;
+    }
+    printf("  frames not clean %ld/%ld, stats: loss %.1f%% jitter %d ms buffered %d ms\n", bad, frames, st.loss_percent,
+           st.jitter_ms, st.buffered_ms);
+    CHECK(bad < frames / 50, "resent packets are waited for (%ld of %ld frames not clean)", bad, frames);
+    CHECK(st.buffered_ms < 400, "bounded latency (%d ms)", st.buffered_ms);
+}
+
 // quiet microphone (laptop / phone at arm's length): default call settings must bring speech to a normal level
 static double SentLevelDb(int micAmp, double* inDb) {
     const LsmModule* m = lunashare_media_module();
@@ -622,6 +677,7 @@ int main() {
     TestLoopback(0.0);
     TestLoopback(0.10);
     TestBursty();
+    TestMobile();
     TestLoudness();
     TestEcho();
     TestEchoBursty();
