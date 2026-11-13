@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.5
+
+- **Messages and calls keep arriving when Android closes the app's screen** (swiped away from the recent apps,
+  memory reclaimed, a phone maker's cleaner), with "Keep running in the background" on: the connection keeps going
+  without the screen, and the app takes it back when opened. After the phone restarts, the app is updated, or
+  Android ends and restarts the app, the connection starts again by itself - without opening LunaShare.
+  A call in progress ends if the screen is closed; one coming in still rings as a notification.
+- **Reconnects at once when the network changes** (Wi-Fi to mobile data and back, another Wi-Fi, the network
+  back after none): every connection is checked straight away (a working one stays, a dead one goes within
+  seconds instead of half a minute), the server learns the new address immediately, and the devices that were
+  connected are dialled again from this side too.
+
 ## 1.7.4
 
 - **Calls follow headphones.** On phones a call starts on headphones that are connected (wired / USB first, then
