@@ -25,6 +25,11 @@ bool Single() {
 SDL_AudioDeviceID Open(const char* who, const char* device, const SDL_AudioSpec* want, SDL_AudioSpec* have) {
     std::lock_guard<std::mutex> l(g_m);
     SDL_AudioDeviceID dev = 0;
+#if defined(__ANDROID__)
+    // only a call plays on Android's call stream (our SDL patch reads this when a device opens): music, radio and
+    // movies on the media stream - its volume buttons, and Bluetooth headphones' music channel, not the call one
+    if (std::string(who) != "call") SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", "0");
+#endif
     if (Emulated() && g_open > 0) SDL_SetError("Audio device already open");  // (as a phone would)
     else dev = SDL_OpenAudioDevice(device, 0, want, have, 0);
     if (dev) {

@@ -1516,3 +1516,4 @@
 {"The sound output couldn't be started - you can't hear the other side.", "音声出力を開始できませんでした。相手の声が聞こえません。"},
 {"The microphone gives only silence - the other side can't hear you.", "マイクから無音しか入ってきません。相手にあなたの声が聞こえません。"},
 {"No sound is arriving from the other side.", "相手側から音声が届いていません。"},
+{"can't reach the station - tap to try again", "局に接続できません - タップして再試行"},

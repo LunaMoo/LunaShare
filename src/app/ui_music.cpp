@@ -627,6 +627,7 @@ void App::DrawMusicMini() {
     if (ImGui::InvisibleButton("##mini", ImVec2(w - bs * 2 - 12, h))) {
         if (mobile) {
             if (screen != MScreen::Music) backStack.push_back(screen);
+            musicNowFromList = screen == MScreen::Music;
             screen = MScreen::Music;
             musicNowShown = true;
         } else {
@@ -821,7 +822,7 @@ void App::DrawMusic() {
     MusicListenPlaylistPopup();
     DrawListenStrip();
     if (mobile && musicNowShown) {  // phones: "now playing" fills the screen
-        if (ui::IconTextButton(T("Library"), Icon::List, ImVec2(0, h))) musicNowShown = false;
+        if (ui::IconTextButton(T("Library"), Icon::List, ImVec2(0, h))) musicNowShown = musicNowFromList = false;
         ImGui::BeginChild("mnow");
         ui::TouchScroll();
         DrawMusicNow(true);

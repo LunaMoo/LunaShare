@@ -39,6 +39,7 @@ bool NaturalLess(const std::string& a, const std::string& b);
 class App {
 public:
     explicit App(ls::Engine& e);
+    ~App();
 
     // Builds the whole UI for this frame. Call between ImGui::NewFrame() and ImGui::Render().
     void Frame();
@@ -317,7 +318,7 @@ private:
     void DrawListenStrip();
     void DrawListenQueue();
     void DrawListenBanner(const std::string& peer);
-    bool musicListenOpen = false, listenFollowing = false;
+    bool musicListenOpen = false, listenFollowing = false, musicCtlSet = false;
     std::vector<ls::LibFile> musicLibList;
     int musicLibAt = -1;
     std::string musicLibId, musicLibWho;
@@ -353,7 +354,7 @@ private:
     int musicPickIdx = -1;
     std::vector<std::string> musicPickAll;  // the songs last listed (for All)
     std::vector<std::string> musicAddPaths;
-    bool musicAddOpen = false, musicNowShown = false;
+    bool musicAddOpen = false, musicNowShown = false, musicNowFromList = false;  // (from the list: back goes back to it)
     float musicDrag = -1;
     void DrawWatchResume();                 // "the movie is on" strip outside its chat (movie player, library)
     void WatchAddPopup();                   // host: add a person / group to the movie

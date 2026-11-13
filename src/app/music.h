@@ -223,13 +223,21 @@ public:
     bool ExternalEnded(uint64_t id);         // that song played to its end
     void SetExternalTrack(uint64_t id, const Track& t);  // radio: the song now on (its title from the stream)
     // while a song from elsewhere is on, the controls go here (1 toggle, 2 next, 3 prev, 6 stop, 7 seek s); true = handled
-    std::function<bool(int cmd, double arg)> externalCtl;
+    // (set by the screen and taken away when it closes - the app's engine, and with it the player, outlive the screen;
+    // a call that is going on finishes first)
+    void SetExternalCtl(std::function<bool(int cmd, double arg)> fn) {
+        std::lock_guard<std::mutex> l(ctlM_);
+        externalCtl_ = std::move(fn);
+    }
 
     // remembered between runs (paused)
     void LoadState(const std::string& path);
     void SaveState();
 
 private:
+    std::mutex ctlM_;
+    std::function<bool(int cmd, double arg)> externalCtl_;
+
     void Loop();
     void LoopExternal();           // (m_ held)
     bool ExtCtl(int cmd, double arg);

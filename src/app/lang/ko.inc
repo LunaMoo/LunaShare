@@ -1516,3 +1516,4 @@
 {"The sound output couldn't be started - you can't hear the other side.", "소리 출력을 시작하지 못해 상대방 소리가 들리지 않습니다."},
 {"The microphone gives only silence - the other side can't hear you.", "마이크에서 무음만 들어와 상대방이 내 소리를 들을 수 없습니다."},
 {"No sound is arriving from the other side.", "상대방에게서 소리가 오지 않습니다."},
+{"can't reach the station - tap to try again", "방송국에 연결할 수 없음 - 탭하여 다시 시도"},

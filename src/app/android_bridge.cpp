@@ -366,6 +366,8 @@ void AndroidBridgeInit(ls::Engine* engine) {
         jstring u = env->NewStringUTF(url.c_str());
         auto r = (jobjectArray)env->CallStaticObjectMethod(g_cls, m, u, (jboolean)icy);
         env->DeleteLocalRef(u);
+        // (Java's own timeouts don't cover looking up the name: a station that never answers is given up on here)
+        int64_t until = ls::SteadyMs() + 25000;
         for (;;) {
             if (env->ExceptionCheck()) {
                 env->ExceptionClear();
@@ -382,10 +384,10 @@ void AndroidBridgeInit(ls::Engine* engine) {
             int id = atoi(get(0).c_str());  // {id, status, headers, final URL, error}
             if (id < 0) {
                 env->DeleteLocalRef(r);
-                if (cancel && *cancel) {
+                if ((cancel && *cancel) || ls::SteadyMs() > until) {
                     env->CallStaticVoidMethod(g_cls, ma, (jint)-id);
                     if (env->ExceptionCheck()) env->ExceptionClear();
-                    err = "cancelled";
+                    err = cancel && *cancel ? "cancelled" : "no answer";
                     return 0;
                 }
                 r = (jobjectArray)env->CallStaticObjectMethod(g_cls, mw, (jint)-id);

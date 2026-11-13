@@ -839,7 +839,8 @@ bool Player::ExtCtl(int cmd, double arg) {
         std::lock_guard<std::mutex> l(m_);
         if (!ext_) return false;
     }
-    return externalCtl && externalCtl(cmd, arg);
+    std::lock_guard<std::mutex> l(ctlM_);
+    return externalCtl_ && externalCtl_(cmd, arg);
 }
 
 // (m_ held) the song from elsewhere that's open: follow the host's clock, notice its end

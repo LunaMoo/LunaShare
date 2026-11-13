@@ -881,6 +881,12 @@ bool MediaHost::OpenPlayback() {
     std::string out = !autoOut_.empty() && mode_ == Mode::Call ? autoOut_ : s.callOutputDevice;
     playDev_ = audio_out::Open("call", out.empty() ? nullptr : out.c_str(), &want, &have);
     if (!playDev_ && !out.empty()) playDev_ = audio_out::Open("call", nullptr, &want, &have);
+#if defined(__ANDROID__)
+    // (only this device: SDL reads it when a device opens, and left on, everything opened after the call - the radio,
+    // music, movies - played on the call stream: the volume buttons set the call volume, and Bluetooth headphones
+    // got it through their low-quality call channel)
+    SDL_SetHint("SDL_ANDROID_VOICE_AUDIO", "0");
+#endif
     if (!playDev_) {
         playErr_ = std::string("speaker: ") + SDL_GetError();
         return false;
@@ -916,6 +922,9 @@ bool MediaHost::OpenCapture() {
     std::string in = !autoIn_.empty() && mode_ == Mode::Call ? autoIn_ : s.callInputDevice;
     capDev_ = SDL_OpenAudioDevice(in.empty() ? nullptr : in.c_str(), 1, &want, &have, 0);
     if (!capDev_ && !in.empty()) capDev_ = SDL_OpenAudioDevice(nullptr, 1, &want, &have, 0);
+#if defined(__ANDROID__)
+    SDL_SetHint("SDL_ANDROID_VOICE_CAPTURE", "0");  // (this microphone only: a voice message after the call is recorded as usual)
+#endif
     if (!capDev_) {
         capErr_ = std::string("microphone: ") + SDL_GetError();
         SDL_Log("microphone couldn't be opened: %s", SDL_GetError());

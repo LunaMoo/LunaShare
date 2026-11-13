@@ -1505,3 +1505,4 @@
 {"The sound output couldn't be started - you can't hear the other side.", "Die Tonausgabe konnte nicht gestartet werden - du hörst die andere Seite nicht."},
 {"The microphone gives only silence - the other side can't hear you.", "Das Mikrofon liefert nur Stille - die andere Seite hört dich nicht."},
 {"No sound is arriving from the other side.", "Von der anderen Seite kommt kein Ton an."},
+{"can't reach the station - tap to try again", "Sender nicht erreichbar - zum erneuten Versuch tippen"},

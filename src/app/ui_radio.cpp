@@ -203,11 +203,11 @@ void App::DrawRadio() {
         ImGui::PushID((int)i);
         ImVec2 p = ImGui::GetCursorScreenPos();
         float w = ImGui::GetContentRegionAvail().x, star = rowH * 0.8f;
-        bool on = rd.Playing(s.id);
+        bool on = rd.Playing(s.id) || (rd.Starting() && rd.Current().id == s.id);  // (also the one being started)
         ImGui::SetNextItemAllowOverlap();
         if (ImGui::Selectable("##st", on, ImGuiSelectableFlags_AllowOverlap, ImVec2(w - star - sp, rowH))) {
-            if (on) music::Play().Toggle();
-            else rd.Play(s);
+            if (on && !rd.Starting()) music::Play().Toggle();
+            else rd.Play(s);  // (also again: one that hasn't started, or couldn't be reached)
         }
         if (ImGui::IsItemHovered() && !mobile && !s.homepage.empty()) ImGui::SetTooltip("%s", s.homepage.c_str());
         float lg = rowH - 8;
@@ -220,7 +220,9 @@ void App::DrawRadio() {
         if (on) {  // the one on: what's playing on it
             music::Now n = music::Play().GetNow();
             std::string t = rd.Title();
-            sub = n.loading ? std::string(n.retries > 0 ? T("can't reach the station - trying again...") : T("connecting..."))
+            sub = rd.Failed() ? std::string(T("can't reach the station - tap to try again"))
+                : rd.Starting() ? std::string(T("connecting..."))
+                : n.loading ? std::string(n.retries > 0 ? T("can't reach the station - trying again...") : T("connecting..."))
                 : !n.playing ? std::string(T("paused"))
                 : t.empty()  ? std::string(T("on air"))
                              : "\xE2\x99\xAA " + t;

@@ -1516,3 +1516,4 @@
 {"The sound output couldn't be started - you can't hear the other side.", "无法启动声音输出，你听不到对方的声音。"},
 {"The microphone gives only silence - the other side can't hear you.", "麦克风只有静音，对方听不到你的声音。"},
 {"No sound is arriving from the other side.", "没有收到对方的声音。"},
+{"can't reach the station - tap to try again", "无法连接电台 - 点按重试"},

@@ -1510,3 +1510,4 @@
 {"The sound output couldn't be started - you can't hear the other side.", "Не удалось включить вывод звука - вы не слышите собеседника."},
 {"The microphone gives only silence - the other side can't hear you.", "Микрофон даёт только тишину - собеседник вас не слышит."},
 {"No sound is arriving from the other side.", "От собеседника не приходит звук."},
+{"can't reach the station - tap to try again", "станция недоступна - нажмите, чтобы повторить"},

@@ -152,12 +152,12 @@ Radio& R() {
 void Radio::Init(const std::string& configDir) {
     // (Android: closing the app and opening it again runs this again in the same process - the worker of the last
     // run has stopped, and everything starts over)
-    if (th_.joinable()) Shutdown();
+    if (wd_.joinable()) Shutdown();
     stopping_ = false;
     {
         std::lock_guard<std::mutex> l(m_);
         quit_ = false;
-        jobs_.clear();
+        for (auto& q : jobs_) q.clear();
         results_.clear();
         favs_.clear();
         recent_.clear();
@@ -168,6 +168,8 @@ void Radio::Init(const std::string& configDir) {
         server_.clear();
         cur_ = Station();
         title_.clear();
+        startedId_.clear();
+        failedId_.clear();
     }
     busy_ = false;
     playerId_ = 0;
@@ -176,7 +178,12 @@ void Radio::Init(const std::string& configDir) {
     ls::MakeDirs(logoDir_);
     Load();
     if (country_.empty()) country_ = SystemCountry();
-    th_ = std::thread([this] { Worker(); });
+    for (int i = 0; i < kLanes; i++) {
+        jobStop_[i] = false;
+        jobAt_[i] = 0;
+        th_[i] = std::thread([this, i] { Worker(i); });
+    }
+    wd_ = std::thread([this] { Watchdog(); });
     if (const char* ap = getenv("LUNASHARE_RADIO_PLAY")) {  // (tests: play the first station whose name has this in it)
         std::string want = ap;
         Job([this, want] {
@@ -190,6 +197,9 @@ void Radio::Init(const std::string& configDir) {
                 }
         });
     }
+    if (const char* hang = getenv("LUNASHARE_RADIO_HANG")) {  // (tests: a station that never answers: url with this in it)
+        hangUrl_ = hang;
+    }
 }
 
 void Radio::Shutdown() {
@@ -197,10 +207,13 @@ void Radio::Shutdown() {
     {
         std::lock_guard<std::mutex> l(m_);
         quit_ = true;
-        jobs_.clear();
+        for (auto& q : jobs_) q.clear();
     }
+    for (auto& f : jobStop_) f = true;
     cv_.notify_all();
-    if (th_.joinable()) th_.join();
+    for (auto& t : th_)
+        if (t.joinable()) t.join();
+    if (wd_.joinable()) wd_.join();
     busy_ = false;
 }
 
@@ -228,26 +241,55 @@ void Radio::Save() {
     ls::SaveJsonFile(file_, j);
 }
 
-void Radio::Worker() {
+static thread_local std::atomic<bool>* t_stop = nullptr;
+
+std::atomic<bool>* Radio::Halt() { return t_stop ? t_stop : &stopping_; }
+
+void Radio::Worker(int lane) {
+    t_stop = &jobStop_[lane];
     for (;;) {
         std::function<void()> fn;
         {
             std::unique_lock<std::mutex> l(m_);
-            cv_.wait(l, [&] { return quit_ || !jobs_.empty(); });
+            cv_.wait(l, [&] { return quit_ || !jobs_[lane].empty(); });
             if (quit_) return;
-            fn = std::move(jobs_.front());
-            jobs_.pop_front();
+            fn = std::move(jobs_[lane].front());
+            jobs_[lane].pop_front();
+            jobStop_[lane] = false;
+            jobAt_[lane] = ls::SteadyMs();
         }
         fn();
+        jobAt_[lane] = 0;
     }
 }
 
-void Radio::Job(std::function<void()> fn) {
+// a job that has waited on the network too long is given up on (its reads and connects see the flag)
+void Radio::Watchdog() {
+    static const int64_t limit[kLanes] = {45000, 25000, 30000};
+    std::unique_lock<std::mutex> l(m_);
+    while (!quit_) {
+        cv_.wait_for(l, std::chrono::milliseconds(500));
+        int64_t now = ls::SteadyMs();
+        for (int i = 0; i < kLanes; i++) {
+            int64_t at = jobAt_[i];
+            if (at && now - at > limit[i] && !jobStop_[i]) {
+                jobStop_[i] = true;
+                SDL_Log("radio: a job of lane %d took over %d s - given up", i, (int)(limit[i] / 1000));
+            }
+        }
+    }
+}
+
+void Radio::Job(std::function<void()> fn, int lane) {
     {
         std::lock_guard<std::mutex> l(m_);
-        jobs_.push_back(std::move(fn));
+        if (lane == 2) {  // (starting a station: only the latest one counts - the one being started gives up)
+            jobs_[lane].clear();
+            if (jobAt_[lane]) jobStop_[lane] = true;
+        }
+        jobs_[lane].push_back(std::move(fn));
     }
-    cv_.notify_one();
+    cv_.notify_all();
 }
 
 // ---------------------------------------------------------------- the directory
@@ -261,7 +303,7 @@ std::string Radio::Server() {
     }
     std::vector<std::string> names;
     std::string body;
-    if (ls::HttpGetAll("https://all.api.radio-browser.info/json/servers", body, 1u << 20, nullptr, &stopping_)) {
+    if (ls::HttpGetAll("https://all.api.radio-browser.info/json/servers", body, 1u << 20, nullptr, Halt())) {
         json j = json::parse(body, nullptr, false);
         if (j.is_array())
             for (auto& e : j)
@@ -279,7 +321,7 @@ std::string Radio::Server() {
 bool Radio::Query(const std::string& path, std::vector<Station>& out, std::string& err) {
     for (int attempt = 0; attempt < 3; attempt++) {
         std::string body, base = Server();
-        if (ls::HttpGetAll(base + path, body, 8u << 20, nullptr, &stopping_)) {
+        if (ls::HttpGetAll(base + path, body, 8u << 20, nullptr, Halt())) {
             json j = json::parse(body, nullptr, false);
             if (!j.is_array()) {
                 err = "unexpected answer";
@@ -409,7 +451,7 @@ std::vector<Country> Radio::Countries() {
     Job([this] {
         std::string body;
         std::vector<Country> v;
-        if (ls::HttpGetAll(Server() + "/json/countries?hidebroken=true", body, 4u << 20, nullptr, &stopping_)) {
+        if (ls::HttpGetAll(Server() + "/json/countries?hidebroken=true", body, 4u << 20, nullptr, Halt())) {
             json j = json::parse(body, nullptr, false);
             if (j.is_array())
                 for (auto& e : j) {
@@ -482,13 +524,14 @@ std::string Radio::LogoFile(const Station& s) {
 void Radio::FetchLogo(const Station& s) {
     {
         std::lock_guard<std::mutex> l(m_);
-        if (std::find(logosAsked_.begin(), logosAsked_.end(), s.favicon) != logosAsked_.end()) return;
-        logosAsked_.push_back(s.favicon);
+        auto it = logosAsked_.find(s.favicon);
+        if (it != logosAsked_.end() && ls::SteadyMs() - it->second < 120000) return;  // (failed: again in a while)
+        logosAsked_[s.favicon] = ls::SteadyMs();
     }
     std::string url = s.favicon, base = ls::JoinPath(logoDir_, std::to_string(Fnv(s.favicon)));
     Job([this, url, base] {
         std::string body;
-        if (!ls::HttpGetAll(url, body, 1u << 20, nullptr, &stopping_) || body.size() < 16) return;
+        if (!ls::HttpGetAll(url, body, 1u << 20, nullptr, Halt()) || body.size() < 16) return;
         const auto* b = (const unsigned char*)body.data();
         const char* ext = b[0] == 0x89 && b[1] == 'P' ? ".png"
                         : b[0] == 0xFF && b[1] == 0xD8 ? ".jpg"
@@ -509,7 +552,7 @@ void Radio::FetchLogo(const Station& s) {
             t.cover = base + ext;
             music::Play().SetExternalTrack(playerId_, t);
         }
-    });
+    }, 1);
 }
 
 void Radio::Play(const Station& s) {
@@ -517,6 +560,7 @@ void Radio::Play(const Station& s) {
         std::lock_guard<std::mutex> l(m_);
         cur_ = s;
         title_.clear();
+        failedId_.clear();
         pausedAt_ = 0;
         recent_.erase(std::remove_if(recent_.begin(), recent_.end(), [&](const Station& x) { return x.id == s.id; }), recent_.end());
         recent_.insert(recent_.begin(), s);
@@ -535,13 +579,15 @@ void Radio::Play(const Station& s) {
     Job([this, st, server] {
         if (st.id.compare(0, 2, "u:") != 0 && !server.empty()) {  // (Radio Browser counts what's listened to)
             std::string ignore;
-            ls::HttpGetAll(server + "/json/url/" + Enc(st.id), ignore, 64 * 1024, nullptr, &stopping_);
+            ls::HttpGetAll(server + "/json/url/" + Enc(st.id), ignore, 64 * 1024, nullptr, Halt());
         }
+        if (!hangUrl_.empty() && st.url.find(hangUrl_) != std::string::npos)  // (tests: never answers)
+            while (!Halt()->load()) std::this_thread::sleep_for(std::chrono::milliseconds(50));
         std::string url = st.url, fmt = st.hls || PathOf(url).find(".m3u8") != std::string::npos ? "hls" : "";
         if (fmt.empty()) {
             for (int hop = 0; hop < 3; hop++) {
                 auto ns = ls::NewNetStream();
-                ns->cancel = &stopping_;
+                ns->cancel = Halt();
                 std::string err;
                 if (!ns->Open(url, false, &err)) break;  // (the player tries again, and says so)
                 std::string ct = Lower(ns->Header("content-type"));
@@ -574,14 +620,22 @@ void Radio::Play(const Station& s) {
                 url = next;
             }
         }
+        if (Halt()->load()) {  // (given up on - or another station was chosen)
+            std::lock_guard<std::mutex> l(m_);
+            if (cur_.id == st.id) failedId_ = st.id;
+            version_++;
+            return;
+        }
         Start(st, url, fmt);
-    });
+    }, 2);
 }
 
 void Radio::Start(const Station& s, const std::string& url, const std::string& format) {
     {
         std::lock_guard<std::mutex> l(m_);
         if (cur_.id != s.id) return;  // (another station was chosen meanwhile)
+        startedId_ = s.id;
+        failedId_.clear();
     }
     static std::atomic<uint64_t> seq{0};
     uint64_t id = (0x5AD10ull << 40) | (++seq & 0xFFFFFFFFFFull);
@@ -626,6 +680,8 @@ void Radio::Stop() {
     if (Active()) music::Play().EndExternal();
     std::lock_guard<std::mutex> l(m_);
     cur_ = Station();
+    startedId_.clear();
+    failedId_.clear();
     playerId_ = 0;
     version_++;
 }
@@ -641,6 +697,16 @@ bool Radio::Playing(const std::string& id) {
     if (!Active()) return false;
     std::lock_guard<std::mutex> l(m_);
     return cur_.id == id;
+}
+
+bool Radio::Starting() {
+    std::lock_guard<std::mutex> l(m_);
+    return !cur_.id.empty() && cur_.id != startedId_;
+}
+
+bool Radio::Failed() {
+    std::lock_guard<std::mutex> l(m_);
+    return !failedId_.empty() && failedId_ == cur_.id;
 }
 
 Station Radio::Current() {

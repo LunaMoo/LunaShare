@@ -25,10 +25,9 @@ static std::string Stem(const std::string& path) {
 // ---------------------------------------------------------------- the player follows (every frame, engine lock)
 
 void App::MusicExternalTick() {
-    static bool ctlSet = false;
-    if (!ctlSet) {  // the player's buttons (and the notification's, the media keys) while a song from elsewhere is on
-        ctlSet = true;
-        music::Play().externalCtl = [this](int cmd, double arg) -> bool {
+    if (!musicCtlSet) {  // the player's buttons (and the notification's, the media keys) while a song from elsewhere is on
+        musicCtlSet = true;  // (this screen's: the next one sets its own; ~App takes it away)
+        music::Play().SetExternalCtl([this](int cmd, double arg) -> bool {
             if (radio::R().Active()) return radio::R().Control(cmd);  // internet radio: stations, back to live
             auto lk = eng.Lock();
             if (eng.listen.sid) {
@@ -55,7 +54,7 @@ void App::MusicExternalTick() {
                 if (cmd == 6) MusicLibEnd();
             }
             return false;
-        };
+        });
     }
     music::Now n = music::Play().GetNow();
     // listening together: the song that's on, at the host's clock

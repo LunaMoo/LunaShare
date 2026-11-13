@@ -8,6 +8,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -60,6 +61,8 @@ public:
     void Play(const Station& s);
     void Stop();
     bool Playing(const std::string& id);           // this station is the one on
+    bool Starting();                               // the one chosen isn't playing yet (the one before still may be)
+    bool Failed();                                 // ...and couldn't be reached
     bool Active();                                 // a station is on (or connecting)
     Station Current();
     std::string Title();                           // the song now on (from the stream), "" = not known
@@ -70,8 +73,14 @@ public:
     uint64_t PlayerId() const { return playerId_; }
 
 private:
-    void Worker();
-    void Job(std::function<void()> fn);
+    // three lanes, each a thread of its own, so one can't hold up another: 0 the directory, 1 logos, 2 starting a
+    // station. A watchdog gives up on a job stuck on the network (a station that never answers held everything up:
+    // no logos, no other station, until the app was restarted)
+    enum { kLanes = 3 };
+    void Worker(int lane);
+    void Job(std::function<void()> fn, int lane = 0);
+    void Watchdog();
+    std::atomic<bool>* Halt();  // the flag the job running on this thread gives up on
     bool Query(const std::string& path, std::vector<Station>& out, std::string& err);
     std::string Server();
     void Start(const Station& s, const std::string& url, const std::string& format);
@@ -83,21 +92,23 @@ private:
     std::string file_, logoDir_;
     std::mutex m_;
     std::condition_variable cv_;
-    std::deque<std::function<void()>> jobs_;
-    std::thread th_;
+    std::deque<std::function<void()>> jobs_[kLanes];
+    std::thread th_[kLanes], wd_;
+    std::atomic<bool> jobStop_[kLanes];
+    std::atomic<int64_t> jobAt_[kLanes];  // (steady ms the running job began; 0 = none)
     bool quit_ = false;
     std::atomic<bool> busy_{false}, stopping_{false};
     std::atomic<uint64_t> version_{1};
     std::vector<Station> results_, favs_, recent_;
     std::vector<Country> countries_;
     bool countriesAsked_ = false;
-    std::string error_, country_, server_;
+    std::string error_, country_, server_, hangUrl_;
     uint64_t query_ = 0;  // (a newer question makes older answers moot)
     Station cur_;
-    std::string title_;
+    std::string title_, startedId_, failedId_;
     std::atomic<uint64_t> playerId_{0};
     int64_t pausedAt_ = 0;
-    std::vector<std::string> logosAsked_;
+    std::map<std::string, int64_t> logosAsked_;  // favicon -> when (asked again a while after a failure)
     struct Fetch;
     std::shared_ptr<Fetch> fetch_;
 };

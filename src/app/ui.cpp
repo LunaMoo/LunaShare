@@ -59,6 +59,11 @@ void RevealPath(const std::string& p) {
     else OpenInFileManager(p);
 }
 
+// the screen closes (the engine and the music player may go on without it): nothing of the player calls into it any more
+App::~App() {
+    if (musicCtlSet) music::Play().SetExternalCtl(nullptr);
+}
+
 App::App(Engine& e) : eng(e) {
     auto lk = eng.Lock();
     edit = eng.settings;
@@ -501,7 +506,7 @@ void App::MusicTick() {
     music::Lib().SetImplicitFolders({eng.settings.downloadDir});
     bool interrupt = Player().Playing() || eng.call.state != CallState::None || Media().Recording() || Media().VideoMessageOpen();
     // dev: LUNASHARE_FAKECALL=from,to (seconds since start) acts like a call then; ",play" presses play during it
-    if (static const char* fc = getenv("LUNASHARE_FAKECALL"); fc) {
+    if (static const char* fc = getenv("LUNASHARE_FAKECALL"); fc && *fc) {
         static int64_t t0 = SteadyMs();
         static bool pressed = false;
         double a = atof(fc), b = strchr(fc, ',') ? atof(strchr(fc, ',') + 1) : a + 5, t = (SteadyMs() - t0) / 1000.0;
@@ -1347,6 +1352,8 @@ void App::DrawMobile() {
             } else if (screen == MScreen::Gallery && !galleryAlbum.empty()) {
                 galleryAlbum.clear();
             } else if (screen == MScreen::Archives && ArchiveBack()) {
+            } else if (screen == MScreen::Music && musicNowShown && musicNowFromList) {
+                musicNowShown = musicNowFromList = false;  // the player, opened from the music list: back to the list
             } else if (screen == MScreen::Settings && settingsCat >= 0) {
                 settingsCat = -1;  // a settings page: back to the list of them
             } else if (!backStack.empty()) { screen = backStack.back(); backStack.pop_back(); }
@@ -1451,8 +1458,9 @@ void App::DrawMobile() {
     ImGui::Separator();
 
     float navH = (screen == MScreen::Chat || keyboardInset > 0) ? 0 : rowH * 1.25f + ImGui::GetStyle().ItemSpacing.y;
-    // the music strip above the navigation (not in a chat - its text box is there - nor on the music screen itself)
-    bool mini = navH > 0 && screen != MScreen::Music && music::Play().GetNow().active;
+    // the music strip above the navigation (not in a chat - its text box is there - nor over "now playing" itself:
+    // on the music list it's the way back to the player)
+    bool mini = navH > 0 && !(screen == MScreen::Music && musicNowShown) && music::Play().GetNow().active;
     float miniH = mini ? rowH * 0.95f + ImGui::GetStyle().ItemSpacing.y * 2 : 0;
     ImGui::BeginChild("mcontent", ImVec2(0, -navH - miniH));
     switch (screen) {
