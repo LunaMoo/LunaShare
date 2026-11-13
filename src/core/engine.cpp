@@ -40,6 +40,37 @@ static bool BroadcastAllowed() {
 Engine::Engine() {}
 Engine::~Engine() { Stop(); }
 
+void Engine::SetMediaHooks(std::function<void(uint64_t, int, const uint8_t*, size_t)> media, std::function<void(int)> streamEnd) {
+    std::lock_guard<std::mutex> l(mediaHookM_);
+    onMedia = std::move(media);
+    onMediaStreamEnd = std::move(streamEnd);
+}
+
+// (a copy is taken under the lock and called outside it: the hook may take the engine lock, and a thread holding
+// that may be waiting here)
+void Engine::CallMedia(uint64_t call, int stream, const uint8_t* data, size_t len) {
+    std::function<void(uint64_t, int, const uint8_t*, size_t)> f;
+    {
+        std::lock_guard<std::mutex> l(mediaHookM_);
+        f = onMedia;
+    }
+    if (f) f(call, stream, data, len);
+}
+
+void Engine::CallMediaEnd(int stream) {
+    std::function<void(int)> f;
+    {
+        std::lock_guard<std::mutex> l(mediaHookM_);
+        f = onMediaStreamEnd;
+    }
+    if (f) f(stream);
+}
+
+bool Engine::HasMediaHook() {
+    std::lock_guard<std::mutex> l(mediaHookM_);
+    return (bool)onMedia;
+}
+
 void Engine::Spawn(std::function<void()> fn) {
     liveThreads_++;
     std::thread([this, fn = std::move(fn)] {
@@ -1547,7 +1578,7 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
                 if (id && id == activeCallId_.load()) GroupMediaIn(c->peerId, f.payload.data() + 8, f.payload.size() - 8);
             } else if (f.payload.size() > 8 && c->peerId == activeCallPeerSnapshot()) {
                 uint64_t id = GetU64(f.payload.data());
-                if (id && id == activeCallId_.load() && onMedia) onMedia(id, 0, f.payload.data() + 8, f.payload.size() - 8);
+                if (id && id == activeCallId_.load()) CallMedia(id, 0, f.payload.data() + 8, f.payload.size() - 8);
             }
             continue;
         }

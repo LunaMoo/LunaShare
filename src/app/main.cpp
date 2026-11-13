@@ -2,7 +2,6 @@
 // SDL2 + OpenGL3/GLES3 + Dear ImGui.
 #include "notify.h"
 #include "stb_image.h"
-extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, int* out_len, int quality);  // (avatar.cpp)
 #include "tray.h"
 #include <algorithm>
 #include <SDL.h>
@@ -31,6 +30,7 @@ extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, 
 #include "file_assoc.h"
 #include "instance.h"
 #include "torrent_host.h"
+#include "core.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -499,7 +499,9 @@ static bool ImeSync(App& app) {
 }
 #endif
 
-int main(int argc, char** argv) {
+// One screen: from the window (a phone's screen) opening to its end. On a phone it runs again each time Android
+// creates the screen anew, in the same process - the engine may then already be running (core.h).
+static int RunScreen(int argc, char** argv) {
 #ifdef _WIN32
     SetProcessDPIAware();
 #endif
@@ -528,10 +530,12 @@ int main(int argc, char** argv) {
         } else if (a.compare(0, 4, "-psn") != 0) openPaths.push_back(a);
     }
     // one copy per settings folder: a second start hands its files over and ends
-    if (!ls::IsMobilePlatform() && !instance::Acquire(ls::ConfigDir())) {
+    static bool owner = false;  // (dev rounds below: this process has it already)
+    if (!owner && !ls::IsMobilePlatform() && !instance::Acquire(ls::ConfigDir())) {
         instance::SendRequest(ls::ConfigDir(), openPaths, openSend);
         return 0;
     }
+    owner = true;
     if (!ls::IsMobilePlatform()) instance::ClearRequests(ls::ConfigDir());
     SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
@@ -685,7 +689,11 @@ int main(int argc, char** argv) {
     Media().SetGlsl(glsl);  // video: YUV -> RGB in a shader
     LoadFonts();
 
-    ls::Engine engine;
+    // The engine: on a phone it may already be running - it kept going while the screen was away, or the background
+    // service started it (see core.h). Then it's taken as it is, not started again.
+    bool adopted = core::Running() != nullptr;
+    ls::Engine& engine = adopted ? *core::Running() : core::Make();
+    if (adopted) SDL_Log("core: the screen takes back the running engine");
     AndroidBridgeInit(&engine);
     Emoji().Load();          // optional colour emoji module (needs the Android bridge for the system font)
     Emoji().AddToFont(io.Fonts);
@@ -696,7 +704,8 @@ int main(int argc, char** argv) {
     Media().Attach(&engine);
     Torrents().Load();       // optional torrent module (desktops)
     Torrents().Attach(&engine);  // (after Media's: it adds to the capabilities announced)
-    engine.Start();
+    if (!adopted) engine.Start();
+    core::SaveCaps(engine);  // (for a start without the screen)
     Torrents().Start();
     if (Torrents().Available() && assoc::Supported()) {
         // "Open with" was set up before torrents came: .torrent files and magnet links are added to it
@@ -707,21 +716,6 @@ int main(int argc, char** argv) {
         if (had && !assoc::Registered()) assoc::Register(err);
     }
     // the music player (its own audio device and thread: it plays on in the background)
-    // chat archives are kept compressed (zlib, from stb - already here for pictures)
-    engine.compress = [](const std::string& in) -> std::string {
-        int n = 0;
-        unsigned char* z = stbi_zlib_compress((unsigned char*)in.data(), (int)in.size(), &n, 8);
-        std::string out = z && n > 0 ? std::string((const char*)z, (size_t)n) : std::string();
-        free(z);
-        return out;
-    };
-    engine.decompress = [](const std::string& in) -> std::string {
-        int n = 0;
-        char* d = stbi_zlib_decode_malloc(in.data(), (int)in.size(), &n);
-        std::string out = d && n > 0 ? std::string(d, (size_t)n) : std::string();
-        free(d);
-        return out;
-    };
     music::Lib().Init(engine.ConfigPath(), Player().Module());
     movpos::Init(engine.ConfigPath());
     music::Play().Init(Player().Module(), &music::Lib());
@@ -749,9 +743,18 @@ int main(int argc, char** argv) {
         }
     }
 #endif
-    notify::Attach(&engine);  // system notifications while in the background
+    // (system notifications while in the background: attached by core::Make)
     if (tray::Available()) notify::SetTrayHook([](const std::string& t, const std::string& x) { tray::Balloon(t, x); });
     if (ls::Bridge().backgroundService && engine.GetSettings().backgroundRun) ls::Bridge().backgroundService(true);
+    // (the engine ends after the UI: the App - declared below, so gone first - still refers to it; on a phone with
+    // background running on it doesn't end at all)
+    bool keepEngine = false;
+    struct EngineEnd {
+        bool& keep;
+        ~EngineEnd() {
+            if (!keep) core::Destroy();
+        }
+    } engineEnd{keepEngine};
     App app(engine);
     if (!openPaths.empty()) app.OpenPaths(openPaths, openSend);
     int64_t lastRequestPoll = 0;
@@ -776,6 +779,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> drops;
     bool running = true;
     int64_t lastInput = ls::SteadyMs();
+    const int64_t screenStart = ls::SteadyMs();  // (dev hooks: their times count from this screen's start)
     while (running) {
         // ---- events (sleep when idle to save battery/CPU)
         SDL_Event ev;
@@ -1053,7 +1057,7 @@ int main(int argc, char** argv) {
         glf::Clear(glf::COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         // optional screenshot for docs/CI (read before swapping)
-        static int64_t startMs = ls::SteadyMs();
+        const int64_t startMs = screenStart;
         if (static const char* fl = SDL_getenv("LUNASHARE_FRAMELOG"); fl) {  // dev: when each frame was drawn (smoothness)
             static FILE* ff = fopen(fl, "w");
             if (ff) fprintf(ff, "%lld\n", (long long)(ls::SteadyMs() - startMs)), fflush(ff);
@@ -1080,10 +1084,26 @@ int main(int argc, char** argv) {
 
     }
 
+    // A phone's screen going away (Android ends the UI when it likes) leaves the engine running when "Keep running in
+    // the background" is on: messages and calls still arrive, and the screen takes it back when it comes (core.h).
+    // What needs the screen ends: a call (its sound and pictures are the UI's), watching together, the music.
+    const bool keep = keepEngine = core::KeepWithoutScreen(engine);
     tray::Hide();
-    if (ls::Bridge().backgroundService) ls::Bridge().backgroundService(false);
-    AndroidBridgeShutdown();
-    engine.onEvent = nullptr;
+    if (keep) {
+        notify::SetBackground(true);
+        {
+            // (a call in progress or being made needs the screen; one coming in rings on as a notification)
+            auto lk = engine.Lock();
+            ls::CallState cs = engine.call.state;
+            engine.ownHook = nullptr;  // (the torrents' - computers only)
+            lk.unlock();
+            if (cs == ls::CallState::Active || cs == ls::CallState::OutgoingRinging) engine.EndCall("hangup");
+        }
+        SDL_Log("core: the screen goes, the engine keeps running");
+    } else {
+        if (ls::Bridge().backgroundService) ls::Bridge().backgroundService(false);
+        AndroidBridgeShutdown();
+    }
     engine.LeaveWatch();  // (unblocks a movie still being read from another device)
     music::Play().onChange = nullptr;
     radio::R().Shutdown();
@@ -1094,7 +1114,7 @@ int main(int argc, char** argv) {
     Player().Shutdown();
     Media().Shutdown();
     Torrents().Shutdown();
-    engine.Stop();
+    if (!keep) engine.Stop();  // (here, as always; the engine itself ends after the UI - EngineEnd)
     Images().Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
@@ -1103,4 +1123,34 @@ int main(int argc, char** argv) {
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
+}
+
+int main(int argc, char** argv) {
+#if !defined(__ANDROID__)
+    // Dev / tests: what a phone does, on a computer (with LUNASHARE_KEEP_CORE: the window's end keeps the engine).
+    //   LUNASHARE_HEADLESS_FIRST=ms  the engine starts without a screen first (the phone's background service),
+    //                                and the window comes that much later
+    //   LUNASHARE_SCREEN_ROUNDS=n    the window opens and closes n times (LUNASHARE_SCREEN_GAP=ms between)
+    const char* hf = SDL_getenv("LUNASHARE_HEADLESS_FIRST");
+    const char* rn = SDL_getenv("LUNASHARE_SCREEN_ROUNDS");
+    const char* gp = SDL_getenv("LUNASHARE_SCREEN_GAP");
+    if (hf || rn) {
+        for (int i = 1; i + 1 < argc; i++)
+            if (std::string(argv[i]) == "--config") ls::SetConfigDirOverride(argv[i + 1]);
+        if (hf) {
+            bool ok = core::StartWithoutScreen("");
+            SDL_Log("dev: started without the screen: %s", ok ? "yes" : "no");
+            SDL_Delay((Uint32)atoi(hf));
+        }
+        int rounds = rn ? std::max(1, atoi(rn)) : 1, r = 0;
+        for (int i = 0; i < rounds; i++) {
+            SDL_Log("dev: screen %d of %d (engine %s)", i + 1, rounds, core::Running() ? "running" : "not running");
+            r = RunScreen(argc, argv);
+            if (i + 1 < rounds && gp) SDL_Delay((Uint32)atoi(gp));
+        }
+        core::Destroy();  // (the very end of the process)
+        return r;
+    }
+#endif
+    return RunScreen(argc, argv);
 }

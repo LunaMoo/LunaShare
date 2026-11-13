@@ -712,10 +712,14 @@ std::vector<std::string> MediaHost::Caps() const {
 void MediaHost::Attach(Engine* e) {
     eng_ = e;
     if (!mod_) return;
-    e->localCaps = Caps();
-    if (vmod_) e->localCaps.push_back("video");
+    {
+        // (under the lock: on a phone the engine may already be running - it kept going without the screen)
+        auto lk = e->Lock();
+        e->localCaps = Caps();
+        if (vmod_) e->localCaps.push_back("video");
+    }
     const LsmModule* m = mod_;
-    e->onMedia = [this, m](uint64_t, int stream, const uint8_t* d, size_t n) {
+    e->SetMediaHooks([this, m](uint64_t, int stream, const uint8_t* d, size_t n) {
         if (mode_ != Mode::Call || n < 1) return;
         if (d[0] == 2) {
             if (videoRunning_ && vmod_) vmod_->receive(d, n);
@@ -724,10 +728,10 @@ void MediaHost::Attach(Engine* e) {
         } else {
             m->receive(d, n);
         }
-    };
-    e->onMediaStreamEnd = [m](int stream) {
+    },
+    [m](int stream) {
         if (m->end_stream) m->end_stream(stream);
-    };
+    });
 }
 
 std::vector<std::string> MediaHost::Devices(bool capture) {
@@ -1197,7 +1201,7 @@ void MediaHost::Shutdown() {
     if (vcamThread_.joinable()) vcamThread_.join();
     if (vcamOn_ && vmod_) vmod_->vcam_enable(0, nullptr, 0);
     vcamOn_ = false;
-    if (eng_) eng_->onMedia = nullptr;
+    if (eng_) eng_->SetMediaHooks(nullptr, nullptr);
 }
 
 void MediaHost::SetMute(bool m) {

@@ -8,6 +8,7 @@
 #include "music.h"
 #include "i18n.h"
 #include "notify.h"
+#include "core.h"
 #include "platform.h"
 
 #if defined(__ANDROID__)
@@ -113,6 +114,13 @@ std::string AndroidDeviceName() {
 
 void AndroidBridgeInit(ls::Engine* engine) {
     g_engine = engine;
+    if (g_cls) {
+        // Again (the screen came back to an engine that kept running, or the background service set it up first):
+        // the bridge stays as it is - its functions may be in use on the engine's threads this very moment, and
+        // replacing them under it would crash. It only says again that the app runs.
+        NotifyV("setNativeRunning", "(Z)V", (jboolean) true);
+        return;
+    }
     JNIEnv* env = Env();
     jclass c = env->FindClass("org/lunamoo/lunashare/LunaShareActivity");
     if (!c) { env->ExceptionClear(); return; }
@@ -443,6 +451,13 @@ void AndroidBridgeInit(ls::Engine* engine) {
 }
 
 void AndroidBridgeShutdown() { NotifyV("setNativeRunning", "(Z)V", (jboolean) false); }
+
+// The background service starts the engine without a screen (the process was ended and started again by Android,
+// the phone was restarted, the app updated): see core.h.
+extern "C" JNIEXPORT jboolean JNICALL Java_org_lunamoo_lunashare_BackgroundService_nativeStartCore(JNIEnv* env, jclass, jstring dir) {
+    std::string d = JStr(env, dir);
+    return core::StartWithoutScreen(d) ? JNI_TRUE : JNI_FALSE;
+}
 
 extern "C" {
 

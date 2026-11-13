@@ -203,9 +203,9 @@ void Engine::HandleGroupCall(const std::shared_ptr<Connection>& c, Msg type, con
                         stream = m.stream;
                     }
             }
-            if (!ask.empty() && onMedia) {  // a new viewer: start them with a fresh keyframe
+            if (!ask.empty() && HasMediaHook()) {  // a new viewer: start them with a fresh keyframe
                 const uint8_t key2[2] = {2, 2};
-                onMedia(id, stream, key2, 2);
+                CallMedia(id, stream, key2, 2);
             }
             break;
         }
@@ -323,7 +323,7 @@ void Engine::GroupPeerLeft(const std::string& dev) {
         call.spotlightPinned = false;
     }
     SyncGroupMedia();
-    if (onMediaStreamEnd) onMediaStreamEnd(stream);
+    CallMediaEnd(stream);
     UpdateSpotlight();
 }
 
@@ -423,9 +423,9 @@ void Engine::SyncGroupMedia() {
                 cam = m.cameraOn ? 1 : 0;
             }
     }
-    if (camStream >= 0 && onMedia && activeCallId_.load()) {
+    if (camStream >= 0 && HasMediaHook() && activeCallId_.load()) {
         const uint8_t p[3] = {2, 3, cam};
-        onMedia(activeCallId_.load(), camStream, p, 3);
+        CallMedia(activeCallId_.load(), camStream, p, 3);
     }
 }
 
@@ -512,7 +512,7 @@ size_t Engine::GroupQueuedBytes() {
 
 void Engine::GroupMediaIn(const std::string& dev, const uint8_t* data, size_t len) {
     uint64_t id = activeCallId_.load();
-    if (!id || !onMedia || len < 1) return;
+    if (!id || !HasMediaHook() || len < 1) return;
     int stream = 0;
     bool spot = false, wants = false;
     uint8_t decAll = 0;
@@ -546,7 +546,7 @@ void Engine::GroupMediaIn(const std::string& dev, const uint8_t* data, size_t le
         }
     }
     if (IsAudio(data, len)) {
-        onMedia(id, stream, data, len);
+        CallMedia(id, stream, data, len);
         return;
     }
     if (camChanged) {  // someone turned their camera on / off: maybe watch someone else now
@@ -554,13 +554,13 @@ void Engine::GroupMediaIn(const std::string& dev, const uint8_t* data, size_t le
         UpdateSpotlight();
     }
     switch (vk) {
-        case 1: if (spot) onMedia(id, stream, data, len); break;            // the picture I'm watching
-        case 3: if (spot) onMedia(id, stream, data, len); break;            // its camera state
-        case 2: case 4: case 6: if (wants) onMedia(id, stream, data, len); break;  // about my picture, from a viewer
+        case 1: if (spot) CallMedia(id, stream, data, len); break;            // the picture I'm watching
+        case 3: if (spot) CallMedia(id, stream, data, len); break;            // its camera state
+        case 2: case 4: case 6: if (wants) CallMedia(id, stream, data, len); break;  // about my picture, from a viewer
         case 5:
             if (decChanged) {  // what everyone can decode
                 uint8_t p[4] = {2, 5, decAll, len >= 4 ? data[3] : (uint8_t)0};
-                onMedia(id, stream, p, sizeof(p));
+                CallMedia(id, stream, p, sizeof(p));
             }
             break;
         default: break;

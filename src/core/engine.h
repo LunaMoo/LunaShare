@@ -586,6 +586,9 @@ public:
     // stream: who it's from (0 in a call with one person; group calls: a number per person)
     std::function<void(uint64_t call, int stream, const uint8_t* data, size_t len)> onMedia;
     std::function<void(int stream)> onMediaStreamEnd;  // group calls: that person left
+    // Sets both while the engine runs (a phone's screen coming back to an engine that kept running without it): the
+    // network threads take a copy under a lock of their own before each call, so they never see one half-replaced.
+    void SetMediaHooks(std::function<void(uint64_t, int, const uint8_t*, size_t)> media, std::function<void(int)> streamEnd);
     CallInfo call;
     void SetHotspotInfo(const HotspotInfo& h);
 
@@ -847,6 +850,10 @@ private:
     SocketHandle udp_ = kInvalidSocket;
     std::thread listenThread_, discoveryThread_, maintThread_, hashThread_;
     void Spawn(std::function<void()> fn);  // detached helper, counted so Stop() can wait for it
+    std::mutex mediaHookM_;  // onMedia / onMediaStreamEnd (SetMediaHooks)
+    void CallMedia(uint64_t call, int stream, const uint8_t* data, size_t len);
+    void CallMediaEnd(int stream);
+    bool HasMediaHook();
     std::atomic<int> liveThreads_{0};
     std::atomic<bool> restartListener_{false};
     void SendBeacon(const std::string* unicastIp);

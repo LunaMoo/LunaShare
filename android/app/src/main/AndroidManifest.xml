@@ -35,6 +35,8 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- running in the background: messages and calls (see BackgroundService) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- after the phone restarts: the connection comes back without opening the app (StartReceiver) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- calls keep the microphone while the screen is off / another app is in front (see CallService) -->
@@ -122,6 +124,12 @@
         </service>
         <receiver android:name="org.lunamoo.lunashare.CallActionReceiver" android:exported="false" />
         <receiver android:name="org.lunamoo.lunashare.NotifyActionReceiver" android:exported="false" />
+        <receiver android:name="org.lunamoo.lunashare.StartReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name="org.lunamoo.lunashare.CallService"
             android:exported="false"

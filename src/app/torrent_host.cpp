@@ -79,8 +79,9 @@ std::string TorrentHost::DefaultDir() const {
 
 void TorrentHost::Attach(Engine* e) {
     eng_ = e;
+    auto lk = e->Lock();  // (the engine may be running already: a phone's screen taking it back)
     e->ownHook = [this](const std::string& from, const std::string& kind, const json& d) { Hook(from, kind, d); };
-    if (mod_) e->localCaps.push_back("torrent");
+    if (mod_ && std::find(e->localCaps.begin(), e->localCaps.end(), "torrent") == e->localCaps.end()) e->localCaps.push_back("torrent");
 }
 
 void TorrentHost::Start() {
