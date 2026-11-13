@@ -133,7 +133,8 @@ if(LUNASHARE_BUILD_VOICE)
     set(SPEEXDSP_SOURCES
         ${speexdsp_SOURCE_DIR}/libspeexdsp/mdf.c ${speexdsp_SOURCE_DIR}/libspeexdsp/preprocess.c
         ${speexdsp_SOURCE_DIR}/libspeexdsp/fftwrap.c ${speexdsp_SOURCE_DIR}/libspeexdsp/kiss_fft.c
-        ${speexdsp_SOURCE_DIR}/libspeexdsp/kiss_fftr.c ${speexdsp_SOURCE_DIR}/libspeexdsp/filterbank.c)
+        ${speexdsp_SOURCE_DIR}/libspeexdsp/kiss_fftr.c ${speexdsp_SOURCE_DIR}/libspeexdsp/filterbank.c
+        ${speexdsp_SOURCE_DIR}/libspeexdsp/resample.c)  # (the player's: music and radio at the device's rate)
     add_library(lunashare_speexdsp STATIC ${SPEEXDSP_SOURCES})
     target_compile_definitions(lunashare_speexdsp PUBLIC FLOATING_POINT USE_KISS_FFT EXPORT= DISABLE_WARNINGS)
     target_include_directories(lunashare_speexdsp PUBLIC ${speexdsp_SOURCE_DIR}/include ${CMAKE_BINARY_DIR}/speexdsp_cfg)
@@ -253,6 +254,10 @@ if(LUNASHARE_BUILD_PLAYER)
             RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR} LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
         target_include_directories(lunashare_player PRIVATE src/media_api modules/player)
         target_link_libraries(lunashare_player PRIVATE Threads::Threads)
+        if(TARGET lunashare_speexdsp)  # a proper resampler (windowed sinc) instead of a linear one
+            target_link_libraries(lunashare_player PRIVATE lunashare_speexdsp)
+            target_compile_definitions(lunashare_player PRIVATE LSP_SPEEX_RESAMPLER)
+        endif()
         if(NOT ANDROID)
             target_include_directories(lunashare_player PRIVATE "${LUNASHARE_FFMPEG_DIR}/include")
         elseif(LSP_FF_ANDROID)

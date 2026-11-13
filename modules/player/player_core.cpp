@@ -18,6 +18,9 @@
 #include <vector>
 
 #include "player_backend.h"
+#ifdef LSP_SPEEX_RESAMPLER
+#include <speex/speex_resampler.h>
+#endif
 
 namespace lsp {
 namespace {
@@ -33,13 +36,26 @@ void Log(const std::string& m) {
     if (g_host.log) g_host.log(g_host.user, ("player: " + m).c_str());
 }
 
-// linear resampler + channel mapping into the device format. Positions are in input frames; index -1 is the
-// last frame of the previous chunk, so consecutive chunks join without clicks.
+// Resampler + channel mapping into the device format.
+// The rate is changed with a windowed-sinc filter (speexdsp's, quality 6) where it's built in: most music and radio
+// is 44.1 kHz and the device 48 kHz, and the linear interpolation used before left mirror images of the high
+// frequencies in - a harsh, metallic edge on cymbals and "s" sounds, worse than the stream's bitrate. Linear stays as
+// the fallback (positions in input frames; index -1 is the last frame of the previous chunk, so chunks join).
 class Resampler {
 public:
+    Resampler() = default;
+    Resampler(const Resampler&) = delete;
+    Resampler& operator=(const Resampler&) = delete;
+    ~Resampler() { FreeSpeex(); }
     void Reset() {
         phase_ = 0;
         have_ = false;
+#ifdef LSP_SPEEX_RESAMPLER
+        if (sp_) {
+            speex_resampler_reset_mem(sp_);
+            speex_resampler_skip_zeros(sp_);  // (no filter delay at the start: the sound stays in time with the picture)
+        }
+#endif
     }
     void Run(const float* in, int frames, int inRate, int inCh, int outRate, int outCh, std::vector<float>& out) {
         if (frames <= 0 || inRate <= 0 || inCh <= 0) return;
@@ -48,6 +64,45 @@ public:
             in = dm_.data();
             inCh = 2;
         }
+#ifdef LSP_SPEEX_RESAMPLER
+        if (inRate != outRate && outCh >= 1 && outCh <= 2) {
+            // channels first (at the input rate), then the rate
+            mapped_.resize((size_t)frames * outCh);
+            for (int i = 0; i < frames; i++) {
+                const float* f = in + (size_t)i * inCh;
+                for (int c = 0; c < outCh; c++)
+                    mapped_[(size_t)i * outCh + c] = inCh == 1 ? f[0] : outCh == 1 ? (f[0] + f[1]) * 0.5f : f[std::min(c, inCh - 1)];
+            }
+            if (!sp_ || spIn_ != inRate || spOut_ != outRate || spCh_ != outCh) {
+                FreeSpeex();
+                int err = 0;
+                sp_ = speex_resampler_init((spx_uint32_t)outCh, (spx_uint32_t)inRate, (spx_uint32_t)outRate, 6, &err);
+                if (!sp_ || err) {
+                    FreeSpeex();
+                } else {
+                    speex_resampler_skip_zeros(sp_);
+                    spIn_ = inRate;
+                    spOut_ = outRate;
+                    spCh_ = outCh;
+                }
+            }
+            if (sp_) {
+                const float* src = mapped_.data();
+                spx_uint32_t left = (spx_uint32_t)frames;
+                while (left > 0) {
+                    spx_uint32_t inLen = left, outLen = (spx_uint32_t)((double)left * outRate / inRate) + 64;
+                    size_t at = out.size();
+                    out.resize(at + (size_t)outLen * outCh);
+                    speex_resampler_process_interleaved_float(sp_, src, &inLen, out.data() + at, &outLen);
+                    out.resize(at + (size_t)outLen * outCh);
+                    if (inLen == 0 && outLen == 0) break;  // (never stuck)
+                    src += (size_t)inLen * outCh;
+                    left -= inLen;
+                }
+                return;
+            }
+        }
+#endif
         if (inRate != inRate_ || inCh != inCh_ || outCh != outCh_) {
             inRate_ = inRate;
             inCh_ = inCh;
@@ -105,6 +160,18 @@ public:
     }
 
 private:
+    void FreeSpeex() {
+#ifdef LSP_SPEEX_RESAMPLER
+        if (sp_) speex_resampler_destroy(sp_);
+        sp_ = nullptr;
+        spIn_ = spOut_ = spCh_ = 0;
+#endif
+    }
+#ifdef LSP_SPEEX_RESAMPLER
+    SpeexResamplerState* sp_ = nullptr;
+    int spIn_ = 0, spOut_ = 0, spCh_ = 0;
+#endif
+    std::vector<float> mapped_;
     std::vector<float> dm_;
     double phase_ = 0;
     bool have_ = false;
