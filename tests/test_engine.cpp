@@ -1553,6 +1553,89 @@ int main() {
         }
     }
 
+    printf("[reading a comic together]\n");
+    {
+        // a comic's pages (as the viewer has them: pictures in a folder) - a big one, a small one, an empty file
+        std::vector<std::string> pages;
+        for (int i = 0; i < 6; i++) {
+            std::string p = JoinPath(Root(), "src/comic/page" + std::to_string(i) + (i == 2 ? ".png" : ".jpg"));
+            MakeDirs(DirName(p));
+            WriteRandomFile(p, i == 0 ? (1 << 20) + 77 : 20000 + i * 1000, 40 + i);
+            pages.push_back(p);
+        }
+        auto slurp = [](const std::string& p, std::string& out) {
+            FILE* f = OpenFile(p, "rb");
+            if (!f) return false;
+            char buf[65536];
+            size_t n;
+            out.clear();
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) out.append(buf, n);
+            fclose(f);
+            return true;
+        };
+        auto same = [&](const std::string& a, const std::string& b) {
+            std::string x, y;
+            return slurp(a, x) && slurp(b, y) && x == y;
+        };
+        std::string bob = "@" + B->MyAccount();
+        uint64_t sid = A->StartRead(bob, "Moomins.cbz", pages, 1);
+        CHECK(sid != 0, "started");
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->readInvites.empty() && B->readInvites.back().sid == sid; }, 3000), "invited");
+        {
+            auto l = B->Lock();
+            CHECK(B->readInvites.back().name == "Moomins.cbz" && B->readInvites.back().pages == 6, "the invite says what it is");
+        }
+        CHECK(B->JoinRead(sid), "joined");
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->read.people.size() == 2; }, 3000), "the host sees the reader");
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->read.pages == 6 && B->read.page == 1 && !B->read.files[1].empty(); }, 5000),
+              "the page that's open comes first");
+        std::string got1;
+        {
+            auto l = B->Lock();
+            got1 = B->read.files[1];
+        }
+        CHECK(same(got1, pages[1]) && got1.size() > 4 && got1.substr(got1.size() - 4) == ".jpg", "the page arrived whole, as a picture");
+        CHECK(WaitFor([&] { auto l = B->Lock(); return std::none_of(B->read.files.begin(), B->read.files.end(), [](auto& f) { return f.empty(); }); }, 8000),
+              "then all the others");
+        {
+            auto l = B->Lock();
+            bool ok = true;
+            for (int i = 0; i < 6; i++) ok = ok && same(B->read.files[(size_t)i], pages[(size_t)i]);
+            CHECK(ok, "every page the same as the host's");
+        }
+        // turning pages: anyone, for everyone
+        B->ReadTurn(4);
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->read.page == 4; }, 3000), "the reader turns the page for the host");
+        A->ReadTurn(2);
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->read.page == 2; }, 3000), "the host turns it for the reader");
+        B->ReadTurn(5);
+        {
+            auto l = B->Lock();
+            CHECK(B->read.page == 5, "turned here at once (the host's answer follows)");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        {
+            auto l = B->Lock();
+            CHECK(B->read.page == 5, "an older word from the host doesn't turn it back");
+        }
+        CHECK(WaitFor([&] { auto l = A->Lock(); return A->read.page == 5; }, 3000), "and the host follows");
+        // the pages are given only to those reading
+        // the host ends it: the reader's copies go
+        std::string dir = DirName(got1);
+        A->LeaveRead();
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->read.sid == 0; }, 3000), "the host ends it for everyone");
+        CHECK(!FileExists(got1) && !FileExists(dir), "the pages that came are deleted");
+        {
+            auto l = A->Lock();
+            CHECK(A->read.sid == 0 && FileExists(pages[0]), "the host's own pages stay");
+        }
+        // an invite that ended before joining is forgotten
+        uint64_t sid2 = A->StartRead(bob, "Second.cbz", pages, 0);
+        CHECK(WaitFor([&] { auto l = B->Lock(); return !B->readInvites.empty() && B->readInvites.back().sid == sid2; }, 3000), "invited again");
+        A->LeaveRead();
+        CHECK(WaitFor([&] { auto l = B->Lock(); return B->readInvites.empty(); }, 3000), "the ended one is forgotten");
+    }
+
     printf("[chat archives, history sent back]\n");
     {
         std::string bk = A->ChatKey(idB);

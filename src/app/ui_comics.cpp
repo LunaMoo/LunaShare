@@ -218,6 +218,7 @@ void App::ComicFrame() {
                 viewer.comic = key;
                 viewer.rtl = pl.rtl;
                 ComicTick();
+                ReadComicOpened(BaseName(g_open.path));  // (picked for reading together: it's shared now)
                 std::lock_guard<std::mutex> pl2(g_pm);  // (read now: first on the shelf)
                 g_places[key].at = NowMs();
                 g_placesDirty = true;

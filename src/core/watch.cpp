@@ -100,6 +100,20 @@ void ListenCacheConnectAt(const std::shared_ptr<WatchCache>& c, int64_t at) {
     c->lastConnect = at;
 }
 
+// a page of a comic read together that has all come: its file becomes `dest`
+bool ListenCacheTake(const std::shared_ptr<WatchCache>& c, const std::string& dest) {
+    std::lock_guard<std::mutex> l(c->m);
+    if (!c->f || c->haveCount != c->Blocks()) return false;
+    fclose(c->f);
+    c->f = nullptr;
+    c->cancelled = true;
+    c->cv.notify_all();
+    RemoveFile(dest);
+    if (RenameFile(c->path, dest)) return true;
+    RemoveFile(c->path);
+    return false;
+}
+
 void ListenCacheDrop(const std::shared_ptr<WatchCache>& c) {
     std::lock_guard<std::mutex> l(c->m);
     c->cancelled = true;  // (the player's reads return)
@@ -345,6 +359,8 @@ std::shared_ptr<WatchCache> Engine::WatchCacheFor(uint64_t sid) {
         if (c->sid == sid) return c;
     for (auto& c : listenCaches_)
         if (c->sid == sid) return c;
+    for (auto& c : readCaches_)
+        if (c.second->sid == sid) return c.second;
     return nullptr;
 }
 
@@ -818,8 +834,11 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             // (a song of mine while listening together, for anyone listening)
             bool listener = listen.sid && listenOwn_.count(sid) &&
                             std::find(listen.devs.begin(), listen.devs.end(), dev) != listen.devs.end();
-            if (!viewer && !saver && !listener) {
-                if (listenOwn_.count(sid)) return;
+            // (a page of the comic I'm reading with them)
+            bool reader = read.sid && read.host.empty() && readOwn_.count(sid) &&
+                          std::find(readMembers_.begin(), readMembers_.end(), dev) != readMembers_.end();
+            if (!viewer && !saver && !listener && !reader) {
+                if (listenOwn_.count(sid) || readOwn_.count(sid)) return;
                 if (!(sid == watch.sid && watch.host.empty())) Queue(c, Msg::WatchLeave, {{"sid", sid}, {"end", true}, {"nosave", true}});
                 return;
             }
@@ -860,14 +879,16 @@ bool Engine::ProduceWatch(const std::shared_ptr<Connection>& c, std::vector<uint
     }
     std::lock_guard<std::mutex> l(watchServe_.m);
     auto it = watchServe_.files.find(w.sid);
-    if (it == watchServe_.files.end() || !it->second.f) return false;
+    if (it == watchServe_.files.end() || (!it->second.f && it->second.path.empty())) return false;
     auto& sf = it->second;
     size_t len = (size_t)std::min<int64_t>(w.len, sf.size - w.off);
     buf.resize(16 + len);
     PutU64(buf.data(), w.sid);
     PutU64(buf.data() + 8, (uint64_t)w.off);
-    if (!FileSeek(sf.f, w.off) || fread(buf.data() + 16, 1, len, sf.f) != len) return false;
-    return true;
+    FILE* f = sf.f ? sf.f : OpenFile(sf.path, "rb");  // (a page: opened for the moment)
+    bool ok = f && FileSeek(f, w.off) && fread(buf.data() + 16, 1, len, f) == len;
+    if (f && !sf.f) fclose(f);
+    return ok;
 }
 
 // reader thread (viewer): a block arrived

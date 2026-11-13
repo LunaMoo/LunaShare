@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "emoji_host.h"
 #include "image_cache.h"
 #include "i18n.h"
 #include "media_host.h"
@@ -219,6 +220,7 @@ void App::OpenViewerList(const std::vector<std::string>& paths, int index, const
     viewer.canDelete = false;
     viewer.comic.clear();
     viewer.rtl = false;
+    viewer.together = false;
     viewer.slideshow = false;
     viewer.peer.clear();
     viewer.paths = paths;
@@ -275,6 +277,7 @@ void App::OpenViewer(const std::string& peer, const std::string& path, bool all)
     viewer.canDelete = false;
     viewer.comic.clear();
     viewer.rtl = false;
+    viewer.together = false;
     viewer.slideshow = false;
     viewer.peer = peer;
     viewer.all = all;
@@ -520,7 +523,9 @@ void App::DrawViewer() {
         }
     }
     if (!isVideo && full.state != ImageTex::Ready) {
-        const char* msg = full.state == ImageTex::Failed ? T("Cannot display this picture") : T("Loading...");
+        const char* msg = viewer.together && path.empty() ? T("The page is on its way...")
+                        : full.state == ImageTex::Failed ? T("Cannot display this picture") : T("Loading...");
+        if (viewer.together && path.empty()) busy = true;  // (it shows the moment it comes)
         ImVec2 ts = ImGui::CalcTextSize(msg);
         dl->AddText(ImVec2(c.x - ts.x * 0.5f, viewer.areaMax.y - ts.y * 3), IM_COL32(220, 220, 220, 255), msg);
     }
@@ -537,14 +542,23 @@ void App::DrawViewer() {
         if (ui::IconButton("vclose", Icon::Back, T("Close (Esc)"), bh)) close = true;
         ImGui::SameLine();
         ImGui::BeginGroup();
-        ImGui::TextUnformatted(BaseName(path).c_str());
+        ImGui::TextUnformatted(viewer.together ? eng.read.name.c_str() : BaseName(path).c_str());
+        if (viewer.together) {  // who's reading
+            std::string ppl;
+            for (size_t i = 0; i < eng.read.people.size(); i++)
+                if (eng.read.devs.size() <= i || eng.read.devs[i] != eng.settings.deviceId)
+                    ppl += (ppl.empty() ? "" : ", ") + Emoji().Display(eng.read.people[i]);
+            viewer.captions[(size_t)viewer.index] = ppl.empty() ? std::string(T("reading together - waiting for them")) : TF("reading together with %s", ppl.c_str());
+        }
         char info[256];
         snprintf(info, sizeof(info), "%d / %d   %s%s", viewer.index + 1, n, viewer.index < (int)viewer.captions.size() ? viewer.captions[(size_t)viewer.index].c_str() : "",
                  full.state == ImageTex::Ready ? ("   " + std::to_string(full.srcW) + "x" + std::to_string(full.srcH)).c_str() : "");
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.75f, 1), "%s", info);
         ImGui::EndGroup();
         // action buttons: top-right on desktop, bottom bar on phones
-        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0) + (viewer.comic.empty() ? 0 : 1);
+        bool comicish = !viewer.comic.empty() || viewer.together;
+        bool shareRead = !viewer.comic.empty() && !viewer.together;  // (a comic of mine: read it together with someone)
+        int nb = (mobile ? 3 : 5) + (viewer.fixed ? 0 : 1) + 1 + (viewer.canDelete ? 1 : 0) + (comicish ? 1 : 0) + (shareRead ? 1 : 0);
         if (mobile) {
             float by = viewer.areaMax.y - barH;
             dl->AddRectFilled(ImVec2(viewer.areaMin.x, by), viewer.areaMax, IM_COL32(0, 0, 0, (int)(150 * a)));
@@ -563,6 +577,7 @@ void App::DrawViewer() {
             ImGui::SameLine();
         }
         float sameGap = mobile ? (areaSize.x - bh * (float)nb) / (float)(nb + 1) : -1.0f;
+        ImGui::BeginDisabled(path.empty());
         if (ui::IconButton("vopen", Icon::Open, T("Open with default app"), bh)) {
             if (Bridge().openFile) Bridge().openFile(path); else OpenWithDefaultApp(path);
         }
@@ -572,13 +587,21 @@ void App::DrawViewer() {
             openSendTo = true;
             close = true;
         }
+        ImGui::EndDisabled();
         ImGui::SameLine(0, sameGap);
         if (ui::IconButton("vslide", viewer.slideshow ? Icon::Pause : Icon::Play, viewer.slideshow ? T("Stop the slideshow") : T("Slideshow"), bh)) {
             viewer.slideshow = !viewer.slideshow;
             viewer.slideT = 0;
             if (viewer.slideshow) viewer.uiAlpha = 0;
         }
-        if (!viewer.comic.empty()) {
+        if (shareRead) {
+            ImGui::SameLine(0, sameGap);
+            ui::PushAccent(!CallChatKey().empty());  // (in a call: the obvious thing to do)
+            if (ui::IconButton("vreadwith", Icon::Users, T("Read together with someone"), bh)) readWhoOpen = true;
+            ui::PopAccent();
+        }
+        ReadWhoPopup();
+        if (comicish) {
             ImGui::SameLine(0, sameGap);
             if (viewer.rtl) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(70, 110, 200, 255));
             if (ui::IconButton("vrtl", Icon::Book, viewer.rtl ? T("Pages right to left (manga): on") : T("Pages right to left (manga): off"), bh)) {

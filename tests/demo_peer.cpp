@@ -1,4 +1,5 @@
 // Scriptable headless peer used for demos/screenshots: demo_peer <cfgdir> <name> <host> <port> [files...]
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -193,6 +194,26 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(2500));
         e.WatchControl(true, getenv("DEMO_WATCH_AT") ? atof(getenv("DEMO_WATCH_AT")) : 20);  // (the clock; the demo itself doesn't decode)
     }
+    if (const char* rd = getenv("DEMO_READ")) {  // read a comic (a folder of pictures) together with the other side
+        std::string them;
+        for (int i = 0; i < 50 && them.empty(); i++) {
+            {
+                auto l = e.Lock();
+                std::string k = e.ChatKey(peer);
+                if (Engine::IsContactKey(k)) them = k;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        std::vector<std::string> pages;
+        for (auto& d : ListDir(rd))
+            if (!d.isDir) pages.push_back(JoinPath(rd, d.name));
+        std::sort(pages.begin(), pages.end());
+        e.StartRead(them, "Demo comic.cbz", pages, 0);
+        if (const char* t = getenv("DEMO_READ_TURN")) {  // a while later: the next page, for everyone
+            std::this_thread::sleep_for(std::chrono::milliseconds(atoi(t)));
+            e.ReadTurn(2);
+        }
+    }
     if (getenv("DEMO_GROUP")) {  // a group with the other side (screenshots of group chats)
         std::string them;
         for (int i = 0; i < 50 && them.empty(); i++) {
@@ -210,6 +231,14 @@ int main(int argc, char** argv) {
     }
     int secs = getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30;
     for (int64_t end = SteadyMs() + secs * 1000; SteadyMs() < end;) {
+        if (getenv("DEMO_READ_JOIN")) {  // join the other side's comic as soon as it's offered
+            uint64_t sid = 0;
+            {
+                auto l = e.Lock();
+                if (!e.read.sid && !e.readInvites.empty()) sid = e.readInvites.back().sid;
+            }
+            if (sid) e.JoinRead(sid);
+        }
         for (auto& ev : e.PopEvents())  // DEMO_LINK: accept a request to join the other side's account
             if (ev.type == EventType::LinkRequest && getenv("DEMO_LINK")) {
                 printf("link request, code %s\n", ev.text.c_str());

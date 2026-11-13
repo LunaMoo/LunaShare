@@ -211,6 +211,22 @@ private:
     void DrawWatch();
     void DrawWatchBanner(const std::string& peer);
     void OpenWatchPicker(const std::string& peer);
+    // ---- together (ui_together.cpp): watch / listen / read with someone, from a call or a chat
+    std::string CallChatKey();
+    bool TogetherInvited(const std::string& key);
+    void OpenTogether(const std::string& key);
+    void DrawTogetherPopup();
+    void ListenWith(const std::string& key);
+    void ReadWithPick(const std::string& key);
+    void JoinReadNow(uint64_t sid);
+    void ReadFrame();
+    void ReadWhoPopup();
+    void ReadComicOpened(const std::string& name);
+    void DrawReadBanner(const std::string& peer);
+    bool togetherOpen = false, togetherClose = false, readOpenPending = false, readJoined = false, readWhoOpen = false;
+    std::string togetherKey, readWith;
+    int readLocal = 0;
+    int64_t readGot = -1;
     void OpenMoviePlayer();                 // the movie player: a movie alone (people can be added later)
     // ---- music (ui_music.cpp)
     void DrawMusic();
@@ -596,6 +612,7 @@ private:
         std::string comic;         // reading this comic (its archive): the page is remembered
         bool rtl = false;          // pages go right to left (manga)
         bool closeRequest = false; // (closed from outside: something else was opened)
+        bool together = false;     // a comic read together: the page is everyone's (ui_together.cpp)
     } viewer;
 
     bool openIncomingCall = false;

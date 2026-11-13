@@ -1124,6 +1124,7 @@ static int RunScreen(int argc, char** argv) {
         AndroidBridgeShutdown();
     }
     engine.LeaveWatch();  // (unblocks a movie still being read from another device)
+    engine.LeaveRead();   // (a comic read together is on the screen)
     music::Play().onChange = nullptr;
     radio::R().Shutdown();
     music::Play().Shutdown();

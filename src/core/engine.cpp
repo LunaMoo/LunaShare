@@ -1524,6 +1524,7 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
                 WatchBroadcast();
             }
             ListenPeerGone(c->peerId);
+            ReadPeerGone(c->peerId);
             InterruptPeerTransfers(c->peerId);
             Device(c->peerId).lastSeen = NowMs();
         } else {
@@ -2542,6 +2543,9 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::ListenAdd:
             if (!c->mailbox) HandleListen(c, f.type, j);
             break;
+        case Msg::ReadInvite: case Msg::ReadJoin: case Msg::ReadLeave: case Msg::ReadTurn: case Msg::ReadState:
+            if (!c->mailbox) HandleRead(c, f.type, j);
+            break;
         case Msg::HistoryAsk: case Msg::HistoryData:
             if (!c->mailbox) HandleHistory(c, f.type, j);
             break;
@@ -3345,6 +3349,7 @@ void Engine::MaintenanceLoop() {
             GroupCallTick();
             WatchTick();
             ListenTick();
+            ReadTick();
         }
         FolderSyncTick();
         if (now - lastMerge_ > 5000) {

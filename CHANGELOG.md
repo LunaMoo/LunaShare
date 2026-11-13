@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.8
+
+- **Together, from the call:** a Together button among the call's buttons (and in a chat's top bar) - watch a
+  movie, listen to music or read a comic with the person you're talking to, and join what they've started. When
+  they invite you, the button lights up.
+- **Read a comic together** (new): the comic opens for both of you, the pages go to the other side as they're
+  needed (the open one first), and a page turned by either of you turns for both. Start it from Together, or with
+  the new button in the comic viewer.
+- **Internet radio no longer gets stuck on one station.** A station that never answered blocked everything after
+  it: every station tapped said "on air" while the old one played on, and logos stopped loading until the app was
+  closed completely. Now a station that can't be reached is given up on after about half a minute and says so
+  ("tap to try again"), and it can't hold up other stations or the logos.
+- Android: **the volume buttons control music and radio again after a call** (with Bluetooth headphones they
+  changed only the call volume, and the sound went over the headphones' call channel).
+- Phones: the "now playing" bar stays at the bottom of the music list, so the player is one tap away.
+
 ## 1.7.7
 
 - **Music and radio sound much better:** most stations and music files are 44.1 kHz, and the sound was converted

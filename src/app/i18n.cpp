@@ -242,6 +242,11 @@ static const char* const kPatterns[] = {
     "%s invites you to watch \"%s\" together.",
     "%s stopped the movie.",
     "Group call through the server: %s",
+    "You started reading \"%s\" together.",
+    "%s invites you to read \"%s\" together.",
+    "You stopped reading together.",
+    "Reading together ended.",
+    "Reading together ended: the host is gone.",
 };
 
 std::string TDynamic(const std::string& en) {

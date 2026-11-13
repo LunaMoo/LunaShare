@@ -280,6 +280,23 @@ void App::Frame() {
     }
     static const char* autoWatch = getenv("LUNASHARE_AUTOWATCH");  // dev: join the first movie invitation (screenshots)
     if (autoWatch && !eng.watch.sid && !eng.watchInvites.empty() && eng.JoinWatch(eng.watchInvites.back().sid)) watchShown = *autoWatch != 'b';
+    static const char* autoRead = getenv("LUNASHARE_AUTOREAD");  // dev: join the first comic invitation (screenshots)
+    if (autoRead && !eng.read.sid && !eng.readInvites.empty()) JoinReadNow(eng.readInvites.back().sid);
+    static const char* devReadWith = getenv("LUNASHARE_READWITH");  // dev: the next comic opened is read with the first contact
+    if (devReadWith && !eng.conns.empty()) {
+        for (auto& c : eng.conns)
+            if (c->ready) {
+                readWith = eng.ChatKey(c->peerId);
+                devReadWith = nullptr;
+                if (const char* f = getenv("LUNASHARE_READFILE")) OpenComic(f);
+                break;
+            }
+    }
+    static const char* devTogether = getenv("LUNASHARE_TOGETHER");  // dev: the call's Together menu (screenshots)
+    if (devTogether && eng.call.state == CallState::Active) {
+        OpenTogether(CallChatKey());
+        devTogether = nullptr;
+    }
     static const char* autoGroup = getenv("LUNASHARE_AUTOGROUP");  // dev: open the first group (screenshots)
     if (autoGroup && !Engine::IsGroupKey(selectedPeer) && !eng.groups.empty()) {
         SelectPeer("#" + eng.groups.begin()->first);
@@ -478,6 +495,8 @@ void App::Frame() {
     DrawVerifyQrPopup();
     DrawLockEncPopup();
     ArchiveTick();
+    ReadFrame();
+    DrawTogetherPopup();
     TorrentPopups();
     Torrents().Tick();
     SleepPopup();
@@ -1444,7 +1463,9 @@ void App::DrawMobile() {
             next();
         }
         if (watchable) {
-            if (ui::IconButton("watch", Icon::Play, nullptr, hb)) OpenWatchPicker(selectedPeer);
+            ui::PushAccent(TogetherInvited(selectedPeer));
+            if (ui::IconButton("watch", Icon::Play, nullptr, hb)) OpenTogether(selectedPeer);
+            ui::PopAccent();
             next();
         }
         if (ui::IconButton("chathist", Icon::History, nullptr, hb)) OpenChatHistory(selectedPeer);
@@ -1642,7 +1663,9 @@ void App::DrawChat(const std::string& peer) {
             ImGui::SameLine();
         }
         if (watchable) {
-            if (ui::IconButton("watch", Icon::Play, T("Watch a movie together"), bw)) OpenWatchPicker(peer);
+            ui::PushAccent(TogetherInvited(peer));  // (they've started something: join it from here)
+            if (ui::IconButton("watch", Icon::Play, T("Together: watch, listen, read"), bw)) OpenTogether(peer);
+            ui::PopAccent();
             ImGui::SameLine();
         }
         if (ui::IconButton("chatsearch", Icon::ZoomIn, T("Search messages"), bw)) OpenChatSearch();
@@ -1672,6 +1695,7 @@ void App::DrawChat(const std::string& peer) {
 
     DrawWatchBanner(peer);
     DrawListenBanner(peer);
+    DrawReadBanner(peer);
     DrawHistoryAskBanner(peer);
     DrawTwinBanner(peer);
     DrawPinnedBar(peer);
@@ -4094,6 +4118,7 @@ int App::CallButtonCount(bool withVideo) const {
         if (Media().CameraOn()) n++;           // flip
     }
     if (Media().Available()) n++;              // call settings (sound, camera)
+    n++;                                       // together: watch / listen / read
     return n;
 }
 
@@ -4127,6 +4152,14 @@ void App::DrawCallButtons(float bw, float h, bool withVideo) {
             if (ui::IconButton("camset", Icon::Sliders, T("Call settings (sound, camera, quality...)"), bw, false, cap ? T("Settings##cap") : nullptr))
                 camPanel = !camPanel;
             camButtonHovered = ImGui::IsItemHovered();  // (its own click toggles: not a click "outside" the panel)
+            ui::PopAccent();
+            ImGui::SameLine();
+        }
+        {  // together: watch a movie, listen to music, read a comic with them (and join what they started)
+            std::string key = CallChatKey();
+            ui::PushAccent(TogetherInvited(key));
+            if (ui::IconButton("together", Icon::Users, T("Together: watch, listen, read"), bw, false, cap ? T("Together##cap") : nullptr))
+                OpenTogether(key);
             ui::PopAccent();
             ImGui::SameLine();
         }

@@ -67,6 +67,12 @@ enum class Msg : uint8_t {
     ChatPin = 105,      // {mid, on, ts[, gid | chat]} - a message (un)pinned in its chat; the later change wins
     HistoryAsk = 100,   // {chat[, gid]}                                   -> the other side (or my other devices)
     HistoryData = 101,  // {chat, msgs[], files[], last, from[, declined, empty][, gid]}  in parts
+    // ---- reading a comic together: the host has it; pages are fetched like songs (WatchRead / WatchData, the page's id as "sid")
+    ReadInvite = 110,   // {sid, name, pages[, gid]}              host -> the people it's shared with
+    ReadJoin = 111,     // {sid, name}                            -> host
+    ReadLeave = 112,    // {sid[, end]}                           a reader leaves / the host ends it for everyone
+    ReadTurn = 113,     // {sid, page}                            reader -> host: I turned to this page
+    ReadState = 114,    // {sid, name, page, seq, pids[], sizes[], exts[], people[], devs[]}  host -> readers
     ListenAdd = 95,     // {sid, items[{iid, name, title, artist, album, dur, size}]}  listener -> host: songs of mine
     GroupInfo = 70,   // {gid, name, creator, ver, members[{acc, name, devs[{id, pub}]}]}  to every member device
                       // (chat frames of a group carry "gid": Chat, ChatAck, ChatSync(chat="#gid", from), ChatRead(chat),

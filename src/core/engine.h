@@ -156,6 +156,25 @@ struct ListenInviteInfo {
     int64_t at = 0;
 };
 
+// ---- reading a comic together (read.cpp): the host has it open; the pages go to the others as they're needed, and
+// a page turned by anyone is turned for everyone
+struct ReadInfo {
+    uint64_t sid = 0;          // 0 = not reading together
+    std::string key, host;     // the conversation; the host's device ("" = me)
+    std::string name;          // the comic
+    int pages = 0, page = 0;
+    int64_t seq = 0;           // page turns so far (a newer one wins)
+    std::vector<std::string> people, devs;  // everyone reading (the host first)
+    std::vector<std::string> files;  // the pages here (others' comic: "" until it has come)
+    int64_t got = 0;           // pages that have come so far (the screen picks them up)
+};
+struct ReadInviteInfo {
+    uint64_t sid = 0;
+    std::string key, host, name;
+    int pages = 0;
+    int64_t at = 0;
+};
+
 // ---- watch together
 struct WatchInfo {
     uint64_t sid = 0;          // 0 = not watching
@@ -523,6 +542,13 @@ public:
     // ---- listening together (listen.cpp); under Lock()
     ListenInfo listen;
     std::vector<ListenInviteInfo> listenInvites;
+    // ---- reading a comic together (read.cpp); under Lock()
+    ReadInfo read;
+    std::vector<ReadInviteInfo> readInvites;
+    uint64_t StartRead(const std::string& key, const std::string& name, const std::vector<std::string>& pages, int page);
+    bool JoinRead(uint64_t sid);
+    void LeaveRead();                 // (the host: ends it for everyone)
+    void ReadTurn(int page);          // I turned to this page: everyone does
     uint64_t StartListen(const std::string& key);
     bool JoinListen(uint64_t sid);
     void LeaveListen();               // (the host: ends it for everyone)
@@ -773,6 +799,7 @@ private:
         struct File {
             FILE* f = nullptr;
             int64_t size = 0;
+            std::string path;  // (a comic's page: opened only when read - a comic has hundreds)
         };
         std::map<uint64_t, File> files;
     } watchServe_;
@@ -809,6 +836,23 @@ private:
     std::vector<std::shared_ptr<WatchCache>> listenCaches_;  // others' songs coming here (watchCacheMtx_)
     int64_t listenLastBroadcast_ = 0, listenHostSeen_ = 0;
     void HandleListen(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    // reading together
+    std::map<uint64_t, int> readOwn_;              // host: page id -> page (the files are in watchServe_)
+    std::vector<uint64_t> readPids_;               // the pages' ids (to ask the host for them)
+    std::vector<int64_t> readSizes_;
+    std::vector<std::string> readExts_;
+    std::vector<std::string> readMembers_;         // host: devices reading
+    std::vector<std::string> readInvited_;         // host: devices asked (told when it ends)
+    std::map<std::string, std::string> readNames_;
+    std::vector<std::pair<int, std::shared_ptr<WatchCache>>> readCaches_;  // pages coming here (watchCacheMtx_)
+    int64_t readLastBroadcast_ = 0, readHostSeen_ = 0, readTurnAt_ = 0, readTurnSeq_ = 0;
+    void HandleRead(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    void ReadTick();
+    void ReadBroadcast();
+    void ReadPeople();
+    void ReadPeerGone(const std::string& dev);
+    void ReadCaches();
+    void EndReadLocked(const std::string& why);
     void HandleHistory(const std::shared_ptr<Connection>& c, Msg type, const json& j);
     json HistoryFiles(const std::vector<ChatMessage>& msgs);
     int MergeHistory(const std::string& key, std::vector<ChatMessage> msgs, const json& files, const std::string& remoteDev);
