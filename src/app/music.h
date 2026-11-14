@@ -302,6 +302,7 @@ private:
     std::mutex pm_;     // the decoder, between this and the audio callback
     std::thread th_;
     std::atomic<bool> quit_{false};
+    std::atomic<bool> changedPending_{false};  // (Changed(): told from the player's thread)
     uint32_t dev_ = 0;
     LspPlayer* p_ = nullptr;
     LspPlayer* pn_ = nullptr;         // the next song, fading in (pm_)

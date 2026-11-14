@@ -4515,7 +4515,9 @@ void App::DrawVideoOverlay() {
         uint64_t sid = 0;
         std::string inv = TogetherInviteLine(CallChatKey(), &kind, &sid);
         if (!inv.empty()) {
-            float rh = bb * 0.8f, y = top.y + full.y - bb - pad * 3 - rh;
+            // (near the top, under the name and the picture's own buttons - not over the small preview at the bottom,
+            // where a tap swapped the pictures instead of joining)
+            float rh = bb * 0.8f, y = top.y + pad * 4 + bw * 2;
             const char* jl = T("Join");
             float jw = ImGui::CalcTextSize(jl).x + ImGui::GetStyle().FramePadding.x * 2 + rh * 0.6f;
             ImDrawList* odl = ImGui::GetWindowDrawList();

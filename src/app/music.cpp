@@ -878,6 +878,7 @@ void Player::LoopExternal() {
             mod_->set_playing(p_, on ? 1 : 0);
             playing_ = on;
             if (dev_) SDL_PauseAudioDevice(dev_, on ? 0 : 1);
+            UpdateMix();  // (in a call: heard through it again - the next shared song starts a moment after it opens)
         }
         if (target >= 0 && (dur_ <= 0 || target < dur_ - 1) && now - exLastSeek_ > 3000) {
             double at = mod_->position(cur);
@@ -1199,8 +1200,11 @@ bool Player::OpenAt(int index, double pos) {
     return true;
 }
 
+// (only noted here: the player's thread tells the UI and the notification a moment later, holding no lock - this is
+// called with the player's lock held too, e.g. at the end of a song from elsewhere, and telling the notification
+// asks the player what's on, which takes that lock: on Android that froze the app at the end of a shared song)
 void Player::Changed() {
-    if (onChange) onChange();
+    changedPending_ = true;
 }
 
 void Player::PlayList(const std::vector<std::string>& paths, int start, bool shuffle) {
@@ -1528,6 +1532,7 @@ void Player::Loop() {
     int64_t lastChange = 0;
     while (!quit_) {
         SDL_Delay(100);
+        if (changedPending_.exchange(false) && onChange) onChange();  // (no lock held here)
         bool changed = false;
         // a song from elsewhere to open (without the lock: its first bytes may take a moment to come)
         Source src;
