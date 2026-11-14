@@ -14,6 +14,7 @@
 #include "link_page.h"
 #include "model.h"
 #include "platform.h"
+#include "wan.h"
 
 namespace ls {
 
@@ -492,13 +493,10 @@ void ShareLinks::TunnelLoop() {
             tunnelStatus_ = "connecting";
             linksChanged_ = false;
         }
-        std::string host = server;
-        uint16_t port = 0;
-        size_t c = server.rfind(':');
-        if (c != std::string::npos) {
-            host = server.substr(0, c);
-            port = (uint16_t)atoi(server.c_str() + c + 1);
-        }
+        // the same reading of the address as the calls' connection: no port written means the usual one
+        std::string host;
+        uint16_t port = kRendezvousPort;
+        if (!ParseEndpoint(server, host, port)) port = 0;
         if (host.size() > 2 && host.front() == '[') host = host.substr(1, host.size() - 2);
         SocketHandle s = port ? TcpConnect(host, port, 5000) : kInvalidSocket;
         std::string why = "can't reach the server";
