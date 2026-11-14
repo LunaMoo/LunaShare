@@ -1554,3 +1554,4 @@
 {"Real-time path not getting through - using the usual connection", "Канал реального времени не проходит - используется обычное соединение"},
 {"Prioritize frame rate over resolution", "Частота кадров важнее разрешения"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "Сохраняет выбранную частоту кадров: сначала картинка становится меньше, и только когда она уже минимальная, а соединение всё ещё не справляется, кадры пропускаются."},
+{"Scan it", "Сканировать"},

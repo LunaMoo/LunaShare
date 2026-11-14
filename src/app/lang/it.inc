@@ -1545,3 +1545,4 @@
 {"Real-time path not getting through - using the usual connection", "Il percorso in tempo reale non passa: si usa la connessione abituale"},
 {"Prioritize frame rate over resolution", "Dare priorità alla fluidità rispetto alla risoluzione"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "Mantiene la frequenza dei fotogrammi scelta: prima l'immagine diventa più piccola, e solo quando è già alla dimensione minima e la connessione non regge ancora si saltano fotogrammi."},
+{"Scan it", "Scansiona"},

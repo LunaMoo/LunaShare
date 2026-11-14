@@ -278,7 +278,7 @@ bool App::DrawAddPersonBody(float width) {
         ImGui::EndDisabled();
         if (!addScan) {
             Wrapped(T("On the other device: Add someone > QR code > Scan their code - and point its camera here. Both must be on the same network."));
-            float s = std::min(width, fs * 15);
+            float s = std::min(width, fs * 20);
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (width - s) * 0.5f);
             static std::string code;
             static int64_t codeAt = 0;
@@ -320,6 +320,20 @@ bool App::DrawAddPersonBody(float width) {
             HandleAddCode(addCodeBuf);
             if (!addMsgErr) addCodeBuf.clear();
         }
+        // ...or scan it off their screen (the QR section's scanner reads invite codes too)
+        ImGui::BeginDisabled(!Media().CanScan() && !Media().Scanning());
+        ImGui::SameLine();
+        if (ImGui::Button(T("Scan it"), ImVec2(0, h))) {
+            addSection = 1;
+            addScan = true;
+            addMsg.clear();
+            Media().audioError.clear();
+            if (!Media().OpenScanner()) {
+                addMsg = Media().audioError.empty() ? T("camera could not be started") : Media().audioError;
+                addMsgErr = true;
+            }
+        }
+        ImGui::EndDisabled();
         message();
         ImGui::Dummy(ImVec2(0, fs * 0.4f));
         ImGui::Separator();
@@ -338,7 +352,7 @@ bool App::DrawAddPersonBody(float width) {
                 }
             }
             if (!addInviteCode.empty()) {
-                float s = std::min(width, fs * 13);
+                float s = std::min(width, fs * 24);  // (an invite is a long code: a dense QR - big enough to scan)
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (width - s) * 0.5f);
                 ui::QrCode(addInviteCode.c_str(), s);
                 ImGui::SetNextItemWidth(mobile ? -1 : width);

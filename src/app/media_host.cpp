@@ -1411,8 +1411,8 @@ bool MediaHost::OpenScanner() {
         return false;
     }
 #endif
-    Settings cs = eng_ ? eng_->GetSettings() : Settings();
-    LsvSettings vs = Preset(std::min(cs.callVideoRes, 3), 30, false);
+    // 1080p whatever the call setting says: a long code (an invite) is a dense QR, and its squares need pixels
+    LsvSettings vs = Preset(3, 30, false);
     if (!StartVideoModule(&vs)) return false;
     // the back camera (phones), else any real one - not the screen
     std::string pick;
@@ -1480,7 +1480,7 @@ void MediaHost::ScanFeed(MediaHost* self, const LsvImage& im) {
     if (now - self->scanLastMs_ < 150) return;  // (a few pictures a second are plenty)
     int W = im.width, H = im.height;
     if (W <= 0 || H <= 0 || W > 8192 || H > 8192) return;
-    int step = std::max(1, std::max(W, H) / 960);  // (big pictures: every 2nd / 3rd pixel)
+    int step = std::max(1, std::max(W, H) / 1600);  // (up to 1080p as it is - dense codes need the detail)
     int w = W / step, h = H / step;
     std::unique_lock<std::mutex> l(self->scanM_, std::try_to_lock);
     if (!l.owns_lock() || self->scanHave_) return;

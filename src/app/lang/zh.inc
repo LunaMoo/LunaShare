@@ -1560,3 +1560,4 @@
 {"Real-time path not getting through - using the usual connection", "实时通道无法连通——正在使用常规连接"},
 {"Prioritize frame rate over resolution", "优先保证帧率而非分辨率"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "保持你选择的帧率：先缩小画面，只有画面已经最小而连接仍跟不上时才会丢帧。"},
+{"Scan it", "扫描"},

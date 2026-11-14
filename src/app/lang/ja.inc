@@ -1560,3 +1560,4 @@
 {"Real-time path not getting through - using the usual connection", "リアルタイム経路が通りません - 通常の接続を使用中"},
 {"Prioritize frame rate over resolution", "解像度よりフレームレートを優先"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "選んだフレームレートを保ちます。まず映像を小さくし、最小サイズでも回線が追いつかないときにだけフレームを減らします。"},
+{"Scan it", "スキャン"},

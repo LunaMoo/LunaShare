@@ -1570,3 +1570,4 @@
 {"Real-time path not getting through - using the usual connection", "Ścieżka czasu rzeczywistego nie przechodzi - używane jest zwykłe połączenie"},
 {"Prioritize frame rate over resolution", "Płynność (klatki/s) ważniejsza niż rozdzielczość"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "Zachowuje wybraną liczbę klatek: najpierw obraz robi się mniejszy, a klatki są pomijane dopiero wtedy, gdy jest już najmniejszy, a połączenie wciąż nie nadąża."},
+{"Scan it", "Zeskanuj"},

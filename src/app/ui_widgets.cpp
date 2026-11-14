@@ -580,7 +580,8 @@ void QrCode(const char* text, float px) {
     if (cachedText != text) {
         cachedText = text;
         try {
-            QrCode qr = QrCode::encodeText(text, QrCode::Ecc::MEDIUM);
+            // LOW: fewer, bigger squares - easier for a camera to read off a screen (and a screen doesn't get dirty)
+            QrCode qr = QrCode::encodeText(text, QrCode::Ecc::LOW);
             n = qr.getSize();
             mods.assign((size_t)(n * n), false);
             for (int y = 0; y < n; y++)
@@ -590,7 +591,7 @@ void QrCode(const char* text, float px) {
         }
     }
     if (n == 0) return;
-    int quiet = 3;
+    int quiet = 4;  // (the white border the QR standard asks for: scanners look for it)
     float cell = floorf(px / (float)(n + quiet * 2));
     if (cell < 1) cell = 1;
     float total = cell * (float)(n + quiet * 2);

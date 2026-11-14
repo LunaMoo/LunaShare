@@ -1560,3 +1560,4 @@
 {"Real-time path not getting through - using the usual connection", "실시간 경로가 연결되지 않음 - 기존 연결 사용 중"},
 {"Prioritize frame rate over resolution", "해상도보다 프레임 속도 우선"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "선택한 프레임 속도를 유지합니다. 먼저 화면을 작게 하고, 가장 작은 크기에서도 연결이 따라가지 못할 때만 프레임을 줄입니다."},
+{"Scan it", "스캔"},
