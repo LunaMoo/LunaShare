@@ -36,6 +36,7 @@ bool App::TogetherInvited(const std::string& key) {
 
 // ---- joining what they started (the menu, the call bar's invitation, the chat's banners)
 void App::JoinWatchNow(uint64_t sid) {
+    DIAG("together: join watching %llx", (unsigned long long)sid);
     TogetherSwitch(1);
     if (eng.JoinWatch(sid)) watchShown = true;
     else toasts.push_back({EventType::Error, T("Watch together"), T("Not connected to them - trying again..."), "", 0, 4.0f});
@@ -280,6 +281,7 @@ void App::DrawTogetherPopup() {
 // ---------------------------------------------------------------- reading a comic together
 
 void App::JoinReadNow(uint64_t sid) {
+    DIAG("together: join reading %llx", (unsigned long long)sid);
     TogetherSwitch(3);
     if (viewer.open && !viewer.together) viewer.closeRequest = true;
     if (eng.JoinRead(sid)) {
@@ -303,6 +305,7 @@ void App::ReadFrame() {
     }
     if (readOpenPending && r.pages > 0 && (int)r.files.size() == r.pages) {  // the pages (here, or still coming) in the viewer
         readOpenPending = false;
+        DIAG("together: the comic opens (%d pages, at %d)", r.pages, r.page + 1);
         std::vector<std::string> caps(r.files.size(), r.name);
         std::vector<std::string> paths = r.files;
         if (paths.empty()) return;
@@ -316,6 +319,7 @@ void App::ReadFrame() {
     }
     if (!viewer.open || !viewer.together) {
         if (viewer.together && !viewer.open) {  // the viewer was closed: I stop reading (the host: for everyone)
+            DIAG("together: the comic's viewer closed (%s)", readKeep ? "switched away - the reading goes on" : "left");
             viewer.together = false;
             if (!readKeep) eng.LeaveRead();  // (switched to something else: it goes on - "Back to the comic")
         }

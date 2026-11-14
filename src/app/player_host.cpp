@@ -1,3 +1,4 @@
+#include "diag.h"
 #include "player_host.h"
 
 #include <SDL.h>
@@ -261,6 +262,7 @@ bool PlayerHost::OpenAudio() {
     want.callback = AudioCb;
     want.userdata = this;
     dev_ = audio_out::Open("player", nullptr, &want, &have);
+    DIAG("player: sound output %s", dev_ ? "opened" : "COULDN'T BE OPENED");
     if (!dev_) return false;
     SDL_PauseAudioDevice(dev_, 0);
     return true;
@@ -304,6 +306,7 @@ bool PlayerHost::Play(const std::string& path) {
         Stop();
         LspInfo info{};
         LspPlayer* p = mod_->open(path.c_str(), 48000, 2, &info);
+        DIAG("player: %s %s (%.0f s, %dx%d)", p ? "opened" : "COULDN'T OPEN", path.c_str(), info.duration, info.width, info.height);
         if (!p) return false;
         {
             std::lock_guard<std::mutex> l(pm_);
@@ -347,6 +350,7 @@ void PlayerHost::OpenStream(const std::string& id, int64_t size, std::function<i
         opened_ = p;
         openedInfo_ = info;
         openState_ = p ? (int)Opening::Ready : (int)Opening::Failed;
+        DIAG("player: the streamed movie %s (%.0f s, %dx%d)", p ? "opened" : "COULDN'T BE OPENED", info.duration, info.width, info.height);
     });
 }
 

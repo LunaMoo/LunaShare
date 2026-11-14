@@ -129,6 +129,7 @@ void ListenCacheDrop(const std::shared_ptr<WatchCache>& c) {
 uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     auto lk = Lock();
     int64_t size = FileSize(path);
+    DIAG("watch: start %s (%lld bytes) with %s", BaseName(path).c_str(), (long long)size, key.substr(0, 12).c_str());
     if (size <= 0) return 0;
     if (watch.sid) LeaveWatch();
     watch = WatchInfo();
@@ -440,9 +441,11 @@ bool Engine::JoinWatch(uint64_t sid) {
     if (it == watchInvites.end()) return false;
     WatchInviteInfo inv = *it;
     if (!ReadyConn(inv.host)) {
+        DIAG("watch: join %llx - not connected to the host %s", (unsigned long long)sid, inv.host.substr(0, 8).c_str());
         ConnectPeer(inv.host);
         return false;
     }
+    DIAG("watch: joined %llx \"%s\" (%lld bytes, host %s)", (unsigned long long)sid, inv.name.c_str(), (long long)inv.size, inv.host.substr(0, 8).c_str());
     if (watch.sid) LeaveWatch();
     watchInvites.erase(it);
     watch = WatchInfo();
@@ -605,6 +608,7 @@ void Engine::WatchUpdateHold() {
         if (b) wait += (wait.empty() ? "" : ", ") + PeerName(ChatKey(d));
     bool hold = !wait.empty() || watchSelfBuffering_;
     if (hold == watch.hold && wait == watch.waitFor) return;
+    DIAG("watch: %s%s%s", hold ? "holding for " : "going on (no one loading)", wait.c_str(), watchSelfBuffering_ ? " (me)" : "");
     int64_t now = SteadyMs();
     watch.pos = watch.Target(now);  // (frozen while holding, goes on from there)
     watch.at = now;
@@ -618,6 +622,7 @@ void Engine::WatchControl(bool playing, double pos) {
     if (!watch.sid) return;
     int64_t now = SteadyMs();
     double p = pos >= 0 ? pos : watch.Target(now);
+    DIAG("watch: I %s at %.1f s", playing ? "play" : "pause", p);
     if (watch.host.empty()) {
         watch.pos = p;
         watch.playing = playing;
@@ -696,6 +701,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             if (w.name.size() > 200) w.name = w.name.substr(0, 200);
             w.size = j.value("size", (int64_t)0);
             w.at = SteadyMs();
+            DIAG("watch: invited to %llx \"%s\" by %s (chat %s)", (unsigned long long)sid, w.name.c_str(), dev.substr(0, 8).c_str(), key.substr(0, 12).c_str());
             if (w.size <= 0) return;
             watchInvites.push_back(w);
             if (watchInvites.size() > 10) watchInvites.erase(watchInvites.begin());
@@ -717,6 +723,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
                 for (auto& f : watch.subFiles) SendWatchSubs(c, f);
             }
             watchBuffering_[dev] = true;
+            DIAG("watch: %s joined", dev.substr(0, 8).c_str());
             WatchUpdateHold();
             WatchBroadcast();
             break;
@@ -795,6 +802,9 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
         }
         case Msg::WatchState: {
             if (sid != watch.sid || dev != watch.host) return;
+            if (j.value("playing", false) != watch.playing || j.value("hold", false) != watch.hold)
+                DIAG("watch: host says %s at %.1f s%s%s", j.value("playing", false) ? "playing" : "paused", j.value("pos", 0.0),
+                     j.value("hold", false) ? ", holding for " : "", j.value("wait", "").c_str());
             watch.playing = j.value("playing", false);
             watch.pos = j.value("pos", 0.0);
             watch.at = SteadyMs();
@@ -823,6 +833,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
                 std::find(watchViewers_.begin(), watchViewers_.end(), dev) != watchViewers_.end())
                 watchServed_[sid].savers.insert(dev);
             if (sid != watch.sid || !watch.host.empty() || !watchBuffering_.count(dev)) return;
+            if (watchBuffering_[dev] != j.value("buffering", false)) DIAG("watch: %s %s", dev.substr(0, 8).c_str(), j.value("buffering", false) ? "is loading" : "is ready");
             watchBuffering_[dev] = j.value("buffering", false);
             WatchUpdateHold();
             break;
@@ -840,6 +851,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
                           std::find(readMembers_.begin(), readMembers_.end(), dev) != readMembers_.end();
             if ((listener || reader) && j.value("off", (int64_t)0) == 0)
                 DIAG("serve: %s asks for %s %llx from the start", dev.substr(0, 8).c_str(), listener ? "song" : "page", (unsigned long long)sid);
+            if (viewer && j.value("off", (int64_t)0) == 0) DIAG("serve: %s asks for the movie from the start", dev.substr(0, 8).c_str());
             if (!viewer && !saver && !listener && !reader) {
                 if (listenOwn_.count(sid) || readOwn_.count(sid))
                     DIAG("serve: %s asked for %llx - REFUSED (not listening / reading with us)", dev.substr(0, 8).c_str(), (unsigned long long)sid);

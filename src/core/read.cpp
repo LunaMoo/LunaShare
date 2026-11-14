@@ -7,6 +7,7 @@
 #include <filesystem>
 
 #include "crypto.h"
+#include "diag.h"
 #include "engine.h"
 #include "platform.h"
 
@@ -94,6 +95,8 @@ uint64_t Engine::StartRead(const std::string& key, const std::string& name, cons
     json inv = KeyField(key, {{"sid", read.sid}, {"name", read.name}, {"pages", read.pages}});
     for (auto& d : to) QueueToPeer(d, Msg::ReadInvite, inv);
     readInvited_ = to;
+    DIAG("read: started %llx \"%s\" (%d pages) with %s - invited %d device(s)", (unsigned long long)read.sid, read.name.c_str(), read.pages,
+         key.substr(0, 12).c_str(), (int)to.size());
     AddSystemMessage(key, "You started reading \"" + read.name + "\" together.");
     Emit({EventType::Info, key, ""});
     return read.sid;
@@ -106,9 +109,11 @@ bool Engine::JoinRead(uint64_t sid) {
     if (it == readInvites.end()) return false;
     ReadInviteInfo inv = *it;
     if (!ReadyConn(inv.host)) {
+        DIAG("read: join %llx - not connected to the host %s", (unsigned long long)sid, inv.host.substr(0, 8).c_str());
         ConnectPeer(inv.host);
         return false;
     }
+    DIAG("read: joined %llx \"%s\" (%d pages, host %s)", (unsigned long long)sid, inv.name.c_str(), inv.pages, inv.host.substr(0, 8).c_str());
     if (read.sid) LeaveRead();
     readInvites.erase(it);
     read = ReadInfo();
@@ -173,6 +178,7 @@ void Engine::ReadTurn(int page) {
     if (!read.sid || read.pages <= 0) return;
     page = std::clamp(page, 0, read.pages - 1);
     if (page == read.page) return;
+    DIAG("read: I turn to page %d", page + 1);
     read.page = page;
     if (!read.host.empty()) {  // (here at once; the host tells everyone)
         readTurnAt_ = SteadyMs();
@@ -243,10 +249,12 @@ void Engine::ReadCaches() {
             snprintf(nm, sizeof(nm), "p%05d", pg);
             std::string dest = JoinPath(dir, nm + readExts_[(size_t)pg]);
             if (ListenCacheTake(c.second, dest)) {
+                DIAG("read: page %d came", pg + 1);
                 read.files[(size_t)pg] = dest;
                 read.got++;
                 Emit({EventType::Info, read.key, ""});
             } else {
+                DIAG("read: page %d came but COULDN'T BE SAVED as %s", pg + 1, dest.c_str());
                 drop.push_back(c);
             }
             continue;
@@ -258,6 +266,8 @@ void Engine::ReadCaches() {
     for (int pg : want) {
         if (std::any_of(keep.begin(), keep.end(), [&](auto& c) { return c.first == pg; })) continue;
         auto c = NewListenCache(readPids_[(size_t)pg], readSizes_[(size_t)pg], dir);
+        DIAG("read: fetching page %d (%lld bytes)%s%s", pg + 1, (long long)readSizes_[(size_t)pg], host ? "" : " - not connected to the host",
+             c ? "" : " - CAN'T MAKE ITS CACHE FILE");
         if (!c) continue;
         ListenCacheSet(c, read.host, host, "", read.key);
         keep.push_back({pg, c});
@@ -301,6 +311,7 @@ void Engine::ReadTick() {
     }
     if (ReadyConn(read.host)) readHostSeen_ = now;
     else if (now - readHostSeen_ > 30000) {
+        DIAG("read: the host is gone");
         EndReadLocked("Reading together ended: the host is gone.");
         return;
     } else if (now - readHostSeen_ > 3000 && (now - readHostSeen_) % 10000 < 300) {
@@ -327,6 +338,7 @@ void Engine::HandleRead(const std::shared_ptr<Connection>& c, Msg type, const js
             readInvites.erase(std::remove_if(readInvites.begin(), readInvites.end(), [&](const ReadInviteInfo& i) { return i.sid == sid; }),
                               readInvites.end());
             readInvites.push_back({sid, key, dev, name, pages, SteadyMs()});
+            DIAG("read: invited to %llx \"%s\" (%d pages) by %s (chat %s)", (unsigned long long)sid, name.c_str(), pages, dev.substr(0, 8).c_str(), key.substr(0, 12).c_str());
             if (readInvites.size() > 10) readInvites.erase(readInvites.begin());
             std::string text = PeerName(ChatKey(dev)) + " invites you to read \"" + name + "\" together.";
             AddSystemMessage(key, text);
@@ -339,6 +351,7 @@ void Engine::HandleRead(const std::shared_ptr<Connection>& c, Msg type, const js
             auto mine = MyOtherDevices();
             if (std::find(to.begin(), to.end(), dev) == to.end() && std::find(mine.begin(), mine.end(), dev) == mine.end()) return;
             if (!member) readMembers_.push_back(dev);
+            DIAG("read: %s joined", dev.substr(0, 8).c_str());
             std::string name = Cut(j.value("name", ""), 100);
             readNames_[dev] = name.empty() ? PeerName(dev) : name;
             ReadPeople();
@@ -362,6 +375,7 @@ void Engine::HandleRead(const std::shared_ptr<Connection>& c, Msg type, const js
             if (!member || read.pages <= 0) return;
             int p = std::clamp(j.value("page", 0), 0, read.pages - 1);
             if (p == read.page) return;
+            DIAG("read: %s turned to page %d", dev.substr(0, 8).c_str(), p + 1);
             read.page = p;
             read.seq++;
             ReadBroadcast();
@@ -380,7 +394,11 @@ void Engine::HandleRead(const std::shared_ptr<Connection>& c, Msg type, const js
                     if (x.is_number_integer() && sizes.size() < pids.size()) sizes.push_back(std::clamp<int64_t>(x.get<int64_t>(), 0, (int64_t)1 << 30));
                 for (auto& x : j.value("exts", json::array()))
                     if (x.is_string() && exts.size() < pids.size()) exts.push_back(SafeExt("p" + x.get<std::string>()));
-                if (pids.empty() || sizes.size() != pids.size()) return;
+                DIAG("read: the host's comic: %d pages", (int)pids.size());
+                if (pids.empty() || sizes.size() != pids.size()) {
+                    DIAG("read: ...UNUSABLE (pages %d, sizes %d)", (int)pids.size(), (int)sizes.size());
+                    return;
+                }
                 exts.resize(pids.size(), ".img");
                 readPids_ = pids;
                 readSizes_ = sizes;
