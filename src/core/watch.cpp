@@ -214,6 +214,12 @@ uint64_t Engine::WatchSwitch(const std::string& path) {
     std::vector<std::string> keys = watchKeys;
     bool loop = watch.loop;
     uint64_t next = RandomU64() | 1;
+    // those still on their way in from the previous switch hear "next" too, or they'd wait on a movie that's gone
+    std::vector<std::string> coming = watchViewers_;
+    for (auto& d : watchComing_)
+        if (std::find(coming.begin(), coming.end(), d) == coming.end()) coming.push_back(d);
+    watchViewers_ = coming;
+    DIAG("watch: switching to %llx, %d viewer(s) come along", (unsigned long long)next, (int)coming.size());
     watchEndNext_ = next;
     LeaveWatch();  // (the viewers hear "next")
     watchEndNext_ = 0;
@@ -221,6 +227,7 @@ uint64_t Engine::WatchSwitch(const std::string& path) {
     uint64_t sid = StartWatch(keys.empty() ? "" : keys[0], path);
     for (size_t i = 1; i < keys.size(); i++) WatchInviteTo(keys[i]);
     watch.loop = loop;
+    if (sid) watchComing_ = coming;
     return sid;
 }
 
@@ -548,6 +555,7 @@ void Engine::EndWatchLocked(const std::string& why) {
         }
     }
     watchViewers_.clear();
+    watchComing_.clear();
     watchBuffering_.clear();
     watchKeys.clear();
     watchSelfBuffering_ = false;
@@ -718,6 +726,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
         }
         case Msg::WatchJoin:
             if (sid != watch.sid || !watch.host.empty()) return;
+            watchComing_.erase(std::remove(watchComing_.begin(), watchComing_.end(), dev), watchComing_.end());
             if (std::find(watchViewers_.begin(), watchViewers_.end(), dev) == watchViewers_.end()) {
                 watchViewers_.push_back(dev);
                 for (auto& f : watch.subFiles) SendWatchSubs(c, f);
@@ -753,6 +762,16 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             if (j.value("end", false)) {
                 watchInvites.erase(std::remove_if(watchInvites.begin(), watchInvites.end(), [&](const WatchInviteInfo& w) { return w.sid == sid; }),
                                    watchInvites.end());
+                if (watchFollow_ == sid) {  // (the movie I was about to come along to is already gone: on to its next)
+                    uint64_t next = j.value("next", (uint64_t)0);
+                    watchFollow_ = next;
+                    watchFollowAt_ = SteadyMs();
+                    if (next && std::any_of(watchInvites.begin(), watchInvites.end(), [&](const WatchInviteInfo& w) { return w.sid == next; })) {
+                        watchFollow_ = 0;
+                        JoinWatch(next);
+                    }
+                    return;
+                }
                 if (sid == watch.sid && dev == watch.host) {
                     uint64_t next = j.value("next", (uint64_t)0);
                     EndWatchLocked(next ? "" : PeerName(ChatKey(dev)) + " stopped the movie.");

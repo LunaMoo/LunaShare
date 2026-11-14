@@ -1415,6 +1415,19 @@ int main() {
             CHECK(s6 && s6 != s5, "the next movie");
             CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == s6 && B->watch.name == "movie2.bin"; }, 3000), "the viewer comes along");
             CHECK(WaitFor([&] { auto l = A->Lock(); return A->watch.people.size() == 2; }, 3000), "still together");
+            // next, next, back - quicker than the viewer gets in: it still ends up on the last one
+            uint64_t s7 = A->WatchSwitch(movie);
+            uint64_t s8 = A->WatchSwitch(movie2);
+            uint64_t s9 = A->WatchSwitch(movie);
+            CHECK(s7 && s8 && s9, "quick switches");
+            CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == s9 && B->watch.name == "movie.bin"; }, 5000),
+                  "the viewer follows quick switches (on %llx)", (unsigned long long)[&] { auto l = B->Lock(); return B->watch.sid; }());
+            CHECK(WaitFor([&] { auto l = A->Lock(); return A->watch.people.size() == 2; }, 3000), "together after quick switches");
+            {
+                auto l = B->Lock();
+                bool stale = std::any_of(B->watchInvites.begin(), B->watchInvites.end(), [&](const WatchInviteInfo& w) { return w.sid == s7 || w.sid == s8 || w.sid == s9; });
+                CHECK(!stale, "no leftover invitations to join");
+            }
             A->LeaveWatch();
             CHECK(WaitFor([&] { auto l = B->Lock(); return B->watch.sid == 0; }, 3000), "ended");
         }

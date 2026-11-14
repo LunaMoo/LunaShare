@@ -1208,6 +1208,7 @@ void MediaHost::Shutdown() {
     CloseScanner();
     CloseVideoMessage(false);
     if (recording_) StopRecording(false);
+    StopVideo();  // (the camera too: left on, no other app could have it until this one was killed)
     SetMode(Mode::Off);
     if (vcamThread_.joinable()) vcamThread_.join();
     if (vcamOn_ && vmod_) vmod_->vcam_enable(0, nullptr, 0);

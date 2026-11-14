@@ -818,6 +818,7 @@ private:
     void WatchSavesTick();
     std::map<std::string, bool> watchBuffering_;  // host: viewer device -> still loading
     std::vector<std::string> watchViewers_;       // host: devices watching
+    std::vector<std::string> watchComing_;        // host: viewers of the previous movie, not joined to this one yet
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
     bool watchReportedBuffering_ = false;
     bool watchSelfBuffering_ = false;             // host of a library stream: waiting for pieces

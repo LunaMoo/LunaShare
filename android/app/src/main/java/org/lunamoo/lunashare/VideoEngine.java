@@ -54,6 +54,12 @@ public final class VideoEngine {
     private static final Object lock = new Object();
     private static HandlerThread camThread, encThread;
     private static Handler camHandler, encHandler;
+    // camera callbacks come on a thread that's never stopped, so an answer arriving after we gave up still gets
+    // here - and closes the camera. (On a stopped thread it was lost and the camera stayed taken for the whole
+    // system until the app was killed.)
+    private static HandlerThread cbThread;
+    private static Handler cbHandler;
+    private static int openGen;  // which start is the current one (under lock); a stale answer closes what it got
     private static CameraDevice camera;
     private static CameraCaptureSession session;
     private static CaptureRequest.Builder request;
@@ -233,6 +239,15 @@ public final class VideoEngine {
             camThread = new HandlerThread("LunaShare camera");
             camThread.start();
             camHandler = new Handler(camThread.getLooper());
+            synchronized (lock) {
+                if (cbThread == null) {
+                    cbThread = new HandlerThread("LunaShare camera state");
+                    cbThread.start();
+                    cbHandler = new Handler(cbThread.getLooper());
+                }
+            }
+            final int myGen;
+            synchronized (lock) { myGen = ++openGen; }
             encThread = new HandlerThread("LunaShare encoder");
             encThread.start();
             encHandler = new Handler(encThread.getLooper());
@@ -260,12 +275,26 @@ public final class VideoEngine {
             final boolean[] ok = {false};
             m.openCamera(id, new CameraDevice.StateCallback() {
                 @Override public void onOpened(CameraDevice d) {
-                    synchronized (lock) { camera = d; }
+                    synchronized (lock) {
+                        if (myGen != openGen) {  // gave up on this one already (or it was stopped): let it go
+                            nativeLog("camera opened too late - closing it");
+                            try { d.close(); } catch (Exception ignored) {}
+                            return;
+                        }
+                        camera = d;
+                    }
                     try {
                         List<Surface> targets = highSpeed ? Arrays.asList(encSurface) : Arrays.asList(encSurface, preview.getSurface());
                         CameraCaptureSession.StateCallback cb = new CameraCaptureSession.StateCallback() {
                             @Override public void onConfigured(CameraCaptureSession s) {
-                                synchronized (lock) { session = s; }
+                                synchronized (lock) {
+                                    if (myGen != openGen) {
+                                        try { s.close(); } catch (Exception ignored) {}
+                                        try { d.close(); } catch (Exception ignored) {}
+                                        return;
+                                    }
+                                    session = s;
+                                }
                                 ok[0] = applyRequest();
                                 opened.countDown();
                             }
@@ -274,8 +303,8 @@ public final class VideoEngine {
                                 opened.countDown();
                             }
                         };
-                        if (highSpeed) d.createConstrainedHighSpeedCaptureSession(targets, cb, camHandler);
-                        else d.createCaptureSession(targets, cb, camHandler);
+                        if (highSpeed) d.createConstrainedHighSpeedCaptureSession(targets, cb, cbHandler);
+                        else d.createCaptureSession(targets, cb, cbHandler);
                     } catch (Exception e) {
                         nativeLog("session: " + e);
                         opened.countDown();
@@ -283,15 +312,17 @@ public final class VideoEngine {
                 }
                 @Override public void onDisconnected(CameraDevice d) {
                     d.close();
+                    synchronized (lock) { if (camera == d) { camera = null; session = null; request = null; } }
                     nativeCameraError("camera disconnected (another app took it?)");
                     opened.countDown();
                 }
                 @Override public void onError(CameraDevice d, int error) {
                     d.close();
+                    synchronized (lock) { if (camera == d) { camera = null; session = null; request = null; } }
                     nativeCameraError("camera error " + error);
                     opened.countDown();
                 }
-            }, camHandler);
+            }, cbHandler);
             if (!opened.await(5, TimeUnit.SECONDS) || !ok[0]) {
                 stopCamera();
                 return false;
@@ -437,6 +468,7 @@ public final class VideoEngine {
 
     public static void stopCamera() {
         synchronized (lock) {
+            openGen++;  // (an open still on its way closes itself when it arrives)
             try { if (session != null) session.close(); } catch (Exception ignored) {}
             try { if (camera != null) camera.close(); } catch (Exception ignored) {}
             session = null;

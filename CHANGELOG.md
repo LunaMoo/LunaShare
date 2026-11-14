@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.12
+
+- **Watching together:** switching movies quickly (next, next, back - or while the other side was still loading)
+  could leave the viewer stuck on a movie that was already gone, with the new one showing only as an invitation
+  to join. The host now takes everyone still on their way in along to each next movie.
+- **Android camera:** LunaShare could keep the camera taken for the whole phone - other apps couldn't use it until
+  LunaShare was force-stopped. A camera that took long to open was given up on, but still opened afterwards and
+  was never closed; such a late camera is now closed at once. The camera is also stopped when the app closes in
+  the middle of a video call.
+
 ## 1.7.11
 
 - **Links for anyone:** a device whose server address in Settings had no port written (just the address, without
