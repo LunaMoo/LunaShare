@@ -8,6 +8,8 @@
 #include <atomic>
 #include <fstream>
 #include <thread>
+#include <deque>
+#include <mutex>
 
 #include "crypto.h"
 #include "engine.h"
@@ -19,6 +21,7 @@
 #include "link_crypto.h"
 #include "link_server.h"
 #include "platform.h"
+#include "rtmedia.h"
 
 using namespace ls;
 namespace fs = std::filesystem;
@@ -550,6 +553,201 @@ static int ServeLinks(const char* file) {
     return 0;
 }
 
+// ---- real-time call media over a simulated network: loss, delay, a slow link with a deep buffer
+struct SimLink {
+    std::mutex m;
+    struct P {
+        double at;
+        std::string d;
+    };
+    std::deque<P> q;
+    int delayMs = 40, lossPct = 0, kbps = 0;  // kbps 0 = unlimited
+    double busyUntil = 0;
+    size_t bufBytes = 0, bufLimit = 1u << 20;
+    std::mt19937 rng{7};
+    std::function<void(const uint8_t*, size_t)> to;
+    std::atomic<bool> run{true};
+    std::thread th;
+    static double NowF() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+    void Start() {
+        th = std::thread([this] {
+            while (run) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                std::vector<std::string> due;
+                {
+                    std::lock_guard<std::mutex> l(m);
+                    double now = NowF();
+                    while (!q.empty() && q.front().at <= now) {
+                        bufBytes -= q.front().d.size();
+                        due.push_back(std::move(q.front().d));
+                        q.pop_front();
+                    }
+                }
+                for (auto& d : due)
+                    if (to) to((const uint8_t*)d.data(), d.size());
+            }
+        });
+    }
+    void Stop() {
+        run = false;
+        if (th.joinable()) th.join();
+    }
+    bool Put(const uint8_t* d, size_t n) {
+        std::lock_guard<std::mutex> l(m);
+        if (lossPct && (int)(rng() % 100) < lossPct) return true;
+        if (bufBytes + n > bufLimit) return true;  // (the router's buffer is full: dropped)
+        double now = NowF();
+        double start = std::max(now, busyUntil);
+        double tx = kbps ? (double)n * 8.0 / kbps : 0.0;  // ms on the slow link
+        busyUntil = start + tx;
+        q.push_back({busyUntil + delayMs, std::string((const char*)d, n)});
+        bufBytes += n;
+        return true;
+    }
+};
+
+static void TestRtMedia() {
+    printf("[real-time call media]\n");
+    uint8_t key[32];
+    SecureRandom(key, 32);
+    uint64_t callId = 0x1122334455667788ull;
+    SimLink ab, ba;
+    std::atomic<int> voiceB{0}, framesB{0}, outOfOrder{0};
+    std::atomic<uint32_t> lastFrame{0};
+    auto A = std::make_unique<RtMedia>(key, callId, [&](const uint8_t* d, size_t n) { return ab.Put(d, n); },
+                                       [&](const uint8_t*, size_t) {});
+    auto B = std::make_unique<RtMedia>(
+        key, callId, [&](const uint8_t* d, size_t n) { return ba.Put(d, n); },
+        [&](const uint8_t* d, size_t n) {
+            if (n >= 6 && d[0] == 2 && d[1] == 1) {
+                uint32_t f = d[2] | (uint32_t)d[3] << 8 | (uint32_t)d[4] << 16 | (uint32_t)d[5] << 24;
+                if (f <= lastFrame) outOfOrder++;
+                lastFrame = f;
+                framesB++;
+            } else if (n >= 1 && d[0] == 1) {
+                voiceB++;
+            }
+        });
+    ab.to = [&](const uint8_t* d, size_t n) { B->Input(d, n); };
+    ba.to = [&](const uint8_t* d, size_t n) { A->Input(d, n); };
+    ab.Start();
+    ba.Start();
+    CHECK(A->LinkBps() == RtMedia::kStartBps, "starts low (%d)", A->LinkBps());
+    CHECK(WaitFor([&] { return A->Ready() && B->Ready(); }, 2000), "both sides hear each other");
+    uint32_t frameNo = 0;
+    auto sendFrame = [&](size_t size) {
+        std::vector<uint8_t> f(std::max<size_t>(size, 16), 0x55);
+        f[0] = 2;
+        f[1] = 1;
+        frameNo++;
+        for (int i = 0; i < 4; i++) f[2 + i] = (uint8_t)(frameNo >> (8 * i));
+        return A->Send(f.data(), f.size());
+    };
+    auto follow = [&] { return (size_t)std::max(500.0, A->LinkBps() * 0.8 / 8 / 30); };  // an encoder following the estimate
+    auto sendVoice = [&] {
+        uint8_t v[60] = {1};
+        A->Send(v, sizeof(v));
+    };
+    // clean network
+    int sentF = 0;
+    for (int i = 0; i < 30; i++) {
+        sendVoice();
+        sentF += sendFrame(follow()) ? 1 : 0;
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    }
+    CHECK(sentF == 30, "nothing refused at the start (%d of 30)", sentF);
+    CHECK(WaitFor([&] { return framesB == 30 && voiceB == 30; }, 2000), "clean: every frame and voice packet (%d / %d)", framesB.load(), voiceB.load());
+    // 5% loss both ways, 40 ms each way: lost pieces are asked for again, frames still come complete and in order
+    // (the delay stays the same from here on: a jump would look like a queue building up for a few seconds)
+    ab.lossPct = ba.lossPct = 5;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    int f0 = framesB, v0 = voiceB;
+    int refusedL = 0;
+    for (int i = 0; i < 150; i++) {  // 15 fps of frames twice the size: a few pieces each
+        sendVoice();
+        if (!sendFrame(follow() * 2)) refusedL++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        sendVoice();
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    RtStats sa = A->Stats(), sb = B->Stats();
+    int gotF = framesB - f0, gotV = voiceB - v0;
+    printf("    5%% loss: %d/150 frames (%d refused), %d/300 voice, %d resent, %d late, rtt %d ms, loss in %.1f%%\n", gotF, refusedL, gotV,
+           sa.resent, sb.lateFrames, sa.rttMs, sb.lossInPct10 / 10.0);
+    CHECK(gotF >= (150 - refusedL) * 95 / 100 && refusedL < 15, "frames completed despite loss (%d of %d sent)", gotF, 150 - refusedL);
+    CHECK(gotV >= 265 && gotV <= 300, "voice: lost ones are simply missing (%d of 300)", gotV);
+    CHECK(sa.resent > 0, "lost pieces were sent again (%d)", sa.resent);
+    CHECK(outOfOrder == 0, "frames in order (%d out of order)", outOfOrder.load());
+    CHECK(sa.rttMs >= 70 && sa.rttMs <= 200, "round trip measured (%d ms)", sa.rttMs);
+    CHECK(sb.lossInPct10 > 15 && sb.lossInPct10 < 120, "loss measured (%.1f%%)", sb.lossInPct10 / 10.0);
+    // a bad mobile connection: 15% loss - voice keeps going, most frames still complete
+    ab.lossPct = ba.lossPct = 15;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    f0 = framesB;
+    v0 = voiceB;
+    int sentH = 0;
+    for (int i = 0; i < 100; i++) {
+        sendVoice();
+        if (sendFrame(follow() * 2)) sentH++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        sendVoice();
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    printf("    15%% loss: %d/%d frames, %d/200 voice, estimate %d kbit/s\n", framesB - f0, sentH, voiceB - v0, A->LinkBps() / 1000);
+    CHECK(framesB - f0 >= sentH * 80 / 100, "most frames still complete at 15%% loss (%d of %d)", framesB - f0, sentH);
+    CHECK(voiceB - v0 >= 150, "voice keeps going (%d of 200)", voiceB - v0);
+    CHECK(A->Ready() && B->Ready(), "path still confirmed at 15%% loss");
+    CHECK(A->LinkBps() >= 200000, "random loss without a queue doesn't crush the bitrate (%d kbit/s)", A->LinkBps() / 1000);
+    // a slow link (600 kbit/s) with a deep buffer: the estimate finds it and the delay stays low
+    ab.lossPct = ba.lossPct = 0;
+    ab.kbps = 600;
+    int sent = 0, refused = 0;
+    int64_t until = SteadyMs() + 14000;
+    int fLate0 = 0;
+    while (SteadyMs() < until) {
+        sendVoice();
+        if (sendFrame(follow())) sent++;
+        else refused++;
+        if (until - SteadyMs() < 3000 && !fLate0) fLate0 = framesB;
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    }
+    sa = A->Stats();
+    int lastFew = framesB - fLate0;
+    printf("    600 kbit/s link: estimate %d kbit/s, their queue %d ms, %d frames in the last 3 s, %d refused\n", sa.estimateKbps,
+           sa.queueDelayMs, lastFew, refused);
+    CHECK(sa.estimateKbps >= 300 && sa.estimateKbps <= 720, "estimate near the link (%d kbit/s)", sa.estimateKbps);
+    CHECK(sa.queueDelayMs < 150, "no standing queue (%d ms)", sa.queueDelayMs);
+    CHECK(lastFew > 60, "video keeps flowing (%d frames in 3 s)", lastFew);
+    // the link opens up: the estimate climbs again
+    ab.kbps = 0;
+    ab.delayMs = ba.delayMs = 10;
+    int startKbps = A->LinkBps() / 1000;
+    until = SteadyMs() + 9000;
+    while (SteadyMs() < until) {
+        sendVoice();
+        sendFrame(follow());
+        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+    }
+    CHECK(A->LinkBps() / 1000 > startKbps * 2, "estimate climbs when the link opens (%d -> %d kbit/s)", startKbps, A->LinkBps() / 1000);
+    // other calls' and garbage datagrams are ignored
+    int fb = framesB;
+    std::string junk(200, 'x');
+    B->Input((const uint8_t*)junk.data(), junk.size());
+    uint8_t key2[32];
+    SecureRandom(key2, 32);
+    {
+        RtMedia other(key2, callId + 1, [&](const uint8_t* d, size_t n) { B->Input(d, n); return true; }, [](const uint8_t*, size_t) {});
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    }
+    CHECK(framesB == fb && B->Ready(), "foreign datagrams ignored");
+    ab.Stop();
+    ba.Stop();
+    A.reset();
+    B.reset();
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (const char* f = getenv("LUNASHARE_TEST_SERVE_LINK")) return ServeLinks(f);
@@ -560,6 +758,8 @@ int main() {
     TestMdnsPackets();
     TestSeal();
     TestHistoryCrypt();
+    TestRtMedia();
+    if (getenv("LUNASHARE_TEST_RT_ONLY")) return g_fail ? 1 : 0;
     printf("root: %s\n", Root().c_str());
     TestShareLinks();
     if (getenv("LUNASHARE_TEST_LINKS_ONLY")) return g_fail ? 1 : 0;
