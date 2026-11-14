@@ -1551,3 +1551,6 @@
 {"What the app did recently (connections, sound, music, calls) - no messages, no file contents. Useful when something doesn't work.", "アプリの最近の動作(接続、音声、音楽、通話) - メッセージやファイルの内容は含みません。問題があるときに役立ちます。"},
 {"%s has an older LunaShare - for this to work for them too, they need to update it (Settings - About).", "%s の LunaShare は古いバージョンです - 相手でも動くようにアップデートが必要です(設定 - このアプリについて)。"},
 {"%s has LunaShare %s, older than yours (%s) - ask them to update it (Settings - About).", "%s の LunaShare は %s で、あなたの %s より古いです - アップデートを頼んでください(設定 - このアプリについて)。"},
+{"Connected to the server: the link works from anywhere.", "サーバーに接続済み: リンクはどこからでも使えます。"},
+{"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "リンク用サーバーに未接続 (%s) - 接続されるまで外からはこの端末がオフラインに見えます。再試行中。"},
+{"Connecting to the server...", "サーバーに接続中..."},

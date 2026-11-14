@@ -1551,3 +1551,6 @@
 {"What the app did recently (connections, sound, music, calls) - no messages, no file contents. Useful when something doesn't work.", "应用最近做了什么(连接、声音、音乐、通话) - 不含消息和文件内容。出问题时有用。"},
 {"%s has an older LunaShare - for this to work for them too, they need to update it (Settings - About).", "%s 的 LunaShare 版本较旧 - 要让对方也能用，需要更新(设置 - 关于)。"},
 {"%s has LunaShare %s, older than yours (%s) - ask them to update it (Settings - About).", "%s 的 LunaShare 是 %s，比你的(%s)旧 - 请对方更新(设置 - 关于)。"},
+{"Connected to the server: the link works from anywhere.", "已连接服务器：链接在任何地方都可用。"},
+{"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "未连接到链接服务器(%s) - 在连接前，外部会显示此设备离线；正在重试。"},
+{"Connecting to the server...", "正在连接服务器..."},

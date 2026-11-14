@@ -1535,3 +1535,6 @@
 {"What the app did recently (connections, sound, music, calls) - no messages, no file contents. Useful when something doesn't work.", "O que o app fez recentemente (conexões, som, música, chamadas) - sem mensagens nem conteúdo de arquivos. Útil quando algo não funciona."},
 {"%s has an older LunaShare - for this to work for them too, they need to update it (Settings - About).", "%s tem um LunaShare mais antigo - para funcionar para essa pessoa também, é preciso atualizá-lo (Configurações - Sobre)."},
 {"%s has LunaShare %s, older than yours (%s) - ask them to update it (Settings - About).", "%s tem o LunaShare %s, mais antigo que o seu (%s) - peça para atualizar (Configurações - Sobre)."},
+{"Connected to the server: the link works from anywhere.", "Conectado ao servidor: o link funciona de qualquer lugar."},
+{"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "Sem conexão com o servidor de links (%s) - de fora, este dispositivo aparece offline até lá; tentando de novo."},
+{"Connecting to the server...", "Conectando ao servidor..."},

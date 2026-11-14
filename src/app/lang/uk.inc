@@ -1545,3 +1545,6 @@
 {"What the app did recently (connections, sound, music, calls) - no messages, no file contents. Useful when something doesn't work.", "Що застосунок робив нещодавно (з'єднання, звук, музика, дзвінки) - без повідомлень і вмісту файлів. Корисно, коли щось не працює."},
 {"%s has an older LunaShare - for this to work for them too, they need to update it (Settings - About).", "У %s старіша версія LunaShare - щоб це працювало і в нього, треба оновити (Налаштування - Про застосунок)."},
 {"%s has LunaShare %s, older than yours (%s) - ask them to update it (Settings - About).", "У %s LunaShare %s, старіша за вашу (%s) - попросіть оновити (Налаштування - Про застосунок)."},
+{"Connected to the server: the link works from anywhere.", "Підключено до сервера: посилання працює звідусіль."},
+{"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "Немає з'єднання з сервером посилань (%s) - ззовні цей пристрій виглядає офлайн, доки не під'єднається; повторюю."},
+{"Connecting to the server...", "Підключення до сервера..."},

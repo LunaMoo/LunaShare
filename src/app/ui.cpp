@@ -3867,19 +3867,37 @@ void App::DrawPopups() {
         auto peers = SortedPeers();
         ImGui::BeginChild("pick", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 24, std::min(ImGui::GetFontSize() * 16, vp->WorkSize.y * 0.5f)), ImGuiChildFlags_Borders);
         if (mobile) ui::TouchScroll();
+        // my other devices, each on its own: "Me" keeps files here (notes) - to have them on my PC / phone, its row
+        std::vector<std::string> mine = eng.MyOtherDevices();
+        std::sort(mine.begin(), mine.end(), [&](const std::string& a, const std::string& b) {
+            bool ca = eng.IsConnected(a), cb = eng.IsConnected(b);
+            if (ca != cb) return ca;
+            return eng.devices[a].lastSeen > eng.devices[b].lastSeen;
+        });
+        std::vector<std::string> rows;
         for (auto& p : peers) {
+            rows.push_back(p);
+            if (eng.IsSelfKey(p))
+                for (auto& d : mine) rows.push_back(d);
+        }
+        if (!mine.empty() && std::find(peers.begin(), peers.end(), eng.SelfKey()) == peers.end()) rows.insert(rows.begin(), mine.begin(), mine.end());
+        for (auto& p : rows) {
             const KnownDevice* d = eng.DeviceFor(p);
             if (d && d->blocked) continue;
             if (Engine::IsGroupKey(p) && !pendingSend.empty()) continue;  // (files go to people, not to groups)
+            bool myDev = std::find(mine.begin(), mine.end(), p) != mine.end();
+            if (myDev) ImGui::Indent(ImGui::GetFontSize());
             if (const Group* g = eng.GroupOf(p); g && g->left) continue;
-            if (DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0)) {
+            bool picked = DevicePeerRow(p, false, mobile ? ui::M().rowH * 1.2f : 0);
+            if (myDev) ImGui::Unindent(ImGui::GetFontSize());
+            if (picked) {
                 for (auto& t : pendingForward) eng.SendChat(p, t, "", {}, !pendingShareText);
                 if (!pendingSendList.empty()) eng.SendFileList(p, pendingSendList, pendingSendName);
                 else if (!pendingSend.empty()) SendFilesUI(p, pendingSend);
                 pendingSendList.clear();
                 pendingForward.clear();
                 pendingShareText = false;
-                SelectPeer(p);
+                SelectPeer(myDev ? eng.SelfKey() : p);
                 if (mobile) { backStack.clear(); backStack.push_back(MScreen::Home); screen = MScreen::Chat; }
                 else { tab = Tab::Chat; tabForce = true; }
                 pendingSend.clear();

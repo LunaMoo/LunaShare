@@ -583,10 +583,11 @@ void ShareLinks::TunnelLoop() {
             CloseSocket(s);
         }
         if (!running_) break;
+        if (log) log("share links: not connected to " + server + " (" + why + ") - again in " + std::to_string(backoff / 1000) + " s");
         std::unique_lock<std::mutex> lk(m_);
         tunnelStatus_ = "offline: " + why;
         cv_.wait_for(lk, std::chrono::milliseconds(backoff));
-        backoff = std::min(backoff * 2, 60000);
+        backoff = std::min(backoff * 2, 20000);  // (at most 20 s: a link someone is opening waits for it)
     }
     std::lock_guard<std::mutex> lk(m_);
     tunnelStatus_ = "";

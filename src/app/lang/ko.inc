@@ -1551,3 +1551,6 @@
 {"What the app did recently (connections, sound, music, calls) - no messages, no file contents. Useful when something doesn't work.", "앱이 최근에 한 일(연결, 소리, 음악, 통화) - 메시지와 파일 내용은 없습니다. 무언가 안 될 때 유용합니다."},
 {"%s has an older LunaShare - for this to work for them too, they need to update it (Settings - About).", "%s 님의 LunaShare가 오래된 버전입니다 - 상대방도 쓰려면 업데이트해야 합니다(설정 - 정보)."},
 {"%s has LunaShare %s, older than yours (%s) - ask them to update it (Settings - About).", "%s 님은 LunaShare %s로, 내 버전(%s)보다 오래되었습니다 - 업데이트를 부탁하세요(설정 - 정보)."},
+{"Connected to the server: the link works from anywhere.", "서버에 연결됨: 링크는 어디서나 작동합니다."},
+{"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "링크 서버에 연결되지 않음 (%s) - 연결될 때까지 외부에서는 이 기기가 오프라인으로 보입니다. 다시 시도 중."},
+{"Connecting to the server...", "서버에 연결하는 중..."},

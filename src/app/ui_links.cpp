@@ -242,6 +242,19 @@ void App::DrawShareLinkPopups() {
                 ImGui::SetNextItemWidth(-1);
                 ImGui::InputText("##url", &url, ImGuiInputTextFlags_ReadOnly);
                 if (info.webUrl.empty()) wrapped(T("Works only on this network (the same Wi-Fi)."));
+                else {  // over the Internet the file comes through this device's connection to the server: is it up?
+                    std::string ts = eng.shareLinks.TunnelStatus();
+                    if (ts == "online") {
+                        ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), "%s", T("Connected to the server: the link works from anywhere."));
+                    } else if (ts.rfind("offline: ", 0) == 0) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, ui::ColWarn());
+                        wrapped(TF("Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.",
+                                   ts.substr(9).c_str()), false);
+                        ImGui::PopStyleColor();
+                    } else if (!ts.empty()) {
+                        ImGui::TextDisabled("%s", T("Connecting to the server..."));
+                    }
+                }
                 if (info.pin && !s.pin.empty()) wrapped(TF("Tell the PIN separately (not in the same message): %s", s.pin.c_str()), false);
                 float bw = mobile ? (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * (Bridge().shareText ? 2 : 1)) / (Bridge().shareText ? 3 : 2) : 0;
                 if (ui::IconTextButton(T("Copy"), Icon::Copy, ImVec2(bw, h))) {

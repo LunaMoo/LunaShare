@@ -973,6 +973,23 @@ int main() {
             for (auto& [id, t] : A->transfers) kept |= t->localPath == note && t->state == TState::Completed && t->peer == A->settings.deviceId;
             CHECK(kept, "a file in my own chat is kept here, not sent");
         }
+        {  // ...but sent to one of my devices (picked by itself): it goes there, shown in my own chat on both
+            std::string f = JoinPath(Root(), "tomypc.bin");
+            WriteRandomFile(f, 300000, 9);
+            A->SendPaths(idA2, {f});
+            auto got = [&] {
+                auto l = A2->Lock();
+                for (auto& [id, t] : A2->transfers)
+                    if (!t->outgoing && t->name == "tomypc.bin" && t->state == TState::Completed) return true;
+                return false;
+            };
+            CHECK(WaitFor(got, 8000), "a file sent to my other device arrives there");
+            auto l = A->Lock();
+            bool inSelf = false;
+            for (auto& m : A->chats[A->SelfKey()].messages) inSelf |= m.kind == MsgKind::Files && !m.tids.empty() && A->transfers.count(m.tids[0]) &&
+                                                                    A->transfers[m.tids[0]]->name == "tomypc.bin";
+            CHECK(inSelf, "shown in my own chat");
+        }
         CHECK(WaitFor([&] { auto l = B->Lock(); return B->devices.count(idA2) && B->ChatKey(idA2) == B->ChatKey(idA); }, 3000),
               "the contact learns about the new device");
         A2->ConnectAddress("127.0.0.1", B->boundPort);
