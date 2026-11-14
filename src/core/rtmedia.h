@@ -130,7 +130,7 @@ private:
     Out out_;
     In in_;
 
-    std::mutex m_, outM_, joinM_;
+    std::mutex m_, outM_, joinM_, deliverM_;  // deliverM_: packets reach the modules one at a time (in order)
     std::condition_variable cv_;
     std::atomic<bool> run_{true}, ready_{false};
     std::thread thread_;

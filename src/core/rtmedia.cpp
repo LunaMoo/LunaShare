@@ -285,7 +285,12 @@ void RtMedia::Input(const uint8_t* d, size_t n) {
         ready_ = lastConfirm_ && now - lastConfirm_ < 3000;
     }
     FlushOut();
-    for (auto& m : deliver) in_((const uint8_t*)m.data(), m.size());
+    if (!deliver.empty()) {
+        // one at a time: frames complete on the timer thread and on the network thread, and the video module's
+        // receiving side (and the phone's decoder behind it) is not made for two at once
+        std::lock_guard<std::mutex> dl(deliverM_);
+        for (auto& m : deliver) in_((const uint8_t*)m.data(), m.size());
+    }
     if (kind == 11 && onBye) {
         std::string why;
         {
@@ -519,7 +524,10 @@ void RtMedia::Loop() {
             ready_ = ready;
         }
         FlushOut();
-        for (auto& m : deliver) in_((const uint8_t*)m.data(), m.size());
+        if (!deliver.empty()) {
+            std::lock_guard<std::mutex> dl(deliverM_);  // (see Input)
+            for (auto& m : deliver) in_((const uint8_t*)m.data(), m.size());
+        }
     }
 }
 
