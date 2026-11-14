@@ -8,6 +8,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -227,7 +228,7 @@ public:
     // a call that is going on finishes first)
     void SetExternalCtl(std::function<bool(int cmd, double arg)> fn) {
         std::lock_guard<std::mutex> l(ctlM_);
-        externalCtl_ = std::move(fn);
+        externalCtl_ = fn ? std::make_shared<std::function<bool(int, double)>>(std::move(fn)) : nullptr;
     }
 
     // remembered between runs (paused)
@@ -236,7 +237,7 @@ public:
 
 private:
     std::mutex ctlM_;
-    std::function<bool(int cmd, double arg)> externalCtl_;
+    std::shared_ptr<std::function<bool(int cmd, double arg)>> externalCtl_;
 
     void Loop();
     void LoopExternal();           // (m_ held)

@@ -4,9 +4,11 @@
 // whole, and the next one comes ahead of time. Everybody's music player follows the host's clock; a song change
 // starts a moment later so the next one can arrive everywhere first.
 #include <algorithm>
+#include <cstdio>
 #include <chrono>
 #include <thread>
 
+#include "diag.h"
 #include "engine.h"
 #include "platform.h"
 
@@ -67,6 +69,7 @@ uint64_t Engine::StartListen(const std::string& key) {
     for (auto& d : MyOtherDevices()) to.push_back(d);
     json inv = KeyField(key, {{"sid", listen.sid}});
     for (auto& d : to) QueueToPeer(d, Msg::ListenInvite, inv);
+    DIAG("listen: started %llx with %s - invited %d device(s)", (unsigned long long)listen.sid, key.substr(0, 12).c_str(), (int)to.size());
     AddSystemMessage(key, "You started listening to music together.");
     Emit({EventType::Info, key, ""});
     return listen.sid;
@@ -79,9 +82,11 @@ bool Engine::JoinListen(uint64_t sid) {
     if (it == listenInvites.end()) return false;
     ListenInviteInfo inv = *it;
     if (!ReadyConn(inv.host)) {
+        DIAG("listen: join %llx - not connected to the host %s", (unsigned long long)sid, inv.host.substr(0, 8).c_str());
         ConnectPeer(inv.host);
         return false;
     }
+    DIAG("listen: joined %llx (host %s)", (unsigned long long)sid, inv.host.substr(0, 8).c_str());
     if (listen.sid) LeaveListen();
     listenInvites.erase(it);
     listen = ListenInfo();
@@ -174,6 +179,8 @@ void Engine::ListenGo(int at, double delay, double fade) {
     }
     // (a blend: right away - the next song came ahead; otherwise a moment for it to arrive everywhere)
     ListenSetPos(!listen.playing ? 0 : fade > 0 ? listen.frag : listen.frag > 0 ? std::max(0.0, listen.frag - delay) : -delay);
+    DIAG("listen: song %d/%d%s%s", listen.at + 1, (int)listen.items.size(),
+            listen.playing ? " - " : " (the end)", listen.playing ? listen.items[(size_t)listen.at].name.c_str() : "");
     listen.ver++;
     ListenBroadcast();
 }
@@ -358,6 +365,7 @@ void Engine::ListenAdd(std::vector<ListenItem> items, double startAt) {
         if (i.path.empty()) continue;
         i.size = FileSize(i.path);
         FILE* f = i.size > 0 ? OpenFile(i.path, "rb") : nullptr;
+        DIAG("listen: add %s (%lld bytes)%s", BaseName(i.path).c_str(), (long long)i.size, f ? "" : " - CAN'T OPEN IT");
         if (!f) continue;
         i.iid = RandomU64() | 1;
         i.owner = settings.deviceId;
@@ -427,6 +435,8 @@ void Engine::ListenCaches() {
         }
         if (have) continue;
         auto c = NewListenCache(i->iid, i->size, JoinPath(ConfigPath(), "watch"));
+        DIAG("listen: fetching %s (%lld bytes) from %s%s%s", i->name.c_str(), (long long)i->size, i->owner.substr(0, 8).c_str(),
+                ReadyConn(i->owner) ? "" : " - not connected", c ? "" : " - CAN'T MAKE ITS CACHE FILE");
         if (!c) continue;
         ListenCacheSet(c, i->owner, ReadyConn(i->owner), i->name, listen.key);
         keep.push_back(c);
@@ -563,6 +573,12 @@ void Engine::ListenApply(const json& j) {
         }
         if (items.size() >= 2000) break;
     }
+    {  // (said when the song or play/pause changes)
+        int at = std::clamp(j.value("at", 0), 0, (int)items.size());
+        bool pl = j.value("playing", false);
+        if (at != l.at || pl != l.playing || items.size() != l.items.size())
+            DIAG("listen: host says song %d/%d %s at %.1f s", at + 1, (int)items.size(), pl ? "playing" : "paused", j.value("pos", 0.0));
+    }
     l.items = items;
     l.at = std::clamp(j.value("at", 0), 0, (int)l.items.size());
     l.playing = j.value("playing", false);
@@ -605,6 +621,7 @@ void Engine::HandleListen(const std::shared_ptr<Connection>& c, Msg type, const 
             listenInvites.erase(std::remove_if(listenInvites.begin(), listenInvites.end(), [&](const ListenInviteInfo& i) { return i.sid == sid; }),
                                 listenInvites.end());
             listenInvites.push_back({sid, key, dev, SteadyMs()});
+            DIAG("listen: invited to %llx by %s (chat %s)", (unsigned long long)sid, dev.substr(0, 8).c_str(), key.substr(0, 12).c_str());
             if (listenInvites.size() > 10) listenInvites.erase(listenInvites.begin());
             std::string text = PeerName(ChatKey(dev)) + " invites you to listen to music together.";
             AddSystemMessage(key, text);

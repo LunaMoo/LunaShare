@@ -5,6 +5,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# test builds: a commit whose message has [diag] is built with the diagnostic log (LUNASHARE_DIAG, CMakeLists.txt) -
+# it goes to the "latest" pre-release only, never to a numbered release
+env:
+  LUNASHARE_DIAG: ${{ contains(github.event.head_commit.message, '[diag]') && 'ON' || 'OFF' }}
+
 jobs:
   # Trimmed FFmpeg (LGPL) shared by the Windows video and player modules, loaded at run time from modules/:
   # video decoders (+ D3D11VA GPU decoding), the common containers and audio decoders. Cached; rebuilt on changes.
@@ -335,6 +340,7 @@ jobs:
           for old in app-calls-release.apk app-lite-release.apk LunaShare-macos-arm64.zip; do gh release delete-asset latest "$old" -R "$GITHUB_REPOSITORY" -y 2>/dev/null || true; done
           # a version that has no release yet: publish it from this commit
           ver=$(sed -n 's/^project(LunaShare VERSION \([0-9.]*\).*/\1/p' src/CMakeLists.txt)
+          if [ "$LUNASHARE_DIAG" = "ON" ]; then echo "a test build ([diag]): no numbered release from it"; ver=""; fi
           if [ -n "$ver" ] && ! gh release view "v$ver" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             mkdir rel
             for f in out/*; do

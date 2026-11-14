@@ -32,7 +32,9 @@ android {
                 arguments '-DANDROID_STL=c++_shared', '-DLUNASHARE_BUILD_TESTS=OFF', '-DLUNASHARE_BUILD_VOICE=ON', '-DLUNASHARE_BUILD_VIDEO=ON',
                           "-DFETCHCONTENT_SOURCE_DIR_SDL2=${sdlDir.absolutePath}",
                           // FFmpeg for sound tracks and subtitles the phone can't decode (CI builds it into ../ffandroid)
-                          "-DLUNASHARE_FFMPEG_ANDROID=${file("${rootDir}/../ffandroid").absolutePath}"
+                          "-DLUNASHARE_FFMPEG_ANDROID=${file("${rootDir}/../ffandroid").absolutePath}",
+                          // a test build with the diagnostic log (CI: a commit with [diag]); never a numbered release
+                          "-DLUNASHARE_DIAG=${System.getenv('LUNASHARE_DIAG') ?: 'OFF'}"
                 cppFlags '-std=c++17'
             }
         }

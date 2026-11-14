@@ -1,5 +1,7 @@
 #include "core.h"
 
+#include "applog.h"
+
 #include <SDL.h>
 
 #include <cstdlib>
@@ -36,8 +38,10 @@ ls::Engine* Running() {
 ls::Engine& Make() {
     std::lock_guard<std::recursive_mutex> l(g_m);
     if (g_engine) return *g_engine;
+    applog::Init();  // (the log, from the start: Settings - About copies it)
     g_engine = new ls::Engine();
     ls::Engine& e = *g_engine;
+    e.appVersion = LUNASHARE_VERSION;  // (told to the others: what they can do with us)
     // chat archives are kept compressed (zlib, from stb - already here for pictures)
     e.compress = [](const std::string& in) -> std::string {
         int n = 0;
@@ -138,6 +142,7 @@ bool StartWithoutScreen(const std::string& filesDir) {
 #endif
         return false;
     };
+    applog::SetDir(e.GetSettings().downloadDir);
     if (!e.Start()) {
         SDL_Log("core: the engine couldn't start without the screen");
         return fail();

@@ -1,5 +1,6 @@
 // LunaShare - file sharing chat for LAN, phone hotspots and Bluetooth.
 // SDL2 + OpenGL3/GLES3 + Dear ImGui.
+#include "applog.h"
 #include "notify.h"
 #include "stb_image.h"
 #include "tray.h"
@@ -521,6 +522,7 @@ static bool ImeSync(App& app) {
 // One screen: from the window (a phone's screen) opening to its end. On a phone it runs again each time Android
 // creates the screen anew, in the same process - the engine may then already be running (core.h).
 static int RunScreen(int argc, char** argv) {
+    applog::Init();  // (from the start: Settings - About copies it)
 #ifdef _WIN32
     SetProcessDPIAware();
 #endif

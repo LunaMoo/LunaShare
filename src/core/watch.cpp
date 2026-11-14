@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <cstring>
 
+#include "diag.h"
 #include "engine.h"
 #include "crypto.h"
 #include "platform.h"
@@ -837,7 +838,11 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             // (a page of the comic I'm reading with them)
             bool reader = read.sid && read.host.empty() && readOwn_.count(sid) &&
                           std::find(readMembers_.begin(), readMembers_.end(), dev) != readMembers_.end();
+            if ((listener || reader) && j.value("off", (int64_t)0) == 0)
+                DIAG("serve: %s asks for %s %llx from the start", dev.substr(0, 8).c_str(), listener ? "song" : "page", (unsigned long long)sid);
             if (!viewer && !saver && !listener && !reader) {
+                if (listenOwn_.count(sid) || readOwn_.count(sid))
+                    DIAG("serve: %s asked for %llx - REFUSED (not listening / reading with us)", dev.substr(0, 8).c_str(), (unsigned long long)sid);
                 if (listenOwn_.count(sid) || readOwn_.count(sid)) return;
                 if (!(sid == watch.sid && watch.host.empty())) Queue(c, Msg::WatchLeave, {{"sid", sid}, {"end", true}, {"nosave", true}});
                 return;

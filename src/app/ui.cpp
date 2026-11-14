@@ -1,3 +1,4 @@
+#include "applog.h"
 #include "ui.h"
 #include "i18n.h"
 
@@ -65,6 +66,7 @@ App::~App() {
 }
 
 App::App(Engine& e) : eng(e) {
+    applog::SetDir(eng.settings.downloadDir);  // (test builds: lunashare-log.txt in the LunaShare folder)
     auto lk = eng.Lock();
     edit = eng.settings;
     browser.lastDir = eng.settings.lastBrowseDir;
@@ -296,9 +298,18 @@ void App::Frame() {
     // goes on for both); LUNASHARE_AUTOLISTEN joins the first invitation to listen; LUNASHARE_WATCHWITH=<movie> shares
     // a movie with the one in the call
     static const char* devListenWith = getenv("LUNASHARE_LISTENWITH");
-    if (devListenWith && eng.call.state == CallState::Active && SteadyMs() - eng.call.answered > 1500 && music::Play().GetNow().active) {
-        devListenWith = nullptr;
-        ListenWith(CallChatKey());
+    if (devListenWith && music::Play().GetNow().active) {
+        if (eng.call.state == CallState::Active && SteadyMs() - eng.call.answered > 1500) {
+            devListenWith = nullptr;
+            ListenWith(CallChatKey());
+        } else if (!getenv("LUNASHARE_AUTOANSWER")) {  // (no call: with the first one connected)
+            for (auto& c : eng.conns)
+                if (c->ready && !c->closed && SteadyMs() - c->connectedAt > 3000) {
+                    devListenWith = nullptr;
+                    ListenWith(eng.ChatKey(c->peerId));
+                    break;
+                }
+        }
     }
     static const char* devAutoListen = getenv("LUNASHARE_AUTOLISTEN");
     if (devAutoListen && !eng.listen.sid && !eng.listenInvites.empty()) JoinListenNow(eng.listenInvites.back().sid);

@@ -1,5 +1,6 @@
 // Music player: library (folders -> tracks with tags and covers), playlists, and the player that keeps going in the
 // background. See music.h.
+#include "diag.h"
 #include "music.h"
 
 #include <SDL.h>
@@ -677,10 +678,20 @@ struct Player::ExtStream {
     static void UrlClose(void* u, void* h) { ((ExtStream*)u)->io->Close(h); }
     static int Read(void* u, int64_t off, uint8_t* buf, int len) {
         auto* x = (ExtStream*)u;
+        int64_t t0 = (int64_t)SDL_GetTicks64();
+        bool said = false;
         for (;;) {
             if (x->stop || *x->quit) return -1;
             int r = x->read(off, buf, len);
-            if (r != -2) return r;
+            if (r != -2) {
+                if (said) DIAG("music: the bytes at %lld came after %d ms", (long long)off, (int)((int64_t)SDL_GetTicks64() - t0));
+                if (r < 0) DIAG("music: reading the song from elsewhere failed at %lld (%d)", (long long)off, r);
+                return r;
+            }
+            if (!said && (int64_t)SDL_GetTicks64() - t0 > 3000) {
+                said = true;
+                DIAG("music: waiting over 3 s for the song's bytes at %lld (of %lld)", (long long)off, (long long)x->s.size);
+            }
         }
     }
 };
@@ -764,12 +775,15 @@ bool Player::EnsureDevice() {
     want.callback = AudioCb;
     want.userdata = this;
     dev_ = audio_out::Open("music", nullptr, &want, &have);
+    DIAG("music: sound output %s (%d Hz, %d ch)", dev_ ? "opened" : "COULDN'T BE OPENED", have.freq, (int)have.channels);
     return dev_ != 0;
 }
 
 // ---------------------------------------------------------------- songs from elsewhere
 
 void Player::PlayExternal(const Source& s, double pos, bool playing) {
+    DIAG("music: play from elsewhere %llx \"%s\" %s, at %.1f s, %s%s", (unsigned long long)s.id, s.track.title.c_str(),
+         !s.path.empty() ? "(a file here)" : !s.url.empty() ? "(a url)" : "(streamed)", pos, playing ? "playing" : "paused", s.follow ? ", following" : "");
     {
         std::lock_guard<std::mutex> l(m_);
         if (!ext_) {  // (my own music rests meanwhile, where it was)
@@ -841,8 +855,14 @@ bool Player::ExtCtl(int cmd, double arg) {
         std::lock_guard<std::mutex> l(m_);
         if (!ext_) return false;
     }
-    std::lock_guard<std::mutex> l(ctlM_);
-    return externalCtl_ && externalCtl_(cmd, arg);
+    // (called outside the lock: the call takes the engine's lock, which the screen may hold while it asks the player for
+    // something that ends up here - holding this one through the call froze the app at the end of a song)
+    std::shared_ptr<std::function<bool(int, double)>> fn;
+    {
+        std::lock_guard<std::mutex> l(ctlM_);
+        fn = externalCtl_;
+    }
+    return fn && (*fn)(cmd, arg);
 }
 
 // (m_ held) the song from elsewhere that's open: follow the host's clock, notice its end
@@ -976,7 +996,9 @@ void Player::Render(float* out, int frames) {
 // (m_ held)
 void Player::UpdateMix() {
     inCall_ = interrupted_;
+    bool was = mixIntoCall_;
     mixIntoCall_ = audio_out::Single() && interrupted_ && playInCall_ && playing_ && p_ != nullptr;
+    if (was != mixIntoCall_) DIAG("music: %s the call's sound", mixIntoCall_ ? "mixed into" : "no longer in");
 }
 
 void Player::UpdateEq() {
@@ -1397,6 +1419,7 @@ void Player::SetInterrupted(bool on) {
         std::lock_guard<std::mutex> l(m_);
         if (on == interrupted_) return;
         interrupted_ = on;
+        DIAG("music: %s (a call or a movie)%s", on ? "interrupted" : "no longer interrupted", ext_ && ex_.follow ? " - listening together goes on" : "");
         int64_t now = (int64_t)SDL_GetTicks64();
         if (on && ext_ && ex_.follow) {
             // listening together goes on through a call (it's paused for everyone, if anyone wants: not here alone)
@@ -1540,6 +1563,8 @@ void Player::Loop() {
             else if (!src.url.empty() && st && st->io && mod_->open_url)
                 q = mod_->open_url(src.url.c_str(), src.format.empty() ? nullptr : src.format.c_str(), &st->lio, 48000, 2, &info);
             else if (src.read && mod_->open_stream) q = mod_->open_stream(&st->s, 48000, 2, &info);
+            DIAG("music: %s %llx (%s)%s", q ? "opened" : "COULDN'T OPEN", (unsigned long long)src.id, !src.path.empty() ? src.path.c_str() : "streamed",
+                 q ? "" : " - not a song the player can read, or its bytes never came");
             std::lock_guard<std::mutex> l(m_);
             exOpening_ = false;
             if (exPending_ == st) exPending_.reset();

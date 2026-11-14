@@ -16,6 +16,7 @@
 #include "media_host.h"
 #include "platform.h"
 #include "protocol.h"
+#include "applog.h"
 #include "ui.h"
 #include "ui_widgets.h"
 #include "wan.h"
@@ -696,6 +697,15 @@ void App::SettingsCategory(int cat, float fieldW, float h, bool& changed) {
                     ImGui::SameLine();
                     if (ImGui::Button(TF("Get %s", updateTag.c_str()).c_str(), ImVec2(0, h))) SDL_OpenURL(updateUrl.c_str());
                 }
+                // a test build: what the app has been doing (for a problem report) - copied, to paste in a message;
+                // it's also in lunashare-log.txt in the LunaShare folder
+                if (applog::On() && ImGui::Button(T("Copy the diagnostic log"), ImVec2(0, h))) {
+                    SDL_SetClipboardText(applog::Text().c_str());
+                    toasts.push_back({EventType::Info, T("Diagnostic log"), T("Copied - paste it into a message to whoever helps you."), "", 0, 4.0f});
+                }
+                if (applog::On())
+                    ui::HelpMarker(T("What the app did recently (connections, sound, music, calls) - no messages, no file contents. "
+                                     "Useful when something doesn't work."));
             }
             ImGui::PushTextWrapPos(0);
             ImGui::TextDisabled(T("Settings folder: %s"), (eng.configDir.empty() ? ConfigDir() : eng.configDir).c_str());

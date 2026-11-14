@@ -1496,7 +1496,7 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
                      {"user", UserName()}, {"host", HostName()}, {"platform", PlatformName()}, {"macs", MacAddresses()},
                      {"tcpPort", boundPort}, {"pub", identity_.PubHex()}, {"sig", c->sec->Sign(identity_)}, {"caps", localCaps},
                      {"pv", settings.profileVer}, {"avh", settings.avatarHash},
-                     {"acc", account_.PubHex()}, {"acs", accountCert_}, {"av", settings.accountVer}};
+                     {"acc", account_.PubHex()}, {"acs", accountCert_}, {"av", settings.accountVer}, {"ver", appVersion}};
         }
         Queue(c, Msg::Hello, hello);
         Spawn([this, c] { ReaderLoop(c); });
@@ -1890,6 +1890,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 bool missing = !avh.empty() && !FileExists(AvatarFile(id, avh));
                 if (pv > d.profileVer || (avh != d.avatarHash && pv >= d.profileVer) || missing) Queue(c, Msg::ProfileGet, json::object());
             }
+            c->ver = j.value("ver", "").substr(0, 32);
             c->caps.clear();
             for (auto& cp : j.value("caps", json::array()))
                 if (cp.is_string()) c->caps.push_back(cp.get<std::string>());
@@ -4546,6 +4547,15 @@ void Engine::SendWifiCreds(const std::string& peer, const std::string& ssid, con
 std::string CapForMedia(const std::string& media) {
     // "webcam": the callee sends its camera (a PC asking a phone); "webcam-offer": the caller sends its camera
     return media == "webcam" || media == "webcam-offer" ? "video" : media;
+}
+
+std::string Engine::PeerVersion(const std::string& keyOrDevice) {
+    std::vector<std::string> devs = IsContactKey(keyOrDevice) || IsGroupKey(keyOrDevice) ? DevicesOf(keyOrDevice) : std::vector<std::string>{keyOrDevice};
+    std::string best;
+    for (auto& d : devs)
+        if (auto c = ReadyConn(d))
+            if (!c->ver.empty()) best = c->ver;
+    return best;
 }
 
 bool Engine::PeerHasCap(const std::string& peer, const std::string& cap) {

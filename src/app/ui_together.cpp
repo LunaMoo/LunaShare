@@ -3,6 +3,7 @@
 // comic together is here too: the comic's pages in the picture viewer, the page anyone turns turned for everyone.
 #include <algorithm>
 
+#include "diag.h"
 #include "emoji_host.h"
 #include "i18n.h"
 #include "imgui.h"
@@ -41,6 +42,7 @@ void App::JoinWatchNow(uint64_t sid) {
 }
 
 void App::JoinListenNow(uint64_t sid) {
+    DIAG("together: join listening %llx", (unsigned long long)sid);
     TogetherSwitch(2);
     if (!musicLibList.empty()) MusicLibEnd();
     if (!eng.JoinListen(sid)) {
@@ -118,6 +120,7 @@ void App::OpenTogether(const std::string& key) {
 // listening together with them: what's playing goes on for both (then the rest of my queue); with nothing on, the
 // music list opens - songs tapped there go to the shared queue
 void App::ListenWith(const std::string& key) {
+    DIAG("together: listen with %s (in a call: %s)", key.substr(0, 12).c_str(), CallChatKey().empty() ? "no" : "yes");
     TogetherSwitch(2);
     if (!musicLibList.empty()) MusicLibEnd();
     music::Now now = music::Play().GetNow();
@@ -172,6 +175,19 @@ void App::DrawTogetherPopup() {
     const std::string& key = togetherKey;
     std::string who = Emoji().Display(eng.PeerName(key));
     ImGui::TextUnformatted(TF("Together with %s", who.c_str()).c_str());
+    {  // their version: doing things together needs the same new enough app on both sides
+        std::string v = eng.IsContactKey(key) ? eng.PeerVersion(key) : std::string(LUNASHARE_VERSION);
+        if (eng.IsContactKey(key) && eng.IsConnected(key)) {
+            ImVec4 warn(1.0f, 0.78f, 0.35f, 1.0f);
+            float wrap = mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 17;
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap);
+            if (v.empty())
+                ImGui::TextColored(warn, "%s", TF("%s has an older LunaShare - for this to work for them too, they need to update it (Settings - About).", who.c_str()).c_str());
+            else if (UpdateIsNewer(LUNASHARE_VERSION, v))
+                ImGui::TextColored(warn, "%s", TF("%s has LunaShare %s, older than yours (%s) - ask them to update it (Settings - About).", who.c_str(), v.c_str(), LUNASHARE_VERSION).c_str());
+            ImGui::PopTextWrapPos();
+        }
+    }
     ImGui::Separator();
     float w = mobile ? -1 : ImGui::GetFontSize() * 17;
     bool done = false;

@@ -1,6 +1,19 @@
 cmake_minimum_required(VERSION 3.16)
 project(LunaShare VERSION 1.7.9 LANGUAGES C CXX)
-add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}")
+# test builds with a diagnostic log (what the app does, copied from Settings - About): -DLUNASHARE_DIAG=ON, or the
+# environment variable LUNASHARE_DIAG=ON (CI: a commit whose message has [diag]). Never in numbered releases.
+if("$ENV{LUNASHARE_DIAG}" STREQUAL "ON")
+    set(LUNASHARE_DIAG_DEFAULT ON)
+else()
+    set(LUNASHARE_DIAG_DEFAULT OFF)
+endif()
+option(LUNASHARE_DIAG "Test build: keep a diagnostic log and log in detail" ${LUNASHARE_DIAG_DEFAULT})
+if(LUNASHARE_DIAG)
+    add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}-diag" LUNASHARE_DIAG=1)
+    message(STATUS "LunaShare: test build with the diagnostic log")
+else()
+    add_compile_definitions(LUNASHARE_VERSION="${PROJECT_VERSION}")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -442,6 +455,7 @@ if(LUNASHARE_BUILD_APP)
         src/app/ui_watch.cpp
         src/app/ui_listen.cpp
         src/app/ui_together.cpp
+        src/app/applog.cpp
         src/app/ui_movies.cpp
         src/app/ui_archive.cpp
         src/app/ui_sleep.cpp

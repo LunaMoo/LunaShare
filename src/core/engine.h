@@ -42,6 +42,7 @@ struct Connection {
     std::atomic<int64_t> bytesIn{0}, bytesOut{0};
     std::atomic<bool> closed{false};
     std::vector<std::string> caps;  // optional features the peer has (e.g. "voice"), from its Hello
+    std::string ver;                // its app version, from its Hello ("" = before 1.7.10)
     std::atomic<bool> callPriority{false};  // a call runs over this connection: keep file data small
     bool mailbox = false;  // not a real connection: frames from / to the server mailbox (device offline)
     int64_t lastChunkMs = 0;
@@ -532,6 +533,8 @@ public:
     std::map<std::string, std::shared_ptr<SwarmDownload>> swarm;  // content id -> download
 
     std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
+    std::string appVersion;              // sent in Hello ("1.7.10")
+    std::string PeerVersion(const std::string& keyOrDevice);  // the app version of a connected device of theirs ("" = older than 1.7.10 / not connected); under Lock()
     std::string machineId;               // tests: instead of this computer's id (see MachineId)
     bool PeerHasCap(const std::string& peer, const std::string& cap);
     uint64_t StartCall(const std::string& peer, const std::string& media = "voice");  // peer: a device, person or group
