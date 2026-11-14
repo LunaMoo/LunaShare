@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.9
+
+- **Watching, listening and reading together during a call really works now:**
+  - listening together was silent on both sides during a call - it now plays through the call, a little under
+    the voices (also when a call starts while you're listening);
+  - during a video call on a phone, the call's picture covered the movie (and the music screen), so the movie
+    looked like it never started - the movie is on top now, and the picture steps aside to the call bar.
+- **Invitations show in the call** - in the call bar and over a video call's picture, with a **Join** button.
+  Before, they were only a line in the chat, which nobody sees during a (video) call.
+- **Switch between them easily:** Together is also on the movie screen and in the comic viewer during a call.
+  Going to music or a comic pauses the movie for everyone; a comic you leave this way keeps going ("Back to the
+  comic"); "Back to the movie" / "Back to the music" are in the Together menu.
+- **Movies start on their own** (autoplay is the default now; it can still be turned off in the movie's sound and
+  subtitles menu).
+- Phones: the movie screen's mute / together / hang-up buttons have a row of their own (they didn't fit before),
+  and the comic viewer's buttons shrink to fit.
+
 ## 1.7.8
 
 - **Together, from the call:** a Together button among the call's buttons (and in a chat's top bar) - watch a

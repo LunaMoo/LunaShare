@@ -115,7 +115,7 @@ struct Settings {
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
     bool playerLoop = false;
-    bool playerAutoplay = false;
+    bool playerAutoplay = true;  // (kept as "autoplayMovies": 1.7.9 made it the default - the old "playerAutoplay", false for nearly everyone, is left behind)
     bool playerAutoNext = false;
     bool playerPip = true;            // Android: picture in picture when leaving the app during a movie
     float subtitleScale = 1.0f;       // subtitle text size (0.5 .. 2.5)      // at the end of a movie, the next one in its folder

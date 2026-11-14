@@ -25,7 +25,7 @@ bool g_started = false;
 
 // the settings that follow me to my other devices (not how this screen looks, not where things are on the disk)
 static json PrefsOf(const Settings& s) {
-    return {{"playerLoop", s.playerLoop},     {"playerAutoplay", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext},
+    return {{"playerLoop", s.playerLoop},     {"autoplayMovies", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext},
             {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"playerPip", s.playerPip},
             {"subtitleScale", std::round(s.subtitleScale * 100) / 100}, {"language", s.language}, {"mutedChats", s.mutedChats},
             {"sound", music::SoundToJson(music::Play().GetSound())}};
@@ -34,7 +34,7 @@ static json PrefsOf(const Settings& s) {
 static void PrefsApply(Engine& eng, const json& p) {
     Settings s = eng.settings;
     s.playerLoop = p.value("playerLoop", s.playerLoop);
-    s.playerAutoplay = p.value("playerAutoplay", s.playerAutoplay);
+    s.playerAutoplay = p.value("autoplayMovies", s.playerAutoplay);  // (older versions' "playerAutoplay" is ignored: autoplay is the default now)
     s.playerAutoNext = p.value("playerAutoNext", s.playerAutoNext);
     s.playerHideUi = p.value("playerHideUi", s.playerHideUi);
     s.playerOrientByAspect = p.value("playerOrientByAspect", s.playerOrientByAspect);
