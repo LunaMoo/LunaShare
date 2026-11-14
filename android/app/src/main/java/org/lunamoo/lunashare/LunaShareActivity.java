@@ -131,7 +131,6 @@ public class LunaShareActivity extends SDLActivity {
         return new String[] {"SDL2", "main"};
     }
 
-    @Override
     private static boolean crashReportInstalled;
 
     /** An uncaught Java exception on any thread: written to lunashare-crash.txt, then handled as before. */
@@ -149,6 +148,7 @@ public class LunaShareActivity extends SDLActivity {
         });
     }
 
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         self = this;
         appCtx = getApplicationContext();
