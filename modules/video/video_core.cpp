@@ -407,10 +407,15 @@ public:
         for (int lv = 0; lv <= kMaxLevel; lv++)
             if (bppAt(lv) >= 0.045) { fit = lv; break; }
         while (fit > 0 && SameShape(LevelSettings(fit), LevelSettings(fit - 1))) fit--;  // (the ladder can end early)
-        upMs = level > 0 && bppAt(level - 1) >= 0.07 ? upMs + 250 : 0;
+        // up: the biggest picture with plenty of bits per pixel (a margin over the way down, so it doesn't flap) -
+        // several sizes at once when the link allows, after it has held for a few seconds
+        int fitUp = level;
+        for (int lv = 0; lv < level; lv++)
+            if (bppAt(lv) >= 0.07) { fitUp = lv; break; }
+        upMs = fitUp < level ? upMs + 250 : 0;
         if (fit > level && now - lastLevelChange > 1500) ChangeLevel(fit, now);  // too big for the link: at once
-        else if (upMs >= 5000 && now - lastLevelChange > 8000) {
-            ChangeLevel(level - 1, now);
+        else if (upMs >= 3000 && now - lastLevelChange > 4000) {
+            ChangeLevel(fitUp, now);
             upMs = 0;
         }
         int next = std::min(video, LevelSettings(level).bitrate);
@@ -445,13 +450,15 @@ public:
         int longSide = std::max(s.width, s.height), shortSide = std::min(s.width, s.height);
         int h = shortSide;
         static const int kHeights[] = {2160, 1440, 1080, 720, 540, 360, 270, 180};
+        bool fpsFirst = s.adaptive == 2;  // (the frame rate stays; only the smallest picture gives up frames)
         for (int i = 0; i < lv; i++) {
-            if (fps > 30) { fps = 30; continue; }  // first: fewer frames, same size
+            if (fps > 30 && !fpsFirst) { fps = 30; continue; }  // first: fewer frames, same size
             int next = 0;
             for (int k : kHeights)
                 if (k < h) { next = k; break; }
             if (next) { h = next; continue; }       // then the next smaller standard size, down to 180p (a phone on a
                                                     // weak signal: a small sharp picture beats a big blocky one)
+            if (fps > 30) { fps = 30; continue; }  // (frame rate first: only now)
             if (fps > 15) fps = fps > 20 ? 20 : 15; // then fewer frames again
         }
         int w = (int)((double)longSide * h / shortSide + 0.5) & ~1;

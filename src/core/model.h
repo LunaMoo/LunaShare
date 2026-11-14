@@ -114,6 +114,7 @@ struct Settings {
     int callVideoRes = 1;          // 0 360p 1 540p 2 720p 3 1080p 4 1440p 5 4K 6 8K
     int callVideoFps = 24;         // 15 / 24 / 30 / 60 / 120
     bool callVideoAdaptive = true; // lower the quality automatically when the connection can't keep up
+    bool callVideoFpsFirst = false; // ...keeping the frame rate: a smaller picture first, fewer frames only at the smallest
     bool playerLoop = false;
     bool playerAutoplay = true;  // (kept as "autoplayMovies": 1.7.9 made it the default - the old "playerAutoplay", false for nearly everyone, is left behind)
     bool playerAutoNext = false;

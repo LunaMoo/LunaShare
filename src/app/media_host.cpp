@@ -581,6 +581,7 @@ void MediaHost::StartVideo() {
     Settings s = eng_->GetSettings();
     LsvSettings vs = Preset(group ? std::min(s.callVideoRes, 2) : s.callVideoRes, group ? std::min(s.callVideoFps, 30) : s.callVideoFps,
                             s.callVideoAdaptive);  // group calls: at most 720p / 30 fps (sent to several people)
+    if (vs.adaptive && s.callVideoFpsFirst) vs.adaptive = 2;
     vs.codec_pref = s.callVideoH264Only ? 1 : 0;
     if (!StartVideoModule(&vs)) return;
     videoRunning_ = true;
@@ -694,6 +695,7 @@ void MediaHost::ApplyVideoQuality() {
     }
     LsvSettings vs = Preset(group ? std::min(s.callVideoRes, 2) : s.callVideoRes, group ? std::min(s.callVideoFps, 30) : s.callVideoFps,
                             s.callVideoAdaptive);
+    if (vs.adaptive && s.callVideoFpsFirst) vs.adaptive = 2;
     vs.codec_pref = s.callVideoH264Only ? 1 : 0;
     vmod_->set_settings(&vs);
 }

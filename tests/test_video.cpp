@@ -259,6 +259,27 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
 
+    printf("[video: frame rate first - the picture gets smaller, the frame rate stays]\n");
+    {
+        LsvSettings fr{1280, 720, 30, 2500000, 2, 0};
+        m->set_settings(&fr);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        g_link = 150000;  // a really slow link
+        bool small = false;
+        for (int i = 0; i < 20 && !small; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            small = L.remoteW > 0 && L.remoteW <= 480;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        LsvStats sf;
+        m->get_stats(&sf);
+        CHECK(small, "smaller picture (%dx%d)", L.remoteW.load(), L.remoteH.load());
+        CHECK(sf.send_fps >= 26, "frame rate kept (%d fps)", sf.send_fps);
+        g_link = 0;
+        m->set_settings(&s);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
+
     printf("[video: receiver asks for a smaller picture]\n");
     {
         uint8_t lim[6] = {2, 4, 0x40, 0x01, 0xF0, 0x00};  // at most 320x240

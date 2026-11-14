@@ -1558,3 +1558,5 @@
 {"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "음성과 영상을 하나의 순서 있는 스트림 대신 개별 패킷으로 보냅니다. 패킷 하나가 손실되어도 그 뒤의 모든 것이 막히지 않으며, 화질은 낮게 시작해 연결이 감당하는 만큼 올라갑니다. 1:1 통화에서 양쪽 모두 켜져 있을 때 사용되며, 그렇지 않거나 연결되지 않으면 기존 방식으로 통화합니다."},
 {"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "실시간: 수신 손실 %.1f%%, 송신 손실 %.1f%%, 왕복 %d ms, 약 %d kbit/s"},
 {"Real-time path not getting through - using the usual connection", "실시간 경로가 연결되지 않음 - 기존 연결 사용 중"},
+{"Prioritize frame rate over resolution", "해상도보다 프레임 속도 우선"},
+{"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "선택한 프레임 속도를 유지합니다. 먼저 화면을 작게 하고, 가장 작은 크기에서도 연결이 따라가지 못할 때만 프레임을 줄입니다."},

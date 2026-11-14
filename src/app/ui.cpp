@@ -4690,6 +4690,11 @@ void App::DrawCameraPanel() {
         edit.callVideoAdaptive = s.callVideoAdaptive;
         Media().ApplyVideoQuality();
     }
+    if (s.callVideoAdaptive && ui::Checkbox(T("Prioritize frame rate over resolution"), &s.callVideoFpsFirst)) {
+        eng.ApplySettings(s);
+        edit.callVideoFpsFirst = s.callVideoFpsFirst;
+        Media().ApplyVideoQuality();
+    }
     if (ui::Checkbox(T("My picture in full quality"), &s.callFullPreview)) {
         eng.ApplySettings(s);
         edit.callFullPreview = s.callFullPreview;
@@ -5138,6 +5143,11 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
         changed |= ui::Checkbox(T("Lower video quality automatically when the connection is slow"), &edit.callVideoAdaptive);
         ui::HelpMarker(T("Keeps the picture smooth: less bitrate first, then a lower frame rate and a smaller picture while the "
                        "connection is slow, back up when it recovers."));
+        if (edit.callVideoAdaptive) {
+            changed |= ui::Checkbox(T("Prioritize frame rate over resolution"), &edit.callVideoFpsFirst);
+            ui::HelpMarker(T("Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest "
+                           "and the connection still can't keep up are frames dropped."));
+        }
         changed |= ui::Checkbox(T("Show my own picture in full quality"), &edit.callFullPreview);
         ui::HelpMarker(T("Your self-view (in calls and when recording a video message) in the camera's full size and frame rate, like "
                        "the recording, instead of a lighter preview. Uses a bit more battery."));

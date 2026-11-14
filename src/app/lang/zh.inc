@@ -1558,3 +1558,5 @@
 {"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "语音和视频作为独立的数据包发送，而不是一条有序的流：丢失一个包不会拖住后面的所有内容，画质从低开始，逐步提升到连接能承载的水平。仅用于一对一通话且双方都开启时；否则（或无法连通时）通话照旧进行。"},
 {"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "实时：接收丢失 %.1f%%，发送丢失 %.1f%%，往返 %d 毫秒，约 %d kbit/s"},
 {"Real-time path not getting through - using the usual connection", "实时通道无法连通——正在使用常规连接"},
+{"Prioritize frame rate over resolution", "优先保证帧率而非分辨率"},
+{"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "保持你选择的帧率：先缩小画面，只有画面已经最小而连接仍跟不上时才会丢帧。"},

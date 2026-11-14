@@ -65,7 +65,7 @@ json ToJson(const Settings& s, bool withIdentity) {
         {"layout", (int)s.layout}, {"uiScale", s.uiScale}, {"theme", s.theme}, {"themeV", 1}, {"lastBrowseDir", s.lastBrowseDir},
         {"browserGrid", s.browserGrid}, {"emojiRecent", s.emojiRecent}, {"language", s.language}, {"emojiTone", s.emojiTone}, {"browserPicturesOnly", s.browserPicturesOnly}, {"browserSort", s.browserSort},
         {"browserTile", s.browserTile}, {"callEchoCancel", s.callEchoCancel}, {"callNoiseSuppress", s.callNoiseSuppress},
-        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"autoplayMovies", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"welcomed", s.welcomed}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"galleryFolders", s.galleryFolders}, {"archiveFolders", s.archiveFolders},
+        {"callAutoGain", s.callAutoGain}, {"callBitrate", s.callBitrate}, {"callMicBoost", s.callMicBoost}, {"wanRelay", s.wanRelay}, {"callVideoRes", s.callVideoRes}, {"callVideoFps", s.callVideoFps}, {"callVideoAdaptive", s.callVideoAdaptive}, {"callVideoFpsFirst", s.callVideoFpsFirst}, {"callFullPreview", s.callFullPreview}, {"fullscreenBorderless", s.fullscreenBorderless}, {"playerLoop", s.playerLoop}, {"autoplayMovies", s.playerAutoplay}, {"playerAutoNext", s.playerAutoNext}, {"playerPip", s.playerPip}, {"welcomed", s.welcomed}, {"subtitleScale", s.subtitleScale}, {"playerHideUi", s.playerHideUi}, {"playerOrientByAspect", s.playerOrientByAspect}, {"movieFolders", s.movieFolders}, {"galleryFolders", s.galleryFolders}, {"archiveFolders", s.archiveFolders},
         {"torrentDir", s.torrentDir}, {"torrentDown", s.torrentDown}, {"torrentUp", s.torrentUp}, {"torrentPort", s.torrentPort},
         {"torrentSeed", s.torrentSeed}, {"torrentRemote", s.torrentRemote}, {"galleryVideos", s.galleryVideos}, {"mutedChats", s.mutedChats}, {"syncOwn", s.syncOwn}, {"folderSyncs", [&] {
                       json a = json::array();
@@ -268,6 +268,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "videoTemperature", s.videoTemperature);
     Get(j, "videoTint", s.videoTint);
     Get(j, "callVideoAdaptive", s.callVideoAdaptive);
+    Get(j, "callVideoFpsFirst", s.callVideoFpsFirst);
     Get(j, "callCamera", s.callCamera);
     Get(j, "virtualCamera", s.virtualCamera);
     Get(j, "callVideoH264Only", s.callVideoH264Only);

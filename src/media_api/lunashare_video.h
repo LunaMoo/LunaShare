@@ -69,7 +69,8 @@ typedef struct LsvSettings {
     int width, height; /* capture size, landscape (the camera's own orientation) */
     int fps;
     int bitrate;      /* target, bits per second */
-    int adaptive;     /* 1: lower bitrate / frame rate when the link can't keep up */
+    int adaptive;     /* 1: lower bitrate / frame rate / size when the link can't keep up; 2: the same, but keep the
+                       * frame rate and make the picture smaller first (the frame rate drops only at the smallest) */
     int codec_pref;   /* 0: best codec both sides support (AV1 > HEVC > H.264), 1: H.264 only */
 } LsvSettings;
 

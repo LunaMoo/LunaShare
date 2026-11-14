@@ -1558,3 +1558,5 @@
 {"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "音声と映像を1本の順序付きストリームではなく個別のパケットとして送ります。失われたパケットが後続すべてを止めることがなく、画質は低く始まって回線が運べるところまで上がります。1対1の通話で両方がオンのときに使われます。それ以外、または通らない場合は従来どおり通話します。"},
 {"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "リアルタイム: 受信の損失 %.1f%%、送信の損失 %.1f%%、往復 %d ms、約 %d kbit/s"},
 {"Real-time path not getting through - using the usual connection", "リアルタイム経路が通りません - 通常の接続を使用中"},
+{"Prioritize frame rate over resolution", "解像度よりフレームレートを優先"},
+{"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "選んだフレームレートを保ちます。まず映像を小さくし、最小サイズでも回線が追いつかないときにだけフレームを減らします。"},
