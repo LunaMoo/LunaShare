@@ -382,7 +382,10 @@ void App::DrawVerifyQrPopup() {
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (mobile) ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x * 0.94f, 0));
     if (!ImGui::BeginPopupModal("##verifyqr", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize)) {
-        if (Media().Scanning()) Media().CloseScanner();  // (closed some other way)
+        // (closed some other way: stop the camera - but only if it's this window's scanner. This runs every frame,
+        // and used to stop the Add someone window's scanner the moment it started.)
+        if (verifyQrScan && Media().Scanning()) Media().CloseScanner();
+        verifyQrScan = false;
         return;
     }
     float side = mobile ? ImGui::GetContentRegionAvail().x : ImGui::GetFontSize() * 18;

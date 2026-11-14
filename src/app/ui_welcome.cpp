@@ -211,6 +211,7 @@ bool App::DrawAddPersonBody(float width) {
         ui::PushAccent(on);
         if (ui::IconTextButton(secs[i].label, secs[i].icon, ImVec2(bw, h)) && !on) {
             if (addSection == 1 && Media().Scanning()) Media().CloseScanner();
+            if (i != 1) addScan = false;  // (left the scanner: coming back shows my code, and "Scan" starts it afresh)
             addSection = i;
             addMsg.clear();
         }
@@ -265,8 +266,10 @@ bool App::DrawAddPersonBody(float width) {
             Media().CloseScanner();
         }
         ImGui::SameLine();
+        // (the scanner can also have been stopped from elsewhere - then "Scan" must start it again, not look chosen)
+        if (addScan && !Media().Scanning() && addMsg.empty()) addScan = false;
         ImGui::BeginDisabled(!Media().CanScan() && !Media().Scanning());
-        if (ImGui::RadioButton(T("Scan their code"), addScan) && !addScan) {
+        if (ImGui::RadioButton(T("Scan their code"), addScan) && !Media().Scanning()) {
             addScan = true;
             addMsg.clear();
             Media().audioError.clear();
