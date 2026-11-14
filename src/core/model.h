@@ -267,6 +267,7 @@ bool TStateFinal(TState s);
 
 struct Transfer {
     bool sync = false;  // folder sync between my own devices (taken without asking)
+    bool ask = false;   // put in my own chat on another of my devices: offered here, saved only if I want it
     uint64_t tid = 0;
     uint64_t batch = 0;
     std::string batchName;

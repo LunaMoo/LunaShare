@@ -420,7 +420,7 @@ ChatMessage MessageFromJson(const json& j) {
 }
 
 json ToJson(const Transfer& t) {
-    return {{"tid", t.tid}, {"sync", t.sync}, {"batch", t.batch}, {"batchName", t.batchName}, {"batchCount", t.batchCount},
+    return {{"tid", t.tid}, {"sync", t.sync}, {"ask", t.ask}, {"batch", t.batch}, {"batchName", t.batchName}, {"batchCount", t.batchCount},
             {"peer", t.peer}, {"out", t.outgoing}, {"name", t.name}, {"rel", t.rel}, {"localPath", t.localPath},
             {"partPath", t.partPath}, {"size", t.size}, {"mtime", t.mtime}, {"sha256", t.sha256},
             {"recvSha", t.recvSha}, {"state", (int)t.state}, {"pausedByPeer", t.pausedByPeer},
@@ -432,6 +432,7 @@ void TransferFromJson(const json& j, Transfer& t) {
     Get(j, "batch", t.batch);
     Get(j, "batchName", t.batchName);
     Get(j, "sync", t.sync);
+    Get(j, "ask", t.ask);
     Get(j, "batchCount", t.batchCount);
     Get(j, "peer", t.peer);
     Get(j, "out", t.outgoing);

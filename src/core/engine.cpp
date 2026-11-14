@@ -2376,6 +2376,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             t->batchName = j.value("batchName", t->name);
             t->batchCount = j.value("batchCount", 1);
             t->sync = j.value("sync", false);
+            t->ask = j.value("ask", false);
             t->created = NowMs();
             t->partPath = JoinPath(PartDir(), TidHex(tid) + ".part");
             t->state = peerPaused ? TState::Paused : TState::Pending;
@@ -2422,6 +2423,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             if (autoAccept && settings.autoAcceptMaxMB > 0 && t->size > (int64_t)settings.autoAcceptMaxMB * 1024 * 1024) autoAccept = false;
             if (autoAccept && settings.autoAcceptNotMetered && Bridge().isMetered && Bridge().isMetered()) autoAccept = false;
             autoAccept |= t->sync && !MyAccount().empty() && d.accountPub == MyAccount();  // (folder sync from my own device)
+            if (t->ask) autoAccept = false;  // (put in my own chat elsewhere: saved here only if I want it - Save)
             if (t->state == TState::Pending && autoAccept) SendAcceptFor(t);
             else if (firstOfBatch) Emit({EventType::IncomingOffer, c->peerId, t->batchName, tid});
             MarkDirty();
@@ -2872,6 +2874,7 @@ void Engine::OfferTransfer(const std::shared_ptr<Transfer>& t, bool resumeReques
               {"mtime", t->mtime}, {"batch", t->batch}, {"batchName", t->batchName}, {"batchCount", t->batchCount},
               {"paused", t->state == TState::Paused}, {"resume", resumeRequest}};
     if (t->sync) j["sync"] = true;
+    if (t->ask) j["ask"] = true;  // (my own chat on another device: not taken by itself)
     if (!QueueToPeer(t->peer, Msg::FileOffer, j) && t->state == TState::Offered) t->state = TState::Interrupted;
 }
 
@@ -3695,6 +3698,33 @@ uint64_t Engine::SendFileList(const std::string& peer, const std::vector<std::pa
     Conversation& cv = chats[key];
     cv.peer = key;
     cv.messages.push_back(m);
+    // my own chat: the files stay here - and my other devices are told, each can save them (a notification there,
+    // and Save in my own chat); one that's off gets the offer when it comes back
+    if (keep && !sync) {
+        for (auto& dev : MyOtherDevices()) {
+            uint64_t ob = RandomU64();  // (a batch of its own: the message here shows the files kept here)
+            int k = 0;
+            for (auto& [abs, rel] : files) {
+                auto t = std::make_shared<Transfer>();
+                t->tid = RandomU64();
+                t->batch = ob;
+                t->batchName = batchName;
+                t->batchCount = (int)files.size();
+                t->ask = true;
+                t->peer = dev;
+                t->outgoing = true;
+                t->localPath = abs;
+                t->rel = SanitizeRelativePath(rel);
+                t->name = BaseName(t->rel);
+                t->size = FileSize(abs);
+                t->created = now + k++;
+                t->state = TState::Hashing;
+                transfers[t->tid] = t;
+                std::lock_guard<std::mutex> l(hashMtx_);
+                hashQueue_.push_back(t);
+            }
+        }
+    }
     hashCv_.notify_all();
     MarkDirty();
     return batch;

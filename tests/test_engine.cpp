@@ -973,6 +973,26 @@ int main() {
             for (auto& [id, t] : A->transfers) kept |= t->localPath == note && t->state == TState::Completed && t->peer == A->settings.deviceId;
             CHECK(kept, "a file in my own chat is kept here, not sent");
         }
+        {  // ...and my other device is told: offered there (in my own chat), saved only when I want it
+            auto offered = [&](TState st) {
+                auto l = A2->Lock();
+                for (auto& [id, t] : A2->transfers)
+                    if (!t->outgoing && t->name == "note.bin" && t->ask && t->state == st) return t->batch;
+                return (uint64_t)0;
+            };
+            CHECK(WaitFor([&] { return offered(TState::Pending) != 0; }, 8000), "my other device is offered the file put in my own chat");
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            uint64_t ob = offered(TState::Pending);
+            CHECK(ob != 0, "not taken by itself");
+            {
+                auto l = A2->Lock();
+                bool inSelf = false;
+                for (auto& m : A2->chats[A2->SelfKey()].messages) inSelf |= m.kind == MsgKind::Files && m.batch == ob;
+                CHECK(inSelf, "shown in my own chat there");
+            }
+            A2->AcceptBatch(ob);
+            CHECK(WaitFor([&] { return offered(TState::Completed) != 0; }, 8000), "saved there when asked");
+        }
         {  // ...but sent to one of my devices (picked by itself): it goes there, shown in my own chat on both
             std::string f = JoinPath(Root(), "tomypc.bin");
             WriteRandomFile(f, 300000, 9);

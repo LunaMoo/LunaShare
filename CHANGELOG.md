@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.7.10
+
+Found with the help of test builds that log what the app does (Settings - About shows them; ordinary releases
+don't log).
+
+- **Listening together:**
+  - Android: **the app froze at the end of a shared song** (and showed only a gradient after reopening). The
+    player told the notification about the song's end while holding its own lock, and the notification asked the
+    player what's on - which waited for that same lock forever. Fixed.
+  - **In a call, only the first shared song was heard** - the next ones started silent. Fixed.
+  - The player's buttons (notification, lock screen, headset) could also freeze the app; fixed.
+- **Reading a comic together:** every page was downloaded twice, and the whole comic was fetched at once
+  (hundreds of MB), taking the connection from the call and from a movie watched next. Now each page once, and
+  only a dozen pages ahead of the one that's open.
+- **Video calls:** an invitation's Join is near the top now - it was over the small preview, where a tap swapped
+  the pictures instead of joining.
+- The Together menu says when the other person's LunaShare is older (from this version on, apps tell each other
+  their version).
+- **My own devices (same account):**
+  - Files put in **"Me"** stay on this device as before - and now **my other devices are told**: they get a
+    notification and can **save** the file from "Me" (a device that's off gets it when it comes back).
+  - In **"Send to"**, each of my other devices is listed under "Me": picked, the file goes straight to that device.
+- **Links for anyone:** the link's window says whether this device is connected to the server for links (from
+  outside, the page shows the device as offline when it isn't) and why not; it's tried again every 20 s at most.
+
 ## 1.7.9
 
 - **Watching, listening and reading together during a call really works now:**

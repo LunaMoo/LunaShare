@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LunaShare VERSION 1.7.9 LANGUAGES C CXX)
+project(LunaShare VERSION 1.7.10 LANGUAGES C CXX)
 # test builds with a diagnostic log (what the app does, copied from Settings - About): -DLUNASHARE_DIAG=ON, or the
 # environment variable LUNASHARE_DIAG=ON (CI: a commit whose message has [diag]). Never in numbered releases.
 if("$ENV{LUNASHARE_DIAG}" STREQUAL "ON")
