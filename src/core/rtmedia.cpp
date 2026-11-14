@@ -290,7 +290,9 @@ void RtMedia::FlushFrames(int64_t now, std::vector<std::string>& deliver) {
         // not complete: wait for its missing pieces while they can still come, then go on without it
         auto later = frames_.upper_bound(nextFrame_);
         if (later == frames_.end()) break;
-        if (!blockedSince_) blockedSince_ = it != frames_.end() ? std::min(it->second.firstAt, later->second.firstAt) : later->second.firstAt;
+        // (the clock starts once a later frame shows this one is incomplete - its own pieces may still have been
+        // on their way out of the pacer until then, which would leave too little time for resends)
+        if (!blockedSince_) blockedSince_ = later->second.firstAt;
         if (now - blockedSince_ < FrameDeadline()) break;
         late_++;
         if (it != frames_.end()) frames_.erase(it);

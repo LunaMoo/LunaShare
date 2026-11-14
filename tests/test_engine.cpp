@@ -1,4 +1,5 @@
 // Headless end-to-end tests: two engines in one process talking over loopback TCP.
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -606,6 +607,12 @@ struct SimLink {
     }
 };
 
+// LUNASHARE_TEST_COARSE_TIMER: every sleep rounded up to whole 15.6 ms ticks, like Windows' default timer
+static void RtSleep(int ms) {
+    if (getenv("LUNASHARE_TEST_COARSE_TIMER")) ms = (int)(std::ceil(ms / 15.625) * 15.625);
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
 static void TestRtMedia() {
     printf("[real-time call media]\n");
     uint8_t key[32];
@@ -661,7 +668,7 @@ static void TestRtMedia() {
     for (int i = 0; i < 30; i++) {
         sendVoice();
         sentF += sendFrame(follow()) ? 1 : 0;
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
     }
     CHECK(sentF == 30, "nothing refused at the start (%d of 30)", sentF);
     CHECK(WaitFor([&] { return framesB == 30 && voiceB == 30; }, 2000), "clean: every frame and voice packet (%d / %d)", framesB.load(), voiceB.load());
@@ -674,9 +681,9 @@ static void TestRtMedia() {
     for (int i = 0; i < 150; i++) {  // 15 fps of frames twice the size: a few pieces each
         sendVoice();
         if (!sendFrame(follow())) refusedL++;
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
         sendVoice();
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
     RtStats sa = A->Stats(), sb = B->Stats();
@@ -698,9 +705,9 @@ static void TestRtMedia() {
     for (int i = 0; i < 100; i++) {
         sendVoice();
         if (sendFrame(follow())) sentH++;
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
         sendVoice();
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(800));
     printf("    15%% loss: %d/%d frames, %d/200 voice, estimate %d kbit/s\n", framesB - f0, sentH, voiceB - v0, A->LinkBps() / 1000);
@@ -719,7 +726,7 @@ static void TestRtMedia() {
         if (sendFrame(follow())) sent++;
         else refused++;
         if (until - SteadyMs() < 3000 && !fLate0) fLate0 = framesB;
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
     }
     sa = A->Stats();
     int lastFew = framesB - fLate0;
@@ -736,7 +743,7 @@ static void TestRtMedia() {
     while (SteadyMs() < until) {
         sendVoice();
         sendFrame(follow());
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        RtSleep(33);
     }
     CHECK(A->LinkBps() / 1000 > startKbps * 2, "estimate climbs when the link opens (%d -> %d kbit/s)", startKbps, A->LinkBps() / 1000);
     // other calls' and garbage datagrams are ignored
