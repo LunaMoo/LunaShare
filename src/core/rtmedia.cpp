@@ -29,10 +29,16 @@ RtMedia::RtMedia(const uint8_t key[32], uint64_t callId, Out out, In in)
     thread_ = std::thread([this] { Loop(); });
 }
 
-RtMedia::~RtMedia() {
+void RtMedia::Shutdown() {
     run_ = false;
     cv_.notify_all();
-    if (thread_.joinable()) thread_.join();
+    std::lock_guard<std::mutex> l(joinM_);
+    if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id()) thread_.join();
+}
+
+RtMedia::~RtMedia() {
+    Shutdown();
+    if (thread_.joinable()) thread_.detach();  // (only if destroyed on its own thread - Shutdown() prevents that)
     memset(key_, 0, sizeof(key_));
 }
 

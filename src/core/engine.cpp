@@ -138,6 +138,10 @@ bool Engine::Start() {
 
     udp_ = UdpOpen(kDiscoveryPort);
     if (udp_ != kInvalidSocket) UdpJoinMulticast(udp_, kMulticastGroup);
+    // real-time call media on the LAN: a UDP port of its own (the TCP port's number when free, any other otherwise)
+    rtUdp_ = UdpOpenOwn(boundPort, &rtUdpPort_);
+    if (rtUdp_ == kInvalidSocket) rtUdp_ = UdpOpenOwn(0, &rtUdpPort_);
+    if (rtUdp_ == kInvalidSocket) rtUdpPort_ = 0;
 
     btSupported = bt_.Supported();
     StartBtServer();
@@ -154,6 +158,7 @@ bool Engine::Start() {
     maintThread_ = std::thread([this] { MaintenanceLoop(); });
     hashThread_ = std::thread([this] { HashLoop(); });
     libThread_ = std::thread([this] { LibraryLoop(); });
+    if (rtUdp_ != kInvalidSocket) rtUdpThread_ = std::thread([this] { RtUdpLoop(); });
     return listener_ != kInvalidSocket;
 }
 
@@ -184,6 +189,10 @@ void Engine::Stop() {
     if (maintThread_.joinable()) maintThread_.join();
     if (hashThread_.joinable()) hashThread_.join();
     if (libThread_.joinable()) libThread_.join();
+    StopRt();
+    if (rtUdpThread_.joinable()) rtUdpThread_.join();
+    if (rtUdp_ != kInvalidSocket) CloseSocket(rtUdp_);
+    rtUdp_ = kInvalidSocket;
     for (auto& t : saveThreads_)
         if (t.joinable()) t.join();
     saveThreads_.clear();
@@ -2583,6 +2592,13 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             call.state = CallState::IncomingRinging;
             call.started = SteadyMs();
             call.media = media;
+            if (j.contains("rt") && j["rt"].is_object()) {  // the caller offers real-time media
+                std::string k = j["rt"].value("k", "");
+                if (k.size() == 64) {
+                    call.rtKey = k;
+                    call.rtPeerPort = (uint16_t)j["rt"].value("p", 0);
+                }
+            }
             Emit({EventType::CallIncoming, c->peerId, "Incoming call", id});
             break;
         }
@@ -2604,6 +2620,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             }
             activeCallId_ = id;
             c->callPriority = true;
+            // they take the real-time media too: start it (else it stays the usual way)
+            if (j.contains("rt") && j["rt"].is_object() && call.rtKey.size() == 64) StartRt(call.rtKey, (uint16_t)j["rt"].value("p", 0));
             Emit({EventType::CallStarted, c->peerId, "Call started", id});
             break;
         }
@@ -3166,6 +3184,14 @@ void Engine::StartWan() {
     wan_.onHub = [this](int from, const std::string& msg) { GroupHubIn(from, msg); };
     wan_.onHubMembers = [this](int you, const std::vector<std::string>& ids) { GroupHubMembers(you, ids); };
     wan_.onHubError = [this](const std::string& msg) { Emit({EventType::Error, "", "Group call through the server: " + msg}); };
+    wan_.onDatagram = [this](const std::string& peerId, const uint8_t* d, size_t n) {
+        std::shared_ptr<RtMedia> r;
+        {
+            std::lock_guard<std::mutex> l(mediaMtx_);
+            if (peerId == activeCallPeer_) r = rt_;
+        }
+        if (r) r->Input(d, n);
+    };
     wan_.Start(
         cfg,
         [this](const std::vector<WanPeer>& peers) {
@@ -4619,7 +4645,14 @@ uint64_t Engine::StartCall(const std::string& peerOrKey, const std::string& medi
     call.started = SteadyMs();
     call.media = media;
     call.invited = ring;
-    for (auto& d : ring) QueueToPeer(d, Msg::CallInvite, {{"call", call.id}, {"media", media}});
+    json inv = {{"call", call.id}, {"media", media}};
+    if (settings.callRealtime) {  // offer real-time media: the key for it (the connection is encrypted)
+        uint8_t k[32];
+        SecureRandom(k, 32);
+        call.rtKey = ToHex(k, 32);
+        inv["rt"] = {{"k", call.rtKey}, {"p", rtUdpPort_}};
+    }
+    for (auto& d : ring) QueueToPeer(d, Msg::CallInvite, inv);
     return call.id;
 }
 
@@ -4644,7 +4677,12 @@ void Engine::AcceptCall() {
     }
     activeCallId_ = call.id;
     c->callPriority = true;
-    Queue(c, Msg::CallAccept, {{"call", call.id}});
+    json acc = {{"call", call.id}};
+    if (settings.callRealtime && call.rtKey.size() == 64) {  // both sides want real-time media
+        acc["rt"] = {{"p", rtUdpPort_}};
+        StartRt(call.rtKey, call.rtPeerPort);
+    }
+    Queue(c, Msg::CallAccept, acc);
     Emit({EventType::CallStarted, call.peer, "Call started", call.id});
 }
 
@@ -4671,6 +4709,7 @@ void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
             if (d != c.peer) QueueToPeer(d, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
     }
     activeCallId_ = 0;
+    StopRt();
     {
         std::lock_guard<std::mutex> l(mediaMtx_);
         activeCallPeer_.clear();
@@ -4723,9 +4762,86 @@ bool Engine::SendMedia(const void* data, size_t len) {
     bool video = ((const uint8_t*)data)[0] == 2;
     if (!video && len > 4000) return false;
     if (groupCall_.load()) return SendGroupMedia(id, (const uint8_t*)data, len);
+    // real-time media while its path works; the connection otherwise (not set up, blocked, or gone quiet)
+    if (auto r = RtNow())
+        if (r->Ready()) return r->Send((const uint8_t*)data, len);
     auto c = CallConn();
     if (!c) return false;
     return QueueMediaTo(c, id, (const uint8_t*)data, len);
+}
+
+// ---------------------------------------------------------------- real-time media (calls with one person)
+
+std::shared_ptr<RtMedia> Engine::RtNow() {
+    std::lock_guard<std::mutex> l(mediaMtx_);
+    return rt_;
+}
+
+void Engine::StartRt(const std::string& keyHex, uint16_t peerPort) {
+    uint8_t key[32];
+    if (!FromHex(keyHex, key, 32) || !call.id) return;
+    uint64_t id = call.id;
+    auto r = std::make_shared<RtMedia>(
+        key, id, [this](const uint8_t* d, size_t n) { return RtOut(d, n); },
+        [this, id](const uint8_t* d, size_t n) {
+            if (activeCallId_.load() == id) CallMedia(id, 0, d, n);
+        });
+    memset(key, 0, sizeof(key));
+    std::shared_ptr<RtMedia> old;
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        old = rt_;
+        rt_ = r;
+        rtLanPort_ = peerPort;
+    }
+    if (old) std::thread([old] { old->Shutdown(); }).detach();
+    DIAG("call: real-time media set up (their LAN port %u)", (unsigned)peerPort);
+}
+
+void Engine::StopRt() {
+    std::shared_ptr<RtMedia> r;
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        r.swap(rt_);
+        rtLanPort_ = 0;
+    }
+    // (stopped on a thread of its own: it may be handing a packet to the modules right now, which can call back here)
+    if (r) std::thread([r] { r->Shutdown(); }).detach();
+}
+
+bool Engine::RtOut(const uint8_t* d, size_t n) {
+    uint16_t port;
+    {
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        port = rtLanPort_;
+    }
+    auto c = CallConn();
+    if (!c) return false;
+    // the way the call's connection goes: the LAN socket, or beside the internet session (direct or relayed)
+    if (c->transport == Transport::LAN) return port && rtUdp_ != kInvalidSocket && UdpSendTo(rtUdp_, c->addr, port, d, n);
+    if (c->transport == Transport::Internet) return wan_.DatagramSend(c->peerId, d, n);
+    return false;  // (Bluetooth: no datagrams - the media stays on the connection)
+}
+
+void Engine::RtUdpLoop() {
+    std::vector<uint8_t> buf(2048);
+    while (running_) {
+        int n = UdpRecvFrom(rtUdp_, buf.data(), buf.size(), nullptr, 200);
+        if (n <= 0) continue;
+        if (auto r = RtNow()) r->Input(buf.data(), (size_t)n);
+    }
+}
+
+bool Engine::CallRtStats(RtStats& st) {
+    auto r = RtNow();
+    if (!r) return false;
+    st = r->Stats();
+    return true;
+}
+
+int Engine::CallLinkBps() {
+    auto r = RtNow();
+    return r && r->Ready() ? r->LinkBps() : 0;
 }
 
 bool Engine::QueueMediaTo(const std::shared_ptr<Connection>& c, uint64_t id, const uint8_t* data, size_t len) {
@@ -4771,6 +4887,8 @@ size_t Engine::MediaQueuedBytes() {
         c = activeCallConn_.lock();
     }
     if (!c) return 0;
+    if (auto r = RtNow())
+        if (r->Ready()) return r->Queued();  // (video waiting to be paced out)
     std::lock_guard<std::mutex> l(c->qm);
     size_t n = 0;
     for (auto& q : c->ctrl)

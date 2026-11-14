@@ -18,6 +18,7 @@
 #include "crypto.h"
 #include "mdns.h"
 #include "wan.h"
+#include "rtmedia.h"
 #include "model.h"
 #include "net.h"
 #include "protocol.h"
@@ -269,6 +270,8 @@ struct CallInfo {
     int64_t answered = 0;  // became active (steady ms)
     std::string media = "voice";
     std::vector<std::string> invited;  // outgoing, ringing: every device of the person that was called
+    std::string rtKey;       // real-time media (rtmedia.h): the call's key (hex; the caller makes it), if offered
+    uint16_t rtPeerPort = 0; // ...and the other side's UDP port on the LAN
     // ---- group calls
     std::string group;       // "#id" (then peer == group)
     std::string inviter;     // incoming: the device that invited me
@@ -615,6 +618,11 @@ public:
     // queued video; video is refused (returns false) when too much is already waiting - the sender then skips frames.
     bool SendMedia(const void* data, size_t len);
     size_t MediaQueuedBytes();  // video+audio bytes waiting on the call connection (congestion signal)
+    // Real-time media (rtmedia.h): true while the call has such a channel (st: how it's doing - st.ready says whether
+    // media goes that way right now). CallLinkBps: its bitrate estimate for voice + video, 0 when not in use.
+    bool CallRtStats(RtStats& st);
+    int CallLinkBps();
+    uint16_t RtUdpPort() const { return rtUdpPort_; }
     // Called on a network thread (never with the engine lock held) for each media packet of the active call.
     // stream: who it's from (0 in a call with one person; group calls: a number per person)
     std::function<void(uint64_t call, int stream, const uint8_t* data, size_t len)> onMedia;
@@ -759,6 +767,17 @@ private:
     std::weak_ptr<Connection> activeCallConn_;  // guarded by mediaMtx_; lets audio threads send without the engine lock
     std::mutex mediaMtx_;
     std::string activeCallPeerSnapshot();
+    // ---- real-time media for calls with one person
+    std::shared_ptr<RtMedia> rt_;  // guarded by mediaMtx_
+    uint16_t rtLanPort_ = 0;       // the other side's UDP port (mediaMtx_)
+    SocketHandle rtUdp_ = kInvalidSocket;
+    uint16_t rtUdpPort_ = 0;
+    std::thread rtUdpThread_;
+    void StartRt(const std::string& keyHex, uint16_t peerPort);  // engine lock held
+    void StopRt();                                                 // engine lock held (or none)
+    std::shared_ptr<RtMedia> RtNow();
+    bool RtOut(const uint8_t* d, size_t n);
+    void RtUdpLoop();
     // ---- group calls (group_calls.cpp)
     struct GcMember {  // what the media threads need to know about each other person in the call
         std::string dev;

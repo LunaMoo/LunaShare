@@ -73,7 +73,7 @@ json ToJson(const Settings& s, bool withIdentity) {
                       return a;
                   }()}, {"clipShare", s.clipShare}, {"lockHash", s.lockHash}, {"lockSalt", s.lockSalt}, {"histPub", s.histPub}, {"histWrap", s.histWrap}, {"lockLen", s.lockLen}, {"lockAfter", s.lockAfter}, {"lockBio", s.lockBio}, {"updateCheck", s.updateCheck}, {"updateLast", s.updateLast}, {"updateSeen", s.updateSeen}, {"prefsVer", s.prefsVer}, {"watchAllowSave", s.watchAllowSave},
         {"videoBrightness", s.videoBrightness}, {"videoContrast", s.videoContrast}, {"videoSaturation", s.videoSaturation}, {"videoGamma", s.videoGamma},
-        {"videoTemperature", s.videoTemperature}, {"videoTint", s.videoTint}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callInputDevice", s.callInputDevice},
+        {"videoTemperature", s.videoTemperature}, {"videoTint", s.videoTint}, {"callCamera", s.callCamera}, {"virtualCamera", s.virtualCamera}, {"callVideoH264Only", s.callVideoH264Only}, {"callRealtime", s.callRealtime}, {"callInputDevice", s.callInputDevice},
         {"callOutputDevice", s.callOutputDevice}, {"avatarHash", s.avatarHash}, {"profileVer", s.profileVer},
         {"accountVer", s.accountVer}, {"accountSig", s.accountSig},
     };
@@ -271,6 +271,7 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "callCamera", s.callCamera);
     Get(j, "virtualCamera", s.virtualCamera);
     Get(j, "callVideoH264Only", s.callVideoH264Only);
+    Get(j, "callRealtime", s.callRealtime);
     s.callVideoRes = std::clamp(s.callVideoRes, 0, 6);
     s.callVideoFps = std::clamp(s.callVideoFps, 10, 120);
     if (s.callMicBoost < 0 || s.callMicBoost > 30) s.callMicBoost = 0;

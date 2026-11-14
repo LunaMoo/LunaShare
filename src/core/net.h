@@ -27,6 +27,8 @@ SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs);
 void TuneStreamSocket(SocketHandle s, bool tcp);
 
 SocketHandle UdpOpen(uint16_t port);  // bound, broadcast-enabled, address reuse
+// A port of its own (no address reuse; 0 = any free one), with a bigger receive buffer (call media bursts).
+SocketHandle UdpOpenOwn(uint16_t port, uint16_t* boundPort);
 bool UdpJoinMulticast(SocketHandle s, const char* group);
 bool UdpSendTo(SocketHandle s, const std::string& ip, uint16_t port, const void* data, size_t len);
 int UdpRecvFrom(SocketHandle s, void* buf, size_t len, std::string* fromIp, int timeoutMs);

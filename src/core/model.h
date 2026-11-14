@@ -162,6 +162,9 @@ struct Settings {
     bool virtualCamera = false;
     bool callVideoH264Only = false; // troubleshooting: never use HEVC/AV1    // Windows 11: offer received video as "LunaShare Camera" to other apps      // dB added to the microphone before processing (quiet PC mics)
     std::string callInputDevice, callOutputDevice;  // empty = system default
+    // calls with one person: voice and video as their own UDP datagrams (rtmedia.h) instead of the connection's
+    // ordered stream - used when both sides have it on, otherwise (or when it can't get through) the usual way
+    bool callRealtime = false;
     // file picker
     bool browserGrid = false;      // gallery tiles instead of a list
     std::string language;          // UI language code ("pl"), empty = the system's

@@ -12,6 +12,8 @@
 //   'K' KCP segment            (client <-> client)
 //   'X' u32 conv: session closed
 //   'Y' KCP segment through the server (relay)
+//   'D' u32 conv + datagram     (client <-> client): real-time call media, outside KCP (see rtmedia.h)
+//   'Z' u32 conv + datagram through the server (relay; an older server drops them, calls then use KCP)
 //   'H' group call through the server: [hub u32][to mask u32][fragment] up, [hub u32][from u8][fragment] down.
 //       Fragments: [msg u16][index u8][count u8][total length u32][data]; indices >= count are XOR parity over
 //       groups of 8 fragments (one lost fragment per group is recovered). Messages are sealed by the engine.
@@ -102,6 +104,11 @@ public:
     // the account this device belongs to (registered with the server, which then lists the account's online devices)
     void SetAccount(const std::string& acc, const std::string& cert);
 
+    // ---- datagrams beside a KCP session ('D' / 'Z'): no retries, no order - for real-time call media.
+    // Goes the way the session with that device goes (direct, or through the server). False: no session.
+    bool DatagramSend(const std::string& peerId, const uint8_t* data, size_t len);
+    std::function<void(const std::string& peerId, const uint8_t* data, size_t len)> onDatagram;  // network thread
+
     // ---- group calls through the server ("hub", see the 'H' packets above)
     void HubJoin(const std::string& hubId);  // 32 hex characters; "" leaves
     bool HubSend(uint32_t toMask, const std::string& msg);  // any thread; up to ~200 KB per message
@@ -140,6 +147,12 @@ private:
     int64_t hubJoinAt_ = 0;
     uint16_t hubMsg_ = 0;
     SocketHandle udp_ = kInvalidSocket;
+    struct DgRoute {
+        uint32_t conv = 0, ip = 0;  // (network byte order)
+        uint16_t port = 0;
+        bool relayed = false;
+    };
+    std::map<std::string, DgRoute> dgRoutes_;  // device id -> its latest session (under hm_)
     uint32_t hubIp_ = 0;    // server address (network byte order), for sending from other threads
     uint16_t hubPort_ = 0;
     struct Reasm {

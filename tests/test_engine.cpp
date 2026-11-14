@@ -748,6 +748,52 @@ static void TestRtMedia() {
     B.reset();
 }
 
+// A call between two connected engines with real-time media wanted on X (onX) and Y (onY): media goes both ways,
+// over the real-time channel when both want it (and it gets through), over the connection otherwise.
+static void RtCall(Engine& X, Engine& Y, const std::string& idY, bool onX, bool onY, bool expectRt, const char* what) {
+    for (auto* e : {&X, &Y}) {
+        auto lk = e->Lock();
+        Settings s = e->settings;
+        s.callRealtime = e == &X ? onX : onY;
+        e->ApplySettings(s);
+    }
+    std::atomic<int> voiceX{0}, voiceY{0}, videoY{0};
+    X.onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 60 && d[0] == 1) voiceX++; };
+    Y.onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) {
+        if (n == 60 && d[0] == 1) voiceY++;
+        if (n == 1500 && d[0] == 2 && d[1] == 1) videoY++;
+    };
+    uint64_t cid = X.StartCall(idY);
+    CHECK(cid != 0, "%s: call started", what);
+    CHECK(WaitFor([&] { auto l = Y.Lock(); return Y.call.state == CallState::IncomingRinging && Y.call.id == cid; }, 5000), "%s: ringing", what);
+    Y.AcceptCall();
+    CHECK(WaitFor([&] { auto l = X.Lock(); return X.call.state == CallState::Active; }, 5000), "%s: active", what);
+    RtStats st;
+    if (expectRt) CHECK(WaitFor([&] { return X.CallRtStats(st) && st.ready && Y.CallRtStats(st) && st.ready; }, 4000), "%s: real-time path confirmed", what);
+    else std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    uint8_t voice[60] = {1};
+    std::vector<uint8_t> frame(1500, 7);  // (~200 kbit/s: under the real-time channel's starting rate)
+    frame[0] = 2;
+    frame[1] = 1;
+    int framesSent = 0;
+    for (int i = 0; i < 100; i++) {
+        X.SendMedia(voice, sizeof(voice));
+        Y.SendMedia(voice, sizeof(voice));
+        if (i % 3 == 0 && X.SendMedia(frame.data(), frame.size())) framesSent++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    CHECK(WaitFor([&] { return voiceX >= 95 && voiceY >= 95 && videoY >= framesSent && framesSent >= 30; }, 4000),
+          "%s: media both ways (voice %d / %d, video %d of %d)", what, voiceX.load(), voiceY.load(), videoY.load(), framesSent);
+    bool rtX = X.CallRtStats(st) && st.ready, rtY = Y.CallRtStats(st) && st.ready;
+    CHECK(rtX == expectRt && rtY == expectRt, "%s: %s", what, expectRt ? "over the real-time channel" : "over the connection (no real-time channel)");
+    if (expectRt) CHECK(X.CallLinkBps() >= RtMedia::kMinBps, "%s: an estimate for the video (%d)", what, X.CallLinkBps());
+    X.EndCall();
+    CHECK(WaitFor([&] { auto l = Y.Lock(); return Y.call.state == CallState::None; }, 3000), "%s: ended", what);
+    CHECK(!X.CallRtStats(st) && !Y.CallRtStats(st), "%s: channel gone with the call", what);
+    X.onMedia = nullptr;
+    Y.onMedia = nullptr;
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (const char* f = getenv("LUNASHARE_TEST_SERVE_LINK")) return ServeLinks(f);
@@ -2330,8 +2376,8 @@ int main() {
         o.port = 48190;
         std::string err;
         CHECK(srv.Start(o, &err), "server start: %s", err.c_str());
-        auto F = MakeEngine("frank", 48170, true, false, false, false, "127.0.0.1:48190", "family");
-        auto G = MakeEngine("gina", 48180, true, false, false, false, "127.0.0.1:48190", "family");
+        auto F = MakeEngine("frank", 48170, true, false, false, false, "127.0.0.1:48190", "family", {"voice"});
+        auto G = MakeEngine("gina", 48180, true, false, false, false, "127.0.0.1:48190", "family", {"voice"});
         auto H = MakeEngine("hank", 48185, true, false, false, false, "127.0.0.1:48190", "strangers");
         std::string idF = F->settings.deviceId, idG = G->settings.deviceId, idH = H->settings.deviceId;
         bool listed = WaitFor([&] {
@@ -2363,6 +2409,7 @@ int main() {
         auto tg = GetT(*G, tw);
         CHECK(tg && Sha256File(tg->localPath) == shaw, "internet transfer verified");
         printf("  24 MB over KCP/UDP loopback: %.2f s\n", (double)(SteadyMs() - t0) / 1000.0);
+        RtCall(*F, *G, idG, true, true, true, "internet, direct");
         printf("[usernames on the server]\n");
         {
             F->ClaimUsername("Frank.F");
@@ -2603,8 +2650,8 @@ int main() {
 #else
         setenv("LUNASHARE_TEST_NO_DIRECT", "1", 1);
 #endif
-        auto R1 = MakeEngine("rita", 48172, true, false, false, false, "127.0.0.1:48190", "relayroom");
-        auto R2 = MakeEngine("rob", 48174, true, false, false, false, "127.0.0.1:48190", "relayroom");
+        auto R1 = MakeEngine("rita", 48172, true, false, false, false, "127.0.0.1:48190", "relayroom", {"voice"});
+        auto R2 = MakeEngine("rob", 48174, true, false, false, false, "127.0.0.1:48190", "relayroom", {"voice"});
         std::string idR1 = R1->settings.deviceId, idR2 = R2->settings.deviceId;
         bool relayed = WaitFor([&] {
             auto c = R1->ReadyConn(idR2);
@@ -2617,6 +2664,7 @@ int main() {
         CHECK(WaitFor([&] { return StateOf(*R2, trl) == TState::Completed; }, 30000), "file over the relay: %s", TStateName(StateOf(*R2, trl)));
         auto trr = GetT(*R2, trl);
         CHECK(trr && Sha256File(trr->localPath) == Sha256File(fr), "relayed transfer verified");
+        RtCall(*R1, *R2, idR2, true, true, true, "through the server's relay");
         R1->Stop();
         R2->Stop();
 #ifdef _WIN32
@@ -2755,6 +2803,23 @@ int main() {
         F->Stop();
         CHECK(WaitFor([&] { return srv.DeviceCount() == 0; }, 7000), "devices unregister on exit (%d left)", (int)srv.DeviceCount());
         srv.Stop();
+    }
+
+    printf("[calls: real-time media]\n");
+    {
+        auto P = MakeEngine("rtpaula", 48240, false, false, false, false, "", "", {"voice"});
+        auto Q = MakeEngine("rtquinn", 48244, false, false, false, false, "", "", {"voice"});
+        std::string idQ = Q->settings.deviceId;
+        P->ConnectAddress("127.0.0.1", Q->boundPort);
+        CHECK(WaitFor([&] { return P->IsConnected(idQ); }, 5000), "connected");
+        CHECK(P->RtUdpPort() != 0 && Q->RtUdpPort() != 0 && P->RtUdpPort() != Q->RtUdpPort(), "each has a UDP port for call media (%u / %u)",
+              P->RtUdpPort(), Q->RtUdpPort());
+        RtCall(*P, *Q, idQ, true, true, true, "LAN, both want it");
+        RtCall(*P, *Q, idQ, true, false, false, "LAN, only the caller wants it");
+        RtCall(*P, *Q, idQ, false, true, false, "LAN, only the one called wants it");
+        RtCall(*P, *Q, idQ, false, false, false, "LAN, neither");
+        P->Stop();
+        Q->Stop();
     }
 
     printf("[calls: signalling + media]\n");

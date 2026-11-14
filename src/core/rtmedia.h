@@ -57,6 +57,9 @@ public:
 
     RtMedia(const uint8_t key[32], uint64_t callId, Out out, In in);
     ~RtMedia();
+    // Stops its thread (waits for it). Call before letting go of the last reference from another thread: the
+    // thread may be inside the In callback, where someone could otherwise drop the last reference.
+    void Shutdown();
 
     static uint32_t TagFor(uint64_t callId) { return (uint32_t)(callId ^ (callId >> 32)) | 1u; }
     uint32_t Tag() const { return tag_; }
@@ -117,7 +120,7 @@ private:
     Out out_;
     In in_;
 
-    std::mutex m_, outM_;
+    std::mutex m_, outM_, joinM_;
     std::condition_variable cv_;
     std::atomic<bool> run_{true}, ready_{false};
     std::thread thread_;

@@ -268,6 +268,28 @@ SocketHandle UdpOpen(uint16_t port) {
     return (SocketHandle)s;
 }
 
+SocketHandle UdpOpenOwn(uint16_t port, uint16_t* boundPort) {
+    NetInit();
+    auto s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if ((SocketHandle)s == kInvalidSocket) return kInvalidSocket;
+    int rcv = 1 << 20;
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcv, sizeof(rcv));
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    a.sin_port = htons(port);
+    if (bind(s, (sockaddr*)&a, sizeof(a)) != 0) {
+        CloseSocket((SocketHandle)s);
+        return kInvalidSocket;
+    }
+    if (boundPort) {
+        socklen_t l = sizeof(a);
+        getsockname(s, (sockaddr*)&a, &l);
+        *boundPort = ntohs(a.sin_port);
+    }
+    return (SocketHandle)s;
+}
+
 bool UdpJoinMulticast(SocketHandle s, const char* group) {
     ip_mreq m{};
     inet_pton(AF_INET, group, &m.imr_multiaddr);

@@ -745,7 +745,7 @@ void RendezvousServer::Loop() {
         if (WaitReadable((SocketHandle)s, 500) != 1) continue;
         sockaddr_in from{};
         int n = RecvFromTo(s, buf, (int)sizeof(buf), from, via);
-        if (n >= 6 && buf[0] == 'Y') {  // relayed data: ['Y'][conv u32][payload]
+        if (n >= 6 && (buf[0] == 'Y' || buf[0] == 'Z')) {  // relayed data: ['Y' KCP / 'Z' call media][conv u32][payload]
             const uint8_t* cb = (const uint8_t*)buf + 1;
             uint32_t conv = cb[0] | (uint32_t)cb[1] << 8 | (uint32_t)cb[2] << 16 | (uint32_t)cb[3] << 24;  // KCP header
             auto it = relays.find(conv);

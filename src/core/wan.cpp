@@ -387,6 +387,11 @@ void WanTransport::Loop() {
             memcpy(x + 1, &conv, 4);
             for (int i = 0; i < 3; i++) sendto(udp, x, 5, 0, (sockaddr*)&s->peer, sizeof(s->peer));
         }
+        {
+            std::lock_guard<std::mutex> l(hm_);
+            auto r = dgRoutes_.find(s->peerId);
+            if (r != dgRoutes_.end() && r->second.conv == conv) dgRoutes_.erase(r);
+        }
         ikcp_release(s->kcp);
         CloseSocket(s->local);
         sessions.erase(it);
@@ -411,6 +416,14 @@ void WanTransport::Loop() {
         ikcp_setmtu(s->kcp, 1200);
         ikcp_nodelay(s->kcp, 1, 10, 2, 1);
         ikcp_wndsize(s->kcp, 1024, 1024);
+        {
+            std::lock_guard<std::mutex> l(hm_);
+            DgRoute& r = dgRoutes_[peerId];
+            r.conv = conv;
+            r.ip = peer.sin_addr.s_addr;
+            r.port = peer.sin_port;
+            r.relayed = relayed;
+        }
         sessions[conv] = std::move(s);
         sessions_ = (int)sessions.size();
         if (onSocket_) onSocket_(pair[1], peerId, relayed ? "relay" : EpStr(peer), initiator);
@@ -714,7 +727,15 @@ void WanTransport::Loop() {
                 if (it == sessions.end()) continue;
                 Session* s = it->second.get();
                 if (s->relayed) continue;
-                s->peer = from;  // follow NAT rebinding
+                if (!SameEp(s->peer, from)) {  // follow NAT rebinding (the datagrams too)
+                    std::lock_guard<std::mutex> l(hm_);
+                    auto r = dgRoutes_.find(s->peerId);
+                    if (r != dgRoutes_.end() && r->second.conv == conv) {
+                        r->second.ip = from.sin_addr.s_addr;
+                        r->second.port = from.sin_port;
+                    }
+                }
+                s->peer = from;
                 s->lastRecv = now;
                 ikcp_input(s->kcp, buf.data() + 1, n - 1);
             } else if (type == 'Y' && n > 5 && serverOk && SameEp(from, server)) {
@@ -723,6 +744,16 @@ void WanTransport::Loop() {
                 if (it == sessions.end() || !it->second->relayed) continue;
                 it->second->lastRecv = now;
                 ikcp_input(it->second->kcp, buf.data() + 1, n - 1);
+            } else if ((type == 'D' || type == 'Z') && n > 5) {  // a datagram beside a session (call media)
+                uint32_t conv;
+                memcpy(&conv, buf.data() + 1, 4);
+                auto it = sessions.find(conv);
+                if (it == sessions.end()) continue;
+                Session* s = it->second.get();
+                bool ok = type == 'D' ? !s->relayed && SameEp(s->peer, from) : s->relayed && serverOk && SameEp(from, server);
+                if (!ok) continue;
+                s->lastRecv = now;
+                if (onDatagram) onDatagram(s->peerId, (const uint8_t*)buf.data() + 5, (size_t)n - 5);
             } else if (type == 'H' && n > 6 && serverOk && SameEp(from, server)) {
                 HubInput((const uint8_t*)buf.data() + 1, (size_t)n - 1);
             } else if (type == 'X' && n >= 5) {
@@ -798,6 +829,29 @@ void WanTransport::HubJoin(const std::string& hubId) {
     hubHandle_ = 0;
     uint8_t h[4];
     if (hubId.size() == 32 && FromHex(hubId.substr(0, 8), h, 4)) hubHandle_ = h[0] | (uint32_t)h[1] << 8 | (uint32_t)h[2] << 16 | (uint32_t)h[3] << 24;
+}
+
+bool WanTransport::DatagramSend(const std::string& peerId, const uint8_t* data, size_t len) {
+    if (!len || len > 1400) return false;
+    SocketHandle udp;
+    DgRoute r;
+    {
+        std::lock_guard<std::mutex> l(hm_);
+        udp = udp_;
+        auto it = dgRoutes_.find(peerId);
+        if (it == dgRoutes_.end()) return false;
+        r = it->second;
+    }
+    if (udp == kInvalidSocket || !r.ip) return false;
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = r.ip;
+    to.sin_port = r.port;
+    uint8_t pkt[1405];
+    pkt[0] = r.relayed ? 'Z' : 'D';
+    memcpy(pkt + 1, &r.conv, 4);  // (as KCP writes it: the server reads it the same way)
+    memcpy(pkt + 5, data, len);
+    return sendto((sock_t)udp, (const char*)pkt, (int)len + 5, 0, (const sockaddr*)&to, sizeof(to)) == (int)len + 5;
 }
 
 bool WanTransport::HubSend(uint32_t toMask, const std::string& msg) {
