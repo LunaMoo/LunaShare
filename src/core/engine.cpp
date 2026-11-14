@@ -1,3 +1,4 @@
+#include "diag.h"
 #include "engine.h"
 
 #ifdef __APPLE__
@@ -1505,8 +1506,11 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
 }
 
 void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
-    (void)why;
     if (c->closed.exchange(true)) return;
+    DIAG("net: connection to %s closed (%s) - %s, after %d s, %lld KB in / %lld KB out, last heard %d ms ago",
+         c->peerId.empty() ? c->addr.c_str() : c->peerId.substr(0, 8).c_str(), why ? why : "?", c->addr == "relay" ? "relay" : c->addr.c_str(),
+         (int)((SteadyMs() - c->connectedAt) / 1000), (long long)(c->bytesIn.load() / 1024), (long long)(c->bytesOut.load() / 1024),
+         (int)(SteadyMs() - c->lastRecv.load()));
     ShutdownSocket(c->sock);
     c->qcv.notify_all();
     auto lk = Lock();
@@ -4625,6 +4629,7 @@ void Engine::EndCall(const std::string& reason) {
 void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
     // called with the engine lock held
     if (call.state == CallState::None) return;
+    DIAG("call: ended (%s)", reason.c_str());
     if (!call.group.empty()) {
         FinishGroupCall(reason);
         return;

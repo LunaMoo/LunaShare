@@ -25,6 +25,7 @@ bool ListenCacheTake(const std::shared_ptr<WatchCache>& c, const std::string& de
 
 static constexpr int kReadMaxPages = 5000;
 static constexpr int kReadAtOnce = 3;  // pages coming at the same time
+static constexpr int kReadAhead = 12;  // pages fetched ahead of the open one (more as the reading goes on)
 
 static std::string Cut(std::string s, size_t n) {
     if (s.size() > n) {
@@ -222,21 +223,15 @@ void Engine::ReadPeerGone(const std::string& dev) {
 void Engine::ReadCaches() {
     if (!read.sid || read.host.empty() || readPids_.empty()) return;
     int n = (int)readPids_.size();
-    // the order they're wanted in: this page, the next two, the one before, then onwards, then back to the start
-    std::vector<int> order;
-    for (int i : {read.page, read.page + 1, read.page + 2, read.page - 1})
-        if (i >= 0 && i < n) order.push_back(i);
-    for (int i = read.page + 3; i < n; i++) order.push_back(i);
-    for (int i = read.page - 2; i >= 0; i--) order.push_back(i);
-    std::vector<int> want;
-    for (int i : order)
-        if (read.files[(size_t)i].empty() && readSizes_[(size_t)i] > 0 && (int)want.size() < kReadAtOnce) want.push_back(i);
     std::vector<std::pair<int, std::shared_ptr<WatchCache>>> all, keep, drop;
     {
         std::lock_guard<std::mutex> g(watchCacheMtx_);
         all = readCaches_;
     }
     std::string dir = ReadDir(ConfigPath(), read.sid);
+    // first the pages that have all come: pictures in the folder now (before choosing what to fetch - so a page that
+    // has just come isn't asked for again)
+    std::vector<std::pair<int, std::shared_ptr<WatchCache>>> pending;
     for (auto& c : all) {
         uint64_t iid = 0;
         bool saving = false, done = false;
@@ -244,22 +239,35 @@ void Engine::ReadCaches() {
         double ld = 0;
         ListenCacheInfo(c.second, iid, saving, done, rp, lc, ld);
         int pg = c.first;
-        if (done) {  // a page has come: it's a picture in the folder now
-            char nm[32];
-            snprintf(nm, sizeof(nm), "p%05d", pg);
-            std::string dest = JoinPath(dir, nm + readExts_[(size_t)pg]);
-            if (ListenCacheTake(c.second, dest)) {
-                DIAG("read: page %d came", pg + 1);
-                read.files[(size_t)pg] = dest;
-                read.got++;
-                Emit({EventType::Info, read.key, ""});
-            } else {
-                DIAG("read: page %d came but COULDN'T BE SAVED as %s", pg + 1, dest.c_str());
-                drop.push_back(c);
-            }
+        if (!done) {
+            pending.push_back(c);
             continue;
         }
-        if (std::find(want.begin(), want.end(), pg) != want.end()) keep.push_back(c);
+        char nm[32];
+        snprintf(nm, sizeof(nm), "p%05d", pg);
+        std::string dest = JoinPath(dir, nm + readExts_[(size_t)pg]);
+        if (ListenCacheTake(c.second, dest)) {
+            DIAG("read: page %d came", pg + 1);
+            read.files[(size_t)pg] = dest;
+            read.got++;
+            Emit({EventType::Info, read.key, ""});
+        } else {
+            DIAG("read: page %d came but COULDN'T BE SAVED as %s", pg + 1, dest.c_str());
+            drop.push_back(c);
+        }
+    }
+    // the order they're wanted in: this page, the next two, the one before, then onwards - a window ahead, not the
+    // whole comic (hundreds of pages of a few MB: that would take the connection from the call and from a movie)
+    std::vector<int> order;
+    for (int i : {read.page, read.page + 1, read.page + 2, read.page - 1})
+        if (i >= 0 && i < n) order.push_back(i);
+    for (int i = read.page + 3; i < n && i <= read.page + kReadAhead; i++) order.push_back(i);
+    for (int i = read.page - 2; i >= 0 && i >= read.page - 3; i--) order.push_back(i);
+    std::vector<int> want;
+    for (int i : order)
+        if (read.files[(size_t)i].empty() && readSizes_[(size_t)i] > 0 && (int)want.size() < kReadAtOnce) want.push_back(i);
+    for (auto& c : pending) {
+        if (std::find(want.begin(), want.end(), c.first) != want.end()) keep.push_back(c);
         else drop.push_back(c);  // (turned elsewhere: other pages first)
     }
     auto host = ReadyConn(read.host);
