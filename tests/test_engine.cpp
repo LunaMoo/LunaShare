@@ -746,6 +746,59 @@ static void TestRtMedia() {
         RtSleep(33);
     }
     CHECK(A->LinkBps() / 1000 > startKbps * 2, "estimate climbs when the link opens (%d -> %d kbit/s)", startKbps, A->LinkBps() / 1000);
+    // a phone's encoder sends well under what it's allowed (a still picture, a small size): the estimate must still
+    // find a fast link (by probing), or the picture never grows - the bug in 1.8.0
+    {
+        SimLink ab2, ba2;
+        ab2.delayMs = ba2.delayMs = 3;  // (same Wi-Fi)
+        uint8_t k2[32];
+        SecureRandom(k2, 32);
+        auto A2 = std::make_unique<RtMedia>(k2, callId + 7, [&](const uint8_t* d, size_t n) { return ab2.Put(d, n); }, [](const uint8_t*, size_t) {});
+        auto B2 = std::make_unique<RtMedia>(k2, callId + 7, [&](const uint8_t* d, size_t n) { return ba2.Put(d, n); }, [](const uint8_t*, size_t) {});
+        ab2.to = [&](const uint8_t* d, size_t n) { B2->Input(d, n); };
+        ba2.to = [&](const uint8_t* d, size_t n) { A2->Input(d, n); };
+        ab2.Start();
+        ba2.Start();
+        CHECK(WaitFor([&] { return A2->Ready(); }, 2000), "second pair ready");
+        int64_t endAt = SteadyMs() + 8000;
+        uint32_t fn = 0;
+        while (SteadyMs() < endAt) {
+            std::vector<uint8_t> f(600, 1);  // ~150 kbit/s whatever the estimate says
+            f[0] = 2;
+            f[1] = 1;
+            fn++;
+            memcpy(&f[2], &fn, 4);
+            A2->Send(f.data(), f.size());
+            RtSleep(33);
+        }
+        RtStats s2 = A2->Stats();
+        printf("    app-limited encoder on fast Wi-Fi: estimate %d kbit/s after 8 s, %d probes\n", s2.estimateKbps, s2.probes);
+        CHECK(s2.estimateKbps >= 2500, "probes find the room an undershooting encoder doesn't show (%d kbit/s)", s2.estimateKbps);
+        // and on a slow link they don't push it past the link for long
+        ab2.kbps = 800;
+        endAt = SteadyMs() + 10000;
+        while (SteadyMs() < endAt) {
+            std::vector<uint8_t> f(600, 1);
+            f[0] = 2;
+            f[1] = 1;
+            fn++;
+            memcpy(&f[2], &fn, 4);
+            A2->Send(f.data(), f.size());
+            RtSleep(33);
+        }
+        s2 = A2->Stats();
+        printf("    ...then an 800 kbit/s link: estimate %d kbit/s, queue %d ms\n", s2.estimateKbps, s2.queueDelayMs);
+        CHECK(s2.estimateKbps <= 2400, "a probe that hits the link doesn't raise the estimate past it (%d kbit/s)", s2.estimateKbps);
+        CHECK(s2.queueDelayMs < 60, "no standing queue from probing (%d ms)", s2.queueDelayMs);
+        // the call ends: the bye gets there over this path
+        std::atomic<bool> bye{false};
+        std::string why;
+        B2->onBye = [&](const std::string& r) { why = r; bye = true; };
+        A2->SendBye("hangup");
+        CHECK(WaitFor([&] { return bye.load(); }, 1000) && why == "hangup", "the end of the call arrives over the real-time path");
+        ab2.Stop();
+        ba2.Stop();
+    }
     // other calls' and garbage datagrams are ignored
     int fb = framesB;
     std::string junk(200, 'x');
@@ -2833,6 +2886,26 @@ int main() {
         RtCall(*P, *Q, idQ, true, false, false, "LAN, only the caller wants it");
         RtCall(*P, *Q, idQ, false, true, false, "LAN, only the one called wants it");
         RtCall(*P, *Q, idQ, false, false, false, "LAN, neither");
+        // a call that ended on one side without the other hearing it (a drop): it must not stay up there
+        for (bool rt : {false, true}) {
+            for (auto* e : {P.get(), Q.get()}) {
+                auto lk = e->Lock();
+                Settings s2 = e->settings;
+                s2.callRealtime = rt;
+                e->ApplySettings(s2);
+            }
+            uint64_t cid = P->StartCall(idQ);
+            CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging && Q->call.id == cid; }, 5000), "ringing");
+            Q->AcceptCall();
+            CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 5000), "active");
+            RtStats st;
+            if (rt) CHECK(WaitFor([&] { return P->CallRtStats(st) && st.ready && Q->CallRtStats(st) && st.ready; }, 4000), "real-time path up");
+            int64_t t0 = SteadyMs();
+            Q->EndCallSilently();
+            CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::None; }, rt ? 2000 : 12000),
+                  "%s: the other side's call ends too (after %d ms)", rt ? "the real-time path's goodbye" : "the call check",
+                  (int)(SteadyMs() - t0));
+        }
         P->Stop();
         Q->Stop();
     }

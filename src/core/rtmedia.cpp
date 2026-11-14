@@ -85,9 +85,10 @@ bool RtMedia::Send(const uint8_t* d, size_t n) {
         if (!ready_) return false;
         int64_t now = SteadyMs();
         if (d[0] == 2 && n > 2 && d[1] == 1) {  // a video frame: in pieces, paced
-            // more than ~300 ms already waiting: the path can't take this frame (unless nothing waits at all - a big
-            // keyframe must get through some time)
-            size_t limit = std::max<size_t>(24000, (size_t)estimate_.load() * 3 / 80);
+            // more than ~600 ms already waiting: the path can't take this frame. (Generous on purpose: a keyframe
+            // makes a backlog for a moment, and refusing the frames after it would only make the video module send
+            // another keyframe - a stutter loop.)
+            size_t limit = std::max<size_t>(150000, (size_t)estimate_.load() * 6 / 80);
             if (pacedBytes_ > limit) return false;
             uint32_t frame = frameOut_++;
             size_t count = (n + kPiece - 1) / kPiece;
@@ -236,6 +237,40 @@ void RtMedia::Input(const uint8_t* d, size_t n) {
             case 6:
                 if (bn >= 4) SendNow(7, std::string((const char*)b, 4));
                 break;
+            case 9:  // a probe burst arriving: timed as a whole
+                if (bn >= 4) {
+                    uint16_t cl = (uint16_t)Get16(b);
+                    if (cl != pin_.cluster) {
+                        pin_ = ProbeIn{cl, now, now, 0, 1, false};
+                    } else if (!pin_.reported) {
+                        pin_.bytes += (int)n;  // (the first one's size doesn't count: it marks the start)
+                        pin_.count++;
+                        pin_.last = now;
+                    }
+                }
+                break;
+            case 10:
+                if (bn >= 6 && (uint16_t)Get16(b) == probeCluster_ && probeCluster_) {
+                    int got = (int)Get32(b + 2) * 1000;
+                    int est = estimate_.load();
+                    // what the burst got through at (no more than it was sent at): the path carries that much
+                    int to = (int)(std::min(got, probeSent_) * 0.9);
+                    if (peerQueueMs_ < 40 && lossOutPct10_ < 50 && to > est) {
+                        estimate_ = std::min(to, 50000000);
+                        lastIncrease_ = now;
+                        nextProbe_ = now + 1500;  // (worked: try higher again soon)
+                    } else {
+                        nextProbe_ = now + 10000;
+                    }
+                    probeCluster_ = 0;
+                }
+                break;
+            case 11:
+                if (!byeSeen_) {
+                    byeSeen_ = true;
+                    byeReason_.assign((const char*)b, std::min<size_t>(bn, 64));
+                }
+                break;
             case 7:
                 if (bn >= 4) {
                     int r = (int)((uint32_t)now - Get32(b));
@@ -251,6 +286,24 @@ void RtMedia::Input(const uint8_t* d, size_t n) {
     }
     FlushOut();
     for (auto& m : deliver) in_((const uint8_t*)m.data(), m.size());
+    if (kind == 11 && onBye) {
+        std::string why;
+        {
+            std::lock_guard<std::mutex> l(m_);
+            if (byeReported_) return;
+            byeReported_ = true;
+            why = byeReason_;
+        }
+        onBye(why);
+    }
+}
+
+void RtMedia::SendBye(const std::string& reason) {
+    {
+        std::lock_guard<std::mutex> l(m_);
+        for (int i = 0; i < 3; i++) SendNow(11, reason.substr(0, 64));
+    }
+    FlushOut();
 }
 
 void RtMedia::TakePiece(uint32_t frame, uint16_t idx, uint16_t count, const uint8_t* p, size_t n, int64_t now) {
@@ -382,7 +435,10 @@ void RtMedia::OnFeedback(const uint8_t* b, size_t n, int64_t now) {
     // there (the picture would only get worse), so the estimate just stops climbing
     bool randomLoss = loss > 0.10 && loss < 0.35 && qd < 30;
     if (randomLoss) {
+        // ...but big frames suffer from it (more pieces, more chances one is lost for good): ease towards 800 kbit/s
+        // (frames of a few pieces), no lower - by the loss share per second
         holdUntil_ = std::max(holdUntil_, now + 1000);
+        if (est > 800000) est = std::max(800000, (int)(est * (1.0 - loss)));  // (loss is judged about once a second)
     } else if (qd > 60 || loss > 0.10) {
         if (now - lastDecrease_ > std::max(rtt_, 200)) {
             // 85% of what arrives (as GCC does) - not of the estimate, which would keep shrinking for as long as an
@@ -396,10 +452,12 @@ void RtMedia::OnFeedback(const uint8_t* b, size_t n, int64_t now) {
         }
     } else if (qd < 25 && loss < 0.03 && lossOutPct10_ < 30 && now >= holdUntil_) {
         double grow = est < 1000000 ? 0.15 : 0.08;  // per second: quicker while still low
-        est = (int)(est * (1.0 + grow * dt));
         // not far above what actually gets through (as GCC does: 1.5x what arrives) - an encoder sending less than
-        // the estimate mustn't let it climb past the link unnoticed, to overshoot the moment it's used
-        est = std::min(est, std::max(kStartBps, std::min(sentBps_ * 2 + 100000, kbps * 1000 * 3 / 2 + 50000)));
+        // the estimate mustn't let it creep past the link unnoticed. This only stops the slow climb; it never
+        // lowers the estimate (probes measure the path itself and may well put it higher).
+        int cap = std::max(kStartBps, std::min(sentBps_ * 2 + 100000, kbps * 1000 * 3 / 2 + 50000));
+        int grown = (int)(est * (1.0 + grow * dt));
+        est = grown <= cap ? grown : std::max(est, cap);
     }
     estimate_ = std::clamp(est, kMinBps, 50000000);
     // pieces they're missing: again, ahead of new ones, if still worth it
@@ -451,6 +509,7 @@ void RtMedia::Loop() {
                 Put32(t, (uint32_t)now);
                 SendNow(6, t);
             }
+            Probe(now, ready);
             FlushFrames(now, deliver);
             if (now - sentWindowAt_ >= 1000) {
                 sentBps_ = (int)((int64_t)sentBytesWindow_ * 8 * 1000 / (now - sentWindowAt_));
@@ -464,6 +523,58 @@ void RtMedia::Loop() {
     }
 }
 
+// Probing: the media alone can't show what the path carries - an encoder sends what its picture size needs (often
+// less), and the estimate is only allowed to creep a little above what arrives. So now and then, while the media
+// uses well under the estimate, a short burst of filler goes out faster (3x the estimate while it's low, 2x
+// above), and how fast it arrives says what the path can do. (This is how WebRTC finds its footing at the start.)
+void RtMedia::Probe(int64_t now, bool ready) {
+    // the result of a burst: the other side times it once it has gone quiet
+    if (!pin_.reported && pin_.count >= 5 && now - pin_.last > 60) {
+        pin_.reported = true;
+        int dur = (int)(pin_.last - pin_.first);
+        if (dur >= 10) {
+            std::string r;
+            Put16(r, pin_.cluster);
+            Put32(r, (uint32_t)((int64_t)pin_.bytes * 8 / dur));  // kbit/s
+            SendNow(10, r);
+            SendNow(10, r);  // (twice: one may get lost)
+        }
+    }
+    int est = estimate_.load();
+    if (probeRate_) {
+        if (now >= probeEnd_) {
+            probeRate_ = 0;
+            return;
+        }
+        probeBudget_ = std::min(probeBudget_ + probeRate_ / 8.0 * (double)(now - probeLast_) / 1000.0, 40000.0);
+        probeLast_ = now;
+        static const std::string filler(1100, '\0');
+        while (probeBudget_ >= 1180) {
+            std::string body;
+            Put16(body, probeCluster_);
+            Put16(body, probeIdx_++);
+            body += filler;
+            SendNow(9, body);
+            probeBudget_ -= 1180;
+        }
+        return;
+    }
+    bool appLimited = sentBps_ < est * 3 / 4;
+    if (!ready || now < nextProbe_ || !appLimited || now - lastDecrease_ < 3000 || peerQueueMs_ >= 25 || lossOutPct10_ >= 20 ||
+        pacedBytes_ > 20000 || est >= 30000000)
+        return;
+    int target = est < 1500000 ? std::max(est * 3, 1000000) : est * 2;
+    if (!++probeClusterSeq_) probeClusterSeq_ = 1;  // (each burst its own number; 0 is "none")
+    probeCluster_ = probeClusterSeq_;
+    probeRate_ = probeSent_ = std::min(target, 40000000);
+    probeEnd_ = now + 150;
+    probeLast_ = now;
+    probeBudget_ = 1180;
+    probeIdx_ = 0;
+    probes_++;
+    nextProbe_ = now + 5000;  // (until its result says otherwise)
+}
+
 RtStats RtMedia::Stats() {
     std::lock_guard<std::mutex> l(m_);
     RtStats s;
@@ -475,6 +586,7 @@ RtStats RtMedia::Stats() {
     s.rttMs = rtt_;
     s.estimateKbps = estimate_.load() / 1000;
     s.queueDelayMs = peerQueueMs_;
+    s.probes = probes_;
     return s;
 }
 

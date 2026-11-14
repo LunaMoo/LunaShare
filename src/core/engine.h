@@ -621,6 +621,11 @@ public:
     // Real-time media (rtmedia.h): true while the call has such a channel (st: how it's doing - st.ready says whether
     // media goes that way right now). CallLinkBps: its bitrate estimate for voice + video, 0 when not in use.
     bool CallRtStats(RtStats& st);
+    // tests: the call ends here without telling the other side over the connection (as when it drops)
+    void EndCallSilently() {
+        auto lk = Lock();
+        FinishCall("connection lost", false);
+    }
     int CallLinkBps();
     uint16_t RtUdpPort() const { return rtUdpPort_; }
     // Called on a network thread (never with the engine lock held) for each media packet of the active call.

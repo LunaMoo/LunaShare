@@ -93,6 +93,8 @@ enum class Msg : uint8_t {
     Media = 53,       // binary: [u64 LE call id][codec payload, interpreted by the media module]
     CallJoin = 54,    // group call: {call, gid, reply}  "I'm in" (to every member device; answered with reply=true)
     CallWant = 55,    // group call: {call, want}  "send me your video" / "stop"
+    CallAlive = 56,   // {call}  every few seconds during a call with one person: "I'm still in this call". A device
+                      // not in it answers CallEnd - so a call can't stay up on one side after a drop ended it on the other
     // Group calls through the server: CallInvite carries {gid, hub, key}; everyone joins the hub, which passes each
     // packet to the people it is meant for. Hub messages are sealed with the call key: ['M'][media packet] or
     // ['C'][u8 Msg][json] (CallWant, CallEnd).

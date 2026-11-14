@@ -2625,6 +2625,13 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             Emit({EventType::CallStarted, c->peerId, "Call started", id});
             break;
         }
+        case Msg::CallAlive: {
+            uint64_t id = j.value("call", (uint64_t)0);
+            if (!id || call.id == id) break;  // (still in it - or still ringing)
+            DIAG("call: %llx is over here - telling %s", (unsigned long long)id, c->peerId.substr(0, 8).c_str());
+            Queue(c, Msg::CallEnd, {{"call", id}, {"reason", "connection lost"}});
+            break;
+        }
         case Msg::CallEnd: {
             uint64_t id = j.value("call", (uint64_t)0);
             if (j.contains("gid")) {
@@ -3291,6 +3298,8 @@ void Engine::MaintenanceLoop() {
             }
             bool ping = now - lastPing > 5000;
             if (ping) lastPing = now;
+            if (ping && call.state == CallState::Active && call.group.empty())  // (see Msg::CallAlive)
+                if (auto cc = ReadyConn(call.peer)) Queue(cc, Msg::CallAlive, {{"call", call.id}});
             // after a network change: what didn't answer the ping sent then is gone (the old network's path)
             bool probeDone = netProbeAt_ && now - netProbeAt_ > 8000;  // (8 s: a ping can wait behind file data on a slow link)
             for (auto& c : conns) {
@@ -4703,6 +4712,7 @@ void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
         return;
     }
     CallInfo c = call;
+    if (auto r = RtNow()) r->SendBye(reason);  // (over the real-time path too: the connection may be what broke)
     if (notifyPeer) {
         QueueToPeer(c.peer, Msg::CallEnd, {{"call", c.id}, {"reason", reason}});
         for (auto& d : c.invited)
@@ -4787,6 +4797,12 @@ void Engine::StartRt(const std::string& keyHex, uint16_t peerPort) {
             if (activeCallId_.load() == id) CallMedia(id, 0, d, n);
         });
     memset(key, 0, sizeof(key));
+    r->onBye = [this, id](const std::string& reason) {
+        Spawn([this, id, reason] {  // (not on the network thread: ending a call takes the engine lock)
+            auto lk = Lock();
+            if (call.id == id && call.state == CallState::Active) FinishCall(reason.empty() ? "hangup" : reason, false);
+        });
+    };
     std::shared_ptr<RtMedia> old;
     {
         std::lock_guard<std::mutex> l(mediaMtx_);

@@ -14,6 +14,10 @@
 //   5 probe       body = [u8 1: I hear you]
 //   6 ping / 7 pong  body = [u32 time]
 //   8 resent piece body = [u32 original pseq] + as 2
+//   9 probe filler body = [u16 cluster][u16 index][filler]  - a short burst faster than the media needs: how fast it
+//                    arrives measures the path itself (the media alone only shows what the encoder chose to send)
+//  10 probe result body = [u16 cluster][u32 kbit/s]
+//  11 bye         body = reason - the call ended (also sent here: the connection may be what broke)
 // pseq counts every datagram one way (losses and delays are measured with it); the tag says which call it is.
 //
 // Bitrate: the receiver reports how long datagrams queue somewhere on the way (delay above the lowest seen) and how
@@ -45,6 +49,7 @@ struct RtStats {
     int rttMs = 0;
     int estimateKbps = 0;        // what the path is thought to carry
     int queueDelayMs = 0;        // how long my datagrams wait somewhere on the way (the other side's reports)
+    int probes = 0;              // probe bursts sent
 };
 
 class RtMedia {
@@ -74,6 +79,10 @@ public:
     int LinkBps() const { return estimate_.load(); }  // what video and voice together may use
     size_t Queued();                                   // bytes waiting to be paced out
     RtStats Stats();
+
+    // The call ended: tells the other side over this path too (a few times - datagrams get lost).
+    void SendBye(const std::string& reason);
+    std::function<void(const std::string& reason)> onBye;  // they ended it (any thread; set before use)
 
     // tests: drop this share of incoming datagrams (0..100)
     std::atomic<int> testDropPct{0};
@@ -113,6 +122,7 @@ private:
     void SendFeedback(int64_t now);
     void OnFeedback(const uint8_t* b, size_t n, int64_t now);
     int FrameDeadline() const;
+    void Probe(int64_t now, bool ready);
     void FlushOut();  // m_ NOT held: puts what Emit() collected onto the network
 
     uint8_t key_[32];
@@ -147,6 +157,25 @@ private:
     int64_t lastConfirm_ = 0;  // they told me they hear me (probe or feedback)
     int64_t lastProbe_ = 0, lastPing_ = 0, lastFeedback_ = 0, lastHeard_ = 0;
     int rtt_ = 0;
+
+    // probing (sender): a burst at probeRate_ until probeEnd_; its result raises the estimate
+    uint16_t probeCluster_ = 0;
+    int probeRate_ = 0;
+    int64_t probeEnd_ = 0, probeLast_ = 0, nextProbe_ = 0;
+    double probeBudget_ = 0;
+    uint16_t probeIdx_ = 0;
+    int probes_ = 0;
+    // probing (receiver): the burst arriving
+    struct ProbeIn {
+        uint16_t cluster = 0;
+        int64_t first = 0, last = 0;
+        int bytes = 0, count = 0;
+        bool reported = true;
+    } pin_;
+    bool byeSeen_ = false, byeReported_ = false;
+    int probeSent_ = 0;          // the rate the last burst went out at
+    uint16_t probeClusterSeq_ = 0;
+    std::string byeReason_;
 
     // receiving
     std::unordered_set<uint32_t> seen_;  // (duplicates and replays)
