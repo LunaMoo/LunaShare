@@ -495,7 +495,7 @@ public final class VideoEngine {
                 session = null;
                 request = null;
             }
-            try { if (encoder != null) { encoder.stop(); encoder.release(); } } catch (Exception ignored) {}
+            releaseEncoder();
             encoder = null;
             if (encSurface != null) encSurface.release();
             encSurface = null;
@@ -533,6 +533,33 @@ public final class VideoEngine {
         }
     }
 
+    /**
+     * Stops and frees the encoder on its own callback thread: its output callback hands the encoder's buffer memory
+     * straight to native code, so freeing it from another thread while a frame is being delivered crashed the app
+     * (a size change during a call does this - often, right after a call starts).
+     */
+    private static void releaseEncoder() {
+        final MediaCodec enc = encoder;
+        encoder = null;
+        if (enc == null) return;
+        final Runnable r = () -> {
+            try { enc.stop(); } catch (Exception ignored) {}
+            try { enc.release(); } catch (Exception ignored) {}
+        };
+        Handler h = encHandler;
+        if (h == null || h.getLooper().getThread() == Thread.currentThread() || !h.getLooper().getThread().isAlive()) {
+            r.run();
+            return;
+        }
+        final CountDownLatch done = new CountDownLatch(1);
+        boolean posted = h.post(() -> { r.run(); done.countDown(); });
+        try {
+            if (!posted || !done.await(3, TimeUnit.SECONDS)) r.run();  // (thread gone or stuck: do it here after all)
+        } catch (InterruptedException e) {
+            r.run();
+        }
+    }
+
     public static void stopCamera() {
         synchronized (lock) {
             openGen++;  // (an open still on its way closes itself when it arrives)
@@ -542,7 +569,7 @@ public final class VideoEngine {
             camera = null;
             request = null;
         }
-        try { if (encoder != null) { encoder.stop(); encoder.release(); } } catch (Exception ignored) {}
+        releaseEncoder();
         encoder = null;
         if (encSurface != null) encSurface.release();
         encSurface = null;
