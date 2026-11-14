@@ -19,20 +19,30 @@ JavaVM* g_vm = nullptr;
 jclass g_cls = nullptr;
 Sink* g_sink = nullptr;
 
-// JNIEnv for the current thread; attaches threads the JVM doesn't know (detached again when the scope ends)
+// A native thread, once it calls into Java, stays attached to the JVM until it ends. (It used to be detached again
+// after each call - but SDL keeps the JNIEnv of a thread that logs through it (SDL_Log reads the manifest's
+// environment over JNI), and after the detach its next log line used that stale JNIEnv: the crash shortly after a
+// video call started, when the camera picture changes size from the video module's timer thread.)
+JNIEnv* ThreadEnv() {
+    struct Holder {
+        bool attached = false;
+        ~Holder() {
+            if (attached && g_vm) g_vm->DetachCurrentThread();  // (the thread is ending)
+        }
+    };
+    static thread_local Holder holder;
+    if (!g_vm) return nullptr;
+    JNIEnv* env = nullptr;
+    if (g_vm->GetEnv((void**)&env, JNI_VERSION_1_6) == JNI_OK) return env;
+    JavaVMAttachArgs args{JNI_VERSION_1_6, "LunaShare video", nullptr};  // (a name crash reports can tell apart)
+    if (g_vm->AttachCurrentThread(&env, &args) != JNI_OK) return nullptr;
+    holder.attached = true;
+    return env;
+}
+
 struct Env {
     JNIEnv* env = nullptr;
-    bool attached = false;
-    Env() {
-        if (!g_vm) return;
-        if (g_vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
-            if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached = true;
-            else env = nullptr;
-        }
-    }
-    ~Env() {
-        if (attached) g_vm->DetachCurrentThread();
-    }
+    Env() : env(ThreadEnv()) {}
     JNIEnv* operator->() { return env; }
     explicit operator bool() const { return env != nullptr; }
 };
@@ -191,7 +201,8 @@ public:
     // the decode thread stays attached to the JVM for its whole life
     bool StartDecoder() override {
         if (!g_vm || !g_cls) return false;
-        if (g_vm->AttachCurrentThread(&decEnv_, nullptr) != JNI_OK) return false;
+        decEnv_ = ThreadEnv();
+        if (!decEnv_) return false;
         decode_ = M(decEnv_, "decode", "(Ljava/nio/ByteBuffer;IZIII)V");
         Clear(decEnv_);
         return decode_ != nullptr;
@@ -209,8 +220,7 @@ public:
         if (!decEnv_) return;
         if (jmethodID m = M(decEnv_, "stopDecoder", "()V")) decEnv_->CallStaticVoidMethod(g_cls, m);
         Clear(decEnv_);
-        decEnv_ = nullptr;
-        g_vm->DetachCurrentThread();
+        decEnv_ = nullptr;  // (the thread stays attached until it ends - see ThreadEnv)
     }
 
     std::string EncoderName() override { return CallStr("encoderName"); }
