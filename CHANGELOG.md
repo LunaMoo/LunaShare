@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.11
+
+- **Links for anyone:** a device whose server address in Settings had no port written (just the address, without
+  `:47830`) showed "can't reach the server" in the link window, and the link's page said the sender was offline.
+  Calls worked because they fill in the usual port themselves; links now do too.
+
 ## 1.7.10
 
 Found with the help of test builds that log what the app does (Settings - About shows them; ordinary releases
