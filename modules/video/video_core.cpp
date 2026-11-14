@@ -331,7 +331,7 @@ public:
                     int byPeer = peerKbps > 0 ? peerKbps * 1000 * 8 / 10 : cur / 2;
                     next = std::min(cur * 7 / 10, std::max(minBitrate, byPeer));
                 }
-                next = std::clamp(next, minBitrate, cur * 3 / 4);
+                next = std::max(minBitrate, std::min(next, cur * 3 / 4));  // (at the floor cur*3/4 is below it)
                 curBitrate = next;
                 lastAdjust = now;
                 calmMs = 0;
@@ -376,7 +376,7 @@ public:
             }
         }
     }
-    static constexpr int minBitrate = 100000;
+    static constexpr int minBitrate = 50000;  // (180p at 15 fps still looks like a face at this)
     // receiver reports: delay that builds up anywhere on the way (also in buffers the host can't see) and a
     // decoder that can't keep up
     static constexpr uint32_t kSentRing = 1024;
@@ -392,7 +392,7 @@ public:
 
     // ---- quality ladder (level 0 = what the user picked)
     std::atomic<int> level{0};
-    static constexpr int kMaxLevel = 6;
+    static constexpr int kMaxLevel = 9;
     LsvSettings LevelSettings(int lv) const {
         LsvSettings s = settings;
         if (lv <= 0) return s;
@@ -400,20 +400,21 @@ public:
         bool portrait = s.height > s.width;
         int longSide = std::max(s.width, s.height), shortSide = std::min(s.width, s.height);
         int h = shortSide;
-        static const int kHeights[] = {2160, 1440, 1080, 720, 540, 360};
+        static const int kHeights[] = {2160, 1440, 1080, 720, 540, 360, 270, 180};
         for (int i = 0; i < lv; i++) {
             if (fps > 30) { fps = 30; continue; }  // first: fewer frames, same size
             int next = 0;
             for (int k : kHeights)
                 if (k < h) { next = k; break; }
-            if (next) { h = next; continue; }       // then the next smaller standard size, down to 360p
+            if (next) { h = next; continue; }       // then the next smaller standard size, down to 180p (a phone on a
+                                                    // weak signal: a small sharp picture beats a big blocky one)
             if (fps > 15) fps = fps > 20 ? 20 : 15; // then fewer frames again
         }
         int w = (int)((double)longSide * h / shortSide + 0.5) & ~1;
         s.width = portrait ? h : w;
         s.height = portrait ? w : h;
         double ratio = (double)s.width * s.height * fps / ((double)settings.width * settings.height * std::max(1, settings.fps));
-        s.bitrate = std::max(minBitrate * 3, (int)(settings.bitrate * std::min(1.0, ratio * 1.15)));
+        s.bitrate = std::max(minBitrate * 2, (int)(settings.bitrate * std::min(1.0, ratio * 1.15)));
         s.fps = fps;
         return s;
     }

@@ -174,6 +174,26 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
 
+    printf("[video: very slow link goes down to the smallest picture]\n");
+    {
+        L.kbps = 70;
+        bool tiny = false;
+        for (int i = 0; i < 100 && !tiny; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            tiny = L.remoteH > 0 && L.remoteH <= 180;
+        }
+        CHECK(tiny, "down to %dx%d (180p) on a 70 kbit/s link", L.remoteW.load(), L.remoteH.load());
+        LsvStats st3;
+        m->get_stats(&st3);
+        CHECK(st3.send_kbps <= 80 && st3.send_kbps > 0, "bitrate below the old 100 kbit/s floor (%d kbps)", st3.send_kbps);
+        int before3 = L.remote;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        CHECK(L.remote - before3 > 10, "and pictures keep coming (%d in 2 s)", L.remote - before3);
+        L.kbps = 0;
+        m->set_settings(&s);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
+
     printf("[video: slow link behind a buffer the host can't see (receiver reports)]\n");
     {
         L.hideQueue = true;
