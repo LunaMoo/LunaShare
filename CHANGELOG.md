@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.2
+
+- **Android: crash shortly after a video call started.** Changing the picture size in a call makes a new video
+  encoder, and the old one was freed from another thread while it could still be handing over a frame. 1.8.1 changes
+  the size much sooner and more often (it finds the link's real speed and grows the picture within seconds), so it
+  crashed right after calls started. The old encoder is now freed on its own thread.
+- **QR scanner in Add someone showed no camera** (Scan their code, and the new Scan it button): the Verify with QR
+  codes window stopped every running scanner, even when it wasn't open. Fixed - and leaving the QR tab no longer
+  leaves "Scan their code" looking chosen with no camera behind it.
+
 ## 1.8.1
 
 - **Real-time calls stayed at a small picture**, even on the same Wi-Fi: the bitrate estimate could only creep a
