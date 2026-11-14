@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.8.1
+
+- **Real-time calls stayed at a small picture**, even on the same Wi-Fi: the bitrate estimate could only creep a
+  little above what was arriving, and the video only sends what its current size needs (phone encoders often less) -
+  so it never got high enough for a bigger picture. Now the connection is probed, as WebRTC does: now and then a
+  short burst goes out faster than the video needs, and how fast it arrives shows what the link really carries.
+  The picture then jumps straight to the biggest size the link allows (e.g. 270p to 720p) instead of one step at a
+  time.
+- **Uneven frame rate on real-time calls:** the frames right after a keyframe could be refused, which made the video
+  send yet another keyframe - a stutter loop. Fixed.
+- **A call could stay frozen on one side** after a short drop that ended it on the other (when only one side lost its
+  connection and the other reconnected straight away). During a call both sides now check every few seconds that
+  they're still in the same call, and hanging up is also sent over the real-time path.
+- **New: "Prioritize frame rate over resolution"** (Settings - Calls, and the camera panel in a call), for both
+  connection options: the picture gets smaller first, frames are dropped only once it is at its smallest.
+- **QR codes:** Add someone > Internet now has a **Scan it** button for invite codes (it only had a field to paste
+  into). Codes are drawn bigger, with fewer, larger squares and the standard white border, so they are easier for
+  any camera to read (the phone's own scanner too), and the in-app scanner looks at the camera picture in full
+  1080p detail.
+
 ## 1.8.0
 
 Calls on weak connections.
