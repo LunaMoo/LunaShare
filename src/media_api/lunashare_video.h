@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define LSV_API_VERSION 4
+#define LSV_API_VERSION 5
 
 #if defined(_WIN32)
 #define LSV_EXPORT __declspec(dllexport)
@@ -58,6 +58,11 @@ typedef struct LsvHost {
     void (*log)(void* user, const char* message);
     void* java_vm;    /* Android: JavaVM* */
     void* java_class; /* Android: global reference to org.lunamoo.lunashare.VideoEngine */
+    /* --- since version 5 (may be NULL) --- */
+    /* what the path to the other side carries for voice + video together, bits per second, as measured by the
+     * host's real-time channel; 0 = not known (the module then adapts from queued_bytes as before). When known,
+     * the video's bitrate and picture size follow it - and start low, since the channel does. */
+    int (*link_bps)(void* user);
 } LsvHost;
 
 typedef struct LsvSettings {

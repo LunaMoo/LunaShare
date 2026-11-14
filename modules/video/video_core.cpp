@@ -315,6 +315,13 @@ public:
             int skippedNow = skipped.exchange(0);
             statsSkipped += skippedNow;
             if (!camOn || !settings.adaptive) { calmMs = 0; lowMs = 0; fullMs = 0; continue; }
+            // the host measures the path (real-time channel): follow that instead of guessing from queues
+            int link = host.link_bps ? host.link_bps(host.user) : 0;
+            if (link > 0) {
+                FollowLink(link, now);
+                calmMs = lowMs = fullMs = 0;
+                continue;
+            }
             LsvSettings run = LevelSettings(level);
             int cur = curBitrate, target = run.bitrate;
             size_t budget = std::max<size_t>(12000, (size_t)cur / 8 * 12 / 100);  // ~120 ms of video
@@ -357,29 +364,60 @@ public:
             bool canDown = level < kMaxLevel && !SameShape(LevelSettings(level + 1), run);
             if ((lowMs >= 2000 || devMs >= 1000) && canDown) want = level + 1;  // too few bits, or their decoder is behind
             else if (fullMs >= 12000 && level > 0 && now - lastLevelChange > 20000) want = level - 1;
-            if (want != level && now - lastLevelChange > 3000) {
-                std::lock_guard<std::mutex> l(m);
-                if (camOn) {
-                    bool up = want < level;
-                    level = want;
-                    LsvSettings ns = LevelSettings(want);
-                    if (up) curBitrate = std::min((int)curBitrate, ns.bitrate * 3 / 4);  // up: start gently
-                    else curBitrate = std::min((int)curBitrate, ns.bitrate);
-                    ns.bitrate = curBitrate;
-                    bool scaled = backend->Rescale(ns);  // (the camera keeps running: no black second, no stall)
-                    Log(std::string("quality ") + (up ? "up" : "down") + " to " + std::to_string(ns.width) + "x" + std::to_string(ns.height) +
-                        " @" + std::to_string(ns.fps) + " fps" + (scaled ? "" : " (camera restarted)"));
-                    if (scaled) {
-                        backend->RequestKeyframe();
-                    } else {
-                        backend->StopCamera();
-                        camOn = StartCameraLocked();
-                        if (!camOn) SendState();
-                    }
-                }
-                lastLevelChange = now;
-                lowMs = fullMs = 0;
+            if (want != level && now - lastLevelChange > 3000) ChangeLevel(want, now);
+        }
+    }
+
+    // a quality step: picture size / frame rate (the camera keeps running where the backend can scale)
+    void ChangeLevel(int want, int64_t now) {
+        std::lock_guard<std::mutex> l(m);
+        if (camOn) {
+            bool up = want < level;
+            level = want;
+            LsvSettings ns = LevelSettings(want);
+            if (up) curBitrate = std::min((int)curBitrate, ns.bitrate * 3 / 4);  // up: start gently
+            else curBitrate = std::min((int)curBitrate, ns.bitrate);
+            ns.bitrate = curBitrate;
+            bool scaled = backend->Rescale(ns);  // (the camera keeps running: no black second, no stall)
+            Log(std::string("quality ") + (up ? "up" : "down") + " to " + std::to_string(ns.width) + "x" + std::to_string(ns.height) +
+                " @" + std::to_string(ns.fps) + " fps" + (scaled ? "" : " (camera restarted)"));
+            if (scaled) {
+                backend->RequestKeyframe();
+            } else {
+                backend->StopCamera();
+                camOn = StartCameraLocked();
+                if (!camOn) SendState();
             }
+        }
+        lastLevelChange = now;
+        lowMs = fullMs = 0;
+    }
+
+    // Real-time channel: what the path carries is measured. The video gets that minus room for the voice, and the
+    // picture is the biggest whose bits per pixel still look good at it - straight down when the link drops, one
+    // step up at a time when there's been plenty for a while.
+    int upMs = 0;
+    void FollowLink(int link, int64_t now) {
+        int video = std::max(minBitrate, (int)(link * 0.9) - 40000);
+        auto bppAt = [&](int lv) {
+            LsvSettings ls = LevelSettings(lv);
+            return (double)video / std::max(1.0, (double)ls.width * ls.height * std::max(1, ls.fps));
+        };
+        int fit = kMaxLevel;
+        for (int lv = 0; lv <= kMaxLevel; lv++)
+            if (bppAt(lv) >= 0.045) { fit = lv; break; }
+        while (fit > 0 && SameShape(LevelSettings(fit), LevelSettings(fit - 1))) fit--;  // (the ladder can end early)
+        upMs = level > 0 && bppAt(level - 1) >= 0.07 ? upMs + 250 : 0;
+        if (fit > level && now - lastLevelChange > 1500) ChangeLevel(fit, now);  // too big for the link: at once
+        else if (upMs >= 5000 && now - lastLevelChange > 8000) {
+            ChangeLevel(level - 1, now);
+            upMs = 0;
+        }
+        int next = std::min(video, LevelSettings(level).bitrate);
+        int cur = curBitrate;
+        if (std::abs(next - cur) > cur / 20) {  // (5%: the encoder isn't told every wobble)
+            curBitrate = next;
+            if (backend) backend->SetBitrate(next);
         }
     }
     static constexpr int minBitrate = 50000;  // (180p at 15 fps still looks like a face at this)

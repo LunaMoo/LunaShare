@@ -120,7 +120,7 @@ void MediaHost::LoadVideo() {
             SDL_UnloadObject(lib);
             continue;
         }
-        vhost_ = LsvHost{LSV_API_VERSION, this, VSend, VImage, VState, VQueued, VLog, nullptr, nullptr};
+        vhost_ = LsvHost{LSV_API_VERSION, this, VSend, VImage, VState, VQueued, VLog, nullptr, nullptr, VLinkBps};
         if (Bridge().javaVm) vhost_.java_vm = Bridge().javaVm();
         if (Bridge().videoClass) vhost_.java_class = Bridge().videoClass();
         if (!m->init(&vhost_)) {
@@ -204,6 +204,10 @@ int MediaHost::VSend(void* u, const uint8_t* d, size_t n) {
         return 1;
     }
     return self->eng_ && self->eng_->SendMedia(d, n) ? 1 : 0;
+}
+int MediaHost::VLinkBps(void* u) {
+    auto* self = (MediaHost*)u;
+    return self->eng_ ? self->eng_->CallLinkBps() : 0;
 }
 size_t MediaHost::VQueued(void* u) {
     auto* self = (MediaHost*)u;

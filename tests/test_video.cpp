@@ -67,6 +67,8 @@ static size_t Queued(void*) {
     return L.hideQueue ? 0 : L.bytes;
 }
 static std::atomic<int> g_restarts{0};
+static std::atomic<int> g_link{0};  // the host's real-time estimate (0: none)
+static int LinkBps(void*) { return g_link.load(); }
 static void Log(void*, const char* m) {
     if (strstr(m, "camera restarted")) g_restarts++;
     printf("    [%s]\n", m);
@@ -79,7 +81,7 @@ int main() {
     setenv("LSV_FAKE_CODECS", "3", 1);
 #endif
     const LsvModule* m = lunashare_video_module();
-    static LsvHost host{LSV_API_VERSION, nullptr, Send, Image, State, Queued, Log, nullptr, nullptr};
+    static LsvHost host{LSV_API_VERSION, nullptr, Send, Image, State, Queued, Log, nullptr, nullptr, LinkBps};
     CHECK(m->init(&host) == 1, "init");
     LsvCamera cams[8];
     int nc = m->list_cameras(cams, 8);
@@ -219,6 +221,41 @@ int main() {
         L.kbps = 0;
         L.hideQueue = false;
         L.refuseAbove = 768 * 1024;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
+
+    printf("[video: follows the host's measured link (real-time channel)]\n");
+    {
+        LsvSettings hd{1280, 720, 30, 2500000, 1, 0};
+        m->set_settings(&hd);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        g_link = 300000;  // a call starting on the real-time channel: it starts low
+        bool small = false;
+        for (int i = 0; i < 16 && !small; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            small = L.remoteW > 0 && L.remoteW <= 640;
+        }
+        LsvStats sl;
+        m->get_stats(&sl);
+        CHECK(small, "picture fits 300 kbit/s at once (%dx%d)", L.remoteW.load(), L.remoteH.load());
+        CHECK(sl.send_kbps <= 300, "bitrate within the link (%d kbps)", sl.send_kbps);
+        int wSmall = L.remoteW;
+        g_link = 4000000;  // the estimate climbs
+        bool bigger = false;
+        for (int i = 0; i < 80 && !bigger; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            bigger = L.remoteW > wSmall;
+        }
+        CHECK(bigger, "steps back up when the link has room (%dx%d)", L.remoteW.load(), L.remoteH.load());
+        g_link = 120000;  // and drops
+        bool tiny = false;
+        for (int i = 0; i < 12 && !tiny; i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            tiny = L.remoteH > 0 && L.remoteH <= 270;
+        }
+        CHECK(tiny, "straight down when the link drops (%dx%d within 3 s)", L.remoteW.load(), L.remoteH.load());
+        g_link = 0;
+        m->set_settings(&s);
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
 

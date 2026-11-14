@@ -197,6 +197,7 @@ private:
     static void VImage(void* u, int src, const LsvImage* img);
     static void VState(void* u, int on);
     static size_t VQueued(void* u);
+    static int VLinkBps(void* u);
     static void VLog(void* u, const char* m);
     const LsvModule* vmod_ = nullptr;
     void* vlib_ = nullptr;

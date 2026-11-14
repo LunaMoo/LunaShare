@@ -110,7 +110,8 @@ int main(int argc, char** argv) {
                     static LsvHost vh{LSV_API_VERSION, nullptr,
                                       [](void*, const uint8_t* d, size_t n) { return eng->SendMedia(d, n) ? 1 : 0; },
                                       [](void*, int, const LsvImage*) {}, [](void*, int) {},
-                                      [](void*) { return eng->MediaQueuedBytes(); }, nullptr, nullptr, nullptr};
+                                      [](void*) { return eng->MediaQueuedBytes(); }, nullptr, nullptr, nullptr,
+                                      [](void*) { return eng->CallLinkBps(); }};
                     const LsvModule* vm = lunashare_video_module();
                     LsvSettings vs{960, 540, 24, 1800000, 1};
                     vm->init(&vh);
