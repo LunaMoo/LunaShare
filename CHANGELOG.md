@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.8.0
+
+Calls on weak connections.
+
+- **New: real-time connection for calls** (Settings - Calls, off by default). Voice and video go as separate
+  packets instead of one ordered stream, where a single lost packet held up everything behind it - voice included -
+  until it was sent again:
+  - a lost voice packet is simply covered up (the voice module's jitter buffer, Opus loss recovery)
+  - a lost piece of a video frame is asked for again while it can still arrive; a frame that can't be completed in
+    time is skipped instead of freezing the picture
+  - video is sent at the rate the path is measured to carry (delay and loss reported by the other side), so a big
+    frame doesn't hit the network as one burst; heavy loss without a queue building up (a bad radio link) doesn't
+    push the quality down for nothing
+  - calls start at a small, sharp picture and grow into what the connection allows, instead of starting big and
+    choking a weak connection
+  - works on the home network (a UDP port of its own) and over the internet, directly or through the server's relay
+  - used in calls with one person when **both sides** have it on; otherwise - or when it can't get through (blocked
+    UDP, Bluetooth, a network change) - the call uses the usual connection, as before
+  - the call's statistics (call bar tooltip, camera panel) show how it's doing: loss each way, round trip, rate
+- **Video calls go lower on a slow connection:** down to 180p and 50 kbit/s (was 360p and 100 kbit/s), so a weak
+  link gets a small clear picture rather than a blocky, stuttering one.
+- **Changing the picture size no longer restarts the camera:** stepping the quality down or up used to cost a
+  second of black and a fresh keyframe, right when the connection was struggling. Windows and Linux now scale the
+  picture in front of the encoder; Android keeps the camera open and only remakes the encoder.
+- **Server / OPNsense plugin 1.3:** relays the real-time call packets. With an older server, relayed calls simply
+  keep using the usual connection.
+
 ## 1.7.12
 
 - **Watching together:** switching movies quickly (next, next, back - or while the other side was still loading)
