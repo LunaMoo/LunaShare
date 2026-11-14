@@ -7,9 +7,9 @@
     </field>
     <field>
         <id>general.port</id>
-        <label>UDP port</label>
+        <label>Port</label>
         <type>text</type>
-        <help>Port the devices use to reach this server (default 47830). In LunaShare enter your public address or DynDNS name and this port, for example home.example.com:47830.</help>
+        <help>Port the devices use to reach this server (default 47830): UDP - and also TCP when "Links for anyone" is on (the devices keep a TCP connection on it for the links). In LunaShare enter your public address or DynDNS name and this port, for example home.example.com:47830.</help>
     </field>
     <field>
         <id>general.listen</id>
@@ -22,7 +22,7 @@
         <id>general.autorule</id>
         <label>Allow on WAN</label>
         <type>checkbox</type>
-        <help>Automatically add a firewall rule that passes UDP traffic to this port on the WAN interface. Disable this if you prefer to create the rule yourself.</help>
+        <help>Automatically add the firewall rules on the WAN interface: UDP to the port above, and with "Links for anyone" on also TCP to the port above and to the links' port. Disable this if you prefer to create the rules yourself (then remember the TCP ones for links).</help>
     </field>
     <field>
         <id>general.rooms</id>
