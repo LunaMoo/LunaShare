@@ -1414,6 +1414,9 @@ bool MediaHost::OpenScanner() {
     // 1080p whatever the call setting says: a long code (an invite) is a dense QR, and its squares need pixels
     LsvSettings vs = Preset(3, 30, false);
     if (!StartVideoModule(&vs)) return false;
+    // the camera's full picture to read from: the light self-view (Android: ~320 pixels wide unless "full
+    // self-view" is on) is far too coarse for a dense code - some phones then never read it
+    if (vmod_->api_version >= 4 && vmod_->set_full_preview) vmod_->set_full_preview(1);
     // the back camera (phones), else any real one - not the screen
     std::string pick;
     for (auto& c : Cameras())
@@ -1456,6 +1459,8 @@ void MediaHost::CloseScanner() {
     scanCv_.notify_all();
     if (scanThread_.joinable()) scanThread_.join();
     vmsgOpen_ = false;
+    if (vmod_->api_version >= 4 && vmod_->set_full_preview)  // (back to the user's self-view setting)
+        vmod_->set_full_preview(eng_ && eng_->GetSettings().callFullPreview ? 1 : 0);
     if (!camId_.empty()) vmod_->select_camera(camId_.c_str());  // (calls keep their camera)
     else
         for (auto& c : Cameras())
