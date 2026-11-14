@@ -523,6 +523,7 @@ static bool ImeSync(App& app) {
 // creates the screen anew, in the same process - the engine may then already be running (core.h).
 static int RunScreen(int argc, char** argv) {
     applog::Init();  // (from the start: Settings - About copies it)
+    applog::CrashReportsInit();  // (lunashare-crash.txt in the LunaShare folder, if the app ever stops)
 #ifdef _WIN32
     SetProcessDPIAware();
 #endif

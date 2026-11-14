@@ -12,7 +12,16 @@
 #include <thread>
 
 #if !defined(_WIN32)
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <string.h>
+#include <sys/prctl.h>
+#include <ucontext.h>
 #include <unistd.h>
+#include <unwind.h>
+#else
+#include <windows.h>
 #endif
 #if defined(__ANDROID__)
 #include <android/log.h>
@@ -102,7 +111,11 @@ bool On() {
 #endif
 }
 
+char g_crashPath[1024] = {0};  // (read in the crash handler: a plain buffer, written before any crash can happen)
+
 void SetDir(const std::string& dir) {
+    if (!dir.empty() && dir.size() + 24 < sizeof(g_crashPath))
+        snprintf(g_crashPath, sizeof(g_crashPath), "%s/lunashare-crash.txt", dir.c_str());
     if (!On() || dir.empty()) return;
     std::string path = dir + "/lunashare-log.txt";
     std::string text;
@@ -158,6 +171,147 @@ void Add(const std::string& line) {
         g_bytes -= g_lines.front().size() + 1;
         g_lines.pop_front();
     }
+}
+
+// ------------------------------------------------------------------------------------------------ crash reports
+
+namespace {
+void CrashWrite(const std::string& text) {
+    if (!g_crashPath[0]) return;
+    FILE* f = fopen(g_crashPath, "ab");
+    if (!f) return;
+    fputs(text.c_str(), f);
+    fclose(f);
+}
+
+#if !defined(_WIN32)
+struct sigaction g_oldAct[NSIG];
+
+struct Bt {
+    uintptr_t* pcs;
+    int n, max;
+};
+_Unwind_Reason_Code BtStep(_Unwind_Context* c, void* arg) {
+    Bt* b = (Bt*)arg;
+    uintptr_t pc = _Unwind_GetIP(c);
+    if (pc) {
+        if (b->n >= b->max) return _URC_END_OF_STACK;
+        b->pcs[b->n++] = pc;
+    }
+    return _URC_NO_REASON;
+}
+
+void WriteAll(int fd, const char* s) {
+    size_t n = strlen(s);
+    while (n) {
+        ssize_t w = write(fd, s, n);
+        if (w <= 0) return;
+        s += w;
+        n -= (size_t)w;
+    }
+}
+
+void WritePc(int fd, int i, uintptr_t pc) {
+    char b[600];
+    Dl_info di;
+    if (dladdr((void*)pc, &di) && di.dli_fname) {
+        const char* f = strrchr(di.dli_fname, '/');
+        f = f ? f + 1 : di.dli_fname;
+        snprintf(b, sizeof(b), "  #%02d %s+0x%lx%s%s%s\n", i, f, (unsigned long)(pc - (uintptr_t)di.dli_fbase),
+                 di.dli_sname ? " (" : "", di.dli_sname ? di.dli_sname : "", di.dli_sname ? ")" : "");
+    } else {
+        snprintf(b, sizeof(b), "  #%02d 0x%lx\n", i, (unsigned long)pc);
+    }
+    WriteAll(fd, b);
+}
+
+const char* SigName(int s) {
+    switch (s) {
+        case SIGSEGV: return "SIGSEGV (bad memory access)";
+        case SIGBUS: return "SIGBUS";
+        case SIGFPE: return "SIGFPE";
+        case SIGILL: return "SIGILL";
+        case SIGABRT: return "SIGABRT (abort)";
+        default: return "?";
+    }
+}
+
+void OnSignal(int sig, siginfo_t* si, void* ucv) {
+    int fd = g_crashPath[0] ? open(g_crashPath, O_WRONLY | O_CREAT | O_APPEND, 0644) : -1;
+    if (fd >= 0) {
+        char b[400];
+        char thread[32] = {0};
+        prctl(PR_GET_NAME, thread, 0, 0, 0);
+        snprintf(b, sizeof(b), "\n==== LunaShare " LUNASHARE_VERSION " crashed (time %ld): signal %d %s, address %p, thread \"%s\"\n",
+                 (long)time(nullptr), sig, SigName(sig), si ? si->si_addr : nullptr, thread);
+        WriteAll(fd, b);
+        uintptr_t pc = 0;
+        ucontext_t* uc = (ucontext_t*)ucv;
+        if (uc) {
+#if defined(__aarch64__)
+            pc = (uintptr_t)uc->uc_mcontext.pc;
+#elif defined(__arm__)
+            pc = (uintptr_t)uc->uc_mcontext.arm_pc;
+#elif defined(__x86_64__)
+            pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__i386__)
+            pc = (uintptr_t)uc->uc_mcontext.gregs[REG_EIP];
+#endif
+        }
+        if (pc) {
+            WriteAll(fd, "where:\n");
+            WritePc(fd, 0, pc);
+        }
+        uintptr_t pcs[48];
+        Bt bt{pcs, 0, 48};
+        _Unwind_Backtrace(BtStep, &bt);
+        WriteAll(fd, "backtrace:\n");
+        for (int i = 0; i < bt.n; i++) WritePc(fd, i, pcs[i]);
+        close(fd);
+    }
+    // the system's own handling, as before (Android: its crash dialog and report)
+    sigaction(sig, &g_oldAct[sig], nullptr);
+    raise(sig);
+}
+#else
+LONG WINAPI OnException(EXCEPTION_POINTERS* ep) {
+    char b[600];
+    void* addr = ep->ExceptionRecord->ExceptionAddress;
+    HMODULE mod = nullptr;
+    char name[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)addr, &mod))
+        GetModuleFileNameA(mod, name, sizeof(name));
+    const char* f = strrchr(name, '\\');
+    snprintf(b, sizeof(b), "\n==== LunaShare " LUNASHARE_VERSION " crashed (time %ld): exception 0x%08lx at %s+0x%llx\n", (long)time(nullptr),
+             (unsigned long)ep->ExceptionRecord->ExceptionCode, f ? f + 1 : name,
+             (unsigned long long)((uintptr_t)addr - (uintptr_t)mod));
+    CrashWrite(b);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+}  // namespace
+
+void CrashReportsInit() {
+    static std::atomic<bool> done{false};
+    if (done.exchange(true)) return;
+#if !defined(_WIN32)
+    static char altStack[64 * 1024];  // (a crash from running out of stack still gets reported)
+    stack_t ss{};
+    ss.ss_sp = altStack;
+    ss.ss_size = sizeof(altStack);
+    sigaltstack(&ss, nullptr);
+    struct sigaction sa{};
+    sa.sa_sigaction = OnSignal;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    for (int s : {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT}) sigaction(s, &sa, &g_oldAct[s]);
+#else
+    SetUnhandledExceptionFilter(OnException);
+#endif
+}
+
+void CrashText(const std::string& text) {
+    CrashWrite("\n==== LunaShare " LUNASHARE_VERSION " crashed (time " + std::to_string((long)time(nullptr)) + "): " + text + "\n");
 }
 
 std::string Text() {

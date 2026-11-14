@@ -11,4 +11,10 @@ void SetDir(const std::string& dir);  // where lunashare-log.txt goes (the LunaS
 bool On();                // a test build: the log is kept
 void Add(const std::string& line);
 std::string Text();       // the recent lines, oldest first
+
+// Crash reports (every build, not only test builds): a native crash (a signal) or an uncaught Java exception writes
+// what happened - the faulting place and a backtrace - to lunashare-crash.txt in the LunaShare folder (SetDir), then
+// lets the system handle the crash as before. Something to send along when the app "stopped".
+void CrashReportsInit();                  // (once; after that SetDir also says where the crash file goes)
+void CrashText(const std::string& text);  // appends to the crash file (the Java handler's report)
 }  // namespace applog

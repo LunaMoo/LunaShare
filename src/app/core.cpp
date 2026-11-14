@@ -39,6 +39,7 @@ ls::Engine& Make() {
     std::lock_guard<std::recursive_mutex> l(g_m);
     if (g_engine) return *g_engine;
     applog::Init();  // (the log, from the start: Settings - About copies it)
+    applog::CrashReportsInit();
     g_engine = new ls::Engine();
     ls::Engine& e = *g_engine;
     e.appVersion = LUNASHARE_VERSION;  // (told to the others: what they can do with us)

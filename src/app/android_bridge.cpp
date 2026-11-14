@@ -4,6 +4,7 @@
 #include <atomic>
 #include <string>
 
+#include "applog.h"
 #include "engine.h"
 #include "imgui.h"
 #include "music.h"
@@ -460,6 +461,13 @@ void AndroidBridgeShutdown() {
 }
 
 // The phone's network changed (NetWatch.java; Android's connectivity thread)
+// an uncaught Java exception (LunaShareActivity's handler): into lunashare-crash.txt, before the app goes down
+extern "C" JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_LunaShareActivity_nativeJavaCrash(JNIEnv* env, jclass, jstring text) {
+    const char* t = text ? env->GetStringUTFChars(text, nullptr) : nullptr;
+    applog::CrashText(std::string("Java exception, ") + (t ? t : "?"));
+    if (t) env->ReleaseStringUTFChars(text, t);
+}
+
 extern "C" JNIEXPORT void JNICALL Java_org_lunamoo_lunashare_NetWatch_nativeNetworkChanged(JNIEnv*, jclass, jboolean force) {
     if (ls::Engine* e = g_engine.load()) e->NetworkChanged(force != JNI_FALSE);
 }

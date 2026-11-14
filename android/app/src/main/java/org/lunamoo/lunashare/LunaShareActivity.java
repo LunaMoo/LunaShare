@@ -120,6 +120,7 @@ public class LunaShareActivity extends SDLActivity {
     static native int nativeAdoptBluetooth(String addr, boolean initiator);
     static native void nativeOnHotspot(boolean active, String ssid, String pass, String error);
     static native void nativeOnError(String message);
+    static native void nativeJavaCrash(String text);  // into lunashare-crash.txt (see applog.h)
     static native void nativeOnIntent(String action, String key);  // a notification was tapped (or "decline")
     static native void nativeQuickReply(String key, String text);  // Reply / Mark as read (text empty) under a message's notification
     static native void nativeMusic(int cmd, long arg);             // the music notification / lock screen / headset buttons
@@ -131,10 +132,28 @@ public class LunaShareActivity extends SDLActivity {
     }
 
     @Override
+    private static boolean crashReportInstalled;
+
+    /** An uncaught Java exception on any thread: written to lunashare-crash.txt, then handled as before. */
+    private static void installCrashReport() {
+        if (crashReportInstalled) return;
+        crashReportInstalled = true;
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try {
+                java.io.StringWriter sw = new java.io.StringWriter();
+                e.printStackTrace(new java.io.PrintWriter(sw));
+                nativeJavaCrash("thread \"" + t.getName() + "\": " + sw);
+            } catch (Throwable ignored) {}
+            if (prev != null) prev.uncaughtException(t, e);
+        });
+    }
+
     protected void onCreate(Bundle savedInstanceState) {
         self = this;
         appCtx = getApplicationContext();
         super.onCreate(savedInstanceState);
+        installCrashReport();
         org.libsdl.app.LunaIme.install(this);  // (the keyboard talks to the text field as it is - see LunaIme)
         handleIntent(getIntent());
     }
