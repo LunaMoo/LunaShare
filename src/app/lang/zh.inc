@@ -1554,3 +1554,7 @@
 {"Connected to the server: the link works from anywhere.", "已连接服务器：链接在任何地方都可用。"},
 {"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "未连接到链接服务器(%s) - 在连接前，外部会显示此设备离线；正在重试。"},
 {"Connecting to the server...", "正在连接服务器..."},
+{"Real-time connection for calls (better on weak networks)", "通话使用实时连接（网络较差时更好）"},
+{"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "语音和视频作为独立的数据包发送，而不是一条有序的流：丢失一个包不会拖住后面的所有内容，画质从低开始，逐步提升到连接能承载的水平。仅用于一对一通话且双方都开启时；否则（或无法连通时）通话照旧进行。"},
+{"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "实时：接收丢失 %.1f%%，发送丢失 %.1f%%，往返 %d 毫秒，约 %d kbit/s"},
+{"Real-time path not getting through - using the usual connection", "实时通道无法连通——正在使用常规连接"},

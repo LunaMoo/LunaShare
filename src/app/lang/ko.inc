@@ -1554,3 +1554,7 @@
 {"Connected to the server: the link works from anywhere.", "서버에 연결됨: 링크는 어디서나 작동합니다."},
 {"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "링크 서버에 연결되지 않음 (%s) - 연결될 때까지 외부에서는 이 기기가 오프라인으로 보입니다. 다시 시도 중."},
 {"Connecting to the server...", "서버에 연결하는 중..."},
+{"Real-time connection for calls (better on weak networks)", "통화에 실시간 연결 사용 (약한 네트워크에서 더 좋음)"},
+{"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "음성과 영상을 하나의 순서 있는 스트림 대신 개별 패킷으로 보냅니다. 패킷 하나가 손실되어도 그 뒤의 모든 것이 막히지 않으며, 화질은 낮게 시작해 연결이 감당하는 만큼 올라갑니다. 1:1 통화에서 양쪽 모두 켜져 있을 때 사용되며, 그렇지 않거나 연결되지 않으면 기존 방식으로 통화합니다."},
+{"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "실시간: 수신 손실 %.1f%%, 송신 손실 %.1f%%, 왕복 %d ms, 약 %d kbit/s"},
+{"Real-time path not getting through - using the usual connection", "실시간 경로가 연결되지 않음 - 기존 연결 사용 중"},

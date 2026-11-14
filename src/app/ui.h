@@ -433,6 +433,7 @@ private:
     // calls (only when the optional media module is installed)
     void DrawCallBar();
     void DrawIncomingCall();
+    std::string RealtimeLine();  // the call's real-time channel, for the stats ("" when it has none)
     bool CallButton(const std::string& peer, float size, bool video = false);
     bool WebcamButton(const std::string& peer, float size);  // PC: "use this phone as webcam"; phone: "send my camera to this PC"
     bool WebcamButtonShown(const std::string& peer) const;

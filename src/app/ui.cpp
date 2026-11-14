@@ -4337,6 +4337,8 @@ void App::DrawCallBar() {
                          vs.encoder[0] ? vs.encoder : "-", vs.decoder[0] ? vs.decoder : "-");
                 vid = b;
             }
+            std::string rt = RealtimeLine();
+            if (!rt.empty()) vid += "\n" + rt;
             ImGui::SetTooltip(T("Packet loss %.1f%%  jitter %d ms  delay %d ms  %d kbps\nsent %d / received %d packets%s%s%s"), st.loss_percent,
                               st.jitter_ms, st.buffered_ms, st.bitrate_kbps, st.packets_out, st.packets_in, vid.c_str(),
                               Media().audioError.empty() ? "" : "\n", Media().audioError.c_str());
@@ -4779,8 +4781,27 @@ void App::DrawCameraPanel() {
     ImGui::TextDisabled(T("Sending %dx%d, %d fps, %d kbps"), vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps);
     if (vs.encoder[0]) ImGui::TextDisabled(T("Encoder: %s"), vs.encoder);
     if (vs.recv_width) ImGui::TextDisabled(T("Receiving %dx%d, %d fps, %d kbps"), vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps);
+    std::string rt = RealtimeLine();
+    if (!rt.empty()) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("%s", rt.c_str());
+        ImGui::PopTextWrapPos();
+    }
     if (mobile && ImGui::Button(T("Close"), ImVec2(w, h))) camPanel = false;
     ImGui::End();
+}
+
+// How the call's real-time channel is doing ("" when the call has none)
+std::string App::RealtimeLine() {
+    RtStats st;
+    if (!eng.CallRtStats(st)) return "";
+    char b[256];
+    if (st.ready)
+        snprintf(b, sizeof(b), T("Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s"), st.lossInPct10 / 10.0,
+                 st.lossOutPct10 / 10.0, st.rttMs, st.estimateKbps);
+    else
+        snprintf(b, sizeof(b), "%s", T("Real-time path not getting through - using the usual connection"));
+    return b;
 }
 
 void App::DrawIncomingCall() {
@@ -5107,6 +5128,10 @@ void App::DrawCallSettings(float fieldW, float h, bool& changed) {
     }
     ImGui::TextDisabled("%s - %s", Media().ModuleName().c_str(), Media().loadInfo.c_str());
     AudioCallControls(fieldW, h, changed);
+    changed |= ui::Checkbox(T("Real-time connection for calls (better on weak networks)"), &edit.callRealtime);
+    ui::HelpMarker(T("Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up "
+                   "everything after it, and the quality starts low and grows into what the connection carries. Used in calls "
+                   "with one person when both sides have it on; otherwise - or when it can't get through - calls work as before."));
     if (Media().VideoAvailable()) {
         changed |= VideoQualityControls(edit, fieldW, h);
         ui::HelpMarker(T("Picture size and frame rate you send in video calls. Lower uses less battery and data; you can also change it during a call."));

@@ -1548,3 +1548,7 @@
 {"Connected to the server: the link works from anywhere.", "Підключено до сервера: посилання працює звідусіль."},
 {"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "Немає з'єднання з сервером посилань (%s) - ззовні цей пристрій виглядає офлайн, доки не під'єднається; повторюю."},
 {"Connecting to the server...", "Підключення до сервера..."},
+{"Real-time connection for calls (better on weak networks)", "З'єднання в реальному часі для дзвінків (краще при слабкій мережі)"},
+{"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "Голос і відео йдуть окремими пакетами, а не одним упорядкованим потоком: втрачений пакет не затримує все, що йде за ним, а якість починається з низької й зростає до того, що витримує з'єднання. Використовується у дзвінках з однією людиною, коли в обох сторін це увімкнено; інакше - або якщо не вдається пройти - дзвінки працюють як раніше."},
+{"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "Реальний час: втрати %.1f%% на прийомі, %.1f%% на відправленні, %d мс туди й назад, близько %d кбіт/с"},
+{"Real-time path not getting through - using the usual connection", "Канал реального часу не проходить - використовується звичайне з'єднання"},

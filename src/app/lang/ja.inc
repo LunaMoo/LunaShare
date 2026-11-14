@@ -1554,3 +1554,7 @@
 {"Connected to the server: the link works from anywhere.", "サーバーに接続済み: リンクはどこからでも使えます。"},
 {"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "リンク用サーバーに未接続 (%s) - 接続されるまで外からはこの端末がオフラインに見えます。再試行中。"},
 {"Connecting to the server...", "サーバーに接続中..."},
+{"Real-time connection for calls (better on weak networks)", "通話にリアルタイム接続を使う（弱い回線で有利）"},
+{"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "音声と映像を1本の順序付きストリームではなく個別のパケットとして送ります。失われたパケットが後続すべてを止めることがなく、画質は低く始まって回線が運べるところまで上がります。1対1の通話で両方がオンのときに使われます。それ以外、または通らない場合は従来どおり通話します。"},
+{"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "リアルタイム: 受信の損失 %.1f%%、送信の損失 %.1f%%、往復 %d ms、約 %d kbit/s"},
+{"Real-time path not getting through - using the usual connection", "リアルタイム経路が通りません - 通常の接続を使用中"},

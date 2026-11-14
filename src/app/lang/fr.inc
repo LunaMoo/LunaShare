@@ -1542,3 +1542,7 @@
 {"Connected to the server: the link works from anywhere.", "Connecté au serveur : le lien fonctionne de partout."},
 {"Not connected to the server for links (%s) - from outside it shows this device as offline until it is; trying again.", "Pas connecté au serveur de liens (%s) - de l'extérieur, cet appareil apparaît hors ligne d'ici là ; nouvelle tentative."},
 {"Connecting to the server...", "Connexion au serveur..."},
+{"Real-time connection for calls (better on weak networks)", "Connexion temps réel pour les appels (meilleure sur un réseau faible)"},
+{"Voice and video go as separate packets instead of one ordered stream, so a lost packet doesn't hold up everything after it, and the quality starts low and grows into what the connection carries. Used in calls with one person when both sides have it on; otherwise - or when it can't get through - calls work as before.", "La voix et la vidéo partent en paquets séparés au lieu d'un seul flux ordonné : un paquet perdu ne bloque pas tout ce qui suit, et la qualité commence basse puis monte jusqu'à ce que la connexion supporte. Utilisé dans les appels avec une personne quand les deux côtés l'ont activé ; sinon - ou s'il ne passe pas - les appels fonctionnent comme avant."},
+{"Real-time: %.1f%% lost coming in, %.1f%% going out, %d ms round trip, about %d kbit/s", "Temps réel : %.1f%% perdus en réception, %.1f%% en envoi, %d ms aller-retour, environ %d kbit/s"},
+{"Real-time path not getting through - using the usual connection", "Le chemin temps réel ne passe pas - la connexion habituelle est utilisée"},
