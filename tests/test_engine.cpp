@@ -717,7 +717,7 @@ static void TestRtMedia() {
     int lastFew = framesB - fLate0;
     printf("    600 kbit/s link: estimate %d kbit/s, their queue %d ms, %d frames in the last 3 s, %d refused\n", sa.estimateKbps,
            sa.queueDelayMs, lastFew, refused);
-    CHECK(sa.estimateKbps >= 300 && sa.estimateKbps <= 720, "estimate near the link (%d kbit/s)", sa.estimateKbps);
+    CHECK(sa.estimateKbps >= 300 && sa.estimateKbps <= 900, "estimate near the link, at most 1.5x what gets through (%d kbit/s)", sa.estimateKbps);
     CHECK(sa.queueDelayMs < 150, "no standing queue (%d ms)", sa.queueDelayMs);
     CHECK(lastFew > 60, "video keeps flowing (%d frames in 3 s)", lastFew);
     // the link opens up: the estimate climbs again

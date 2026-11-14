@@ -392,8 +392,9 @@ void RtMedia::OnFeedback(const uint8_t* b, size_t n, int64_t now) {
     } else if (qd < 25 && loss < 0.03 && lossOutPct10_ < 30 && now >= holdUntil_) {
         double grow = est < 1000000 ? 0.15 : 0.08;  // per second: quicker while still low
         est = (int)(est * (1.0 + grow * dt));
-        // not far above what is actually sent (an encoder sending less mustn't let the estimate run away)
-        est = std::min(est, std::max(kStartBps, sentBps_ * 2 + 100000));
+        // not far above what actually gets through (as GCC does: 1.5x what arrives) - an encoder sending less than
+        // the estimate mustn't let it climb past the link unnoticed, to overshoot the moment it's used
+        est = std::min(est, std::max(kStartBps, std::min(sentBps_ * 2 + 100000, kbps * 1000 * 3 / 2 + 50000)));
     }
     estimate_ = std::clamp(est, kMinBps, 50000000);
     // pieces they're missing: again, ahead of new ones, if still worth it
