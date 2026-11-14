@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "vcam_shared.h"
+#include "scale.h"
 #include "screen_grab.h"
 #include "video_backend.h"
 
@@ -682,6 +683,8 @@ public:
         }
         s_ = s;
         bitrate_ = s.bitrate;
+        boxW_ = boxH_ = encFps_ = 0;
+        gate_ = FrameGate();
         run_ = true;
         std::mutex wm;
         std::condition_variable wcv;
@@ -713,6 +716,20 @@ public:
     void StopCamera() override {
         run_ = false;
         if (th_.joinable()) th_.join();
+    }
+
+    // smaller pictures: scaled down in front of the encoder (reopened at the new size), the camera keeps running.
+    // (The screen keeps its size: Rescale is then simply a no-op.)
+    bool ScalesDown() const override { return true; }
+    bool Rescale(const LsvSettings& s) override {
+        if (!run_) return false;
+        boxW_ = s.width;
+        boxH_ = s.height;
+        encFps_ = s.fps;
+        bitrate_ = s.bitrate;
+        newBitrate_ = true;
+        keyReq_ = true;
+        return true;
     }
 
     void SetBitrate(int bps) override {
@@ -991,6 +1008,7 @@ private:
             amp_ = source_.As<IAMVideoProcAmp>();
         }
         std::string e;
+        encW_ = encH_ = 0;  // (the camera's size)
         if (!OpenEncoder(&e)) {
             *err = e;
             return false;
@@ -998,17 +1016,21 @@ private:
         return true;
     }
 
-    bool OpenEncoder(std::string* err) {
+    bool OpenEncoder(std::string* err, int w = 0, int h = 0, int fps = 0) {
+        if (!w) w = encW_ ? encW_ : w_, h = encW_ ? encH_ : h_;
+        if (!fps) fps = s_.fps;
+        encW_ = w;
+        encH_ = h;
         enc_ = std::make_unique<Encoder>();
         std::string e1;
-        if (!triedSoftwareOnly_ && enc_->Open(w_, h_, s_.fps, bitrate_, true, &e1)) {
+        if (!triedSoftwareOnly_ && enc_->Open(w, h, fps, bitrate_, true, &e1)) {
             SetEncName(enc_->name + " (hardware)");
             return true;
         }
         enc_->Close();
         enc_ = std::make_unique<Encoder>();
         std::string e2;
-        if (enc_->Open(w_, h_, s_.fps, bitrate_, false, &e2)) {
+        if (enc_->Open(w, h, fps, bitrate_, false, &e2)) {
             SetEncName(enc_->name.empty() ? "H.264 (software)" : enc_->name);
             return true;
         }
@@ -1038,6 +1060,7 @@ private:
             if (ok) {
                 w_ = grab.Width();
                 h_ = grab.Height();
+                encW_ = encH_ = 0;
                 ok = OpenEncoder(&startErr);
             }
             {
@@ -1137,15 +1160,39 @@ private:
             sink_->OnLocalImage(img);  // webcams: mirrored self-view like a mirror
 
             if (!enc_) continue;
+            int64_t nowMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (!gate_.Pass(encFps_, nowMs)) continue;  // (a lower frame rate than the camera's)
+            int ew, eh;
+            FitInBox(w_, h_, boxW_, boxH_, 16, ew, eh);
+            if (ew != encW_ || eh != encH_) {  // the size changed: a new encoder for it
+                enc_->Close();
+                std::string e;
+                if (!OpenEncoder(&e, ew, eh, encFps_ > 0 ? (int)encFps_ : s_.fps)) {
+                    sink_->Log("encoder at " + std::to_string(ew) + "x" + std::to_string(eh) + " failed (" + e + "), back to full size");
+                    boxW_ = boxH_ = 0;
+                    if (!OpenEncoder(&e, w_, h_, s_.fps)) {
+                        sink_->OnCameraError("no working H.264 encoder: " + e);
+                        break;
+                    }
+                }
+                keyReq_ = true;
+            }
+            const uint8_t* encData = frame.data();
+            if (encW_ != w_ || encH_ != h_) {
+                img.mirror = 0;
+                ScaleYuv420(img, encW_, encH_, true, scaled_);
+                encData = scaled_.data();
+            }
             if (newBitrate_.exchange(false)) enc_->SetBitrate(bitrate_);
             if (keyReq_.exchange(false)) enc_->ForceKey();
-            enc_->Encode(frame.data(), ts, [&](const uint8_t* d, size_t n, bool key) {
+            enc_->Encode(encData, ts, [&](const uint8_t* d, size_t n, bool key) {
                 EncodedFrame f;
                 f.data = d;
                 f.len = n;
                 f.key = key;
-                f.width = w_;
-                f.height = h_;
+                f.width = encW_;
+                f.height = encH_;
                 f.codec = kH264;
                 sink_->OnEncoded(f);
             });
@@ -1274,6 +1321,10 @@ private:
     bool triedSoftwareOnly_ = false;
     std::thread th_;
     int w_ = 0, h_ = 0;
+    int encW_ = 0, encH_ = 0;                          // the size the encoder is open at
+    std::atomic<int> boxW_{0}, boxH_{0}, encFps_{0};   // Rescale(): the box to fit the sent picture into, its frame rate
+    FrameGate gate_;
+    std::vector<uint8_t> scaled_;
     Com<IMFMediaSource> source_;
     Com<IMFSourceReader> reader_;
     std::mutex ctlM_, nameM_;

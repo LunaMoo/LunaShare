@@ -24,6 +24,7 @@
 #include <thread>
 
 #include "screen_grab.h"
+#include "scale.h"
 #include "video_backend.h"
 
 namespace lsv {
@@ -300,6 +301,8 @@ public:
         }
         s_ = s;
         bitrate_ = s.bitrate;
+        boxW_ = boxH_ = encFps_ = 0;
+        gate_ = FrameGate();
         std::string dev = id;
         if (dev.empty()) {
             for (auto& c : Cameras())
@@ -329,6 +332,18 @@ public:
 
     void SetBitrate(int bps) override { bitrate_ = bps; }
     void RequestKeyframe() override { keyReq_ = true; }
+    // smaller pictures: scaled down in front of the encoder (which is reopened at the new size), camera untouched
+    bool ScalesDown() const override { return true; }
+    bool Rescale(const LsvSettings& s) override {
+        if (!run_) return false;
+        boxW_ = s.width;
+        boxH_ = s.height;
+        encFps_ = s.fps;
+        bitrate_ = s.bitrate;
+        keyReq_ = true;
+        encCv_.notify_one();
+        return true;
+    }
 
     // ---------------------------------------------------------------- camera controls (V4L2)
     std::vector<LsvControl> Controls() override {
@@ -800,8 +815,35 @@ private:
             }
             int W = w_ & ~1, H = h_ & ~1;
             if (work.size() < (size_t)W * H * 3 / 2) continue;
-            enc_.SetBitrate(bitrate_);
+            int64_t nowMs = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (!gate_.Pass(screen_ ? 0 : (int)encFps_, nowMs)) continue;  // (a lower frame rate than the camera's)
             LsvImage img{W, H, work.data(), work.data() + (size_t)W * H, work.data() + (size_t)W * H * 5 / 4, W, W / 2, 1, 0, 0};
+            int ew, eh;
+            FitInBox(W, H, boxW_, boxH_, 2, ew, eh);
+            if (ew != enc_.Width() || eh != enc_.Height()) {  // the size changed: a new encoder for it
+                std::string e;
+                int fps = encFps_ > 0 ? (int)encFps_ : fps_;
+                if (!enc_.Open(ew, eh, fps, bitrate_, &e)) {
+                    sink_->Log("encoder at " + std::to_string(ew) + "x" + std::to_string(eh) + " failed (" + e + "), back to full size");
+                    boxW_ = boxH_ = 0;
+                    ew = W;
+                    eh = H;
+                    if (!enc_.Open(W, H, fps_, bitrate_, &e)) {
+                        sink_->OnCameraError("no working H.264 encoder: " + e);
+                        return;
+                    }
+                }
+                std::lock_guard<std::mutex> l(nameM_);
+                encName_ = enc_.Name();
+            }
+            if (ew != W || eh != H) {
+                ScaleYuv420(img, ew, eh, false, scaled_);
+                img = LsvImage{ew, eh, scaled_.data(), scaled_.data() + (size_t)ew * eh, scaled_.data() + (size_t)ew * eh * 5 / 4, ew, ew / 2, 1, 0, 0};
+                W = ew;
+                H = eh;
+            }
+            enc_.SetBitrate(bitrate_);
             bool ok = enc_.Encode(img, keyReq_.exchange(false), [&](const uint8_t* d, size_t n, bool key) {
                 EncodedFrame f;
                 f.data = d;
@@ -854,8 +896,10 @@ private:
     std::thread capThread_, encThread_;
     std::mutex ctlM_, nameM_, encM_;
     std::condition_variable encCv_;
-    std::vector<uint8_t> pending_;
+    std::vector<uint8_t> pending_, scaled_;
     bool havePending_ = false;
+    std::atomic<int> boxW_{0}, boxH_{0}, encFps_{0};  // Rescale(): the box to fit the sent picture into, its frame rate
+    FrameGate gate_;
     int fd_ = -1, w_ = 0, h_ = 0, stride_ = 0, fps_ = 30;
     uint32_t fourcc_ = 0;
     bool streaming_ = false, test_ = false, screen_ = false;

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <thread>
 
+#include "scale.h"
 #include "video_backend.h"
 
 namespace lsv {
@@ -39,6 +40,8 @@ public:
         s_ = s;
         bitrate_ = s.bitrate;
         front_ = id == "front";
+        boxW_ = boxH_ = encFps_ = 0;
+        restarts++;
         run_ = true;
         th_ = std::thread([this] { Loop(); });
         return true;
@@ -48,6 +51,17 @@ public:
         if (th_.joinable()) th_.join();
     }
     void SetBitrate(int bps) override { bitrate_ = bps; }
+    // like the desktop backends: the camera keeps its size, the encoder gets a scaled-down picture
+    bool ScalesDown() const override { return getenv("LSV_FAKE_NO_SCALE") == nullptr; }
+    bool Rescale(const LsvSettings& s) override {
+        if (!ScalesDown() || !run_) return false;
+        boxW_ = s.width;
+        boxH_ = s.height;
+        encFps_ = s.fps;
+        bitrate_ = s.bitrate;
+        key_ = true;
+        return true;
+    }
     void RequestKeyframe() override { key_ = true; }
     std::vector<LsvControl> Controls() override { return {{LSV_CTL_ZOOM, 1, 4, 0.1f, zoom_}}; }
     void SetControl(int id, float v) override {
@@ -86,6 +100,7 @@ public:
     std::string DecoderName() override { return "test"; }
 
     std::atomic<int> lastFrame{-1};
+    static inline std::atomic<int> restarts{0};  // camera (re)starts, for the tests
 
 private:
     void Loop() {
@@ -108,6 +123,25 @@ private:
             int rot = getenv("LSV_FAKE_ROTATION") ? atoi(getenv("LSV_FAKE_ROTATION")) : 0;  // pretend to be a phone sensor
             LsvImage im{w, h, yp.data(), uvp.data(), uvp.data() + 1, w, w, 2, rot, front_ ? 1 : 0};
             sink_->OnLocalImage(im);
+            next += std::chrono::milliseconds(1000 / fps);
+            if (!gate_.Pass(encFps_, (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now().time_since_epoch()).count())) {
+                frame++;
+                std::this_thread::sleep_until(next);
+                continue;
+            }
+            int camW = w, camH = h;
+            const uint8_t* Yp = yp.data();
+            const uint8_t* UVp = uvp.data();
+            int ew, eh;
+            FitInBox(camW, camH, boxW_, boxH_, 2, ew, eh);
+            if (ew != camW || eh != camH) {
+                ScaleYuv420(im, ew, eh, true, scaled_);
+                Yp = scaled_.data();
+                UVp = scaled_.data() + (size_t)ew * eh;
+                w = ew;
+                h = eh;
+            }
             bool key = key_.exchange(false) || frame % (fps * 2) == 0;
             // "quality" follows the bitrate: the coarsest grid that fits it
             int f = 4;
@@ -123,9 +157,9 @@ private:
             for (int y = 0; y < sh; y++)
                 for (int x = 0; x < sw; x++) {
                     size_t sy = (size_t)(y * f), sx = (size_t)(x * f);
-                    out[13 + y * sw + x] = yp[sy * w + sx];
-                    out[13 + sw * sh + y * sw + x] = uvp[(sy / 2) * w + (sx & ~(size_t)1)];
-                    out[13 + 2 * sw * sh + y * sw + x] = uvp[(sy / 2) * w + (sx & ~(size_t)1) + 1];
+                    out[13 + y * sw + x] = Yp[sy * w + sx];
+                    out[13 + sw * sh + y * sw + x] = UVp[(sy / 2) * w + (sx & ~(size_t)1)];
+                    out[13 + 2 * sw * sh + y * sw + x] = UVp[(sy / 2) * w + (sx & ~(size_t)1) + 1];
                 }
             EncodedFrame ef;
             ef.data = out.data();
@@ -137,8 +171,9 @@ private:
             ef.codec = codec_;
             ef.mirror = front_;
             sink_->OnEncoded(ef);
+            w = camW;
+            h = camH;
             frame++;
-            next += std::chrono::milliseconds(1000 / fps);
             std::this_thread::sleep_until(next);
         }
     }
@@ -151,7 +186,9 @@ private:
     int codec_ = 0;
     float zoom_ = 1;
     std::thread th_;
-    std::vector<uint8_t> img_, uv_;
+    std::vector<uint8_t> img_, uv_, scaled_;
+    std::atomic<int> boxW_{0}, boxH_{0}, encFps_{0};
+    FrameGate gate_;
 };
 
 }  // namespace

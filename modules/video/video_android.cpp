@@ -159,6 +159,17 @@ public:
 
     void RequestKeyframe() override { CallV("requestKeyframe"); }
 
+    // a new encoder + capture session on the camera that stays open (no second of black, no reopening)
+    bool Rescale(const LsvSettings& s) override {
+        Env e;
+        if (!e || !g_cls) return false;
+        jmethodID m = M(e.env, "rescale", "(IIII)Z");
+        if (!m) { Clear(e.env); return false; }
+        jboolean ok = e->CallStaticBooleanMethod(g_cls, m, s.width, s.height, s.fps, s.bitrate);
+        Clear(e.env);
+        return ok;
+    }
+
     std::vector<LsvControl> Controls() override {
         std::vector<LsvControl> out;
         std::istringstream in(CallStr("controls"));

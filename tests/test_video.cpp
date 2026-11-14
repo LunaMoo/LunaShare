@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <random>
@@ -65,7 +66,11 @@ static size_t Queued(void*) {
     std::lock_guard<std::mutex> l(L.m);
     return L.hideQueue ? 0 : L.bytes;
 }
-static void Log(void*, const char* m) { printf("    [%s]\n", m); }
+static std::atomic<int> g_restarts{0};
+static void Log(void*, const char* m) {
+    if (strstr(m, "camera restarted")) g_restarts++;
+    printf("    [%s]\n", m);
+}
 
 int main() {
 #ifdef _WIN32
@@ -183,6 +188,7 @@ int main() {
             tiny = L.remoteH > 0 && L.remoteH <= 180;
         }
         CHECK(tiny, "down to %dx%d (180p) on a 70 kbit/s link", L.remoteW.load(), L.remoteH.load());
+        CHECK(g_restarts == 0, "every step without restarting the camera (%d restarts)", g_restarts.load());
         LsvStats st3;
         m->get_stats(&st3);
         CHECK(st3.send_kbps <= 80 && st3.send_kbps > 0, "bitrate below the old 100 kbit/s floor (%d kbps)", st3.send_kbps);

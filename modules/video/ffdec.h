@@ -55,6 +55,8 @@ public:
     bool IsOpen() const { return ctx_ != nullptr; }
     bool Hardware() const { return name_.find("GPU") != std::string::npos; }
     std::string Name() const { return name_; }
+    int Width() const { return w_; }
+    int Height() const { return h_; }
     void SetBitrate(int bps);
     // I420 picture; out() gets the encoded frames (zero or more)
     bool Encode(const LsvImage& img, bool forceKey, const std::function<void(const uint8_t*, size_t, bool key)>& out);

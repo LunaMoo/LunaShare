@@ -48,6 +48,12 @@ public:
     virtual bool StartCamera(const std::string& id, const LsvSettings& s, int codec, std::string* err) = 0;
     virtual void StopCamera() = 0;
     virtual void SetBitrate(int bps) = 0;
+    // A different picture size / frame rate while the camera keeps running (s: the box to fit into, its fps and
+    // bitrate). Returns false when the backend can't - the core then restarts the camera with the new settings.
+    virtual bool Rescale(const LsvSettings&) { return false; }
+    // true: Rescale() works by scaling down what the camera takes, so the camera should run at the full size the
+    // user picked (the picture can then also grow back without a restart)
+    virtual bool ScalesDown() const { return false; }
     virtual void RequestKeyframe() = 0;
     virtual std::vector<LsvControl> Controls() = 0;
     virtual void SetControl(int id, float value) = 0;

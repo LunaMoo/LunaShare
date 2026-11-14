@@ -466,6 +466,73 @@ public final class VideoEngine {
         return false;
     }
 
+    /**
+     * A different picture size / frame rate during a call with the camera left open: only the encoder and the
+     * capture session are made again. False when that's not possible here (the caller then restarts the camera).
+     */
+    public static boolean rescale(int w, int h, int frameRate, int bitrate) {
+        final CameraDevice cam;
+        final int myGen;
+        synchronized (lock) {
+            cam = camera;
+            myGen = openGen;
+        }
+        if (cam == null || chars == null || highSpeed || frameRate > 60) return false;
+        try {
+            StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            Size[] all = map.getOutputSizes(MediaCodec.class);
+            Size want = pick(all, w, h);
+            Size size = null;
+            int newFps = frameRate;
+            for (int tryFps : new int[]{frameRate, 30, 24, 15}) {
+                if (tryFps > frameRate) continue;
+                size = largestSupported(all, want, tryFps);
+                if (size != null) { newFps = tryFps; break; }
+            }
+            if (size == null) size = want;
+            synchronized (lock) {
+                try { if (session != null) session.close(); } catch (Exception ignored) {}
+                session = null;
+                request = null;
+            }
+            try { if (encoder != null) { encoder.stop(); encoder.release(); } } catch (Exception ignored) {}
+            encoder = null;
+            if (encSurface != null) encSurface.release();
+            encSurface = null;
+            width = size.getWidth() & ~1;
+            height = size.getHeight() & ~1;
+            fps = newFps;
+            if (!openEncoder(bitrate)) return false;
+            final CountDownLatch done = new CountDownLatch(1);
+            final boolean[] ok = {false};
+            List<Surface> targets = preview != null ? Arrays.asList(encSurface, preview.getSurface()) : Arrays.asList(encSurface);
+            cam.createCaptureSession(targets, new CameraCaptureSession.StateCallback() {
+                @Override public void onConfigured(CameraCaptureSession s) {
+                    synchronized (lock) {
+                        if (myGen != openGen || camera != cam) {  // stopped meanwhile
+                            try { s.close(); } catch (Exception ignored) {}
+                            done.countDown();
+                            return;
+                        }
+                        session = s;
+                    }
+                    ok[0] = applyRequest();
+                    done.countDown();
+                }
+                @Override public void onConfigureFailed(CameraCaptureSession s) {
+                    nativeLog("capture session failed (new size)");
+                    done.countDown();
+                }
+            }, cbHandler);
+            if (!done.await(5, TimeUnit.SECONDS) || !ok[0]) return false;
+            nativeLog("picture now " + width + "x" + height + " @ " + fps + " fps (camera kept open)");
+            return true;
+        } catch (Exception e) {
+            nativeLog("rescale: " + e);
+            return false;
+        }
+    }
+
     public static void stopCamera() {
         synchronized (lock) {
             openGen++;  // (an open still on its way closes itself when it arrives)

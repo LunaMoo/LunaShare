@@ -363,13 +363,19 @@ public:
                     bool up = want < level;
                     level = want;
                     LsvSettings ns = LevelSettings(want);
-                    Log(std::string("quality ") + (up ? "up" : "down") + " to " + std::to_string(ns.width) + "x" + std::to_string(ns.height) +
-                        " @" + std::to_string(ns.fps) + " fps");
                     if (up) curBitrate = std::min((int)curBitrate, ns.bitrate * 3 / 4);  // up: start gently
                     else curBitrate = std::min((int)curBitrate, ns.bitrate);
-                    backend->StopCamera();
-                    camOn = StartCameraLocked();
-                    if (!camOn) SendState();
+                    ns.bitrate = curBitrate;
+                    bool scaled = backend->Rescale(ns);  // (the camera keeps running: no black second, no stall)
+                    Log(std::string("quality ") + (up ? "up" : "down") + " to " + std::to_string(ns.width) + "x" + std::to_string(ns.height) +
+                        " @" + std::to_string(ns.fps) + " fps" + (scaled ? "" : " (camera restarted)"));
+                    if (scaled) {
+                        backend->RequestKeyframe();
+                    } else {
+                        backend->StopCamera();
+                        camOn = StartCameraLocked();
+                        if (!camOn) SendState();
+                    }
                 }
                 lastLevelChange = now;
                 lowMs = fullMs = 0;
@@ -573,8 +579,11 @@ public:
             return false;
         }
         cameraId = id;
-        LsvSettings s = LevelSettings(level);
-        s.bitrate = std::min((int)curBitrate, s.bitrate);
+        LsvSettings lv = LevelSettings(level);
+        // a backend that scales takes the camera at the full size picked and sends the level's size from it
+        bool scales = backend->ScalesDown();
+        LsvSettings s = scales ? settings : lv;
+        s.bitrate = std::min((int)curBitrate, lv.bitrate);
         std::string err;
         int codec = ChooseCodec();
         if (!backend->StartCamera(id, s, codec, &err)) {
@@ -587,6 +596,10 @@ public:
         }
         curCodec = codec;
         needKey = false;
+        if (scales && level > 0) {
+            lv.bitrate = s.bitrate;
+            backend->Rescale(lv);
+        }
         backend->RequestKeyframe();
         return true;
     }
