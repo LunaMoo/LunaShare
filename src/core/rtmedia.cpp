@@ -383,9 +383,12 @@ void RtMedia::OnFeedback(const uint8_t* b, size_t n, int64_t now) {
         holdUntil_ = std::max(holdUntil_, now + 1000);
     } else if (qd > 60 || loss > 0.10) {
         if (now - lastDecrease_ > std::max(rtt_, 200)) {
+            // 85% of what arrives (as GCC does) - not of the estimate, which would keep shrinking for as long as an
+            // old queue drains
             int recv = kbps * 1000;
-            int base = recv > 0 ? std::min(est, recv) : est;
-            est = std::max(kMinBps, (int)(base * 0.85));
+            // (at most half in one step: a half-second that happened to be nearly empty mustn't floor it)
+            int to = recv > 0 ? std::min(est, (int)(recv * 0.85)) : (int)(est * 0.85);
+            est = std::max(kMinBps, std::max(to, est / 2));
             lastDecrease_ = now;
             holdUntil_ = now + 1500;
         }

@@ -643,7 +643,15 @@ static void TestRtMedia() {
         for (int i = 0; i < 4; i++) f[2 + i] = (uint8_t)(frameNo >> (8 * i));
         return A->Send(f.data(), f.size());
     };
-    auto follow = [&] { return (size_t)std::max(500.0, A->LinkBps() * 0.8 / 8 / 30); };  // an encoder following the estimate
+    // an encoder following the estimate: each frame sized by the time since the last one (as a real encoder at a
+    // bitrate does - so coarse sleeps, like Windows' 15 ms timer, don't change the rate)
+    int64_t lastFrameAt = SteadyMs();
+    auto follow = [&] {
+        int64_t now = SteadyMs();
+        double dt = std::clamp((double)(now - lastFrameAt), 10.0, 200.0) / 1000.0;
+        lastFrameAt = now;
+        return (size_t)std::max(500.0, A->LinkBps() * 0.8 / 8 * dt);
+    };
     auto sendVoice = [&] {
         uint8_t v[60] = {1};
         A->Send(v, sizeof(v));
@@ -665,7 +673,7 @@ static void TestRtMedia() {
     int refusedL = 0;
     for (int i = 0; i < 150; i++) {  // 15 fps of frames twice the size: a few pieces each
         sendVoice();
-        if (!sendFrame(follow() * 2)) refusedL++;
+        if (!sendFrame(follow())) refusedL++;
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
         sendVoice();
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
@@ -689,7 +697,7 @@ static void TestRtMedia() {
     int sentH = 0;
     for (int i = 0; i < 100; i++) {
         sendVoice();
-        if (sendFrame(follow() * 2)) sentH++;
+        if (sendFrame(follow())) sentH++;
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
         sendVoice();
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
