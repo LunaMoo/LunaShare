@@ -1,0 +1,43 @@
+# Turns the offsets in a crash report (lunashare-crash.txt, e.g. "libmain.so+0x3d5f38") into functions, using the
+# unstripped Android libraries the build kept (artifact LunaShare-android-symbols). Run by hand:
+#   gh workflow run symbolize.yml -f run_id=<the build's run> -f addrs="libmain.so+0x1234 liblunashare_video.so+0x56"
+name: symbolize
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run of the build the crash report came from"
+        required: true
+      addrs:
+        description: "lib+offset entries from the crash report, separated by spaces"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  symbolize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LunaShare-android-symbols
+          path: symbols
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Look up the offsets
+        env:
+          ADDRS: ${{ inputs.addrs }}
+        run: |
+          A2L=$(ls $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-addr2line 2>/dev/null || command -v llvm-addr2line || command -v addr2line)
+          echo "using $A2L"; ls symbols
+          for e in $ADDRS; do
+            lib="${e%%+*}"; off="${e#*+}"
+            if [ -f "symbols/$lib" ]; then
+              echo "== $e"; "$A2L" -f -C -i -e "symbols/$lib" "$off"
+            else
+              echo "== $e: no symbols for $lib"
+            fi
+          done
