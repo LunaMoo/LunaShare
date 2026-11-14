@@ -82,7 +82,7 @@
         <id>general.linkport</id>
         <label>Links: HTTPS port</label>
         <type>text</type>
-        <help>TCP port of the link pages (default 47831; it must not be the port of this web interface). Devices also connect to TCP on the UDP port above. With "Allow on WAN" both TCP ports are opened on WAN.</help>
+        <help>TCP port of the link pages (default 47831; it must not be the port of this web interface). Devices also connect to TCP on the port above. With "Allow on WAN" both TCP ports are opened on WAN.</help>
     </field>
     <field>
         <id>general.linkcert</id>
