@@ -262,6 +262,51 @@ void OnSignal(int sig, siginfo_t* si, void* ucv) {
             WriteAll(fd, "where:\n");
             WritePc(fd, 0, pc);
         }
+        // A jump to a garbage address (a corrupted function pointer or return address) stops the unwinder right
+        // there - so also: who called (the link register), and the return addresses still on the stack.
+        uintptr_t sp = 0, lr = 0;
+        if (uc) {
+#if defined(__aarch64__)
+            lr = (uintptr_t)uc->uc_mcontext.regs[30];
+            sp = (uintptr_t)uc->uc_mcontext.sp;
+            WriteAll(fd, "registers:\n");
+            for (int i = 0; i < 31; i += 4) {
+                char r[200];
+                int k = 0;
+                for (int j = i; j < i + 4 && j < 31; j++)
+                    k += snprintf(r + k, sizeof(r) - k, " x%-2d %016lx", j, (unsigned long)uc->uc_mcontext.regs[j]);
+                snprintf(r + k, sizeof(r) - k, "\n");
+                WriteAll(fd, r);
+            }
+#elif defined(__arm__)
+            lr = (uintptr_t)uc->uc_mcontext.arm_lr;
+            sp = (uintptr_t)uc->uc_mcontext.arm_sp;
+#elif defined(__x86_64__)
+            sp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+            lr = sp ? *(uintptr_t*)sp : 0;  // (x86: the return address is the top of the stack when a call went wild)
+#endif
+        }
+        if (lr) {
+            WriteAll(fd, "called from (lr):\n");
+            WritePc(fd, 0, lr);
+        }
+        if (sp) {
+            WriteAll(fd, "return addresses on the stack (most recent first; some may be stale):\n");
+            const uintptr_t* st = (const uintptr_t*)sp;
+            int found = 0;
+            for (int i = 0; i < 768 && found < 40; i++) {
+                uintptr_t v = st[i];
+                Dl_info di;
+                if (v < 0x10000 || !dladdr((void*)v, &di) || !di.dli_fname) continue;
+                if (!strstr(di.dli_fname, "lunashare") && !strstr(di.dli_fname, "libmain") && !strstr(di.dli_fname, "libSDL2") &&
+                    !strstr(di.dli_fname, "libc++"))
+                    continue;  // (our own code is what matters here)
+                char pre[48];
+                snprintf(pre, sizeof(pre), "  [sp+0x%x]", i * (int)sizeof(uintptr_t));
+                WriteAll(fd, pre);
+                WritePc(fd, found++, v);
+            }
+        }
         uintptr_t pcs[48];
         Bt bt{pcs, 0, 48};
         _Unwind_Backtrace(BtStep, &bt);

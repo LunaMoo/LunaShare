@@ -263,6 +263,17 @@ jobs:
         with:
           name: LunaShare-android
           path: apk-out/*.apk
+      # the libraries before stripping: they turn the offsets in a crash report (lunashare-crash.txt) into functions
+      - name: Keep the unstripped libraries
+        run: |
+          mkdir -p symbols
+          find android/app/build/intermediates -path "*/obj/arm64-v8a/*.so" -exec cp {} symbols/ \;
+          ls -la symbols
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LunaShare-android-symbols
+          path: symbols/*.so
+          retention-days: 60
 
   opnsense:
     runs-on: ubuntu-24.04
