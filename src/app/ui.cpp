@@ -4444,13 +4444,25 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         ImVec2 ms = ImGui::CalcTextSize(msg.c_str());
         dl->AddText(ImVec2(c.x - ms.x * 0.5f, c.y + r + ImGui::GetStyle().ItemSpacing.y), IM_COL32(220, 220, 220, 255), msg.c_str());
     }
-    if (remote && !local && Media().CameraOn()) {
-        const char* t = eng.settings.callVideoFps > 60 ? T("No self-view at 120 fps") : T("Starting camera...");
-        ImVec2 ts = ImGui::CalcTextSize(t);
+    static int64_t camWaitSince = 0;  // (when the camera was turned on without a picture of it yet)
+    if (!Media().CameraOn() || local) camWaitSince = 0;
+    else if (!camWaitSince) camWaitSince = nowMs;
+    if (!local && Media().CameraOn()) {
+        // no self-view: say what the camera is really doing, from what the encoder gets - in the high-speed mode
+        // (60/120 fps on many phones) the camera feeds only the encoder, so there's no picture of yourself to show
+        LsvStats vs = Media().VideoStats();
+        std::string t;
+        if (vs.encode_fps > 0)
+            t = std::string(T("No self-view in high-speed mode")) + "\n" + TF("Sending %dx%d at %d fps", vs.send_width, vs.send_height, vs.encode_fps);
+        else if (nowMs - camWaitSince > 6000)
+            t = T("The camera isn't giving any picture - try a lower frame rate");
+        else
+            t = T("Starting camera...");
+        ImVec2 ts = ImGui::CalcTextSize(t.c_str());
         float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
         ImVec2 a(p1.x - ts.x - m * 3, p1.y - ts.y - m * 3 - (phone ? ui::M().rowH * 1.6f : 0));
         dl->AddRectFilled(a, ImVec2(a.x + ts.x + m * 2, a.y + ts.y + m * 2), IM_COL32(0, 0, 0, 150), 6);
-        dl->AddText(ImVec2(a.x + m, a.y + m), IM_COL32(230, 230, 230, 255), t);
+        dl->AddText(ImVec2(a.x + m, a.y + m), IM_COL32(230, 230, 230, 255), t.c_str());
     }
     if (remote && local) {
         // the other picture in the corner (yourself, or them when swapped): a tap swaps the two, as in Messenger
