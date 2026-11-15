@@ -217,7 +217,6 @@ public final class VideoEngine {
             highSpeed = false;
             hsRate = 0;
             logCameraModes(id, map);
-        stopOrientation();
             Size size = null;
             // above 60 fps - or 60 when the normal mode can't, with "prioritize frame rate" on: the camera's constrained
             // high-speed mode, at the sizes it lists for it. Its fixed rate may be higher than wanted (120 for 60):
@@ -607,6 +606,7 @@ public final class VideoEngine {
         preview = null;
         highSpeed = false;
         hsRate = 0;
+        stopOrientation();
         if (camThread != null) camThread.quitSafely();
         if (encThread != null) encThread.quitSafely();
         camThread = encThread = null;
