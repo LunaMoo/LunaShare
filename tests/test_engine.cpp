@@ -721,12 +721,13 @@ static void TestRtMedia() {
     ab.kbps = 600;
     int sent = 0, refused = 0;
     int64_t until = SteadyMs() + 14000;
-    int fLate0 = 0;
+    int fLate0 = 0, minQueue = 1 << 30;
     while (SteadyMs() < until) {
         sendVoice();
         if (sendFrame(follow())) sent++;
         else refused++;
         if (until - SteadyMs() < 3000 && !fLate0) fLate0 = framesB;
+        if (until - SteadyMs() < 1000) minQueue = std::min(minQueue, A->Stats().queueDelayMs);  // (the last second)
         RtSleep(33);
     }
     sa = A->Stats();
@@ -734,7 +735,8 @@ static void TestRtMedia() {
     printf("    600 kbit/s link: estimate %d kbit/s, their queue %d ms, %d frames in the last 3 s, %d refused\n", sa.estimateKbps,
            sa.queueDelayMs, lastFew, refused);
     CHECK(sa.estimateKbps >= 300 && sa.estimateKbps <= 900, "estimate near the link, at most 1.5x what gets through (%d kbit/s)", sa.estimateKbps);
-    CHECK(sa.queueDelayMs < 150, "no standing queue (%d ms)", sa.queueDelayMs);
+    // (a queue that stays: the lowest in the last second - one look at the end caught a passing spike on busy machines)
+    CHECK(minQueue < 150, "no standing queue (%d ms at least in the last second, %d at the end)", minQueue, sa.queueDelayMs);
     CHECK(lastFew > 60, "video keeps flowing (%d frames in 3 s)", lastFew);
     // the link opens up: the estimate climbs again
     ab.kbps = 0;
@@ -873,7 +875,8 @@ static void TestConnReasons() {
         SocketHandle l = TcpListen(0, &freePort);  // (a port nothing listens on any more)
         CloseSocket(l);
     }
-    SocketHandle s = TcpConnect("127.0.0.1", freePort, 2000, &why);
+    // (5 s: Windows tries a refused connection again for about 2 s before it says so)
+    SocketHandle s = TcpConnect("127.0.0.1", freePort, 5000, &why);
     CHECK(s == kInvalidSocket && why == ConnFail::Refused, "closed port: refused (%d)", (int)why);
     s = TcpConnect("no-such-host.invalid", 48000, 2000, &why);
     CHECK(s == kInvalidSocket && why == ConnFail::BadAddress, "unknown name: no such address (%d)", (int)why);
