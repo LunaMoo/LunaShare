@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.3
+
+- **Android: the crash shortly after a video call started - found and fixed.** The video module attached its
+  threads to Java for each call and detached them right after; SDL keeps the Java connection of a thread that logs
+  through it, so when the picture changed size (which 1.8.1 does within seconds of a call starting) the next log
+  line used a connection that was already gone. Threads now stay attached until they end. (1.8.2's change to how
+  the old encoder is freed was not it.)
+- **Crash reports:** if the app ever stops, `lunashare-crash.txt` in the LunaShare folder says where (the faulting
+  place, who called it, a backtrace) - send it along. That's how this one was found.
+- **QR scanner on some phones (e.g. Xiaomi 12) never read a code:** it looked at the small self-view picture (~320
+  pixels wide). It now reads the camera's full picture.
+- **Real-time calls:** received packets reach the voice and video modules one at a time.
+
 ## 1.8.2
 
 - **Android: crash shortly after a video call started.** Changing the picture size in a call makes a new video
