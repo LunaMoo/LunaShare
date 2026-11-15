@@ -99,7 +99,8 @@ public:
     int64_t lastKeyAsk = 0;
 
     // per-second stats
-    std::atomic<int> sFpsOut{0}, sKbpsOut{0}, sFpsIn{0}, sKbpsIn{0};
+    std::atomic<int> sFpsOut{0}, sKbpsOut{0}, sFpsIn{0}, sKbpsIn{0}, sFpsEnc{0};
+    std::atomic<int> framesEncoded{0};
     std::thread decodeThread, timerThread;
 
     void Log(const std::string& msg) override {
@@ -139,6 +140,7 @@ public:
     // ---------------------------------------------------------------- Sink
     void OnEncoded(const EncodedFrame& f) override {
         if (!camOn || !running) return;
+        framesEncoded++;
         if (needKey && !f.key) {
             skipped++;
             int64_t now = NowMs();
@@ -274,6 +276,7 @@ public:
                 double sec = (now - lastStats) / 1000.0;
                 lastStats = now;
                 sFpsOut = (int)(framesOut.exchange(0) / sec + 0.5);
+                sFpsEnc = (int)(framesEncoded.exchange(0) / sec + 0.5);
                 sKbpsOut = (int)(bytesOut.exchange(0) * 8 / 1000 / sec);
                 sFpsIn = (int)(framesIn.exchange(0) / sec + 0.5);
                 sKbpsIn = (int)(bytesIn.exchange(0) * 8 / 1000 / sec);
@@ -744,7 +747,9 @@ void ApiStats(LsvStats* o) {
     o->recv_fps = c.sFpsIn;
     o->recv_kbps = c.sKbpsIn;
     o->frames_skipped = c.statsSkipped;
+    o->encode_fps = c.camOn ? c.sFpsEnc.load() : 0;
     std::lock_guard<std::mutex> l(c.m);
+    o->target_fps = c.camOn ? c.LevelSettings(c.level).fps : 0;
     if (c.backend) {
         snprintf(o->encoder, sizeof(o->encoder), "%s", c.backend->EncoderName().c_str());
         snprintf(o->decoder, sizeof(o->decoder), "%s", c.backend->DecoderName().c_str());

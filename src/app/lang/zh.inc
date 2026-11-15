@@ -1561,3 +1561,4 @@
 {"Prioritize frame rate over resolution", "优先保证帧率而非分辨率"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "保持你选择的帧率：先缩小画面，只有画面已经最小而连接仍跟不上时才会丢帧。"},
 {"Scan it", "扫描"},
+{"Camera: %d fps (asked for %d)", "摄像头：%d fps（请求 %d）"},

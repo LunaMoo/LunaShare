@@ -1545,3 +1545,4 @@
 {"Prioritize frame rate over resolution", "Priorizar a taxa de quadros sobre a resolução"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "Mantém a taxa de quadros escolhida: primeiro a imagem fica menor e só quando já está no menor tamanho e a conexão ainda não acompanha é que quadros são descartados."},
 {"Scan it", "Escanear"},
+{"Camera: %d fps (asked for %d)", "Câmera: %d fps (pedido %d)"},

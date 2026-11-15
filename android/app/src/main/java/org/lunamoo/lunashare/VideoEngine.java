@@ -227,7 +227,7 @@ public final class VideoEngine {
                 Size want = pick(all, w, h);
                 for (int tryFps : new int[]{fps, 60, 30, 24}) {
                     if (tryFps > fps) continue;
-                    size = largestSupported(all, want, tryFps);
+                    size = largestSupported(map, all, want, tryFps);
                     if (size != null) { fps = tryFps; break; }
                 }
                 if (size == null) size = want;
@@ -354,7 +354,7 @@ public final class VideoEngine {
     }
 
     /** Largest camera size not bigger than `want` (same aspect preferred) that the encoder handles at `rate`. */
-    private static Size largestSupported(Size[] all, Size want, int rate) {
+    private static Size largestSupported(StreamConfigurationMap map, Size[] all, Size want, int rate) {
         MediaCodecInfo.VideoCapabilities vc = avcCaps();
         Size best = null;
         double aspect = (double) want.getWidth() / want.getHeight();
@@ -362,6 +362,12 @@ public final class VideoEngine {
             if (s.getWidth() > want.getWidth() || s.getHeight() > want.getHeight()) continue;
             if (Math.abs((double) s.getWidth() / s.getHeight() - aspect) > 0.05) continue;
             if (vc != null && !vc.areSizeAndRateSupported(s.getWidth() & ~1, s.getHeight() & ~1, rate)) continue;
+            // ...and the camera must deliver that rate at this size: big pictures are often 30 fps at most (asking
+            // 60 of 2880x2160 quietly gave 30 - the frame rate setting then did nothing)
+            try {
+                long minDur = map.getOutputMinFrameDuration(MediaCodec.class, s);
+                if (minDur > 0 && minDur > 1_000_000_000L / rate + 1_000_000L) continue;
+            } catch (Exception ignored) {}
             if (best == null || (long) s.getWidth() * s.getHeight() > (long) best.getWidth() * best.getHeight()) best = s;
         }
         return best;
@@ -486,7 +492,7 @@ public final class VideoEngine {
             int newFps = frameRate;
             for (int tryFps : new int[]{frameRate, 30, 24, 15}) {
                 if (tryFps > frameRate) continue;
-                size = largestSupported(all, want, tryFps);
+                size = largestSupported(map, all, want, tryFps);
                 if (size != null) { newFps = tryFps; break; }
             }
             if (size == null) size = want;
@@ -601,6 +607,8 @@ public final class VideoEngine {
     }
 
     // ------------------------------------------------------------------ controls
+    private static boolean fpsWarned;
+
     private static Range<Integer> fpsRange() {
         Range<Integer>[] ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
         Range<Integer> best = null;
@@ -640,6 +648,10 @@ public final class VideoEngine {
                 }
                 Range<Integer> fr = highSpeed ? new Range<>(fps, fps) : fpsRange();
                 if (fr != null) request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fr);
+                else if (fps > 30 && !fpsWarned) {  // (it then runs at its default, usually 30)
+                    fpsWarned = true;
+                    nativeLog("this camera has no " + fps + " fps mode at " + width + "x" + height + " (outside high-speed)");
+                }
                 // zoom
                 float[] zr = zoomRange();
                 float z = Math.max(zr[0], Math.min(zr[1], zoom));

@@ -4785,6 +4785,9 @@ void App::DrawCameraPanel() {
     LsvStats vs = Media().VideoStats();
     ImGui::TextDisabled(T("Sending %dx%d, %d fps, %d kbps"), vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps);
     if (vs.encoder[0]) ImGui::TextDisabled(T("Encoder: %s"), vs.encoder);
+    // what the camera really delivers next to what this quality step asks for (a phone camera may not do 60 fps
+    // outside its high-speed mode; frames it delivers but the link can't take show as fewer sent)
+    if (vs.target_fps) ImGui::TextDisabled(T("Camera: %d fps (asked for %d)"), vs.encode_fps, vs.target_fps);
     if (vs.recv_width) ImGui::TextDisabled(T("Receiving %dx%d, %d fps, %d kbps"), vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps);
     std::string rt = RealtimeLine();
     if (!rt.empty()) {

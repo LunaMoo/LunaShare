@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#define LSV_API_VERSION 5
+#define LSV_API_VERSION 6
 
 #if defined(_WIN32)
 #define LSV_EXPORT __declspec(dllexport)
@@ -108,6 +108,9 @@ typedef struct LsvStats {
     int recv_width, recv_height, recv_fps, recv_kbps;
     int frames_skipped; /* not sent because the link was congested */
     char encoder[64], decoder[64];
+    /* since version 6: frames per second the encoder put out (what the camera really delivers - sent or not), and
+     * the rate asked of it at the current quality step */
+    int encode_fps, target_fps;
 } LsvStats;
 
 typedef struct LsvModule {

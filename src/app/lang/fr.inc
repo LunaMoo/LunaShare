@@ -1549,3 +1549,4 @@
 {"Prioritize frame rate over resolution", "Privilégier la fluidité à la résolution"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "Garde la fréquence d'images choisie : l'image devient d'abord plus petite, et des images ne sont sautées qu'une fois à la plus petite taille si la connexion ne suit toujours pas."},
 {"Scan it", "Scanner"},
+{"Camera: %d fps (asked for %d)", "Caméra : %d i/s (demandé %d)"},

@@ -1555,3 +1555,4 @@
 {"Prioritize frame rate over resolution", "Частота кадрів важливіша за роздільність"},
 {"Keeps the frame rate you picked: the picture gets smaller first, and only once it is at its smallest and the connection still can't keep up are frames dropped.", "Зберігає вибрану частоту кадрів: спершу зображення стає меншим, і лише коли воно вже найменше, а з'єднання все ще не встигає, кадри пропускаються."},
 {"Scan it", "Сканувати"},
+{"Camera: %d fps (asked for %d)", "Камера: %d к/с (запитано %d)"},
