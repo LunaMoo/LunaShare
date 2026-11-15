@@ -332,6 +332,7 @@ public:
 
     void SetBitrate(int bps) override { bitrate_ = bps; }
     void RequestKeyframe() override { keyReq_ = true; }
+    int IntraRefresh() const override { return enc_.IntraRefresh(); }
     // smaller pictures: scaled down in front of the encoder (which is reopened at the new size), camera untouched
     bool ScalesDown() const override { return true; }
     bool Rescale(const LsvSettings& s) override {

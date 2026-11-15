@@ -72,6 +72,8 @@ std::string CallStr(const char* name) {
 }
 
 // ------------------------------------------------------------------------ natives called by Java
+std::atomic<int> g_irPeriod{0};  // the encoder mends the picture in strips: its round in frames (0: no)
+
 void JNICALL NEncoded(JNIEnv* env, jclass, jobject buf, jint off, jint size, jboolean key, jint w, jint h, jint rot, jint codec) {
     auto* p = (const uint8_t*)env->GetDirectBufferAddress(buf);
     if (!p || !g_sink) return;
@@ -82,7 +84,8 @@ void JNICALL NEncoded(JNIEnv* env, jclass, jobject buf, jint off, jint size, jbo
     f.width = w;
     f.height = h;
     f.rotation = rot;
-    f.codec = codec;
+    f.codec = codec & 0xff;
+    g_irPeriod = codec >> 8;  // (VideoEngine: the encoder's intra refresh round, in the codec's upper bits)
     g_sink->OnEncoded(f);
 }
 
@@ -173,6 +176,7 @@ public:
     }
 
     void RequestKeyframe() override { CallV("requestKeyframe"); }
+    int IntraRefresh() const override { return g_irPeriod.load(); }
 
     // a new encoder + capture session on the camera that stays open (no second of black, no reopening)
     bool Rescale(const LsvSettings& s) override {

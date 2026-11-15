@@ -3,8 +3,10 @@
 // (HEVC/H.264; FFmpeg's AV1 decoder needs the GPU). Frames come out as NV12 or I420 LsvImages.
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <functional>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -61,6 +63,8 @@ public:
     // I420 picture; out() gets the encoded frames (zero or more)
     bool Encode(const LsvImage& img, bool forceKey, const std::function<void(const uint8_t*, size_t, bool key)>& out);
     bool FallBackToCpu(std::string* err);  // a GPU encoder failed while running
+    // x264 mends the picture in strips (intra refresh) instead of sending periodic keyframes: a round in frames, 0 if not
+    int IntraRefresh() const { return refresh_.load(); }
 
 private:
     bool OpenWith(const char* name, std::string* err);
@@ -74,6 +78,7 @@ private:
     int bitrate_ = 0, openedBitrate_ = 0, fps_ = 30, w_ = 0, h_ = 0;
     std::chrono::steady_clock::time_point lastReopen_{};
     std::string name_;
+    std::atomic<int> refresh_{0};
 };
 
 }  // namespace lsv

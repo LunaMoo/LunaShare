@@ -60,6 +60,9 @@ public:
     // user picked (the picture can then also grow back without a restart)
     virtual bool ScalesDown() const { return false; }
     virtual void RequestKeyframe() = 0;
+    // the encoder repairs the picture a strip at a time ("intra refresh"): the number of frames one round takes, 0 when
+    // it doesn't (then a lost frame waits for a keyframe). Cheap - called for every frame.
+    virtual int IntraRefresh() const { return 0; }
     virtual std::vector<LsvControl> Controls() = 0;
     virtual void SetControl(int id, float value) = 0;
     // decoding: called from the core's decode thread only

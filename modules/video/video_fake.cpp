@@ -63,6 +63,12 @@ public:
         return true;
     }
     void RequestKeyframe() override { key_ = true; }
+    // LSV_FAKE_INTRA_REFRESH: like an encoder that mends the picture in strips (a round a second, no periodic keyframes)
+    int IntraRefresh() const override {
+        if (!getenv("LSV_FAKE_INTRA_REFRESH")) return 0;
+        int f = encFps_ > 0 ? encFps_.load() : s_.fps;  // (encFps_ is set only once rescaled)
+        return f > 0 ? f : 30;
+    }
     std::vector<LsvControl> Controls() override { return {{LSV_CTL_ZOOM, 1, 4, 0.1f, zoom_}}; }
     void SetControl(int id, float v) override {
         if (id == LSV_CTL_ZOOM) zoom_ = v;
@@ -143,7 +149,7 @@ private:
                 w = ew;
                 h = eh;
             }
-            bool key = key_.exchange(false) || frame % (fps * 2) == 0;
+            bool key = key_.exchange(false) || (!IntraRefresh() && frame % (fps * 2) == 0);
             // "quality" follows the bitrate: the coarsest grid that fits it
             int f = 4;
             while (f < 64 && (size_t)((w / f) * (h / f) * 3) * (size_t)fps * 8 > (size_t)bitrate_ * 8 / 10) f *= 2;

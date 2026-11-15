@@ -413,6 +413,18 @@ public final class VideoEngine {
             if (Build.VERSION.SDK_INT >= 29) fmt.setInteger(MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1);
             encoder = MediaCodec.createEncoderByType(mime);
             MediaCodecInfo info = encoder.getCodecInfo();
+            // intra refresh (H.264, where the encoder has it): a strip of every frame made anew, so a lost frame mends
+            // itself within a round (a second) without a keyframe - the heaviest frame there is, wanted just when the
+            // link is worst. Asked-for keyframes stay real ones; the regular ones come far apart then.
+            irPeriod = 0;
+            if (Build.VERSION.SDK_INT >= 24 && encCodec == 0) {
+                MediaCodecInfo.CodecCapabilities cc = info.getCapabilitiesForType(mime);
+                if (cc != null && cc.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_IntraRefresh)) {
+                    fmt.setInteger(MediaFormat.KEY_INTRA_REFRESH_PERIOD, Math.max(1, fps));
+                    fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 20);
+                    irPeriod = Math.max(1, fps);
+                }
+            }
             MediaCodecInfo.EncoderCapabilities caps = info.getCapabilitiesForType(mime).getEncoderCapabilities();
             if (caps != null && caps.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR))
                 fmt.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR);
@@ -435,6 +447,9 @@ public final class VideoEngine {
                                     config = Arrays.copyOfRange(config, 4, config.length);
                             } else {
                                 boolean key = (bi.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
+                                // (intra refresh: some encoders flag where a round starts too - only an IDR is a keyframe)
+                                if (key && irPeriod > 0 && !hasNal(b, bi.offset, bi.size, 5)) key = false;
+                                int codecArg = encCodec | (irPeriod << 8);  // (the round goes along in the upper bits)
                                 if (key && config != null && !hasSps(b, bi.offset, bi.size)) {
                                     int need = config.length + bi.size;
                                     if (keyBuf == null || keyBuf.capacity() < need) keyBuf = ByteBuffer.allocateDirect(need * 2);
@@ -442,9 +457,9 @@ public final class VideoEngine {
                                     keyBuf.put(config);
                                     b.position(bi.offset).limit(bi.offset + bi.size);
                                     keyBuf.put(b);
-                                    nativeEncoded(keyBuf, 0, need, true, width, height, rotation(), encCodec);
+                                    nativeEncoded(keyBuf, 0, need, true, width, height, rotation(), codecArg);
                                 } else {
-                                    nativeEncoded(b, bi.offset, bi.size, key, width, height, rotation(), encCodec);
+                                    nativeEncoded(b, bi.offset, bi.size, key, width, height, rotation(), codecArg);
                                 }
                             }
                         }
@@ -469,6 +484,20 @@ public final class VideoEngine {
     }
 
     /** Does this keyframe already carry the stream headers (SPS / VPS / AV1 sequence header)? */
+    /** An H.264 NAL unit of this type (5: IDR) in the frame (Annex B start codes). */
+    private static boolean hasNal(ByteBuffer b, int off, int size, int type) {
+        int end = off + size;
+        for (int i = off; i + 3 < end; i++) {
+            if (b.get(i) == 0 && b.get(i + 1) == 0 && b.get(i + 2) == 1) {
+                if ((b.get(i + 3) & 0x1f) == type) return true;
+                i += 2;
+            }
+        }
+        return false;
+    }
+
+    private static volatile int irPeriod;  // the encoder's intra refresh round in frames (0: it has none)
+
     private static boolean hasSps(ByteBuffer b, int off, int size) {
         if (encCodec == 2) {
             // AV1: OBUs; a temporal delimiter (type 2) may come first

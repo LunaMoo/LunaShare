@@ -1,6 +1,7 @@
 // FFmpeg decoding, libraries loaded at run time. See ffdec.h.
 // SPDX-License-Identifier: GPL-3.0-only
 #include "ffdec.h"
+#include "video_backend.h"
 
 #include <algorithm>
 #include <chrono>
@@ -379,6 +380,8 @@ bool FfEncoder::Open(int width, int height, int fps, int bitrate, std::string* e
 }
 
 bool FfEncoder::OpenWith(const char* name, std::string* err) {
+    int refreshWanted = 0;
+    refresh_ = 0;
     const AVCodec* c = name ? (g_api.find_encoder_by_name ? g_api.find_encoder_by_name(name) : nullptr)
                             : g_api.find_encoder(AV_CODEC_ID_H264);
     if (!c) return false;  // not in this build
@@ -439,6 +442,16 @@ bool FfEncoder::OpenWith(const char* name, std::string* err) {
             g_api.opt_set(ctx->priv_data, "preset", pixels > 1920 * 1080 * 60 ? "ultrafast" : pixels > 1920 * 1080 * 30 ? "superfast" : "veryfast", 0);
             g_api.opt_set(ctx->priv_data, "tune", "zerolatency", 0);
             g_api.opt_set(ctx->priv_data, "profile", "high", 0);
+            // intra refresh: a strip of every frame made anew, so a lost frame mends itself within a round (a second)
+            // without a keyframe - the heaviest frame there is, wanted just when the link is worst. Asked-for
+            // keyframes stay real ones (forced-idr), for a decoder starting or failing.
+            if (!getenv("LUNASHARE_NO_INTRA_REFRESH") && g_api.opt_set(ctx->priv_data, "intra-refresh", "1", 0) >= 0) {
+                g_api.opt_set(ctx->priv_data, "forced-idr", "1", 0);
+                g_api.opt_set(ctx->priv_data, "x264-params", "scenecut=0", 0);  // (no surprise IDRs: a camera's noise
+                                                                                // alone set them off - 67 in 200 frames)
+                ctx->gop_size = fps_;  // (the round)
+                refreshWanted = fps_;
+            }
         }
     }
     if (g_api.open2(ctx, c, nullptr) < 0) {
@@ -470,6 +483,7 @@ bool FfEncoder::OpenWith(const char* name, std::string* err) {
     openedBitrate_ = bitrate_;
     std::string n = c->name;
     name_ = n == "libx264" ? "x264 (CPU)" : n == "h264_nvenc" ? "NVIDIA NVENC (GPU)" : n == "h264_vaapi" ? "VA-API (GPU)" : n;
+    refresh_ = refreshWanted;
     return true;
 }
 
@@ -577,7 +591,9 @@ bool FfEncoder::Encode(const LsvImage& img, bool forceKey, const std::function<v
         r = g_api.receive_packet(ctx, pkt);
         if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) break;
         if (r < 0) return false;
-        out(pkt->data, (size_t)pkt->size, (pkt->flags & AV_PKT_FLAG_KEY) != 0);
+        // (with intra refresh x264 marks the start of each round as "key" too: only a real IDR counts as one here)
+        bool key = refresh_ ? H264HasNal(pkt->data, (size_t)pkt->size, 5) : (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+        out(pkt->data, (size_t)pkt->size, key);
         g_api.packet_unref(pkt);
     }
     return true;

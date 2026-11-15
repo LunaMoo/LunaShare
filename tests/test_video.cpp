@@ -148,6 +148,21 @@ int main() {
     CHECK(got > 15, "video keeps going (%d frames in 3 s)", got);
     L.lossRate = 0;
 
+    printf("[video: 10%% packet loss with intra refresh - mended without keyframes]\n");
+    SetEnv("LSV_FAKE_INTRA_REFRESH", "1");
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));  // (a frame or two to say the stream mends itself)
+    L.lossRate = 0.10;
+    before = L.remote;
+    asks = L.keyAsks;
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    got = L.remote - before;
+    printf("    %d frames in 3 s, %d keyframes asked for\n", got, L.keyAsks - asks);
+    CHECK(L.keyAsks - asks <= 1, "no keyframe asked for after loss (%d)", L.keyAsks - asks);
+    CHECK(got > 35, "the video goes on through the gaps (%d frames in 3 s)", got);
+    L.lossRate = 0;
+    SetEnv("LSV_FAKE_INTRA_REFRESH", nullptr);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
     printf("[video: congested link]\n");
     L.kbps = 400;
     std::this_thread::sleep_for(std::chrono::milliseconds(6000));

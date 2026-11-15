@@ -4,7 +4,9 @@
 //   network -> host -> [packet] -> decode thread -> platform H.264 decoder -> host (draws it)
 //
 // Packets (first byte 2 = video, so the host can tell them from voice):
-//   [2][1][seq u32][flags u8: 1 = keyframe][rotation/90 u8][width u16][height u16][Annex B data]   one encoded frame
+//   [2][1][seq u32][flags u8: 1 = keyframe, 2 = intra refresh, bits 2-7 its period / 4 frames]
+//         [rotation/90 u8][width u16][height u16][Annex B data]                                   one encoded frame
+//         (older receivers read only the keyframe bit)
 //   [2][2]                                                                                       please send a keyframe
 //   [2][3][camera on u8]                                                                         camera state
 //   [2][4][max width u16][max height u16]                                                         "too big for my decoder"
@@ -13,7 +15,9 @@
 // Byte 12 of a frame packet is the codec (0 H.264, 1 HEVC, 2 AV1). The sender picks the best codec both sides have.
 //
 // Loss handling: a frame refused by the congested link or a gap in sequence numbers makes the decoder wait for the
-// next keyframe (asked for at most twice a second).
+// next keyframe (asked for at most twice a second) - unless the sender's encoder does intra refresh (a strip of the
+// picture made anew in every frame): then the decoder goes on through the gap and the picture mends itself within
+// one round, with no big keyframe sent at the moment the link is weakest. A decoder error still asks for one.
 //
 // Adaptation puts smoothness first: the bitrate follows what the link actually carries (checked four times a second,
 // cut hard as soon as ~120 ms of video waits in the queue, raised slowly), and when the bitrate stays too low for the
@@ -66,6 +70,7 @@ struct Packet {
     uint32_t seq = 0;
     int codec = 0;
     bool key = false;
+    int refresh = 0;  // the sender's intra refresh round in frames (0: none - a gap needs a keyframe)
     int rotation = 0, width = 0, height = 0;
 };
 
@@ -152,18 +157,25 @@ public:
         }
         std::vector<uint8_t> pkt(kHeader + f.len);
         uint32_t seq = seqOut++;
+        int ir = backend ? backend->IntraRefresh() : 0;
         pkt[0] = 2;
         pkt[1] = 1;
         Put32(&pkt[2], seq);
-        pkt[6] = f.key ? 1 : 0;
+        pkt[6] = (uint8_t)((f.key ? 1 : 0) | (ir > 0 ? 2 | (std::min(63, (ir + 3) / 4) << 2) : 0));
         pkt[7] = (uint8_t)(((f.rotation % 360 + 360) % 360) / 90);
         Put16(&pkt[8], (uint32_t)f.width);
         Put16(&pkt[10], (uint32_t)f.height);
         pkt[12] = (uint8_t)f.codec;
         memcpy(&pkt[kHeader], f.data, f.len);
         if (!Send(pkt.data(), pkt.size())) {
-            // the link is backed up: everything until the next keyframe would be undecodable, so skip to it
             skipped++;
+            if (ir > 0 && !f.key) {
+                // the link is backed up, and the picture mends itself: only this frame is left out (its strip comes
+                // round again) - no keyframe, the heaviest frame there is, while the link can carry least
+                seqOut = seq;
+                return;
+            }
+            // the link is backed up: everything until the next keyframe would be undecodable, so skip to it
             needKey = true;
             seqOut = seq;  // no gap for the receiver; it simply waits a little longer
             if (backend) backend->RequestKeyframe();
@@ -220,6 +232,7 @@ public:
     }
     int64_t errWindowStart = 0, lastLimitAsk = 0, overflowWindow = 0;
     int errCount = 0, overflows = 0;
+    std::atomic<int> gapsMended{0};  // (gaps decoded through, the sender's intra refresh mending them)
     std::atomic<bool> pendingTooSlow{false};
     std::atomic<int> limitW{0}, limitH{0};
 
@@ -245,7 +258,10 @@ public:
                 bool gap = haveSeq && p.seq != lastSeqIn + 1;
                 haveSeq = true;
                 lastSeqIn = p.seq;
-                if (gap && !p.key) waitingKey = true;
+                if (gap && !p.key) {
+                    if (p.refresh) gapsMended++;  // (the decoder goes on: the next round of strips mends the picture)
+                    else waitingKey = true;
+                }
                 if (p.key) waitingKey = false;
                 if (waitingKey) {
                     l.unlock();
@@ -574,6 +590,7 @@ public:
             Packet p;
             p.seq = Get32(d + 2);
             p.key = d[6] & 1;
+            p.refresh = (d[6] & 2) ? std::max(1, (d[6] >> 2) * 4) : 0;
             p.rotation = (d[7] & 3) * 90;
             p.width = (int)Get16(d + 8);
             p.height = (int)Get16(d + 10);
