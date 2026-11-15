@@ -911,7 +911,28 @@ int main() {
         CHECK(N->UseConnectCode("LSC1:" + std::string(64, 'a') + ":" + std::string(64, 'b') + ":99999:10.0.0.1", pub, verify) == 0, "connect code: a bad port");
         CHECK(N->UseConnectCode(A->ConnectCode(), pub, verify) == 1 && pub == A->MyPublicKey(), "connect code: alice's is taken");
         std::string got;
-        CHECK(WaitFor([&] { got = N->ConnectedDeviceByKey(pub); return !got.empty(); }, 15000) && got == idA, "connect code: connected to alice");
+        bool qrOk = WaitFor([&] { got = N->ConnectedDeviceByKey(pub); return !got.empty(); }, 15000) && got == idA;
+        CHECK(qrOk, "connect code: connected to alice");
+        if (!qrOk) {  // (flaky on CI runners only: say what happened)
+            std::string cc = A->ConnectCode();
+            printf("    code ips: %s (alice is %s, got '%s')\n", cc.substr(135).c_str(), idA.c_str(), got.c_str());
+            std::string ips = cc.substr(cc.find(':', 135) + 1);
+            for (size_t p0 = 0; p0 <= ips.size();) {
+                size_t e = ips.find(',', p0); if (e == std::string::npos) e = ips.size();
+                std::string ip = ips.substr(p0, e - p0);
+                SocketHandle t = TcpConnect(ip, (uint16_t)std::atoi(cc.substr(135, cc.find(':', 135) - 135).c_str()), 2000);
+                printf("    tcp to %s: %s\n", ip.c_str(), t != kInvalidSocket ? "ok" : "fails");
+                if (t != kInvalidSocket) CloseSocket(t);
+                p0 = e + 1;
+            }
+            {
+                auto l = N->Lock();
+                for (auto& [id, d] : N->devices)
+                    printf("    new one knows %s key %.8s connected %d\n", id.c_str(), d.pubKey.c_str(), (int)N->IsConnected(id));
+            }
+            for (auto& ev : N->PopEvents()) printf("    new one event %d %s: %s\n", (int)ev.type, ev.peer.c_str(), ev.text.c_str());
+            for (auto& ev : A->PopEvents()) printf("    alice event %d %s: %s\n", (int)ev.type, ev.peer.c_str(), ev.text.c_str());
+        }
         CHECK(N->VerifyByCode(got, verify) == 1, "connect code: and verified");
         {
             auto l = N->Lock();
