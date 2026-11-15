@@ -272,6 +272,8 @@ struct CallInfo {
     std::vector<std::string> invited;  // outgoing, ringing: every device of the person that was called
     std::string rtKey;       // real-time media (rtmedia.h): the call's key (hex; the caller makes it), if offered
     uint16_t rtPeerPort = 0; // ...and the other side's UDP port on the LAN
+    int64_t lostAt = 0;      // the connection went mid-call without a goodbye (steady ms): reconnecting until it's
+    int64_t lastRetry = 0;   // back or callGraceMs pass (calls with one person)
     // ---- group calls
     std::string group;       // "#id" (then peer == group)
     std::string inviter;     // incoming: the device that invited me
@@ -536,6 +538,7 @@ public:
     std::map<std::string, std::shared_ptr<SwarmDownload>> swarm;  // content id -> download
 
     std::vector<std::string> localCaps;  // set before Start(), e.g. {"voice"} when the media module is present
+    int callGraceMs = 30000;  // how long a call waits for its connection to come back after a drop (tests: less)
     std::string appVersion;              // sent in Hello ("1.7.10")
     std::string PeerVersion(const std::string& keyOrDevice);  // the app version of a connected device of theirs ("" = older than 1.7.10 / not connected); under Lock()
     std::string machineId;               // tests: instead of this computer's id (see MachineId)
@@ -625,6 +628,12 @@ public:
     void EndCallSilently() {
         auto lk = Lock();
         FinishCall("connection lost", false);
+    }
+    // tests: the connections to this device break without a goodbye (as when Wi-Fi goes)
+    void DropConnectionTo(const std::string& peer) {
+        auto lk = Lock();
+        for (auto& c : conns)
+            if (c->peerId == peer) ShutdownSocket(c->sock);
     }
     int CallLinkBps();
     uint16_t RtUdpPort() const { return rtUdpPort_; }
@@ -775,6 +784,8 @@ private:
     // ---- real-time media for calls with one person
     std::shared_ptr<RtMedia> rt_;  // guarded by mediaMtx_
     uint16_t rtLanPort_ = 0;       // the other side's UDP port (mediaMtx_)
+    std::string rtLastAddr_, rtLastPeer_;  // where call media last went (kept through a drop of the connection: the
+    Transport rtLastTransport_ = Transport::LAN;  // datagrams may still get through while it reconnects)
     SocketHandle rtUdp_ = kInvalidSocket;
     uint16_t rtUdpPort_ = 0;
     std::thread rtUdpThread_;

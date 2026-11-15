@@ -2960,6 +2960,100 @@ int main() {
         Q->Stop();
     }
 
+    printf("[calls: a dropped connection]\n");
+    {
+        auto P = MakeEngine("droppaula", 48250, false, false, false, false, "", "", {"voice"});
+        auto Q = MakeEngine("dropquinn", 48254, false, false, false, false, "", "", {"voice"});
+        std::string idP = P->settings.deviceId, idQ = Q->settings.deviceId;
+        P->ConnectAddress("127.0.0.1", Q->boundPort);
+        CHECK(WaitFor([&] { return P->IsConnected(idQ); }, 5000), "connected");
+        std::atomic<int> gotP{0}, gotQ{0};
+        P->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'q') gotP++; };
+        Q->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'p') gotQ++; };
+        auto startCall = [&](bool rt) {
+            for (auto* e : {P.get(), Q.get()}) {
+                auto lk = e->Lock();
+                Settings s2 = e->settings;
+                s2.callRealtime = rt;
+                e->ApplySettings(s2);
+            }
+            WaitFor([&] { return P->IsConnected(idQ) && Q->IsConnected(idP); }, 5000);
+            uint64_t cid = P->StartCall(idQ);
+            CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging && Q->call.id == cid; }, 5000), "ringing");
+            Q->AcceptCall();
+            CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 5000), "active");
+            RtStats st;
+            if (rt) CHECK(WaitFor([&] { return P->CallRtStats(st) && st.ready && Q->CallRtStats(st) && st.ready; }, 4000), "real-time path up");
+            return cid;
+        };
+        auto mediaFlows = [&] {
+            gotP = gotQ = 0;
+            return WaitFor([&] {
+                P->SendMedia("ppp", 3);
+                Q->SendMedia("qqq", 3);
+                return gotP >= 10 && gotQ >= 10;
+            }, 4000);
+        };
+        auto state = [](Engine& e, uint64_t& id, int64_t& lost) {
+            auto l = e.Lock();
+            id = e.call.id;
+            lost = e.call.lostAt;
+            return e.call.state;
+        };
+        for (bool rt : {false, true}) {
+            const char* how = rt ? "real-time media" : "media on the connection";
+            // 1. it drops and comes back: the call goes on, on both sides, and the media with it
+            uint64_t cid = startCall(rt);
+            CHECK(mediaFlows(), "%s: media before the drop", how);
+            P->DropConnectionTo(idQ);
+            uint64_t id;
+            int64_t lost;
+            CHECK(WaitFor([&] { return state(*P, id, lost) == CallState::Active && lost; }, 3000), "%s: the call waits (reconnecting)", how);
+            int64_t t0 = SteadyMs();
+            CHECK(WaitFor([&] {
+                uint64_t i1, i2;
+                int64_t l1, l2;
+                return state(*P, i1, l1) == CallState::Active && state(*Q, i2, l2) == CallState::Active && i1 == cid && i2 == cid && !l1 && !l2;
+            }, 8000), "%s: back in the same call on both sides (after %d ms)", how, (int)(SteadyMs() - t0));
+            CHECK(mediaFlows(), "%s: media flows again (%d / %d)", how, gotP.load(), gotQ.load());
+            {
+                auto l = P->Lock();
+                auto& msgs = P->chats[P->ChatKey(idQ)].messages;
+                CHECK(msgs.empty() || msgs.back().text.find("connection lost") == std::string::npos, "%s: no 'connection lost' logged", how);
+            }
+            P->EndCall();
+            CHECK(WaitFor([&] { return state(*Q, id, lost) == CallState::None; }, 3000), "%s: hang up still works", how);
+        }
+        // 2. it drops and the other side hangs up meanwhile: once connected again, it ends here too
+        {
+            startCall(false);
+            P->DropConnectionTo(idQ);
+            uint64_t id;
+            int64_t lost;
+            WaitFor([&] { return state(*Q, id, lost) == CallState::Active && lost; }, 3000);
+            Q->EndCallSilently();
+            CHECK(WaitFor([&] { return state(*P, id, lost) == CallState::None; }, 10000), "hung up during the drop: ends on the other side too");
+        }
+        // 3. it doesn't come back: the call ends after the grace time, not at once
+        {
+            P->callGraceMs = 3000;
+            startCall(false);
+            int64_t t0 = SteadyMs();
+            Q->callGraceMs = 3000;
+            Q->DropConnectionTo(idP);
+            Q->Stop();  // (gone without a goodbye: the connection was already broken)
+            uint64_t id;
+            int64_t lost;
+            CHECK(WaitFor([&] { return state(*P, id, lost) == CallState::None; }, 9000), "no way back: the call ends");
+            int ms = (int)(SteadyMs() - t0);
+            CHECK(ms >= 2500, "...after the grace time, not at once (%d ms)", ms);
+            auto l = P->Lock();
+            auto& msgs = P->chats[P->ChatKey(idQ)].messages;
+            CHECK(!msgs.empty() && msgs.back().text.find("connection lost") != std::string::npos, "logged as lost: %s", msgs.empty() ? "" : msgs.back().text.c_str());
+        }
+        P->Stop();
+    }
+
     printf("[calls: signalling + media]\n");
     {
         auto P = MakeEngine("paula", 48210, false, false, false, false, "", "", {"voice"});

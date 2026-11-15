@@ -1528,7 +1528,17 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
         for (auto& o : conns)
             if (o != c && o->ready && !o->closed && o->peerId == c->peerId) other = true;
         if (!other) {
-            if (call.state != CallState::None && call.peer == c->peerId) FinishCall("connection lost", false);
+            // a call with them: a drop (no goodbye) waits for the connection to come back; leaving ends it
+            bool deliberate = why && (!strcmp(why, "bye") || !strcmp(why, "user") || !strcmp(why, "shutdown"));
+            if (call.state == CallState::Active && call.group.empty() && call.peer == c->peerId && !deliberate && running_) {
+                if (!call.lostAt) {
+                    call.lostAt = SteadyMs();
+                    call.lastRetry = 0;
+                    DIAG("call: the connection went (%s) - reconnecting", why ? why : "?");
+                }
+            } else if (call.state != CallState::None && call.peer == c->peerId) {
+                FinishCall("connection lost", false);
+            }
             if (call.state == CallState::Active && !call.group.empty() && !call.hub) GroupPeerLeft(c->peerId);
             if (watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), c->peerId) != watchViewers_.end()) {
                 watchViewers_.erase(std::remove(watchViewers_.begin(), watchViewers_.end(), c->peerId), watchViewers_.end());
@@ -1570,6 +1580,7 @@ void Engine::InterruptPeerTransfers(const std::string& peer) {
 
 void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
     Frame f;
+    bool bye = false;  // (a goodbye: they left - not a drop)
     while (!c->closed && c->sec->Recv(c->sock, f)) {
         c->lastRecv = SteadyMs();
         c->bytesIn += (int64_t)f.payload.size() + 5;
@@ -1596,10 +1607,13 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
             }
             continue;
         }
-        if (f.type == Msg::Bye) break;
+        if (f.type == Msg::Bye) {
+            bye = true;
+            break;
+        }
         HandleFrame(c, f);
     }
-    CloseConn(c, "reader");
+    CloseConn(c, bye ? "bye" : "reader");
     if (--c->alive == 0) CloseSocket(c->sock);
 }
 
@@ -1913,6 +1927,12 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             // De-duplicate parallel connections to the same device.
             for (auto& o : conns) {
                 if (o == c || !o->ready || o->closed || o->peerId != id) continue;
+                if (SteadyMs() - o->lastRecv.load() > 7000) {
+                    // nothing from the old one for longer than two pings: it's a dead path the other side has already
+                    // left (its network changed) - the new one stays, else a call would keep sending to the old address
+                    CloseConn(o, "stale");
+                    continue;
+                }
                 std::shared_ptr<Connection> loser;
                 if (o->transport != c->transport) {
                     loser = TransportRank(c->transport) > TransportRank(o->transport) ? c : o;
@@ -2803,6 +2823,18 @@ bool Engine::SyncPop(std::string& kind, json& data) {
 
 void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
+    if (call.state == CallState::Active && call.group.empty() && call.peer == peer) {
+        // a (new) connection to the one I'm in a call with: the call goes on over it. Whether they are still in it,
+        // CallAlive asks (if not, they answer with CallEnd) - also when only the other side noticed the drop
+        if (call.lostAt) DIAG("call: connection back after %d ms - the call goes on", (int)(SteadyMs() - call.lostAt));
+        call.lostAt = 0;
+        c->callPriority = true;
+        {
+            std::lock_guard<std::mutex> l(mediaMtx_);
+            activeCallConn_ = ReadyConn(peer);
+        }
+        Queue(c, Msg::CallAlive, {{"call", call.id}});
+    }
     Emit({EventType::PeerOnline, peer, PeerName(peer)});
     for (auto& f : settings.folderSyncs)
         if (f.to == peer && f.on) fsSoon_ = true;  // (folder sync: its device is here)
@@ -3304,6 +3336,17 @@ void Engine::MaintenanceLoop() {
             if (ping) lastPing = now;
             if (ping && call.state == CallState::Active && call.group.empty())  // (see Msg::CallAlive)
                 if (auto cc = ReadyConn(call.peer)) Queue(cc, Msg::CallAlive, {{"call", call.id}});
+            if (call.state == CallState::Active && call.group.empty() && call.lostAt) {  // the call's connection dropped
+                if (ReadyConn(call.peer)) {
+                    // (back - OnReady picked the call up)
+                } else if (now - call.lostAt > callGraceMs) {
+                    DIAG("call: no connection again within %d s - ending it", callGraceMs / 1000);
+                    FinishCall("connection lost", false);
+                } else if (now - call.lastRetry > 2000) {
+                    call.lastRetry = now;
+                    ConnectPeer(call.peer);
+                }
+            }
             // after a network change: what didn't answer the ping sent then is gone (the old network's path)
             bool probeDone = netProbeAt_ && now - netProbeAt_ > 8000;  // (8 s: a ping can wait behind file data on a slow link)
             for (auto& c : conns) {
@@ -3314,7 +3357,10 @@ void Engine::MaintenanceLoop() {
                     continue;
                 }
                 if (!c->ready && now - c->connectedAt > 10000) toClose.push_back(c);
-                else if (c->ready && now - c->lastRecv.load() > 25000) toClose.push_back(c);
+                // (in a call: 12 s - pings come every 5, and a frozen call is noticed sooner; the call then waits for
+                // the connection to come back)
+                else if (c->ready && now - c->lastRecv.load() > (call.state == CallState::Active && c->peerId == call.peer ? 12000 : 25000))
+                    toClose.push_back(c);
                 else if (ping && c->ready) Queue(c, Msg::Ping, json::object());
             }
             if (probeDone) netProbeAt_ = 0;
@@ -4824,6 +4870,8 @@ void Engine::StopRt() {
         std::lock_guard<std::mutex> l(mediaMtx_);
         r.swap(rt_);
         rtLanPort_ = 0;
+        rtLastAddr_.clear();
+        rtLastPeer_.clear();
     }
     // (stopped on a thread of its own: it may be handing a packet to the modules right now, which can call back here)
     if (r) std::thread([r] { r->Shutdown(); }).detach();
@@ -4835,11 +4883,26 @@ bool Engine::RtOut(const uint8_t* d, size_t n) {
         std::lock_guard<std::mutex> l(mediaMtx_);
         port = rtLanPort_;
     }
-    auto c = CallConn();
-    if (!c) return false;
+    std::string addr, peer;
+    Transport tr;
+    if (auto c = CallConn()) {
+        addr = c->addr;
+        peer = c->peerId;
+        tr = c->transport;
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        rtLastAddr_ = addr;
+        rtLastPeer_ = peer;
+        rtLastTransport_ = tr;
+    } else {  // the connection dropped and the call waits for it: the last way still, it may work meanwhile
+        std::lock_guard<std::mutex> l(mediaMtx_);
+        if (rtLastPeer_.empty()) return false;
+        addr = rtLastAddr_;
+        peer = rtLastPeer_;
+        tr = rtLastTransport_;
+    }
     // the way the call's connection goes: the LAN socket, or beside the internet session (direct or relayed)
-    if (c->transport == Transport::LAN) return port && rtUdp_ != kInvalidSocket && UdpSendTo(rtUdp_, c->addr, port, d, n);
-    if (c->transport == Transport::Internet) return wan_.DatagramSend(c->peerId, d, n);
+    if (tr == Transport::LAN) return port && rtUdp_ != kInvalidSocket && UdpSendTo(rtUdp_, addr, port, d, n);
+    if (tr == Transport::Internet) return wan_.DatagramSend(peer, d, n);
     return false;  // (Bluetooth: no datagrams - the media stays on the connection)
 }
 
