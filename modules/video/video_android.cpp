@@ -148,6 +148,9 @@ public:
         if (!e || !g_cls) { if (err) *err = "no Java VM"; return false; }
         if (jmethodID fp = e->GetStaticMethodID(g_cls, "setFullPreview", "(Z)V")) e->CallStaticVoidMethod(g_cls, fp, (jboolean)FullPreview().load());
         Clear(e.env);
+        // "prioritize frame rate": the camera may use its high-speed mode for 60 fps (no self-view there)
+        if (jmethodID ff = e->GetStaticMethodID(g_cls, "setFpsFirst", "(Z)V")) e->CallStaticVoidMethod(g_cls, ff, (jboolean)(s.adaptive == 2));
+        Clear(e.env);
         jmethodID m = M(e.env, "startCamera", "(Ljava/lang/String;IIIII)Z");
         if (!m) { Clear(e.env); if (err) *err = "VideoEngine.startCamera missing"; return false; }
         jstring js = e->NewStringUTF(id.c_str());

@@ -113,6 +113,19 @@ public final class VideoEngine {
         orient = null;
     }
     private static boolean highSpeed;  // > 60 fps: constrained high-speed session (encoder only, no self-view)
+    private static int hsRate;         // the camera's rate in it (may be above fps: the encoder drops the extra frames)
+    private static volatile boolean fpsFirst;  // "prioritize frame rate": high-speed mode for 60 fps when needed
+    public static void setFpsFirst(boolean on) { fpsFirst = on; }
+
+    /** The normal (non-high-speed) mode can give this rate at some size around the one asked for. */
+    private static boolean normalCanDo(StreamConfigurationMap map, int w, int h, int rate) {
+        boolean range = false;
+        Range<Integer>[] rs = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        if (rs != null) for (Range<Integer> r : rs) if (r.getUpper() >= rate) range = true;
+        if (!range) return false;
+        Size[] all = map.getOutputSizes(MediaCodec.class);
+        return all != null && largestSupported(map, all, pick(all, w, h), rate) != null;
+    }
     private static String encName = "";
     private static byte[] config;  // SPS/PPS
     private static ByteBuffer keyBuf;
@@ -202,22 +215,28 @@ public final class VideoEngine {
             StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             fps = frameRate;
             highSpeed = false;
+            hsRate = 0;
             logCameraModes(id, map);
         stopOrientation();
             Size size = null;
-            if (frameRate > 60) {
-                // 120 fps only works in a constrained high-speed session, at the sizes the camera lists for it
+            // above 60 fps - or 60 when the normal mode can't, with "prioritize frame rate" on: the camera's constrained
+            // high-speed mode, at the sizes it lists for it. Its fixed rate may be higher than wanted (120 for 60):
+            // from Android 10 the encoder then drops the frames over the rate. (No self-view in that mode.)
+            if (frameRate > 60 || (frameRate > 30 && fpsFirst && !normalCanDo(map, w, h, frameRate))) {
                 Size[] hs = map.getHighSpeedVideoSizes();
                 if (hs != null && hs.length > 0) {
                     Size cand = pick(hs, w, h);
+                    Range<Integer> best = null;
                     for (Range<Integer> r : map.getHighSpeedVideoFpsRangesFor(cand))
-                        if (r.getLower() >= frameRate && r.getUpper() >= frameRate && encoderSupports(cand, frameRate)) {
-                            size = cand;
-                            highSpeed = true;
-                            break;
-                        }
+                        if (r.getLower().equals(r.getUpper()) && r.getUpper() >= frameRate && (best == null || r.getUpper() < best.getUpper()))
+                            best = r;
+                    if (best != null && (best.getUpper() == frameRate || Build.VERSION.SDK_INT >= 29) && encoderSupports(cand, frameRate)) {
+                        size = cand;
+                        highSpeed = true;
+                        hsRate = best.getUpper();
+                    }
                 }
-                if (!highSpeed) {
+                if (!highSpeed && frameRate > 60) {
                     nativeLog("this camera can't do " + frameRate + " fps here; using 60");
                     fps = 60;
                 }
@@ -235,7 +254,8 @@ public final class VideoEngine {
             }
             width = size.getWidth() & ~1;
             height = size.getHeight() & ~1;
-            nativeLog("camera " + id + ": " + width + "x" + height + " @ " + fps + " fps" + (highSpeed ? " (high speed)" : ""));
+            nativeLog("camera " + id + ": " + width + "x" + height + " @ " + fps + " fps"
+                    + (highSpeed ? " (high speed" + (hsRate > fps ? ", camera at " + hsRate + ", the encoder drops the rest" : "") + ")" : ""));
 
             camThread = new HandlerThread("LunaShare camera");
             camThread.start();
@@ -384,7 +404,10 @@ public final class VideoEngine {
             fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 4);
             if (Build.VERSION.SDK_INT >= 23) {
                 fmt.setInteger(MediaFormat.KEY_PRIORITY, 0);  // realtime
-                if (fps > 30) fmt.setInteger(MediaFormat.KEY_OPERATING_RATE, fps);  // lets the codec clock up for 60/120 fps
+                if (fps > 30) fmt.setInteger(MediaFormat.KEY_OPERATING_RATE, Math.max(fps, hsRate));  // lets the codec clock up for 60/120 fps
+            }
+            if (Build.VERSION.SDK_INT >= 29 && highSpeed && hsRate > fps) {
+                fmt.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, (float) fps);  // (the camera runs faster: drop the rest)
             }
             if (Build.VERSION.SDK_INT >= 29) fmt.setInteger(MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1);
             encoder = MediaCodec.createEncoderByType(mime);
@@ -583,6 +606,7 @@ public final class VideoEngine {
         if (preview != null) preview.close();
         preview = null;
         highSpeed = false;
+        hsRate = 0;
         if (camThread != null) camThread.quitSafely();
         if (encThread != null) encThread.quitSafely();
         camThread = encThread = null;
@@ -681,7 +705,7 @@ public final class VideoEngine {
                     request.addTarget(encSurface);
                     if (preview != null) request.addTarget(preview.getSurface());
                 }
-                Range<Integer> fr = highSpeed ? new Range<>(fps, fps) : fpsRange();
+                Range<Integer> fr = highSpeed ? new Range<>(hsRate > 0 ? hsRate : fps, hsRate > 0 ? hsRate : fps) : fpsRange();
                 if (fr != null) request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fr);
                 else if (fps > 30 && !fpsWarned) {  // (it then runs at its default, usually 30)
                     fpsWarned = true;
