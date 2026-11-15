@@ -918,6 +918,112 @@ static void TestConnReasons() {
     A->Stop();
 }
 
+// a bad network for a while - connections dropping (one side noticing first, or both), stalling for seconds - while
+// messages go both ways, files go across and a call goes on: afterwards every message is there exactly once, every
+// file whole, and the call the same call with its media flowing
+static void TestBadNetwork() {
+    printf("[a bad network for 45 s: messages, files and a call through drops and stalls]\n");
+    auto P = MakeEngine("stressp", 48460, true, true, true, true, "", "", {"voice"});
+    auto Q = MakeEngine("stressq", 48470, true, true, true, true, "", "", {"voice"});
+    std::string idP = P->settings.deviceId, idQ = Q->settings.deviceId;
+    P->ConnectAddress("127.0.0.1", Q->boundPort);
+    CHECK(WaitFor([&] { return P->IsConnected(idQ) && Q->IsConnected(idP); }, 5000), "connected");
+    std::atomic<int> mediaP{0}, mediaQ{0};
+    P->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'q') mediaP++; };
+    Q->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'p') mediaQ++; };
+    uint64_t cid = P->StartCall(idQ);
+    CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging; }, 5000), "ringing");
+    Q->AcceptCall();
+    CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 5000), "call on");
+    // three files, 6 MB each, both ways
+    std::vector<std::pair<Engine*, std::string>> files;
+    std::vector<std::pair<uint64_t, std::string>> tids;  // (transfer, its hash)
+    for (int i = 0; i < 3; i++) {
+        std::string f = JoinPath(Root(), "src/stress" + std::to_string(i) + ".bin");
+        WriteRandomFile(f, 6 << 20, 100 + i);
+        Engine* from = i == 1 ? Q.get() : P.get();
+        uint64_t b = from->SendPaths(i == 1 ? idP : idQ, {f});
+        tids.push_back({FirstTid(*from, b), Sha256File(f)});
+        files.push_back({from, f});
+    }
+    {  // (slowed down, so the files are still on their way while the network misbehaves)
+        for (Engine* e : {P.get(), Q.get()}) {
+            Settings s = e->GetSettings();
+            s.speedLimitKBs = 400;
+            e->ApplySettings(s);
+        }
+    }
+    std::mt19937 rng(2024);
+    int sentP = 0, sentQ = 0, drops = 0, stalls = 0;
+    int64_t t0 = SteadyMs(), nextFault = t0 + 2000;
+    while (SteadyMs() - t0 < 45000) {
+        // a message each way every 150 ms, numbered
+        P->SendChat(idQ, "p" + std::to_string(sentP++));
+        Q->SendChat(idP, "q" + std::to_string(sentQ++));
+        for (int k = 0; k < 3; k++) {
+            P->SendMedia("ppp", 3);
+            Q->SendMedia("qqq", 3);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        if (SteadyMs() >= nextFault && SteadyMs() - t0 < 38000) {  // (the last few seconds calm: time to settle)
+            int what = (int)(rng() % 4);
+            if (what == 0) { P->DropConnectionTo(idQ); drops++; }
+            else if (what == 1) { Q->DropConnectionTo(idP); drops++; }
+            else { (what == 2 ? P : Q)->StallConnectionTo(what == 2 ? idQ : idP, 1000 + (int)(rng() % 3000)); stalls++; }
+            nextFault = SteadyMs() + 1500 + (int)(rng() % 3000);
+        }
+    }
+    printf("  %d drops, %d stalls; %d + %d messages sent\n", drops, stalls, sentP, sentQ);
+    for (Engine* e : {P.get(), Q.get()}) {
+        Settings s = e->GetSettings();
+        s.speedLimitKBs = 0;
+        e->ApplySettings(s);
+    }
+    // messages: each exactly once
+    auto count = [&](Engine& e, const std::string& from, char tag, int n, int& missing, int& twice) {
+        std::vector<int> seen((size_t)n, 0);
+        auto l = e.Lock();
+        for (auto& m : e.chats[e.ChatKey(from)].messages)
+            if (!m.outgoing && m.text.size() > 1 && m.text[0] == tag) {
+                int i = atoi(m.text.c_str() + 1);
+                if (i >= 0 && i < n) seen[(size_t)i]++;
+            }
+        missing = twice = 0;
+        for (int v : seen) missing += v == 0, twice += v > 1;
+    };
+    int missQ = 0, twiceQ = 0, missP = 0, twiceP = 0;
+    bool allMsgs = WaitFor([&] {
+        count(*Q, idP, 'p', sentP, missQ, twiceQ);
+        count(*P, idQ, 'q', sentQ, missP, twiceP);
+        return missQ == 0 && missP == 0;
+    }, 20000);
+    CHECK(allMsgs, "every message arrived (missing %d and %d)", missQ, missP);
+    CHECK(twiceQ == 0 && twiceP == 0, "none twice (%d and %d)", twiceQ, twiceP);
+    // files: whole, with the right hash
+    for (size_t i = 0; i < tids.size(); i++) {
+        Engine* to = files[i].first == P.get() ? Q.get() : P.get();
+        bool ok = WaitFor([&] { return StateOf(*to, tids[i].first) == TState::Completed; }, 40000);
+        auto t = GetT(*to, tids[i].first);
+        CHECK(ok && t && Sha256File(t->localPath) == tids[i].second, "file %d whole (%s)", (int)i, TStateName(StateOf(*to, tids[i].first)));
+    }
+    // the call: the same one, media flowing both ways
+    {
+        auto lp = P->Lock();
+        auto lq = Q->Lock();
+        CHECK(P->call.state == CallState::Active && P->call.id == cid && Q->call.state == CallState::Active && Q->call.id == cid,
+              "the call went on through it all");
+    }
+    mediaP = mediaQ = 0;
+    CHECK(WaitFor([&] {
+        P->SendMedia("ppp", 3);
+        Q->SendMedia("qqq", 3);
+        return mediaP > 10 && mediaQ > 10;
+    }, 8000), "call media flowing at the end (%d / %d)", mediaP.load(), mediaQ.load());
+    P->EndCall();
+    P->Stop();
+    Q->Stop();
+}
+
 // listing them all): exactly one connection must stay, on both sides, whichever got ready first where
 static void TestParallelDial() {
     printf("[two connections to one device at once: one stays]\n");
@@ -962,6 +1068,8 @@ int main() {
     TestParallelDial();
     TestConnReasons();
     if (getenv("LUNASHARE_TEST_DIAL_ONLY")) return g_fail ? 1 : 0;
+    TestBadNetwork();
+    if (getenv("LUNASHARE_TEST_STRESS_ONLY")) return g_fail ? 1 : 0;
 
     auto A = MakeEngine("alice", 48110, false, true);
     auto B = MakeEngine("bob", 48120, true, true);

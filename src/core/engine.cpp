@@ -1632,10 +1632,17 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
     if (--c->alive == 0) CloseSocket(c->sock);
 }
 
+void Engine::StallConnectionTo(const std::string& peer, int ms) {
+    auto lk = Lock();
+    for (auto& c : conns)
+        if (c->peerId == peer) c->testStallUntil = SteadyMs() + ms;
+}
+
 void Engine::WriterLoop(std::shared_ptr<Connection> c) {
     std::vector<uint8_t> buf;
     bool pieceTurn = false;
     while (!c->closed) {
+        while (c->testStallUntil.load() > SteadyMs() && !c->closed) std::this_thread::sleep_for(std::chrono::milliseconds(20));
         std::pair<Msg, std::string> msg;
         bool haveCtrl = false, haveData = false, havePiece = false, haveWatch = false;
         {

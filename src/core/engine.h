@@ -40,6 +40,7 @@ struct Connection {
     bool ready = false;
     int64_t connectedAt = 0;
     std::atomic<int64_t> lastRecv{0};
+    std::atomic<int64_t> testStallUntil{0};  // tests: nothing goes out until then (steady ms) - a network that stalls
     std::atomic<int64_t> bytesIn{0}, bytesOut{0};
     std::atomic<bool> closed{false};
     std::vector<std::string> caps;  // optional features the peer has (e.g. "voice"), from its Hello
@@ -641,6 +642,8 @@ public:
         auto lk = Lock();
         FinishCall("connection lost", false);
     }
+    // tests: the connections to this device send nothing for a while (as when the network stalls)
+    void StallConnectionTo(const std::string& peer, int ms);
     // tests: the connections to this device break without a goodbye (as when Wi-Fi goes)
     void DropConnectionTo(const std::string& peer) {
         auto lk = Lock();
