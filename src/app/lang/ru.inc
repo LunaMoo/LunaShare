@@ -1558,3 +1558,5 @@
 {"No self-view in high-speed mode", "Нет своего изображения в скоростном режиме"},
 {"Sending %dx%d at %d fps", "Отправка %dx%d, %d кадр/с"},
 {"The camera isn't giving any picture - try a lower frame rate", "Камера не даёт изображения - попробуйте меньшую частоту кадров"},
+{"Reconnecting... %d s", "Переподключение... %d с"},
+{"Connection lost - reconnecting... %d s", "Связь потеряна - переподключение... %d с"},

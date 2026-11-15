@@ -1564,3 +1564,5 @@
 {"No self-view in high-speed mode", "고속 모드에서는 내 화면이 표시되지 않습니다"},
 {"Sending %dx%d at %d fps", "%dx%d, %d fps로 전송 중"},
 {"The camera isn't giving any picture - try a lower frame rate", "카메라에서 영상이 나오지 않습니다 - 더 낮은 프레임 속도를 시도하세요"},
+{"Reconnecting... %d s", "다시 연결 중... %d초"},
+{"Connection lost - reconnecting... %d s", "연결이 끊어졌습니다 - 다시 연결 중... %d초"},

@@ -1548,3 +1548,5 @@
 {"No self-view in high-speed mode", "Sem visualização própria no modo de alta velocidade"},
 {"Sending %dx%d at %d fps", "Enviando %dx%d a %d fps"},
 {"The camera isn't giving any picture - try a lower frame rate", "A câmera não está dando imagem - tente uma taxa de quadros menor"},
+{"Reconnecting... %d s", "Reconectando... %d s"},
+{"Connection lost - reconnecting... %d s", "Conexão perdida - reconectando... %d s"},

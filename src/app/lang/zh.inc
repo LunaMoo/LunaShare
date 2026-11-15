@@ -1564,3 +1564,5 @@
 {"No self-view in high-speed mode", "高速模式下无法显示自己的画面"},
 {"Sending %dx%d at %d fps", "正在以 %dx%d、%d fps 发送"},
 {"The camera isn't giving any picture - try a lower frame rate", "摄像头没有画面 - 请尝试较低的帧率"},
+{"Reconnecting... %d s", "正在重新连接... %d 秒"},
+{"Connection lost - reconnecting... %d s", "连接已断开 - 正在重新连接... %d 秒"},

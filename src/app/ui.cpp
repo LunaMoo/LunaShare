@@ -4292,13 +4292,16 @@ void App::DrawCallBar() {
             fprintf(stderr, "call sound: %s (%s)\n", prob.c_str(), Media().audioError.c_str());
         }
     }
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, c.state == CallState::Active ? IM_COL32(30, 110, 70, 255) : IM_COL32(60, 70, 120, 255));
+    bool reconnecting = c.state == CallState::Active && c.lostAt;  // (the connection dropped; the call waits for it)
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, reconnecting ? IM_COL32(150, 95, 20, 255) : c.state == CallState::Active ? IM_COL32(30, 110, 70, 255) : IM_COL32(60, 70, 120, 255));
     ImGui::BeginChild("callbar", ImVec2(0, barH + ImGui::GetStyle().WindowPadding.y * 2), ImGuiChildFlags_AlwaysUseWindowPadding);
     std::string who = Emoji().Display(eng.PeerName(c.peer));
     char status[160];
     if (c.state == CallState::Active && groupCall) {
         int secs = (int)((SteadyMs() - c.answered) / 1000);
         snprintf(status, sizeof(status), "%s  %d:%02d%s", who.c_str(), secs / 60, secs % 60, c.hub ? T("  through the server") : "");
+    } else if (reconnecting) {
+        snprintf(status, sizeof(status), "%s  %s", who.c_str(), TF("Reconnecting... %d s", (int)((SteadyMs() - c.lostAt) / 1000)).c_str());
     } else if (c.state == CallState::Active) {
         int secs = (int)((SteadyMs() - c.answered) / 1000);
         auto conn = eng.ReadyConn(c.peer);
@@ -4444,6 +4447,15 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         ImVec2 ms = ImGui::CalcTextSize(msg.c_str());
         dl->AddText(ImVec2(c.x - ms.x * 0.5f, c.y + r + ImGui::GetStyle().ItemSpacing.y), IM_COL32(220, 220, 220, 255), msg.c_str());
     }
+    if (eng.call.state == CallState::Active && eng.call.lostAt && eng.call.group.empty()) {
+        // the connection dropped: the picture is the last one that came - say so over it
+        std::string t = TF("Connection lost - reconnecting... %d s", (int)((SteadyMs() - eng.call.lostAt) / 1000));
+        ImVec2 ts = ImGui::CalcTextSize(t.c_str());
+        float m = ImGui::GetStyle().ItemSpacing.x * 1.5f;
+        ImVec2 a((p0.x + p1.x - ts.x) * 0.5f - m, (p0.y + p1.y) * 0.5f - ts.y * 0.5f - m);
+        dl->AddRectFilled(a, ImVec2(a.x + ts.x + m * 2, a.y + ts.y + m * 2), IM_COL32(150, 95, 20, 220), 8);
+        dl->AddText(ImVec2(a.x + m, a.y + m), IM_COL32_WHITE, t.c_str());
+    }
     static int64_t camWaitSince = 0;  // (when the camera was turned on without a picture of it yet)
     if (!Media().CameraOn() || local) camWaitSince = 0;
     else if (!camWaitSince) camWaitSince = nowMs;
@@ -4537,7 +4549,11 @@ void App::DrawVideoOverlay() {
     ImGui::SameLine();
     int secs = (int)((SteadyMs() - eng.call.answered) / 1000);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (bw - ImGui::GetTextLineHeight()) * 0.5f);
-    ImGui::Text("%s  %d:%02d", Emoji().Display(eng.PeerName(eng.call.peer)).c_str(), secs / 60, secs % 60);
+    if (eng.call.lostAt)
+        ImGui::TextColored(ImVec4(1.f, 0.75f, 0.3f, 1.f), "%s  %s", Emoji().Display(eng.PeerName(eng.call.peer)).c_str(),
+                           TF("Reconnecting... %d s", (int)((SteadyMs() - eng.call.lostAt) / 1000)).c_str());
+    else
+        ImGui::Text("%s  %d:%02d", Emoji().Display(eng.PeerName(eng.call.peer)).c_str(), secs / 60, secs % 60);
     // bottom: call buttons, centered
     int nb = CallButtonCount(true);
     float bb = std::min(bw * 1.05f, (full.x - pad * (float)(nb + 1)) / (float)nb);  // always fits the screen width
