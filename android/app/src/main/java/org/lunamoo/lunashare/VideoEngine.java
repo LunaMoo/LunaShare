@@ -202,6 +202,7 @@ public final class VideoEngine {
             StreamConfigurationMap map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             fps = frameRate;
             highSpeed = false;
+            logCameraModes(id, map);
         stopOrientation();
             Size size = null;
             if (frameRate > 60) {
@@ -608,6 +609,40 @@ public final class VideoEngine {
 
     // ------------------------------------------------------------------ controls
     private static boolean fpsWarned;
+    private static final java.util.HashSet<String> modesLogged = new java.util.HashSet<>();
+
+    /**
+     * Once per camera: what it offers apps (not the phone's own camera app - that one may use the maker's private
+     * modes): the frame rate ranges, the top frame rate per picture size, and the high-speed modes.
+     */
+    private static void logCameraModes(String id, StreamConfigurationMap map) {
+        if (map == null || !modesLogged.add(id)) return;
+        try {
+            StringBuilder b = new StringBuilder("camera " + id + " offers apps: fps ranges");
+            Range<Integer>[] rs = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+            if (rs != null) for (Range<Integer> r : rs) b.append(' ').append(r);
+            b.append("; sizes (max fps):");
+            Size[] all = map.getOutputSizes(MediaCodec.class);
+            if (all != null)
+                for (Size z : all) {
+                    if ((long) z.getWidth() * z.getHeight() < 1280L * 720L) continue;
+                    long d = map.getOutputMinFrameDuration(MediaCodec.class, z);
+                    b.append(' ').append(z.getWidth()).append('x').append(z.getHeight())
+                     .append('(').append(d > 0 ? (int) Math.round(1e9 / d) : 0).append(')');
+                }
+            Size[] hs = map.getHighSpeedVideoSizes();
+            b.append("; high-speed:");
+            if (hs == null || hs.length == 0) b.append(" none");
+            else
+                for (Size z : hs) {
+                    b.append(' ').append(z.getWidth()).append('x').append(z.getHeight());
+                    for (Range<Integer> r : map.getHighSpeedVideoFpsRangesFor(z)) b.append(r);
+                }
+            nativeLog(b.toString());
+        } catch (Exception e) {
+            nativeLog("camera modes: " + e);
+        }
+    }
 
     private static Range<Integer> fpsRange() {
         Range<Integer>[] ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
