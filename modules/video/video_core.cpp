@@ -277,6 +277,34 @@ public:
                 lastStats = now;
                 sFpsOut = (int)(framesOut.exchange(0) / sec + 0.5);
                 sFpsEnc = (int)(framesEncoded.exchange(0) / sec + 0.5);
+                // the camera falling short of the rate asked for two seconds running: plan with what it gives (it
+                // drops back to "all of it" as soon as the frames come at the rate asked)
+                int asked = camOn ? LevelSettings(level).fps : 0, got = sFpsEnc.load();
+                if (!asked || got <= 0) {
+                    lowFpsSecs = 0;
+                    if (!camOn) camFps = 0;
+                } else if (got < asked * 85 / 100) {
+                    if (++lowFpsSecs >= 2 && camFps.load() != got) {
+                        if (!camFps.load()) Log("the camera gives " + std::to_string(got) + " fps of " + std::to_string(asked) + " asked: bitrate for that");
+                        camFps = got;
+                        int cap = LevelSettings(level).bitrate;  // (down to it now, not when adapting gets there)
+                        if (curBitrate > cap) {
+                            curBitrate = cap;
+                            std::lock_guard<std::mutex> l(m);
+                            if (backend && camOn) backend->SetBitrate(cap);
+                        }
+                    }
+                } else {
+                    lowFpsSecs = 0;
+                    if (got >= asked * 95 / 100 && camFps.load()) {
+                        camFps = 0;
+                        if (settings.adaptive == 0) {  // (adapting raises it again by itself)
+                            curBitrate = LevelSettings(level).bitrate;
+                            std::lock_guard<std::mutex> l(m);
+                            if (backend && camOn) backend->SetBitrate(curBitrate);
+                        }
+                    }
+                }
                 sKbpsOut = (int)(bytesOut.exchange(0) * 8 / 1000 / sec);
                 sFpsIn = (int)(framesIn.exchange(0) / sec + 0.5);
                 sKbpsIn = (int)(bytesIn.exchange(0) * 8 / 1000 / sec);
@@ -360,7 +388,7 @@ public:
                 calmMs = 0;
             }
             // ---- picture size / frame rate: what fits the bitrate the link allows
-            double bpp = (double)curBitrate / std::max(1.0, (double)run.width * run.height * run.fps);
+            double bpp = (double)curBitrate / std::max(1.0, (double)run.width * run.height * EffFps(run.fps));
             lowMs = bpp < 0.035 ? lowMs + 250 : 0;                                   // too few bits: blocky + stutter
             fullMs = !congested && !slowDecoder && curBitrate >= target * 95 / 100 ? fullMs + 250 : 0;  // link keeps up at full rate
             int want = level;
@@ -404,7 +432,7 @@ public:
         int video = std::max(minBitrate, (int)(link * 0.9) - 40000);
         auto bppAt = [&](int lv) {
             LsvSettings ls = LevelSettings(lv);
-            return (double)video / std::max(1.0, (double)ls.width * ls.height * std::max(1, ls.fps));
+            return (double)video / std::max(1.0, (double)ls.width * ls.height * std::max(1, EffFps(ls.fps)));
         };
         int fit = kMaxLevel;
         for (int lv = 0; lv <= kMaxLevel; lv++)
@@ -447,14 +475,13 @@ public:
     static constexpr int kMaxLevel = 9;
     LsvSettings LevelSettings(int lv) const {
         LsvSettings s = settings;
-        if (lv <= 0) return s;
         int fps = s.fps;
         bool portrait = s.height > s.width;
         int longSide = std::max(s.width, s.height), shortSide = std::min(s.width, s.height);
         int h = shortSide;
         static const int kHeights[] = {2160, 1440, 1080, 720, 540, 360, 270, 180};
         bool fpsFirst = s.adaptive == 2;  // (the frame rate stays; only the smallest picture gives up frames)
-        for (int i = 0; i < lv; i++) {
+        for (int i = 0; i < lv && lv > 0; i++) {
             if (fps > 30 && !fpsFirst) { fps = 30; continue; }  // first: fewer frames, same size
             int next = 0;
             for (int k : kHeights)
@@ -467,10 +494,19 @@ public:
         int w = (int)((double)longSide * h / shortSide + 0.5) & ~1;
         s.width = portrait ? h : w;
         s.height = portrait ? w : h;
-        double ratio = (double)s.width * s.height * fps / ((double)settings.width * settings.height * std::max(1, settings.fps));
+        // the bitrate by the frames that really come (a camera giving 30 for 60 asked mustn't get 60 fps worth of bits
+        // to spread over half the frames - wasted bandwidth); the camera is still asked for the full rate
+        double ratio = (double)s.width * s.height * EffFps(fps) / ((double)settings.width * settings.height * std::max(1, settings.fps));
         s.bitrate = std::max(minBitrate * 2, (int)(settings.bitrate * std::min(1.0, ratio * 1.15)));
         s.fps = fps;
         return s;
+    }
+    // what the camera really delivers when that's less than asked (measured; 0 = all of it)
+    std::atomic<int> camFps{0};
+    int lowFpsSecs = 0;
+    int EffFps(int fps) const {
+        int c = camFps.load();
+        return c > 0 && c < fps ? c : fps;
     }
     bool SameShape(const LsvSettings& a, const LsvSettings& b) const { return a.width == b.width && a.height == b.height && a.fps == b.fps; }
     std::atomic<int> sentTick{0};

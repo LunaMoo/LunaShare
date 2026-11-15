@@ -105,6 +105,7 @@ public:
 private:
     void Loop() {
         int w = s_.width, h = s_.height, fps = std::max(1, s_.fps), frame = 0;
+        if (const char* mx = getenv("LSV_FAKE_MAX_FPS")) fps = std::max(1, std::min(fps, atoi(mx)));  // (a camera that can't)
         std::vector<uint8_t> yp((size_t)w * h), uvp((size_t)w * h / 2, 128);
         auto next = std::chrono::steady_clock::now();
         while (run_) {

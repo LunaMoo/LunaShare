@@ -259,6 +259,22 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
 
+    printf("[video: a camera giving fewer frames than asked doesn't get the full bitrate]\n");
+    {
+        setenv("LSV_FAKE_MAX_FPS", "30", 1);
+        LsvSettings s60{640, 480, 60, 2000000, 0, 0};
+        m->set_settings(&s60);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        LsvStats sc;
+        m->get_stats(&sc);
+        printf("    camera %d of %d fps, sending %d kbps\n", sc.encode_fps, sc.target_fps, sc.send_kbps);
+        CHECK(sc.encode_fps >= 26 && sc.encode_fps <= 32 && sc.target_fps == 60, "stats: camera %d fps of %d asked", sc.encode_fps, sc.target_fps);
+        CHECK(sc.send_kbps > 0 && sc.send_kbps < 1400, "bitrate for 30 fps, not 60 (%d kbps of 2000)", sc.send_kbps);
+        unsetenv("LSV_FAKE_MAX_FPS");
+        m->set_settings(&s);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
+
     printf("[video: frame rate first - the picture gets smaller, the frame rate stays]\n");
     {
         LsvSettings fr{1280, 720, 30, 2500000, 2, 0};
