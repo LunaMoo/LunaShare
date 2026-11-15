@@ -1582,3 +1582,8 @@
 {"No picture from %s yet - the connection may be too slow for video", "%s の映像がまだありません - 接続がビデオには遅すぎるかもしれません"},
 {"Video call (not connected yet - see above the chat)", "ビデオ通話（まだ未接続 - チャットの上を参照）"},
 {"Voice call (not connected yet - see above the chat)", "音声通話（まだ未接続 - チャットの上を参照）"},
+{"LunaShare stopped last time", "前回 LunaShare が停止しました"},
+{"It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "アプリのどこで止まったかを記録しました（アドレスと数値で、チャット内容ではありません）。LunaShare の作者に送ると修正に役立ちます。送る前に中身を確認できます。"},
+{"What's in it", "中身"},
+{"Send to a chat...", "チャットに送る..."},
+{"Copied - paste it wherever you report it.", "コピーしました - 報告する場所に貼り付けてください。"},

@@ -1567,3 +1567,8 @@
 {"No picture from %s yet - the connection may be too slow for video", "Ancora nessuna immagine da %s - la connessione potrebbe essere troppo lenta per il video"},
 {"Video call (not connected yet - see above the chat)", "Videochiamata (non ancora connesso - vedi sopra la chat)"},
 {"Voice call (not connected yet - see above the chat)", "Chiamata vocale (non ancora connesso - vedi sopra la chat)"},
+{"LunaShare stopped last time", "LunaShare si è fermato l'ultima volta"},
+{"It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "Ha annotato dove si è fermato nell'app - indirizzi e numeri, non le tue chat. Inviarlo a chi fa il tuo LunaShare aiuta a correggerlo; puoi guardarlo prima."},
+{"What's in it", "Cosa contiene"},
+{"Send to a chat...", "Invia a una chat..."},
+{"Copied - paste it wherever you report it.", "Copiato - incollalo dove lo segnali."},

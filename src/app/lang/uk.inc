@@ -1576,3 +1576,8 @@
 {"No picture from %s yet - the connection may be too slow for video", "Зображення від %s поки немає - з'єднання може бути надто повільним для відео"},
 {"Video call (not connected yet - see above the chat)", "Відеодзвінок (ще немає з'єднання - див. над чатом)"},
 {"Voice call (not connected yet - see above the chat)", "Голосовий дзвінок (ще немає з'єднання - див. над чатом)"},
+{"LunaShare stopped last time", "Минулого разу LunaShare зупинився"},
+{"It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "Записано, де в програмі сталася зупинка - адреси й числа, не ваші чати. Надсилання цього авторові вашого LunaShare допоможе виправити; спершу можна переглянути."},
+{"What's in it", "Що всередині"},
+{"Send to a chat...", "Надіслати в чат..."},
+{"Copied - paste it wherever you report it.", "Скопійовано - вставте туди, куди повідомляєте."},

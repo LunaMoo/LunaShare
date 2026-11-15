@@ -907,6 +907,59 @@ void App::HandleOpenPaths() {
     }
 }
 
+void App::DrawCrashReportOffer() {
+    if (!crashChecked) {
+        crashChecked = true;
+        crashReport = applog::NewCrashReport();
+    }
+    if (crashReport.empty() || welcomeStep >= 0 || eng.call.state != CallState::None) return;
+    const char* title = T("LunaShare stopped last time");
+    if (!ImGui::IsPopupOpen(title)) ImGui::OpenPopup(title);
+    bool mobile = ui::M().mobile;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (mobile) ImGui::SetNextWindowSize(ImVec2(ImGui::GetMainViewport()->Size.x * 0.92f, 0));
+    if (!ImGui::BeginPopupModal(title, nullptr, mobile ? 0 : ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::PushTextWrapPos(mobile ? 0 : ImGui::GetFontSize() * 28);
+    ImGui::TextWrapped("%s", T("It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first."));
+    ImGui::PopTextWrapPos();
+    if (ImGui::CollapsingHeader(T("What's in it"))) {
+        ImGui::BeginChild("crashtext", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 28, ImGui::GetFontSize() * 10), ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(crashReport.c_str());
+        ImGui::EndChild();
+    }
+    float h = mobile ? ui::M().rowH * 0.85f : 0;
+    bool done = false;
+    if (ui::IconTextButton(T("Send to a chat..."), Icon::Send, ImVec2(0, h))) {
+        // (a file of its own, beside the crash file: just this report)
+        std::string path = JoinPath(eng.settings.downloadDir, "lunashare-crash-report.txt");
+        if (FILE* f = fopen(path.c_str(), "wb")) {
+            fwrite(crashReport.data(), 1, crashReport.size(), f);
+            fclose(f);
+            OpenSendTo({path});
+        }
+        done = true;
+    }
+    ImGui::SameLine();
+    if (Bridge().shareText) {
+        if (ui::IconTextButton(T("Share..."), Icon::Share, ImVec2(0, h))) {
+            Bridge().shareText(crashReport);
+            done = true;
+        }
+    } else if (ImGui::Button(T("Copy"), ImVec2(0, h))) {
+        ImGui::SetClipboardText(crashReport.c_str());
+        toasts.push_back({EventType::Info, title, T("Copied - paste it wherever you report it."), "", 0, 3.0f});
+        done = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Not now"), ImVec2(0, h))) done = true;
+    if (done) {
+        applog::CrashReportSeen();
+        crashReport.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 void App::OpenSendTo(const std::vector<std::string>& paths) {
     pendingSend = paths;
     pendingSendList.clear();
@@ -3850,6 +3903,7 @@ void App::DrawPopups() {
     }
 
     DrawIncomingCall();
+    DrawCrashReportOffer();
 
     // ---- send to device picker
     if (openSendTo) { ImGui::OpenPopup(T("Send to device")); openSendTo = false; }

@@ -17,4 +17,8 @@ std::string Text();       // the recent lines, oldest first
 // lets the system handle the crash as before. Something to send along when the app "stopped".
 void CrashReportsInit();                  // (once; after that SetDir also says where the crash file goes)
 void CrashText(const std::string& text);  // appends to the crash file (the Java handler's report)
+// the report of a crash since the last start that hasn't been offered to the user yet (empty: none) - the end of the
+// crash file past what CrashReportSeen() last marked (lunashare-crash.seen beside it)
+std::string NewCrashReport();
+void CrashReportSeen();
 }  // namespace applog

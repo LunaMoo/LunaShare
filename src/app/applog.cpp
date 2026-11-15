@@ -113,6 +113,51 @@ bool On() {
 
 char g_crashPath[1024] = {0};  // (read in the crash handler: a plain buffer, written before any crash can happen)
 
+static long SeenBytes() {
+    std::string sp = std::string(g_crashPath) + ".seen";  // ("lunashare-crash.txt.seen")
+    FILE* f = fopen(sp.c_str(), "rb");
+    if (!f) return 0;
+    long n = 0;
+    if (fscanf(f, "%ld", &n) != 1) n = 0;
+    fclose(f);
+    return n;
+}
+
+std::string NewCrashReport() {
+    if (!g_crashPath[0]) return "";
+    FILE* f = fopen(g_crashPath, "rb");
+    if (!f) return "";
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f), from = SeenBytes();
+    if (from > size) from = 0;  // (the file was deleted and made again)
+    if (size - from > 64 * 1024) from = size - 64 * 1024;  // (the latest part is what matters)
+    std::string t;
+    if (size > from) {
+        t.resize((size_t)(size - from));
+        fseek(f, from, SEEK_SET);
+        t.resize(fread(&t[0], 1, t.size(), f));
+    }
+    fclose(f);
+    while (!t.empty() && (t[0] == '\n' || t[0] == '\r')) t.erase(0, 1);
+    return t;
+}
+
+void CrashReportSeen() {
+    if (!g_crashPath[0]) return;
+    FILE* f = fopen(g_crashPath, "rb");
+    long size = 0;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        size = ftell(f);
+        fclose(f);
+    }
+    std::string sp = std::string(g_crashPath) + ".seen";
+    if (FILE* o = fopen(sp.c_str(), "wb")) {
+        fprintf(o, "%ld\n", size);
+        fclose(o);
+    }
+}
+
 void SetDir(const std::string& dir) {
     if (!dir.empty() && dir.size() + 24 < sizeof(g_crashPath))
         snprintf(g_crashPath, sizeof(g_crashPath), "%s/lunashare-crash.txt", dir.c_str());
