@@ -13,6 +13,9 @@
   really come, and goes back up when the camera catches up.
 - **Android: the sent picture follows how the phone is held again** - the motion sensor was switched off right
   after each camera start, so rotation only followed the screen.
+- **A connection could drop right after connecting** when one device reached the other on two addresses at once
+  (a PC on Wi-Fi and cable, a VPN or virtual adapters, or adding someone by QR code, which lists all of them): each
+  side closed a different one of the two. Both sides now keep the same one.
 
 ## 1.8.3
 

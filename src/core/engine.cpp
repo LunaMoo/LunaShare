@@ -1920,7 +1920,11 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                     auto initId = [&](const std::shared_ptr<Connection>& x) { return x->initiator ? settings.deviceId : id; };
                     std::string want = std::min(settings.deviceId, id);
                     bool cGood = initId(c) == want, oGood = initId(o) == want;
-                    loser = (cGood && !oGood) ? o : c;
+                    if (cGood != oGood) loser = cGood ? o : c;
+                    else if (c->sec && o->sec)  // both dialed by the same side (two addresses of one device): both ends
+                        loser = c->sec->ConnId() < o->sec->ConnId() ? o : c;  // must drop the same one, whichever got ready first
+                    else
+                        loser = c;
                 }
                 if (loser == o && o->transport == c->transport) {
                     CloseConn(o, "duplicate");

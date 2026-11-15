@@ -862,6 +862,33 @@ static void RtCall(Engine& X, Engine& Y, const std::string& idY, bool onX, bool 
     Y.onMedia = nullptr;
 }
 
+// one device dialing another on two of its addresses at once (a PC on Wi-Fi and cable, a VPN, docker - or a QR code
+// listing them all): exactly one connection must stay, on both sides, whichever got ready first where
+static void TestParallelDial() {
+    printf("[two connections to one device at once: one stays]\n");
+    std::string lan;
+    for (auto& a : LocalIPv4Addresses())
+        if (a.ip != "127.0.0.1") { lan = a.ip; break; }
+    if (lan.empty()) { printf("  no LAN address here (skipped)\n"); return; }
+    auto P = MakeEngine("dial-p", 48360, false, false);
+    auto Q = MakeEngine("dial-q", 48370, false, false);
+    std::string idP = P->settings.deviceId, idQ = Q->settings.deviceId;
+    int bad = 0;
+    for (int round = 0; round < 8; round++) {
+        Q->ConnectAddress("127.0.0.1", P->boundPort, false);
+        Q->ConnectAddress(lan, P->boundPort, false);
+        bool up = WaitFor([&] { return Q->IsConnected(idP) && P->IsConnected(idQ); }, 5000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));  // (both duplicates decided)
+        bool still = Q->IsConnected(idP) && P->IsConnected(idQ);
+        if (!up || !still) { bad++; printf("    round %d: %s\n", round, !up ? "never connected" : "both connections dropped"); }
+        Q->Disconnect(idP);
+        WaitFor([&] { return !Q->IsConnected(idP) && !P->IsConnected(idQ); }, 3000);
+    }
+    CHECK(bad == 0, "parallel dial: a connection stays every time (%d of 8 lost)", bad);
+    P->Stop();
+    Q->Stop();
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (const char* f = getenv("LUNASHARE_TEST_SERVE_LINK")) return ServeLinks(f);
@@ -877,6 +904,8 @@ int main() {
     printf("root: %s\n", Root().c_str());
     TestShareLinks();
     if (getenv("LUNASHARE_TEST_LINKS_ONLY")) return g_fail ? 1 : 0;
+    TestParallelDial();
+    if (getenv("LUNASHARE_TEST_DIAL_ONLY")) return g_fail ? 1 : 0;
 
     auto A = MakeEngine("alice", 48110, false, true);
     auto B = MakeEngine("bob", 48120, true, true);

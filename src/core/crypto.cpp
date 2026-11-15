@@ -503,6 +503,19 @@ bool Base64Decode(const std::string& text, std::string& out) {
     return true;
 }
 
+std::string SecureChannel::ConnId() const {
+    uint8_t h[16];
+    static const char ctx[] = "LunaShare connection id";
+    uint8_t buf[64 + sizeof(ctx)];
+    memcpy(buf, ctx, sizeof(ctx));
+    memcpy(buf + sizeof(ctx), th_, 64);
+    crypto_blake2b(h, sizeof(h), buf, sizeof(buf));
+    static const char* hx = "0123456789abcdef";
+    std::string out;
+    for (uint8_t b : h) { out += hx[b >> 4]; out += hx[b & 15]; }
+    return out;
+}
+
 std::string SecureChannel::Code() const {
     uint8_t h[32];
     static const char ctx[] = "LunaShare confirmation code";

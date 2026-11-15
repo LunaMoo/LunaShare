@@ -95,6 +95,9 @@ public:
     // 6 digits both ends of THIS connection compute identically (from the handshake hash): shown on both screens
     // before something important (linking a device), so a man in the middle would be noticed.
     std::string Code() const;
+    // the same on both ends of this connection and different for every connection (from the handshake hash): lets
+    // both sides agree which of two parallel connections to keep
+    std::string ConnId() const;
     bool VerifyPeer(const std::string& pubHex, const std::string& sigHex) const;
 
 private:
