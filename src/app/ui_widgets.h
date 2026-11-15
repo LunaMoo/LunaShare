@@ -39,6 +39,7 @@ void TouchScrollUpdate(bool enabled);
 
 // Draws a QR code for `text`, `px` pixels wide.
 void QrCode(const char* text, float px);
+extern int g_qrDrawnFrame;  // the ImGui frame a code was last drawn in (the app turns the screen up for scanning)
 
 ImU32 ColAccent();
 ImU32 ColAccentText();  // the accent as a colour for text and icons on the window's background

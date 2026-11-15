@@ -133,6 +133,8 @@ public final class VideoEngine {
     private static volatile boolean fullPreview;  // self-view in the camera's full size and frame rate
 
     public static void setFullPreview(boolean on) { fullPreview = on; }
+    private static volatile boolean scanMode;  // the picture is read for a QR code: fast picture focus, not video's smooth one
+    public static void setScanMode(boolean on) { scanMode = on; }
 
     // control state
     private static float zoom = 1f, evComp = 0f, iso = 400f, shutterMs = 10f, focus = 0f;
@@ -738,7 +740,13 @@ public final class VideoEngine {
                 }
                 // focus
                 if (afAuto) {
-                    request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+                    // (scanning a code held close: the picture mode refocuses at once; the video one drifts slowly)
+                    int af = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO;
+                    int[] afModes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES);
+                    if (scanMode && afModes != null)
+                        for (int mo : afModes)
+                            if (mo == CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) af = mo;
+                    request.set(CaptureRequest.CONTROL_AF_MODE, af);
                 } else {
                     request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF);
                     request.set(CaptureRequest.LENS_FOCUS_DISTANCE, focus);

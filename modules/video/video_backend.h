@@ -39,6 +39,11 @@ inline std::atomic<bool>& FullPreview() {
     static std::atomic<bool> v{false};
     return v;
 }
+// the picture is read for a QR code (set_full_preview(2)): focus fast on what's close rather than smoothly
+inline std::atomic<bool>& ScanMode() {
+    static std::atomic<bool> v{false};
+    return v;
+}
 
 class Backend {
 public:

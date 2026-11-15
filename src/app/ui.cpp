@@ -3904,6 +3904,16 @@ void App::DrawPopups() {
 
     DrawIncomingCall();
     DrawCrashReportOffer();
+    {
+        // a code on screen to be scanned: the screen at full brightness meanwhile (a dim screen gives the other
+        // camera a weak, grey picture), the system's own again after - not while the movie player has its own
+        static bool qrBright = false;
+        bool shown = ImGui::GetFrameCount() - ui::g_qrDrawnFrame <= 2;
+        if (Bridge().setScreenBrightness && watchBrightness < 0 && shown != qrBright) {
+            Bridge().setScreenBrightness(shown ? 1.0f : -1.0f);
+            qrBright = shown;
+        }
+    }
 
     // ---- send to device picker
     if (openSendTo) { ImGui::OpenPopup(T("Send to device")); openSendTo = false; }

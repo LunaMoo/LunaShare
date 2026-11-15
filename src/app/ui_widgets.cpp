@@ -572,6 +572,8 @@ void TouchScrollUpdate(bool enabled) {
     }
 }
 
+int g_qrDrawnFrame = -100;
+
 void QrCode(const char* text, float px) {
     using qrcodegen::QrCode;
     static std::string cachedText;
@@ -591,6 +593,7 @@ void QrCode(const char* text, float px) {
         }
     }
     if (n == 0) return;
+    g_qrDrawnFrame = ImGui::GetFrameCount();
     int quiet = 4;  // (the white border the QR standard asks for: scanners look for it)
     float cell = floorf(px / (float)(n + quiet * 2));
     if (cell < 1) cell = 1;

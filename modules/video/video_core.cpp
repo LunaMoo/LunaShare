@@ -809,7 +809,10 @@ void ApiVcamPush(const LsvImage* img) {
     if (c.backend && img) c.backend->VcamPush(*img);
 }
 
-void ApiSetFullPreview(int on) { FullPreview() = on != 0; }
+void ApiSetFullPreview(int on) {
+    FullPreview() = on != 0;
+    ScanMode() = on == 2;  // (2: for the QR scanner - see lunashare_video.h)
+}
 
 const LsvModule kModule = {
     LSV_API_VERSION, "LunaShare video", "1.1",

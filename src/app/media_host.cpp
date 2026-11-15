@@ -1416,11 +1416,20 @@ bool MediaHost::OpenScanner() {
     if (!StartVideoModule(&vs)) return false;
     // the camera's full picture to read from: the light self-view (Android: ~320 pixels wide unless "full
     // self-view" is on) is far too coarse for a dense code - some phones then never read it
-    if (vmod_->api_version >= 4 && vmod_->set_full_preview) vmod_->set_full_preview(1);
-    // the back camera (phones), else any real one - not the screen
+    if (vmod_->api_version >= 4 && vmod_->set_full_preview) vmod_->set_full_preview(2);  // (2: for reading a code)
+    // the first back camera (phones: the main one - the ones after it are the ultra-wide, macro or depth helpers,
+    // some with far fewer pixels), else any real one - not the screen
     std::string pick;
-    for (auto& c : Cameras())
-        if (std::string(c.id) != "screen" && (pick.empty() || c.facing == LSV_FACING_BACK)) pick = c.id;
+    bool back = false;
+    for (auto& c : Cameras()) {
+        if (std::string(c.id) == "screen" || back) continue;
+        if (c.facing == LSV_FACING_BACK) {
+            pick = c.id;
+            back = true;
+        } else if (pick.empty()) {
+            pick = c.id;
+        }
+    }
     if (pick.empty()) {
         vmod_->stop();
         audioError = T("no camera");
@@ -1507,9 +1516,14 @@ void MediaHost::ScanFeed(MediaHost* self, const LsvImage& im) {
 
 void MediaHost::ScanLoop() {
     struct quirc* q = quirc_new();
-    if (!q) return;
-    std::vector<uint8_t> grey;
-    int w = 0, h = 0, qw = 0, qh = 0;
+    struct quirc* q2 = quirc_new();  // (the half-size try)
+    if (!q || !q2) {
+        if (q) quirc_destroy(q);
+        if (q2) quirc_destroy(q2);
+        return;
+    }
+    std::vector<uint8_t> grey, half;
+    int w = 0, h = 0, qw = 0, qh = 0, q2w = 0, q2h = 0;
     for (;;) {
         {
             std::unique_lock<std::mutex> l(scanM_);
@@ -1524,20 +1538,43 @@ void MediaHost::ScanLoop() {
             qw = w;
             qh = h;
         }
-        memcpy(quirc_begin(q, nullptr, nullptr), grey.data(), (size_t)w * h);
-        quirc_end(q);
-        std::string found;
-        for (int i = 0; i < quirc_count(q) && found.empty(); i++) {
-            struct quirc_code code;
-            struct quirc_data data;
-            quirc_extract(q, i, &code);
-            quirc_decode_error_t e = quirc_decode(&code, &data);
-            if (e == QUIRC_ERROR_DATA_ECC) {  // (seen in a mirror: flip it)
-                quirc_flip(&code);
-                e = quirc_decode(&code, &data);
+        auto decode = [](struct quirc* qq, const uint8_t* px, int pw, int ph) {
+            memcpy(quirc_begin(qq, nullptr, nullptr), px, (size_t)pw * ph);
+            quirc_end(qq);
+            std::string out;
+            for (int i = 0; i < quirc_count(qq) && out.empty(); i++) {
+                struct quirc_code code;
+                struct quirc_data data;
+                quirc_extract(qq, i, &code);
+                quirc_decode_error_t e = quirc_decode(&code, &data);
+                if (e == QUIRC_ERROR_DATA_ECC) {  // (seen in a mirror: flip it)
+                    quirc_flip(&code);
+                    e = quirc_decode(&code, &data);
+                }
+                if (e != QUIRC_SUCCESS) continue;
+                out.assign((const char*)data.payload, (size_t)data.payload_len);
             }
-            if (e != QUIRC_SUCCESS) continue;
-            found.assign((const char*)data.payload, (size_t)data.payload_len);
+            return out;
+        };
+        std::string found = decode(q, grey.data(), w, h);
+        if (found.empty() && w >= 320 && h >= 240) {
+            // again at half size (each pixel the average of four): a slightly blurred or noisy picture - a shaky hand,
+            // focus not quite there, a screen's pixel grid - often reads there when it doesn't at full size
+            int hw = w / 2, hh = h / 2;
+            half.resize((size_t)hw * hh);
+            for (int r = 0; r < hh; r++) {
+                const uint8_t* a0 = &grey[(size_t)(r * 2) * w];
+                const uint8_t* a1 = a0 + w;
+                uint8_t* d = &half[(size_t)r * hw];
+                for (int c = 0; c < hw; c++) d[c] = (uint8_t)((a0[c * 2] + a0[c * 2 + 1] + a1[c * 2] + a1[c * 2 + 1] + 2) / 4);
+            }
+            if (hw != q2w || hh != q2h) {
+                if (quirc_resize(q2, hw, hh) >= 0) {
+                    q2w = hw;
+                    q2h = hh;
+                }
+            }
+            if (hw == q2w && hh == q2h) found = decode(q2, half.data(), hw, hh);
         }
         std::lock_guard<std::mutex> l(scanM_);
         scanHave_ = false;
@@ -1545,6 +1582,7 @@ void MediaHost::ScanLoop() {
         if (!found.empty()) WakeUi();
     }
     quirc_destroy(q);
+    quirc_destroy(q2);
 }
 
 void MediaHost::StartMicTest() { micTest_ = true; }

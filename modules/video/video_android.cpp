@@ -148,6 +148,8 @@ public:
         if (!e || !g_cls) { if (err) *err = "no Java VM"; return false; }
         if (jmethodID fp = e->GetStaticMethodID(g_cls, "setFullPreview", "(Z)V")) e->CallStaticVoidMethod(g_cls, fp, (jboolean)FullPreview().load());
         Clear(e.env);
+        if (jmethodID sm = e->GetStaticMethodID(g_cls, "setScanMode", "(Z)V")) e->CallStaticVoidMethod(g_cls, sm, (jboolean)ScanMode().load());
+        Clear(e.env);
         // "prioritize frame rate": the camera may use its high-speed mode for 60 fps (no self-view there)
         if (jmethodID ff = e->GetStaticMethodID(g_cls, "setFpsFirst", "(Z)V")) e->CallStaticVoidMethod(g_cls, ff, (jboolean)(s.adaptive == 2));
         Clear(e.env);

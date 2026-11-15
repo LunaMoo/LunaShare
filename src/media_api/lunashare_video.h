@@ -140,6 +140,7 @@ typedef struct LsvModule {
     /* the picture to show in it (normally the video received from the other device); any thread */
     void (*vcam_push)(const LsvImage* img);
     /* --- since version 4: self-view in the camera's full size and frame rate (1) instead of a light preview (0).
+     * 2: the same, for reading a QR code (a backend may focus for close things; older modules take it as 1).
      * Takes effect when the camera (re)starts. --- */
     void (*set_full_preview)(int on);
 } LsvModule;
