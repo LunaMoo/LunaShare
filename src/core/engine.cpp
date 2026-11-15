@@ -1492,6 +1492,7 @@ void Engine::AdoptSocket(SocketHandle s, Transport t, const std::string& addr, b
                 loud = loudAddrs_.erase(c->addr) > 0;
             }
             if (loud && c->initiator && running_) Emit({EventType::Error, "", "Secure handshake with " + c->addr + " failed: " + err});
+            if (c->initiator && running_ && c->transport == Transport::LAN) NoteConnFail(c->addr, ConnFail::Handshake);
             CloseSocket(c->sock);
             return;
         }
@@ -1523,6 +1524,8 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
     ShutdownSocket(c->sock);
     c->qcv.notify_all();
     auto lk = Lock();
+    if (!c->ready && c->initiator && c->transport == Transport::LAN && running_ && why && (!strcmp(why, "reader") || !strcmp(why, "bye")))
+        addrFail_[c->addr] = {ConnFail::ClosedByThem, SteadyMs()};  // (they ended it while saying hello: blocked, or refused)
     if (c->ready) {
         bool other = false;
         for (auto& o : conns)
@@ -2624,6 +2627,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 }
             }
             Emit({EventType::CallIncoming, c->peerId, "Incoming call", id});
+            Queue(c, Msg::CallAlive, {{"call", id}});  // ("it rings here": the caller can say so)
             break;
         }
         case Msg::CallAccept: {
@@ -2651,6 +2655,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::CallAlive: {
             uint64_t id = j.value("call", (uint64_t)0);
+            if (id && call.id == id && call.state == CallState::OutgoingRinging && !call.ringingAt) call.ringingAt = SteadyMs();
             if (!id || call.id == id) break;  // (still in it - or still ringing)
             DIAG("call: %llx is over here - telling %s", (unsigned long long)id, c->peerId.substr(0, 8).c_str());
             Queue(c, Msg::CallEnd, {{"call", id}, {"reason", "connection lost"}});
@@ -2823,6 +2828,7 @@ bool Engine::SyncPop(std::string& kind, json& data) {
 
 void Engine::OnReady(const std::shared_ptr<Connection>& c) {
     const std::string& peer = c->peerId;
+    if (c->transport == Transport::LAN) addrFail_.erase(c->addr);  // (it works now)
     if (call.state == CallState::Active && call.group.empty() && call.peer == peer) {
         // a (new) connection to the one I'm in a call with: the call goes on over it. Whether they are still in it,
         // CallAlive asks (if not, they answer with CallEnd) - also when only the other side noticed the drop
@@ -3947,7 +3953,8 @@ void Engine::ConnectAddress(const std::string& host, uint16_t port, bool report)
         if (report) loudAddrs_.insert(host);
     }
     Spawn([this, host, port, key, report] {
-        SocketHandle s = TcpConnect(host, port ? port : kDefaultTcpPort, 3000);
+        ConnFail why = ConnFail::None;
+        SocketHandle s = TcpConnect(host, port ? port : kDefaultTcpPort, 3000, &why);
         {
             auto lk = Lock();
             connecting_.erase(key);
@@ -3959,9 +3966,51 @@ void Engine::ConnectAddress(const std::string& host, uint16_t port, bool report)
                 auto lk = Lock();
                 loudAddrs_.erase(host);
             }
-            if (report) Emit({EventType::Error, "", "Could not connect to " + key});
+            NoteConnFail(host, why);
+            if (report) Emit({EventType::Error, "", "Could not connect to " + key + ": " + ConnFailText(why)});
         }
     });
+}
+
+void Engine::NoteConnFail(const std::string& host, ConnFail why) {
+    auto lk = Lock();
+    if (why == ConnFail::None) addrFail_.erase(host);
+    else addrFail_[host] = {why, SteadyMs()};
+}
+
+const char* Engine::ConnFailText(ConnFail f) {
+    switch (f) {
+    case ConnFail::Refused: return "it refuses the connection - LunaShare there may be closing, or another app has its port";
+    case ConnFail::NoAnswer: return "no answer - a firewall, or the Wi-Fi's device isolation (guest networks), may be blocking it";
+    case ConnFail::Unreachable: return "this network can't reach it";
+    case ConnFail::BadAddress: return "that address doesn't exist";
+    case ConnFail::Handshake: return "the secure connection fails - update LunaShare on both devices";
+    case ConnFail::ClosedByThem: return "it closes the connection - it may have blocked this device";
+    default: return "it didn't work";
+    }
+}
+
+ConnFail Engine::ConnectTrouble(const std::string& peerOrKey, int64_t* ageMs) {
+    auto lk = Lock();
+    std::vector<std::string> devs;
+    if (IsContactKey(peerOrKey)) devs = DevicesOf(peerOrKey);
+    else devs.push_back(peerOrKey);
+    int64_t now = SteadyMs();
+    ConnFail best = ConnFail::None;
+    int64_t bestAt = 0;
+    for (auto& d : devs) {
+        if (IsConnected(d)) return ConnFail::None;  // (one of them works)
+        auto o = online.find(d);
+        if (o == online.end() || !o->second.OnLan()) continue;
+        auto f = addrFail_.find(o->second.ip);
+        if (f == addrFail_.end() || now - f->second.at > 30000) continue;  // (old: it has had a new try since)
+        if (f->second.at > bestAt) {
+            best = f->second.why;
+            bestAt = f->second.at;
+        }
+    }
+    if (ageMs) *ageMs = best == ConnFail::None ? 0 : now - bestAt;
+    return best;
 }
 
 void Engine::ConnectPeer(const std::string& peerOrKey) {
@@ -4083,17 +4132,37 @@ int Engine::UseConnectCode(const std::string& code, std::string& pub, std::strin
     verify = "LSV1:" + acc + ":" + dev;
     std::string ips = rest.substr(c + 1);
     int n = 0;
+    {
+        auto lk = Lock();
+        codeIps_.clear();
+    }
     for (size_t s = 0; s <= ips.size() && n < 8;) {
         size_t e = ips.find(',', s);
         if (e == std::string::npos) e = ips.size();
         std::string ip = ips.substr(s, e - s);
         if (ip.size() >= 7 && ip.size() <= 15) {
+            {
+                auto lk = Lock();
+                addrFail_.erase(ip);  // (a fresh try)
+                codeIps_.push_back(ip);
+            }
             ConnectAddress(ip, (uint16_t)port);
             n++;
         }
         s = e + 1;
     }
     return 1;
+}
+
+ConnFail Engine::ConnectCodeTrouble() {
+    // the most telling reason among the code's addresses: one that answered says more than ones that didn't (a code
+    // lists every adapter, and most of them are no way to the other device anyway)
+    static const ConnFail order[] = {ConnFail::ClosedByThem, ConnFail::Handshake, ConnFail::Refused, ConnFail::NoAnswer, ConnFail::Unreachable};
+    auto lk = Lock();
+    for (ConnFail f : order)
+        for (auto& ip : codeIps_)
+            if (auto it = addrFail_.find(ip); it != addrFail_.end() && it->second.why == f) return f;
+    return ConnFail::None;
 }
 
 std::string Engine::ConnectedDeviceByKey(const std::string& pubHex) {

@@ -23,7 +23,9 @@ int WaitReadable(SocketHandle s, int timeoutMs);
 
 SocketHandle TcpListen(uint16_t port, uint16_t* boundPort);
 SocketHandle TcpAccept(SocketHandle listener, std::string* peerIp, int timeoutMs);
-SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs);
+// why a connect failed - for telling the user something better than "could not connect"
+enum class ConnFail { None, Refused, NoAnswer, Unreachable, BadAddress, Handshake, ClosedByThem };
+SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs, ConnFail* why = nullptr);
 void TuneStreamSocket(SocketHandle s, bool tcp);
 
 SocketHandle UdpOpen(uint16_t port);  // bound, broadcast-enabled, address reuse

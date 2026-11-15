@@ -31,6 +31,8 @@
 using namespace ls;
 using ui::Icon;
 
+static std::map<std::string, int64_t> g_connWaitSince;  // chat header: since when a device is seen but not connected
+
 static std::string Eta(double remaining, double speed) {
     if (speed < 1) return "";
     int s = (int)(remaining / speed);
@@ -1652,11 +1654,23 @@ void App::DrawChat(const std::string& peer) {
         if (ImGui::IsItemHovered() && !names.empty()) ImGui::SetTooltip("%s", names.c_str());
     } else if (eng.IsSelfKey(peer) && eng.DevicesOf(peer).empty()) {
         ImGui::TextDisabled("%s", T("notes for yourself - files you add stay on this device"));
-    } else if (connected) ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
+    } else if (connected) g_connWaitSince.erase(peer), ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.45f, 1), T("connected via %s%s"), conn ? T(TransportName(conn->transport)) : "?",
                                       conn && conn->addr == "relay" ? T(" (relay through the server)") : "");
-    else if (eng.IsOnline(peer)) ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1), "%s", T("online - connecting..."));
-    else if (eng.WanStatus().rfind("connected", 0) == 0) ImGui::TextDisabled("%s", T("offline - messages wait on your server, files are queued"));
-    else ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
+    else if (eng.IsOnline(peer)) {
+        // seen, not connected: say why when a try failed, and that it's still trying when it takes long
+        // i18n-keys: "it refuses the connection - LunaShare there may be closing, or another app has its port", "no answer - a firewall, or the Wi-Fi's device isolation (guest networks), may be blocking it", "this network can't reach it", "that address doesn't exist", "the secure connection fails - update LunaShare on both devices", "it closes the connection - it may have blocked this device", "it didn't work"
+        int64_t& t0 = g_connWaitSince[peer];
+        if (!t0) t0 = SteadyMs();
+        ConnFail why = eng.ConnectTrouble(peer);
+        std::string t = why != ConnFail::None ? TF("online, but can't connect: %s - trying again", T(Engine::ConnFailText(why)))
+                        : SteadyMs() - t0 > 8000 ? TF("online - still connecting (%d s)...", (int)((SteadyMs() - t0) / 1000))
+                                                 : std::string(T("online - connecting..."));
+        ImGui::PushStyleColor(ImGuiCol_Text, why != ConnFail::None ? ImVec4(0.95f, 0.5f, 0.3f, 1) : ImVec4(0.9f, 0.7f, 0.2f, 1));
+        ImGui::TextWrapped("%s", t.c_str());
+        ImGui::PopStyleColor();
+    }
+    else if (eng.WanStatus().rfind("connected", 0) == 0) g_connWaitSince.erase(peer), ImGui::TextDisabled("%s", T("offline - messages wait on your server, files are queued"));
+    else g_connWaitSince.erase(peer), ImGui::TextDisabled("%s", T("offline - messages and files are queued"));
     if (auto cvt = eng.chats.find(peer); cvt != eng.chats.end() && cvt->second.ttl > 0) {  // disappearing
         ImGui::SameLine();
         int t = cvt->second.ttl;
@@ -4108,7 +4122,8 @@ bool App::CallButton(const std::string& peer, float size, bool video) {
     bool connected = grp ? !grp->left : eng.IsConnected(peer);
     bool capable = grp ? connected : connected && eng.PeerHasCap(peer, video ? "video" : "voice");
     bool busy = eng.call.state != CallState::None;
-    const char* tip = !connected ? (video ? T("Video call (device is offline)") : T("Voice call (device is offline)"))
+    const char* tip = !connected && !grp && eng.IsOnline(peer) ? (video ? T("Video call (not connected yet - see above the chat)") : T("Voice call (not connected yet - see above the chat)"))
+                      : !connected ? (video ? T("Video call (device is offline)") : T("Voice call (device is offline)"))
                     : !capable ? (video ? T("Video call - the other device does not have the video module")
                                         : T("Voice call - the other device does not have the voice module"))
                     : busy ? T("Already in a call") : grp ? (video ? T("Group video call") : T("Group voice call"))
@@ -4307,7 +4322,7 @@ void App::DrawCallBar() {
         auto conn = eng.ReadyConn(c.peer);
         snprintf(status, sizeof(status), "%s  %d:%02d%s", who.c_str(), secs / 60, secs % 60, conn ? ("  " + TF("via %s", T(TransportName(conn->transport)))).c_str() : "");
     } else {
-        snprintf(status, sizeof(status), "Calling %s...", who.c_str());
+        snprintf(status, sizeof(status), "%s", (c.ringingAt ? TF("Ringing at %s...", who.c_str()) : TF("Calling %s...", who.c_str())).c_str());
     }
     ImGui::AlignTextToFramePadding();
     float ih = ImGui::GetTextLineHeight();
@@ -4443,7 +4458,12 @@ void App::DrawVideoStage(ImVec2 size, bool phone) {
         float fs = r * 1.1f;
         ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, 0, ini.c_str());
         dl->AddText(f, fs, ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), IM_COL32_WHITE, ini.c_str());
-        std::string msg = Media().RemoteCameraOn() ? TF("Waiting for %s's video...", who.c_str()) : TF("%s's camera is off", who.c_str());
+        static int64_t waitVid = 0;  // (since when their camera is on with no picture of it here)
+        if (!Media().RemoteCameraOn()) waitVid = 0;
+        else if (!waitVid) waitVid = SteadyMs();
+        std::string msg = !Media().RemoteCameraOn() ? TF("%s's camera is off", who.c_str())
+                          : SteadyMs() - waitVid > 7000 ? TF("No picture from %s yet - the connection may be too slow for video", who.c_str())
+                                                        : TF("Waiting for %s's video...", who.c_str());
         ImVec2 ms = ImGui::CalcTextSize(msg.c_str());
         dl->AddText(ImVec2(c.x - ms.x * 0.5f, c.y + r + ImGui::GetStyle().ItemSpacing.y), IM_COL32(220, 220, 220, 255), msg.c_str());
     }

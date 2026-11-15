@@ -864,6 +864,57 @@ static void RtCall(Engine& X, Engine& Y, const std::string& idY, bool onX, bool 
 }
 
 // one device dialing another on two of its addresses at once (a PC on Wi-Fi and cable, a VPN, docker - or a QR code
+// why a connection doesn't come up, in words for the user (the chat header, adding by QR code)
+static void TestConnReasons() {
+    printf("[why connecting fails]\n");
+    ConnFail why;
+    uint16_t freePort = 0;
+    {
+        SocketHandle l = TcpListen(0, &freePort);  // (a port nothing listens on any more)
+        CloseSocket(l);
+    }
+    SocketHandle s = TcpConnect("127.0.0.1", freePort, 2000, &why);
+    CHECK(s == kInvalidSocket && why == ConnFail::Refused, "closed port: refused (%d)", (int)why);
+    s = TcpConnect("no-such-host.invalid", 48000, 2000, &why);
+    CHECK(s == kInvalidSocket && why == ConnFail::BadAddress, "unknown name: no such address (%d)", (int)why);
+    auto A = MakeEngine("reasona", 48380, false, false);
+    std::string code = A->ConnectCode();  // LSC1:acc:pub:port:ips
+    size_t pe = code.find(':', 135), ps = code.rfind(':', pe - 1) + 1;
+    auto withPort = [&](uint16_t port) { return code.substr(0, ps) + std::to_string(port) + ":127.0.0.1"; };
+    auto N = MakeEngine("reasonn", 48390, false, false);
+    std::string pub, verify;
+    CHECK(N->UseConnectCode(withPort(freePort), pub, verify) == 1, "code with a closed port");
+    CHECK(WaitFor([&] { return N->ConnectCodeTrouble() == ConnFail::Refused; }, 4000), "code: refused (%d)", (int)N->ConnectCodeTrouble());
+    // something that isn't LunaShare on the port: the secure connection fails
+    uint16_t junkPort = 0;
+    SocketHandle junk = TcpListen(0, &junkPort);
+    std::atomic<bool> stop{false};
+    std::thread jt([&] {
+        while (!stop) {
+            std::string ip;
+            SocketHandle c = TcpAccept(junk, &ip, 200);
+            if (c == kInvalidSocket) continue;
+            const char http[] = "HTTP/1.0 400 Bad Request\r\n\r\n";
+            SendAll(c, http, sizeof(http) - 1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            CloseSocket(c);
+        }
+    });
+    CHECK(N->UseConnectCode(withPort(junkPort), pub, verify) == 1, "code to something else");
+    CHECK(WaitFor([&] { auto w = N->ConnectCodeTrouble(); return w == ConnFail::Handshake || w == ConnFail::ClosedByThem; }, 6000),
+          "code: not LunaShare there - the secure connection fails (%d)", (int)N->ConnectCodeTrouble());
+    stop = true;
+    jt.join();
+    CloseSocket(junk);
+    // the right code: it works, and the reason goes
+    CHECK(N->UseConnectCode(code, pub, verify) == 1, "the real code");
+    CHECK(WaitFor([&] { return !N->ConnectedDeviceByKey(pub).empty(); }, 6000), "connected with the real code");
+    CHECK(N->ConnectCodeTrouble() == ConnFail::None || N->ConnectCodeTrouble() == ConnFail::NoAnswer || N->ConnectCodeTrouble() == ConnFail::Unreachable,
+          "...and no refusal said any more (%d)", (int)N->ConnectCodeTrouble());
+    N->Stop();
+    A->Stop();
+}
+
 // listing them all): exactly one connection must stay, on both sides, whichever got ready first where
 static void TestParallelDial() {
     printf("[two connections to one device at once: one stays]\n");
@@ -906,6 +957,7 @@ int main() {
     TestShareLinks();
     if (getenv("LUNASHARE_TEST_LINKS_ONLY")) return g_fail ? 1 : 0;
     TestParallelDial();
+    TestConnReasons();
     if (getenv("LUNASHARE_TEST_DIAL_ONLY")) return g_fail ? 1 : 0;
 
     auto A = MakeEngine("alice", 48110, false, true);
@@ -2947,6 +2999,7 @@ int main() {
             }
             uint64_t cid = P->StartCall(idQ);
             CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging && Q->call.id == cid; }, 5000), "ringing");
+            CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.ringingAt != 0; }, 3000), "the caller hears that it rings there");
             Q->AcceptCall();
             CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 5000), "active");
             RtStats st;

@@ -272,6 +272,7 @@ struct CallInfo {
     std::vector<std::string> invited;  // outgoing, ringing: every device of the person that was called
     std::string rtKey;       // real-time media (rtmedia.h): the call's key (hex; the caller makes it), if offered
     uint16_t rtPeerPort = 0; // ...and the other side's UDP port on the LAN
+    int64_t ringingAt = 0;   // calling: when their device said it rings (CallAlive on the invite; older ones don't)
     int64_t lostAt = 0;      // the connection went mid-call without a goodbye (steady ms): reconnecting until it's
     int64_t lastRetry = 0;   // back or callGraceMs pass (calls with one person)
     // ---- group calls
@@ -365,6 +366,10 @@ public:
     void Disconnect(const std::string& peerId);
     void AdoptSocket(SocketHandle s, Transport t, const std::string& addr, bool initiator);  // Android bridge, BT, tests
     std::set<std::string> loudAddrs_;  // addresses the user connects to: a failed handshake is reported
+    struct AddrFail { ConnFail why = ConnFail::None; int64_t at = 0; };
+    std::map<std::string, AddrFail> addrFail_;  // host -> why the last try to it failed (cleared when one works)
+    void NoteConnFail(const std::string& host, ConnFail why);
+    std::vector<std::string> codeIps_;  // the addresses of the last connect code tried
 
     void SetCustomName(const std::string& peer, const std::string& name);
     void SetTrusted(const std::string& peer, bool v);
@@ -402,6 +407,11 @@ public:
     std::vector<std::string> DevicesOf(const std::string& key);  // a person's devices (just `key` for a device id)
     std::string Resolve(const std::string& key);             // best device: connected (fastest link) > online > last seen
     bool IsOnline(const std::string& key);
+    // seen online but not connected: why the last tries to it failed (None: no failure seen, or it's still trying for
+    // the first time); *ageMs how long ago. For the chat header and for calls/sending that can't start.
+    ConnFail ConnectTrouble(const std::string& peerOrKey, int64_t* ageMs = nullptr);
+    static const char* ConnFailText(ConnFail f);
+    ConnFail ConnectCodeTrouble();  // why the addresses of the last connect code (UseConnectCode) didn't work  // plain words, untranslated (the UI's T() translates them)
     std::vector<std::string> MyOtherDevices();               // devices linked to my account (not this one)
     // my other devices: things the app keeps the same everywhere (playlists, settings). SyncPush hands mine (sent to
     // those online now, and to the others when they come); SyncPop gives theirs, for the app to merge.

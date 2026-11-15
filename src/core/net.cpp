@@ -191,13 +191,30 @@ static void SetNonBlocking(SocketHandle s, bool nb) {
 #endif
 }
 
-SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs) {
+static ConnFail FailFromErr(int e) {
+#ifdef _WIN32
+    if (e == WSAECONNREFUSED) return ConnFail::Refused;
+    if (e == WSAENETUNREACH || e == WSAEHOSTUNREACH || e == WSAENETDOWN) return ConnFail::Unreachable;
+#else
+    if (e == ECONNREFUSED) return ConnFail::Refused;
+    if (e == ENETUNREACH || e == EHOSTUNREACH || e == ENETDOWN) return ConnFail::Unreachable;
+#endif
+    return ConnFail::NoAnswer;  // (timed out, or something unusual: either way nothing answered)
+}
+
+SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs, ConnFail* why) {
     NetInit();
+    ConnFail dummy;
+    ConnFail& w = why ? *why : dummy;
+    w = ConnFail::None;
     addrinfo hints{}, *res = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     std::string ps = std::to_string(port);
-    if (getaddrinfo(host.c_str(), ps.c_str(), &hints, &res) != 0 || !res) return kInvalidSocket;
+    if (getaddrinfo(host.c_str(), ps.c_str(), &hints, &res) != 0 || !res) {
+        w = ConnFail::BadAddress;
+        return kInvalidSocket;
+    }
     SocketHandle result = kInvalidSocket;
     for (addrinfo* ai = res; ai && result == kInvalidSocket; ai = ai->ai_next) {
         auto s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
@@ -207,26 +224,34 @@ SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs) {
         bool ok = r == 0;
         if (!ok) {
 #ifdef _WIN32
-            bool inProgress = WSAGetLastError() == WSAEWOULDBLOCK;
+            int e0 = WSAGetLastError();
+            bool inProgress = e0 == WSAEWOULDBLOCK;
             WSAPOLLFD pfd{};
             pfd.fd = s;
             pfd.events = POLLWRNORM;
-            if (inProgress && WSAPoll(&pfd, 1, timeoutMs) == 1 && !(pfd.revents & (POLLERR | POLLHUP))) ok = true;
+            int pr = inProgress ? WSAPoll(&pfd, 1, timeoutMs) : -1;
 #else
-            bool inProgress = errno == EINPROGRESS;
+            int e0 = errno;
+            bool inProgress = e0 == EINPROGRESS;
             pollfd pfd{};
             pfd.fd = s;
             pfd.events = POLLOUT;
-            if (inProgress && poll(&pfd, 1, timeoutMs) == 1) ok = true;
+            int pr = inProgress ? poll(&pfd, 1, timeoutMs) : -1;
 #endif
-            if (ok) {
+            if (!inProgress) w = FailFromErr(e0);
+            else if (pr == 0) w = ConnFail::NoAnswer;
+            else if (pr == 1) {
                 int err = 0;
                 socklen_t el = sizeof(err);
                 getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &el);
                 ok = err == 0;
+                if (!ok) w = FailFromErr(err);
+            } else {
+                w = ConnFail::NoAnswer;
             }
         }
         if (ok) {
+            w = ConnFail::None;
             SetNonBlocking((SocketHandle)s, false);
             TuneStreamSocket((SocketHandle)s, true);
             result = (SocketHandle)s;

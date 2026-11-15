@@ -186,7 +186,13 @@ void App::AddPersonTick() {
         }
     } else if (SteadyMs() > connectPendingUntil) {
         connectPendingPub.clear();
-        addMsg = T("Couldn't reach them. Both devices must be on the same network (the same Wi-Fi, or one on the other's hotspot).");
+        ConnFail why = eng.ConnectCodeTrouble();
+        if (why == ConnFail::None || why == ConnFail::NoAnswer || why == ConnFail::Unreachable)
+            addMsg = T("Couldn't reach them. Both devices must be on the same network (the same Wi-Fi, or one on the other's hotspot).");
+        else
+            addMsg = TF("Couldn't connect: %s.", T(Engine::ConnFailText(why)));
+        if (why == ConnFail::NoAnswer)  // (on the same Wi-Fi and still nothing: the network keeps devices apart)
+            addMsg += std::string(" ") + T("If they are, the Wi-Fi may keep its devices apart (guest networks do) - try one phone's hotspot.");
         addMsgErr = true;
     }
 }
