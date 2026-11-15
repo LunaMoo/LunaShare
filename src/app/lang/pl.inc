@@ -1597,3 +1597,5 @@
 {"What's in it", "Co zawiera"},
 {"Send to a chat...", "Wyślij do czatu..."},
 {"Copied - paste it wherever you report it.", "Skopiowano - wklej tam, gdzie to zgłaszasz."},
+{"Connection lost - reconnecting...", "Utracono połączenie - ponowne łączenie..."},
+{"%d s", "%d s"},

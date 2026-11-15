@@ -1581,3 +1581,5 @@
 {"What's in it", "Що всередині"},
 {"Send to a chat...", "Надіслати в чат..."},
 {"Copied - paste it wherever you report it.", "Скопійовано - вставте туди, куди повідомляєте."},
+{"Connection lost - reconnecting...", "З'єднання втрачено - повторне з'єднання..."},
+{"%d s", "%d с"},

@@ -1698,6 +1698,27 @@ int main() {
             CHECK(WaitFor([&] { return frameB >= b0 + 3; }, 3000), "B still does");
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
             CHECK(frameC == c0, "C, watching B now, doesn't get A's video (%d)", (int)frameC - c0);
+            {  // A's connection to C drops (no goodbye): C stays in the call, comes back, and is heard again
+                std::string idC2 = C->settings.deviceId;
+                auto lostOf = [&](Engine& e, const std::string& dev) {
+                    auto l = e.Lock();
+                    for (auto& p : e.call.peers)
+                        if (p.dev == dev) return p.lostAt != 0 ? 1 : 0;
+                    return -1;  // (not in the call)
+                };
+                A->DropConnectionTo(idC2);
+                CHECK(WaitFor([&] { return lostOf(*A, idC2) == 1; }, 3000), "the dropped one is kept, waiting (%d)", lostOf(*A, idC2));
+                CHECK(peersOf(*A) == 2, "still two others in A's call");
+                int64_t d0 = SteadyMs();
+                CHECK(WaitFor([&] { return lostOf(*A, idC2) == 0 && lostOf(*C, idA2) == 0; }, 12000), "back in the call on both sides (%d ms; %d %d)",
+                      (int)(SteadyMs() - d0), lostOf(*A, idC2), lostOf(*C, idA2));
+                int a0 = audioC;
+                CHECK(WaitFor([&] {
+                    A->SendMedia(voice, sizeof(voice));
+                    return audioC > a0 + 3;
+                }, 4000), "C hears A again");
+                CHECK(endedA == 0, "no stream ended for the drop");
+            }
             C->EndCall();
             CHECK(WaitFor([&] { return peersOf(*A) == 1 && peersOf(*B) == 1 && endedA == 1; }, 3000), "C leaves the call");
             B->EndCall();

@@ -1581,3 +1581,5 @@
 {"What's in it", "Что внутри"},
 {"Send to a chat...", "Отправить в чат..."},
 {"Copied - paste it wherever you report it.", "Скопировано - вставьте туда, куда сообщаете."},
+{"Connection lost - reconnecting...", "Связь потеряна - переподключение..."},
+{"%d s", "%d с"},

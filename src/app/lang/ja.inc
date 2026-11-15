@@ -1587,3 +1587,5 @@
 {"What's in it", "中身"},
 {"Send to a chat...", "チャットに送る..."},
 {"Copied - paste it wherever you report it.", "コピーしました - 報告する場所に貼り付けてください。"},
+{"Connection lost - reconnecting...", "接続が切れました - 再接続中..."},
+{"%d s", "%d 秒"},

@@ -230,7 +230,8 @@ void App::GroupCallStrip(float tile, bool onVideo) {
         bool clicked = ImGui::InvisibleButton("##cp", ImVec2(tile, tile + nameH));
         std::string name = CallPeerName(p);
         if (ImGui::IsItemHovered() && !ui::M().mobile)
-            ImGui::SetTooltip("%s%s", name.c_str(), video ? (std::string("\n") + T("Click to watch their video")).c_str() : "");
+            ImGui::SetTooltip("%s%s", name.c_str(), p.lostAt ? (std::string("\n") + T("Connection lost - reconnecting...")).c_str()
+                                                   : video ? (std::string("\n") + T("Click to watch their video")).c_str() : "");
         if (clicked && video) eng.SetSpotlight(p.dev);
         if (onVideo) dl->AddRectFilled(p0, ImVec2(p0.x + tile, p0.y + tile + nameH), IM_COL32(0, 0, 0, 140), 6);
         ImVec2 cc(p0.x + tile * 0.5f, p0.y + tile * 0.48f);
@@ -240,6 +241,12 @@ void App::GroupCallStrip(float tile, bool onVideo) {
         if (talking) dl->AddCircle(cc, av * 0.5f + 3, IM_COL32(80, 230, 120, 255), 0, 3);
         else if (watched) dl->AddCircle(cc, av * 0.5f + 3, IM_COL32(255, 255, 255, 200), 0, 2);
         DrawAvatar(dl, cc, av, "@" + p.acc, name);
+        if (p.lostAt) {  // (their connection dropped: dimmed, with the seconds it's been trying)
+            dl->AddCircleFilled(cc, av * 0.5f + 1, IM_COL32(150, 95, 20, 190));
+            std::string sec = TF("%d s", (int)((now - p.lostAt) / 1000));
+            ImVec2 st = ImGui::CalcTextSize(sec.c_str());
+            dl->AddText(ImVec2(cc.x - st.x * 0.5f, cc.y - st.y * 0.5f), IM_COL32_WHITE, sec.c_str());
+        }
         if (video)
             ui::DrawIcon(dl, p.cameraOn ? Icon::Video : Icon::VideoOff, ImVec2(p0.x + tile * 0.84f, p0.y + tile * 0.16f), tile * 0.22f,
                          p.cameraOn ? IM_COL32(255, 255, 255, 230) : IM_COL32(200, 200, 200, 150));

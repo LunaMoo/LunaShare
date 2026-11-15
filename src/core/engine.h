@@ -260,6 +260,8 @@ struct CallPeer {          // group calls: another device in the call
     bool cameraOn = false;
     int64_t talking = 0;     // (steady ms) last time voice came from them
     int hubIdx = -1;         // through the server: its number in the hub
+    int64_t lostAt = 0;      // its connection dropped (steady ms): kept, dialled again, out after 30 s
+    int64_t askedAt = 0;     // connected again: when "still in?" (CallJoin) was asked - out if no answer
 };
 struct CallInfo {
     uint64_t id = 0;
@@ -868,7 +870,8 @@ private:
     bool TogetherMemberLost(const std::string& kind, const std::string& dev, int64_t now, bool* out);
     std::map<std::string, int64_t> watchViewerGone_;  // host: viewer device -> since when without a connection
     int64_t watchRetryAt_ = 0;
-    int64_t listenRetryAt_ = 0, readRetryAt_ = 0;  // (last time a lost host was dialled again)                    // (last time a lost host / viewer was dialled again)
+    int64_t listenRetryAt_ = 0, readRetryAt_ = 0;
+    int64_t groupRetryAt_ = 0;  // (group call: last time dropped people were dialled again)  // (last time a lost host was dialled again)                    // (last time a lost host / viewer was dialled again)
     std::vector<std::string> watchComing_;        // host: viewers of the previous movie, not joined to this one yet
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
     bool watchReportedBuffering_ = false;

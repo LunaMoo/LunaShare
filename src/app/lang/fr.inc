@@ -1575,3 +1575,5 @@
 {"What's in it", "Ce qu'il contient"},
 {"Send to a chat...", "Envoyer à une discussion..."},
 {"Copied - paste it wherever you report it.", "Copié - collez-le là où vous le signalez."},
+{"Connection lost - reconnecting...", "Connexion perdue - reconnexion..."},
+{"%d s", "%d s"},

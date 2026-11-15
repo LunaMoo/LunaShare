@@ -1587,3 +1587,5 @@
 {"What's in it", "内容"},
 {"Send to a chat...", "发送到聊天..."},
 {"Copied - paste it wherever you report it.", "已复制 - 粘贴到你报告的地方。"},
+{"Connection lost - reconnecting...", "连接已断开 - 正在重新连接..."},
+{"%d s", "%d 秒"},

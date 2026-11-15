@@ -19,6 +19,7 @@
 
 #include "crypto.h"
 #include "engine.h"
+#include "diag.h"
 #include "platform.h"
 
 namespace ls {
@@ -174,7 +175,12 @@ void Engine::HandleGroupCall(const std::shared_ptr<Connection>& c, Msg type, con
             if (call.id != id || call.hub) return;
             if (call.state != CallState::Active) return;
             bool known = false;
-            for (auto& p : call.peers) known |= p.dev == c->peerId;
+            for (auto& p : call.peers)
+                if (p.dev == c->peerId) {
+                    known = true;
+                    if (p.lostAt) DIAG("group call: %s is back after %d ms", p.dev.substr(0, 8).c_str(), (int)(SteadyMs() - p.lostAt));
+                    p.lostAt = p.askedAt = 0;  // (back, and still in it)
+                }
             if (!known) GroupPeerJoined(c->peerId);
             if (!j.value("reply", false)) Queue(c, Msg::CallJoin, {{"call", id}, {"gid", gid}, {"reply", true}});
             break;
@@ -436,6 +442,31 @@ void Engine::GroupCallTick() {
         if (call.peers.empty() && call.aloneSince && SteadyMs() - call.aloneSince > (call.answered == call.started && call.outgoing ? 60000 : 30000)) {
             FinishGroupCall("alone");
             return;
+        }
+        if (!call.hub) {  // people whose connection dropped: dialled again, asked "still in?" once back, out after a while
+            int64_t now = SteadyMs();
+            bool retry = now - groupRetryAt_ > 2000;
+            std::vector<std::string> out;
+            for (auto& p : call.peers) {
+                if (!p.lostAt) continue;
+                if (ReadyConn(p.dev)) {
+                    if (!p.askedAt) {  // (OnReady asks; this is in case the connection was already there)
+                        p.askedAt = now;
+                        QueueToPeer(p.dev, Msg::CallJoin, {{"call", call.id}, {"gid", call.group.substr(1)}});
+                    } else if (now - p.askedAt > 8000) {
+                        out.push_back(p.dev);  // (connected, but not in this call any more)
+                    }
+                } else if (now - p.lostAt > 30000) {
+                    out.push_back(p.dev);
+                } else if (retry) {
+                    ConnectPeer(p.dev);
+                    groupRetryAt_ = now;
+                }
+            }
+            for (auto& d : out) {
+                DIAG("group call: %s didn't come back - out of the call", d.substr(0, 8).c_str());
+                GroupPeerLeft(d);
+            }
         }
         if (!call.hub) {  // connections that came back / changed
             std::lock_guard<std::mutex> l(mediaMtx_);

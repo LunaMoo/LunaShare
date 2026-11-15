@@ -1572,3 +1572,5 @@
 {"What's in it", "Cosa contiene"},
 {"Send to a chat...", "Invia a una chat..."},
 {"Copied - paste it wherever you report it.", "Copiato - incollalo dove lo segnali."},
+{"Connection lost - reconnecting...", "Connessione persa - riconnessione..."},
+{"%d s", "%d s"},

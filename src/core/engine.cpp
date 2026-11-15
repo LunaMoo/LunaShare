@@ -1542,7 +1542,16 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
             } else if (call.state != CallState::None && call.peer == c->peerId) {
                 FinishCall("connection lost", false);
             }
-            if (call.state == CallState::Active && !call.group.empty() && !call.hub) GroupPeerLeft(c->peerId);
+            if (call.state == CallState::Active && !call.group.empty() && !call.hub) {
+                if (deliberate) GroupPeerLeft(c->peerId);
+                else  // (a drop: they stay in the call a while - GroupCallTick)
+                    for (auto& p : call.peers)
+                        if (p.dev == c->peerId && !p.lostAt) {
+                            p.lostAt = SteadyMs();
+                            p.askedAt = 0;
+                            DIAG("group call: the connection to %s dropped - waiting for it", p.dev.substr(0, 8).c_str());
+                        }
+            }
             // a viewer that left: gone now; one whose connection dropped: WatchTick waits for it (not holding the movie)
             if (deliberate && watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), c->peerId) != watchViewers_.end()) {
                 watchViewers_.erase(std::remove(watchViewers_.begin(), watchViewers_.end(), c->peerId), watchViewers_.end());
@@ -2904,7 +2913,15 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
         const Group* g = GroupOf(call.group);
         bool in = false;
         for (auto& p : call.peers) in |= p.dev == peer;
-        if (!in && g && dv != devices.end() && dv->second.accountPub != MyAccount() && g->Has(dv->second.accountPub))
+        bool lost = false;
+        for (auto& p : call.peers)
+            if (p.dev == peer && p.lostAt) {
+                lost = true;
+                p.askedAt = SteadyMs();
+            }
+        // (someone not in it yet: "I'm in"; someone whose connection dropped: the same, as "still in?" - their
+        // answer keeps them, no answer lets them go - GroupCallTick)
+        if ((!in || lost) && g && dv != devices.end() && dv->second.accountPub != MyAccount() && g->Has(dv->second.accountPub))
             Queue(c, Msg::CallJoin, {{"call", call.id}, {"gid", call.group.substr(1)}});
         if (in) SyncGroupMedia();  // (a new connection to someone in the call)
     }

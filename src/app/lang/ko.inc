@@ -1587,3 +1587,5 @@
 {"What's in it", "내용"},
 {"Send to a chat...", "채팅으로 보내기..."},
 {"Copied - paste it wherever you report it.", "복사했습니다 - 알리는 곳에 붙여 넣으세요."},
+{"Connection lost - reconnecting...", "연결이 끊어졌습니다 - 다시 연결 중..."},
+{"%d s", "%d초"},
