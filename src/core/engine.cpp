@@ -1543,14 +1543,17 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
                 FinishCall("connection lost", false);
             }
             if (call.state == CallState::Active && !call.group.empty() && !call.hub) GroupPeerLeft(c->peerId);
-            if (watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), c->peerId) != watchViewers_.end()) {
+            // a viewer that left: gone now; one whose connection dropped: WatchTick waits for it (not holding the movie)
+            if (deliberate && watch.sid && watch.host.empty() && std::find(watchViewers_.begin(), watchViewers_.end(), c->peerId) != watchViewers_.end()) {
                 watchViewers_.erase(std::remove(watchViewers_.begin(), watchViewers_.end(), c->peerId), watchViewers_.end());
                 watchBuffering_.erase(c->peerId);  // (a viewer that went away doesn't keep everyone waiting)
                 WatchUpdateHold();
                 WatchBroadcast();
             }
-            ListenPeerGone(c->peerId);
-            ReadPeerGone(c->peerId);
+            if (deliberate) {  // (left: out now; a drop: ListenTick / ReadTick wait for them a while)
+                ListenPeerGone(c->peerId);
+                ReadPeerGone(c->peerId);
+            }
             InterruptPeerTransfers(c->peerId);
             Device(c->peerId).lastSeen = NowMs();
         } else {

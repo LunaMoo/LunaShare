@@ -143,6 +143,7 @@ uint64_t Engine::StartWatch(const std::string& key, const std::string& path) {
     watch.people = {settings.displayName};
     watchViewers_.clear();
     watchBuffering_.clear();
+    watchViewerGone_.clear();
     watch.allowSave = settings.watchAllowSave;
     watch.playing = settings.playerAutoplay;  // (autoplay: no need to press play)
     {
@@ -193,6 +194,7 @@ uint64_t Engine::StartWatchExt(const std::string& ext, const std::string& name, 
     watchKeys.clear();
     watchViewers_.clear();
     watchBuffering_.clear();
+    watchViewerGone_.clear();
     watchSelfBuffering_ = false;
     MarkDirty();
     return watch.sid;
@@ -269,6 +271,7 @@ uint64_t Engine::StartLibraryWatch(const LibFile& f) {
     watchKeys.clear();
     watchViewers_.clear();
     watchBuffering_.clear();
+    watchViewerGone_.clear();
     watchSelfBuffering_ = false;
     SwarmTick();
     return watch.sid;
@@ -557,6 +560,7 @@ void Engine::EndWatchLocked(const std::string& why) {
     watchViewers_.clear();
     watchComing_.clear();
     watchBuffering_.clear();
+    watchViewerGone_.clear();
     watchKeys.clear();
     watchSelfBuffering_ = false;
     watch = WatchInfo();
@@ -644,6 +648,9 @@ void Engine::WatchControl(bool playing, double pos) {
     }
 }
 
+// how long watching together waits for a dropped connection to come back (as a call does)
+static const int kWatchGraceMs = 30000;
+
 void Engine::WatchTick() {
     WatchSavesTick();
     if (watchFollow_ && SteadyMs() - watchFollowAt_ > 15000) watchFollow_ = 0;  // (the next movie never came)
@@ -661,6 +668,36 @@ void Engine::WatchTick() {
             }
             if (it != swarm.end()) watch.saving = it->second->keep;
         }
+        // viewers whose connection dropped: don't hold the movie for them, dial them again, and after a while they're
+        // gone (their own side ends it then too, and can't say so without a connection)
+        bool changed = false, retry = now - watchRetryAt_ > 2000;
+        for (size_t i = 0; i < watchViewers_.size();) {
+            const std::string d = watchViewers_[i];
+            if (ReadyConn(d)) {
+                watchViewerGone_.erase(d);
+                i++;
+                continue;
+            }
+            int64_t& since = watchViewerGone_[d];
+            if (!since) since = now;
+            if (now - since > 3000 && watchBuffering_[d]) {
+                watchBuffering_[d] = false;  // (the others go on meanwhile)
+                changed = true;
+            }
+            if (now - since > kWatchGraceMs) {
+                DIAG("watch: %s has been gone %d s - no longer watching", d.substr(0, 8).c_str(), kWatchGraceMs / 1000);
+                watchViewers_.erase(watchViewers_.begin() + (ptrdiff_t)i);
+                watchBuffering_.erase(d);
+                watchViewerGone_.erase(d);
+                changed = true;
+                continue;
+            }
+            if (retry) ConnectPeer(d);
+            i++;
+        }
+        if (retry) watchRetryAt_ = now;
+        if (changed) WatchUpdateHold();
+        if (changed) WatchBroadcast();
         if (now - watchLastState_ > 1000) WatchBroadcast();
         return;
     }
@@ -672,9 +709,12 @@ void Engine::WatchTick() {
         QueueToPeer(watch.host, Msg::WatchReport, {{"sid", watch.sid}, {"buffering", b}, {"saving", watch.saving}});
     }
     if (ReadyConn(watch.host)) watchHostSeen_ = now;
-    else if (now - watchHostSeen_ > 20000) {
+    else if (now - watchHostSeen_ > kWatchGraceMs) {
         EndWatchLocked("Watching together ended (connection lost).");
         return;
+    } else if (now - watchRetryAt_ > 2000) {  // (the connection dropped: dial the host again meanwhile)
+        watchRetryAt_ = now;
+        ConnectPeer(watch.host);
     }
     if (auto c = WatchCacheNow()) {
         int64_t from;

@@ -512,6 +512,26 @@ double Engine::ListenLoaded(uint64_t iid) {
 
 // ---------------------------------------------------------------- the tick and the messages
 
+// a member of listening / reading together without a connection (true; since when is kept in togetherGone_), and
+// *out once it's been gone too long
+bool Engine::TogetherMemberLost(const std::string& kind, const std::string& dev, int64_t now, bool* out) {
+    const int kTogetherGraceMs = 30000;
+    std::string k = kind + dev;
+    *out = false;
+    if (ReadyConn(dev)) {
+        togetherGone_.erase(k);
+        return false;
+    }
+    auto it = togetherGone_.find(k);
+    if (it == togetherGone_.end()) it = togetherGone_.emplace(k, now).first;
+    if (now - it->second > kTogetherGraceMs) {
+        togetherGone_.erase(it);
+        *out = true;
+        return false;
+    }
+    return true;
+}
+
 void Engine::ListenTick() {
     // (invites older than six hours are forgotten)
     int64_t now = SteadyMs();
@@ -534,12 +554,25 @@ void Engine::ListenTick() {
         } else if (now - listenLastBroadcast_ > 2000) {
             ListenBroadcast();
         }
+        // members whose connection dropped: dialled again; out after a while (they can't say goodbye then)
+        std::vector<std::string> gone;
+        bool retry = now - listenRetryAt_ > 2000;
+        for (auto& d : listenMembers_) {
+            bool out = false;
+            if (TogetherMemberLost("l:", d, now, &out) && retry) {
+                ConnectPeer(d);
+                listenRetryAt_ = now;
+            }
+            if (out) gone.push_back(d);
+        }
+        for (auto& d : gone) ListenPeerGone(d);
     } else {
         if (ReadyConn(listen.host)) listenHostSeen_ = now;
         else if (now - listenHostSeen_ > 30000) {
             EndListenLocked("Listening together ended: the host is gone.");
             return;
-        } else if (now - listenHostSeen_ > 3000 && (now - listenHostSeen_) % 10000 < 300) {
+        } else if (now - listenRetryAt_ > 2000) {  // (dial the host again meanwhile)
+            listenRetryAt_ = now;
             ConnectPeer(listen.host);
         }
     }

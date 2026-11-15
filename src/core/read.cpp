@@ -315,6 +315,17 @@ void Engine::ReadTick() {
     if (!read.sid) return;
     if (read.host.empty()) {
         if (now - readLastBroadcast_ > 3000) ReadBroadcast();
+        std::vector<std::string> gone;  // (members whose connection dropped - see ListenTick)
+        bool retry = now - readRetryAt_ > 2000;
+        for (auto& d : readMembers_) {
+            bool out = false;
+            if (TogetherMemberLost("r:", d, now, &out) && retry) {
+                ConnectPeer(d);
+                readRetryAt_ = now;
+            }
+            if (out) gone.push_back(d);
+        }
+        for (auto& d : gone) ReadPeerGone(d);
         return;
     }
     if (ReadyConn(read.host)) readHostSeen_ = now;
@@ -322,7 +333,8 @@ void Engine::ReadTick() {
         DIAG("read: the host is gone");
         EndReadLocked("Reading together ended: the host is gone.");
         return;
-    } else if (now - readHostSeen_ > 3000 && (now - readHostSeen_) % 10000 < 300) {
+    } else if (now - readRetryAt_ > 2000) {  // (dial the host again meanwhile)
+        readRetryAt_ = now;
         ConnectPeer(read.host);
     }
     ReadCaches();

@@ -863,6 +863,12 @@ private:
     void WatchSavesTick();
     std::map<std::string, bool> watchBuffering_;  // host: viewer device -> still loading
     std::vector<std::string> watchViewers_;       // host: devices watching
+    std::map<std::string, int64_t> togetherGone_;  // host of listening / reading together: "l:"/"r:" + member -> since
+    // when without a connection (out after 30 s); true while it has none
+    bool TogetherMemberLost(const std::string& kind, const std::string& dev, int64_t now, bool* out);
+    std::map<std::string, int64_t> watchViewerGone_;  // host: viewer device -> since when without a connection
+    int64_t watchRetryAt_ = 0;
+    int64_t listenRetryAt_ = 0, readRetryAt_ = 0;  // (last time a lost host was dialled again)                    // (last time a lost host / viewer was dialled again)
     std::vector<std::string> watchComing_;        // host: viewers of the previous movie, not joined to this one yet
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
     bool watchReportedBuffering_ = false;

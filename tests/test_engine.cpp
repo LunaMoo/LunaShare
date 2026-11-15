@@ -1772,6 +1772,21 @@ int main() {
         A->WatchControl(false, 30);  // the host pauses at 30 s
         CHECK(WaitFor([&] { auto l = B->Lock(); return !B->watch.playing && std::abs(B->watch.Target(SteadyMs()) - 30) < 0.01; }, 3000),
               "and the host's reaches everyone");
+        {  // the connection drops (no goodbye): watching goes on, and controls work again once it's back
+            std::string idBw = B->GetSettings().deviceId;
+            A->DropConnectionTo(idBw);
+            int64_t d0 = SteadyMs();
+            WaitFor([&] { return !A->IsConnected(idBw) || !B->IsConnected(A->GetSettings().deviceId); }, 3000);  // (the drop noticed)
+            CHECK(WaitFor([&] { return A->IsConnected(idBw) && B->IsConnected(A->GetSettings().deviceId); }, 12000), "connected again after the drop (%d ms)", (int)(SteadyMs() - d0));
+            {
+                auto l = B->Lock();
+                CHECK(B->watch.sid == sid, "still watching together after the drop");
+            }
+            B->WatchControl(false, 31.5);
+            CHECK(WaitFor([&] { auto l = A->Lock(); return std::abs(A->watch.Target(SteadyMs()) - 31.5) < 0.01; }, 3000), "a viewer's seek reaches the host again");
+            A->WatchControl(false, 30);
+            CHECK(WaitFor([&] { auto l = B->Lock(); return std::abs(B->watch.Target(SteadyMs()) - 30) < 0.01; }, 3000), "and the host's reaches the viewer");
+        }
         CHECK(B->WatchLoaded() > 0.1, "loaded %.0f%%", B->WatchLoaded() * 100);
         B->WatchSetLoop(true);
         CHECK(WaitFor([&] { auto l = A->Lock(); auto l2 = B->Lock(); return A->watch.loop && B->watch.loop; }, 3000), "loop on for everyone");
@@ -2366,6 +2381,27 @@ int main() {
     {
         auto tb = GetT(*B, t2);
         CHECK(tb && Sha256File(tb->localPath) == sha2, "restart: hash matches");
+    }
+
+    // ------------------------------------------------------------ the connection drops mid-transfer (Wi-Fi gone a moment)
+    printf("[a dropped connection mid-transfer: it goes on by itself]\n");
+    {
+        std::string f4 = JoinPath(Root(), "src/big4.bin");
+        WriteRandomFile(f4, SZ, 7);
+        std::string sha4 = Sha256File(f4);
+        int64_t down0 = B->totalDown.load();
+        uint64_t t4 = FirstTid(*A, A->SendPaths(idB, {f4}));
+        CHECK(WaitFor([&] { auto t = GetT(*B, t4); return t && t->done.load() > SZ / 3; }, 15000), "progress before the drop");
+        int64_t at = GetT(*B, t4)->done.load();
+        A->DropConnectionTo(idB);  // (no goodbye: as when the network goes)
+        int64_t t0 = SteadyMs();
+        // nobody connects by hand and nobody presses resume
+        bool done = WaitFor([&] { return StateOf(*A, t4) == TState::Completed && StateOf(*B, t4) == TState::Completed; }, 30000);
+        CHECK(done, "completed on its own after the drop (%d ms): A=%s B=%s", (int)(SteadyMs() - t0), TStateName(StateOf(*A, t4)), TStateName(StateOf(*B, t4)));
+        printf("  dropped at %.0f%%, done %d ms later\n", 100.0 * (double)at / (double)SZ, (int)(SteadyMs() - t0));
+        CHECK(B->totalDown.load() - down0 < SZ + SZ / 3, "went on from where it was (downloaded %lld of %lld)", (long long)(B->totalDown.load() - down0), (long long)SZ);
+        auto tb = GetT(*B, t4);
+        CHECK(tb && Sha256File(tb->localPath) == sha4, "after the drop: hash matches");
     }
 
     // ------------------------------------------------------------ corruption is detected by the final hash
