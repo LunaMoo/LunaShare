@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.4
+
+- **Video calls: 60 fps that stayed at 30.** Many phone cameras give only 30 fps at big sizes to apps (their own
+  camera app uses private modes others can't open). The size for a call is now checked against what the camera
+  itself delivers at the rate asked, and the camera panel in a call shows "Camera: N fps (asked for M)".
+- **60 and 120 fps through the camera's high-speed mode:** with "prioritize frame rate" on, when no normal mode
+  gives 60 fps, Android uses the camera's slow-motion (high-speed) mode at the sizes it offers there - often 1080p
+  or 720p at 120, with the encoder keeping 60 (Android 10+). No self-view in that mode.
+- **No wasted bandwidth when the camera gives fewer frames than asked:** the bitrate was set for the asked rate,
+  so 60 fps asked from a 30 fps camera sent each frame with twice the data. The bitrate now follows the frames that
+  really come, and goes back up when the camera catches up.
+- **Android: the sent picture follows how the phone is held again** - the motion sensor was switched off right
+  after each camera start, so rotation only followed the screen.
+
 ## 1.8.3
 
 - **Android: the crash shortly after a video call started - found and fixed.** The video module attached its
