@@ -876,7 +876,7 @@ private:
     int64_t listenRetryAt_ = 0, readRetryAt_ = 0;
     int64_t groupRetryAt_ = 0;  // (group call: last time dropped people were dialled again)  // (last time a lost host was dialled again)                    // (last time a lost host / viewer was dialled again)
     std::vector<std::string> watchComing_;        // host: viewers of the previous movie, not joined to this one yet
-    int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0;
+    int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0, watchStateAt_ = 0;  // (StateAt: the host's last state)
     bool watchReportedBuffering_ = false;
     bool watchSelfBuffering_ = false;             // host of a library stream: waiting for pieces
     uint64_t watchForceSid_ = 0, watchEndNext_ = 0;  // host switching movies: the new one's id (told when the old ends)
@@ -895,7 +895,7 @@ private:
     std::vector<std::string> listenMembers_;      // host: devices listening
     std::map<std::string, std::string> listenNames_;  // host: device -> name
     std::vector<std::shared_ptr<WatchCache>> listenCaches_;  // others' songs coming here (watchCacheMtx_)
-    int64_t listenLastBroadcast_ = 0, listenHostSeen_ = 0;
+    int64_t listenLastBroadcast_ = 0, listenHostSeen_ = 0, listenStateAt_ = 0;
     void HandleListen(const std::shared_ptr<Connection>& c, Msg type, const json& j);
     // reading together
     std::map<uint64_t, int> readOwn_;              // host: page id -> page (the files are in watchServe_)
@@ -906,7 +906,7 @@ private:
     std::vector<std::string> readInvited_;         // host: devices asked (told when it ends)
     std::map<std::string, std::string> readNames_;
     std::vector<std::pair<int, std::shared_ptr<WatchCache>>> readCaches_;  // pages coming here (watchCacheMtx_)
-    int64_t readLastBroadcast_ = 0, readHostSeen_ = 0, readTurnAt_ = 0, readTurnSeq_ = 0;
+    int64_t readLastBroadcast_ = 0, readHostSeen_ = 0, readStateAt_ = 0, readTurnAt_ = 0, readTurnSeq_ = 0;
     void HandleRead(const std::shared_ptr<Connection>& c, Msg type, const json& j);
     void ReadTick();
     void ReadBroadcast();

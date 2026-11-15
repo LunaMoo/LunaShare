@@ -125,7 +125,7 @@ bool Engine::JoinRead(uint64_t sid) {
     readPids_.clear();
     readSizes_.clear();
     readExts_.clear();
-    readHostSeen_ = SteadyMs();
+    readHostSeen_ = readStateAt_ = SteadyMs();
     readTurnAt_ = 0;
     {  // (pages of an earlier one that didn't end tidily)
         std::string all = JoinPath(JoinPath(ConfigPath(), "cache"), "read");
@@ -328,8 +328,14 @@ void Engine::ReadTick() {
         for (auto& d : gone) ReadPeerGone(d);
         return;
     }
-    if (ReadyConn(read.host)) readHostSeen_ = now;
-    else if (now - readHostSeen_ > 30000) {
+    if (ReadyConn(read.host)) {
+        readHostSeen_ = now;
+        if (now - readStateAt_ > 12000) {  // (connected, and its state - every 3 s - stopped: it ended meanwhile)
+            DIAG("read: no state from the host - it has ended");
+            EndReadLocked("Reading together ended.");
+            return;
+        }
+    } else if (now - readHostSeen_ > 30000) {
         DIAG("read: the host is gone");
         EndReadLocked("Reading together ended: the host is gone.");
         return;
@@ -403,7 +409,7 @@ void Engine::HandleRead(const std::shared_ptr<Connection>& c, Msg type, const js
         }
         case Msg::ReadState: {
             if (read.sid != sid || dev != read.host) return;
-            readHostSeen_ = SteadyMs();
+            readHostSeen_ = readStateAt_ = SteadyMs();
             if (readPids_.empty()) {  // the first one: what the comic is
                 std::vector<uint64_t> pids;
                 std::vector<int64_t> sizes;

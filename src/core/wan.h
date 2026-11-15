@@ -122,6 +122,8 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<int> sessions_{0};
     std::thread thread_;
+    std::mutex lifeM_;  // Start / Stop one at a time (see Mdns)
+    void StopLocked();
     std::mutex m_;
     Config cfg_;
     std::string status_, publicEp_, mappedEp_;

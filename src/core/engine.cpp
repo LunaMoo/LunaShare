@@ -187,6 +187,9 @@ void Engine::Stop() {
     if (listenThread_.joinable()) listenThread_.join();
     if (discoveryThread_.joinable()) discoveryThread_.join();
     if (maintThread_.joinable()) maintThread_.join();
+    // (the maintenance thread restarts these after a network change - it may have, after they were stopped above)
+    mdns_.Stop();
+    wan_.Stop();
     if (hashThread_.joinable()) hashThread_.join();
     if (libThread_.joinable()) libThread_.join();
     StopRt();
@@ -196,7 +199,11 @@ void Engine::Stop() {
     for (auto& t : saveThreads_)
         if (t.joinable()) t.join();
     saveThreads_.clear();
-    for (int i = 0; i < 100 && liveThreads_ > 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // every job started with Spawn must be over before the engine can go away (one still running after Stop used
+    // this engine's memory once it was freed); they end on their own once the connections are closed - the slowest,
+    // a Bluetooth search, within ~12 s
+    for (int i = 0; i < 600 && liveThreads_ > 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    if (liveThreads_ > 0) fprintf(stderr, "engine: %d background job(s) still running 30 s after stopping\n", liveThreads_.load());
     CloseSocket(listener_);
     listener_ = kInvalidSocket;
     CloseSocket(udp_);
@@ -4956,7 +4963,7 @@ void Engine::StartRt(const std::string& keyHex, uint16_t peerPort) {
         rt_ = r;
         rtLanPort_ = peerPort;
     }
-    if (old) std::thread([old] { old->Shutdown(); }).detach();
+    if (old) Spawn([old] { old->Shutdown(); });  // (Spawn: Stop waits for it - its thread calls back into the engine)
     DIAG("call: real-time media set up (their LAN port %u)", (unsigned)peerPort);
 }
 
@@ -4970,7 +4977,7 @@ void Engine::StopRt() {
         rtLastPeer_.clear();
     }
     // (stopped on a thread of its own: it may be handing a packet to the modules right now, which can call back here)
-    if (r) std::thread([r] { r->Shutdown(); }).detach();
+    if (r) Spawn([r] { r->Shutdown(); });  // (Spawn, not a detached thread: Stop waits for it to be over)
 }
 
 bool Engine::RtOut(const uint8_t* d, size_t n) {

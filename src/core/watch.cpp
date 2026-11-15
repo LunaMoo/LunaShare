@@ -486,7 +486,7 @@ bool Engine::JoinWatch(uint64_t sid) {
         std::lock_guard<std::mutex> l(watchCacheMtx_);
         watchCache_ = c;
     }
-    watchHostSeen_ = SteadyMs();
+    watchHostSeen_ = watchStateAt_ = SteadyMs();
     watchReportedBuffering_ = true;
     QueueToPeer(inv.host, Msg::WatchJoin, {{"sid", sid}});
     return true;
@@ -650,6 +650,8 @@ void Engine::WatchControl(bool playing, double pos) {
 
 // how long watching together waits for a dropped connection to come back (as a call does)
 static const int kWatchGraceMs = 30000;
+// connected to the host and no state from it for this long: the session is gone (hosts send it every 1-3 s)
+static const int kStateSilenceMs = 12000;
 
 void Engine::WatchTick() {
     WatchSavesTick();
@@ -708,8 +710,15 @@ void Engine::WatchTick() {
         watchLastReport_ = now;
         QueueToPeer(watch.host, Msg::WatchReport, {{"sid", watch.sid}, {"buffering", b}, {"saving", watch.saving}});
     }
-    if (ReadyConn(watch.host)) watchHostSeen_ = now;
-    else if (now - watchHostSeen_ > kWatchGraceMs) {
+    if (ReadyConn(watch.host)) {
+        watchHostSeen_ = now;
+        // connected, and the host's state (every second) stopped coming: it isn't on there any more - it ended
+        // while we weren't connected, so its goodbye never came
+        if (now - watchStateAt_ > kStateSilenceMs) {
+            EndWatchLocked("Watching together ended.");
+            return;
+        }
+    } else if (now - watchHostSeen_ > kWatchGraceMs) {
         EndWatchLocked("Watching together ended (connection lost).");
         return;
     } else if (now - watchRetryAt_ > 2000) {  // (the connection dropped: dial the host again meanwhile)
@@ -884,7 +893,7 @@ void Engine::HandleWatch(const std::shared_ptr<Connection>& c, Msg type, const j
             watch.people.clear();
             for (auto& p : j.value("people", json::array()))
                 if (p.is_string()) watch.people.push_back(p.get<std::string>());
-            watchHostSeen_ = SteadyMs();
+            watchHostSeen_ = watchStateAt_ = SteadyMs();
             break;
         }
         case Msg::WatchReport:

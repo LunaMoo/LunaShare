@@ -92,6 +92,9 @@ private:
     void SetStatus(const std::string& s);
     std::atomic<bool> running_{false}, queryNow_{false}, reannounce_{false};
     std::thread thread_;
+    std::mutex lifeM_;  // Start / Stop one at a time (the engine's maintenance thread restarts it on network changes
+                        // while the app may be closing: two joins of one thread at once never came back)
+    void StopLocked();
     Found cb_;
     std::mutex m_;
     std::string id_, name_, platform_, status_;

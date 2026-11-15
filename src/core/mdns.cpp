@@ -330,7 +330,8 @@ void Mdns::SetStatus(const std::string& s) {
 }
 
 bool Mdns::Start(const std::string& id, const std::string& name, const std::string& platform, uint16_t port, Found cb) {
-    Stop();
+    std::lock_guard<std::mutex> life(lifeM_);
+    StopLocked();
     {
         std::lock_guard<std::mutex> l(m_);
         id_ = id;
@@ -345,10 +346,12 @@ bool Mdns::Start(const std::string& id, const std::string& name, const std::stri
 }
 
 void Mdns::Stop() {
-    if (!running_.exchange(false)) {
-        if (thread_.joinable()) thread_.join();
-        return;
-    }
+    std::lock_guard<std::mutex> life(lifeM_);
+    StopLocked();
+}
+
+void Mdns::StopLocked() {
+    running_ = false;
     if (thread_.joinable()) thread_.join();
 }
 

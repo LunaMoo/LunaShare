@@ -93,7 +93,7 @@ bool Engine::JoinListen(uint64_t sid) {
     listen.sid = sid;
     listen.key = inv.key;
     listen.host = inv.host;
-    listenHostSeen_ = SteadyMs();
+    listenHostSeen_ = listenStateAt_ = SteadyMs();
     QueueToPeer(inv.host, Msg::ListenJoin, {{"sid", sid}, {"name", settings.displayName}});
     Emit({EventType::Info, inv.key, ""});
     return true;
@@ -567,8 +567,13 @@ void Engine::ListenTick() {
         }
         for (auto& d : gone) ListenPeerGone(d);
     } else {
-        if (ReadyConn(listen.host)) listenHostSeen_ = now;
-        else if (now - listenHostSeen_ > 30000) {
+        if (ReadyConn(listen.host)) {
+            listenHostSeen_ = now;
+            if (now - listenStateAt_ > 12000) {  // (connected, and its state - every 2 s - stopped: it ended meanwhile)
+                EndListenLocked("Listening together ended.");
+                return;
+            }
+        } else if (now - listenHostSeen_ > 30000) {
             EndListenLocked("Listening together ended: the host is gone.");
             return;
         } else if (now - listenRetryAt_ > 2000) {  // (dial the host again meanwhile)
@@ -712,7 +717,7 @@ void Engine::HandleListen(const std::shared_ptr<Connection>& c, Msg type, const 
             break;
         case Msg::ListenState:
             if (listen.sid != sid || dev != listen.host) return;
-            listenHostSeen_ = SteadyMs();
+            listenHostSeen_ = listenStateAt_ = SteadyMs();
             ListenApply(j);
             break;
         case Msg::ListenAdd: {

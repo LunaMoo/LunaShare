@@ -150,7 +150,8 @@ std::string WanTransport::PublicEndpoint() {
 }
 
 bool WanTransport::Start(const Config& cfg, OnPeers onPeers, OnSocket onSocket) {
-    Stop();
+    std::lock_guard<std::mutex> life(lifeM_);
+    StopLocked();
     {
         std::lock_guard<std::mutex> l(m_);
         cfg_ = cfg;
@@ -166,6 +167,11 @@ bool WanTransport::Start(const Config& cfg, OnPeers onPeers, OnSocket onSocket) 
 }
 
 void WanTransport::Stop() {
+    std::lock_guard<std::mutex> life(lifeM_);
+    StopLocked();
+}
+
+void WanTransport::StopLocked() {
     running_ = false;
     if (thread_.joinable()) thread_.join();
 }
