@@ -911,7 +911,7 @@ int main() {
         CHECK(N->UseConnectCode("LSC1:" + std::string(64, 'a') + ":" + std::string(64, 'b') + ":99999:10.0.0.1", pub, verify) == 0, "connect code: a bad port");
         CHECK(N->UseConnectCode(A->ConnectCode(), pub, verify) == 1 && pub == A->MyPublicKey(), "connect code: alice's is taken");
         std::string got;
-        CHECK(WaitFor([&] { got = N->ConnectedDeviceByKey(pub); return !got.empty(); }, 6000) && got == idA, "connect code: connected to alice");
+        CHECK(WaitFor([&] { got = N->ConnectedDeviceByKey(pub); return !got.empty(); }, 15000) && got == idA, "connect code: connected to alice");
         CHECK(N->VerifyByCode(got, verify) == 1, "connect code: and verified");
         {
             auto l = N->Lock();

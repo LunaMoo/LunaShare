@@ -13,6 +13,14 @@
 
 #include "lunashare_video.h"
 
+static void SetEnv(const char* k, const char* v) {
+#ifdef _WIN32
+    _putenv_s(k, v ? v : "");  // (empty removes it)
+#else
+    if (v) setenv(k, v, 1); else unsetenv(k);
+#endif
+}
+
 static int failures = 0;
 #define CHECK(c, ...)                         \
     do {                                      \
@@ -261,7 +269,7 @@ int main() {
 
     printf("[video: a camera giving fewer frames than asked doesn't get the full bitrate]\n");
     {
-        setenv("LSV_FAKE_MAX_FPS", "30", 1);
+        SetEnv("LSV_FAKE_MAX_FPS", "30");
         LsvSettings s60{640, 480, 60, 2000000, 0, 0};
         m->set_settings(&s60);
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
@@ -270,7 +278,7 @@ int main() {
         printf("    camera %d of %d fps, sending %d kbps\n", sc.encode_fps, sc.target_fps, sc.send_kbps);
         CHECK(sc.encode_fps >= 26 && sc.encode_fps <= 32 && sc.target_fps == 60, "stats: camera %d fps of %d asked", sc.encode_fps, sc.target_fps);
         CHECK(sc.send_kbps > 0 && sc.send_kbps < 1400, "bitrate for 30 fps, not 60 (%d kbps of 2000)", sc.send_kbps);
-        unsetenv("LSV_FAKE_MAX_FPS");
+        SetEnv("LSV_FAKE_MAX_FPS", nullptr);
         m->set_settings(&s);
         std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     }
