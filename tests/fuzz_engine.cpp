@@ -21,7 +21,12 @@
 #include <random>
 #include <set>
 #include <thread>
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 #include "crypto.h"
 #include "engine.h"
 #include "hash.h"
@@ -55,6 +60,9 @@ static void Problem(const std::string& what) {
 
 // where every thread is (gdb, when there is one): what a hang or deadlock is waiting on
 static void DumpThreads() {
+#ifdef _WIN32
+    return;  // (gdb attaching: Linux)
+#endif
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "gdb -p %d -batch -ex 'set pagination off' -ex 'thread apply all bt 25' 2>/dev/null | grep -E '^Thread|^#' | grep -v 'in ?? ()' | head -400",
              (int)getpid());
