@@ -2495,7 +2495,13 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             uint64_t tid = j.value("tid", (uint64_t)0);
             int64_t offset = j.value("offset", (int64_t)0);
             auto it = transfers.find(tid);
-            if (it == transfers.end() || !it->second->outgoing || it->second->peer != c->peerId) break;
+            if (it == transfers.end()) {
+                // not here any more (removed while they still had it waiting - the cancel was lost if we weren't
+                // connected): say so, or they'd show it as transferring for good
+                if (tid) Queue(c, Msg::FileCancel, {{"tid", tid}, {"reason", "removed by the sender"}});
+                break;
+            }
+            if (!it->second->outgoing || it->second->peer != c->peerId) break;
             auto t = it->second;
             if (TStateFinal(t->state)) {
                 if (t->state == TState::Cancelled) Queue(c, Msg::FileCancel, {{"tid", tid}, {"reason", "cancelled by sender"}});

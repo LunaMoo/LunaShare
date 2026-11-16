@@ -288,7 +288,12 @@ static void Act() {
         if (what < 4) {
             std::string to = Target(i, &who);
             std::string f = g_files[(size_t)R((int)g_files.size())];
-            Do(p.name + " sends " + BaseName(f) + " to " + (who < 0 ? "the group" : g_p[who].name), [&] { e.SendPaths(to, {f}); });
+            Do(p.name + " sends " + BaseName(f) + " to " + (who < 0 ? "the group" : g_p[who].name), [&] {
+                uint64_t b = e.SendPaths(to, {f});
+                std::string ids;
+                for (auto& t : e.BatchTransfers(b)) ids += " " + std::to_string(t->tid % 10000);
+                Log("  (transfer" + ids + ")");
+            });
         } else {
             auto tids = Tids(e);
             if (tids.empty()) return;
@@ -561,9 +566,19 @@ static void CheckRules() {
     }
     if (!moving.empty()) std::this_thread::sleep_for(std::chrono::seconds(3));
     for (auto& m : moving)
-        if (m.t->state == m.st && m.t->done.load() == m.done)
-            Problem(g_p[m.who].name + "'s transfer " + m.t->name + " is " + TStateName(m.st) + " and doesn't move (" +
-                    std::to_string(m.done) + " of " + std::to_string(m.t->size) + ")");
+        if (m.t->state == m.st && m.t->done.load() == m.done) {
+            int o = IndexOfDev(m.t->peer);
+            std::string there = "unknown";
+            if (o >= 0) {
+                auto l = g_p[o].e->Lock();
+                auto it = g_p[o].e->transfers.find(m.t->tid);
+                there = it == g_p[o].e->transfers.end() ? "not there" : std::string(TStateName(it->second->state)) +
+                        (it->second->pausedByPeer ? " (paused by the other side)" : "") + ", " + std::to_string(it->second->done.load()) + " done";
+            }
+            Problem(g_p[m.who].name + "'s " + (m.t->outgoing ? "outgoing" : "incoming") + " transfer " + m.t->name + " (" +
+                    std::to_string(m.t->tid % 10000) + ") is " + TStateName(m.st) + " and doesn't move (" + std::to_string(m.done) + " of " +
+                    std::to_string(m.t->size) + "); at " + (o >= 0 ? g_p[o].name : "?") + ": " + there);
+        }
     // only the three of them know each other (another program's devices showing up would spoil the run)
     for (int a = 0; a < 3; a++) {
         auto l = g_p[a].e->Lock();

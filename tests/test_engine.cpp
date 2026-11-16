@@ -1025,6 +1025,30 @@ static void TestBadNetwork() {
     Q->Stop();
 }
 
+// (found by the user simulator) a transfer the sender removed while the two weren't connected - its cancel lost -
+// accepted later by the receiver: it ends there too, instead of "transferring" for good
+static void TestRemovedWhileApart() {
+    printf("[a transfer removed by the sender while apart, accepted later]\n");
+    auto S = MakeEngine("removesam", 48480, true, false);
+    auto Rr = MakeEngine("removerae", 48490, false, false);  // (accepts by hand)
+    std::string idS = S->settings.deviceId, idR = Rr->settings.deviceId;
+    S->ConnectAddress("127.0.0.1", Rr->boundPort);
+    CHECK(WaitFor([&] { return S->IsConnected(idR) && Rr->IsConnected(idS); }, 5000), "connected");
+    std::string f = JoinPath(Root(), "src/removed.bin");
+    WriteRandomFile(f, 300 << 10, 77);
+    uint64_t tid = FirstTid(*S, S->SendPaths(idR, {f}));
+    CHECK(WaitFor([&] { return StateOf(*Rr, tid) == TState::Pending; }, 5000), "waiting to be accepted there");
+    S->DropConnectionTo(idR);
+    WaitFor([&] { return !S->IsConnected(idR); }, 3000);
+    S->RemoveTransfer(tid);  // (its cancel goes nowhere: not connected)
+    Rr->ConnectAddress("127.0.0.1", S->boundPort);
+    CHECK(WaitFor([&] { return S->IsConnected(idR) && Rr->IsConnected(idS); }, 6000), "connected again");
+    Rr->Accept(tid);
+    CHECK(WaitFor([&] { return StateOf(*Rr, tid) == TState::Cancelled; }, 5000), "accepted later: it ends there too (%s)", TStateName(StateOf(*Rr, tid)));
+    S->Stop();
+    Rr->Stop();
+}
+
 // listing them all): exactly one connection must stay, on both sides, whichever got ready first where
 static void TestParallelDial() {
     printf("[two connections to one device at once: one stays]\n");
@@ -1068,6 +1092,7 @@ int main() {
     if (getenv("LUNASHARE_TEST_LINKS_ONLY")) return g_fail ? 1 : 0;
     TestParallelDial();
     TestConnReasons();
+    TestRemovedWhileApart();
     if (getenv("LUNASHARE_TEST_DIAL_ONLY")) return g_fail ? 1 : 0;
     TestBadNetwork();
     if (getenv("LUNASHARE_TEST_STRESS_ONLY")) return g_fail ? 1 : 0;
