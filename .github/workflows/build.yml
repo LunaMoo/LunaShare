@@ -171,6 +171,18 @@ jobs:
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then python3 tools/i18n_keys.py src/app/lang/pl.inc; fi
           if [ -f build/Release/lunashare_tests.exe ]; then build/Release/lunashare_voice_tests.exe && build/Release/lunashare_video_tests.exe && build/Release/lunashare_tests.exe; else build/lunashare_voice_tests && build/lunashare_video_tests && build/lunashare_tests; fi
+      # the user simulator (tests/fuzz_engine.cpp): 3 minutes of random actions in random order, a different seed each
+      # run - what it finds is shown on the run page (and how to replay it), but doesn't hold the build back
+      - name: User simulator
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        run: |
+          build/lunashare_fuzz 180 ${{ github.run_number }} 2>/dev/null | grep -v "^net:" | tee fuzz.txt | grep -E "PROBLEM|RULES|round" || true
+          if ! grep -q "ALL RULES HELD" fuzz.txt; then
+            echo "::error title=User simulator::$(grep -m1 PROBLEM fuzz.txt) - replay: lunashare_fuzz 180 ${{ github.run_number }}"
+            exit 1
+          fi
       - name: Package
         shell: bash
         run: |
