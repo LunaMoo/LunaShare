@@ -941,7 +941,10 @@ private:
     void EndWatchLocked(const std::string& why);
     json WatchStateJson();
     void SendWatchSubs(const std::shared_ptr<Connection>& c, const std::string& path);
-    std::shared_ptr<Connection> CallConn();
+    // the call's connection. wait=false: never waits for the engine lock (only tries it) - for RtOut, which runs under
+    // the real-time media's send lock while a thread holding the engine lock may be waiting for that one (ending a
+    // call sends its goodbye): waiting there deadlocked both
+    std::shared_ptr<Connection> CallConn(bool wait = true);
     std::string PartDir();
 
     void Load();

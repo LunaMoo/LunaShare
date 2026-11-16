@@ -4905,7 +4905,7 @@ void Engine::FinishCall(const std::string& reason, bool notifyPeer) {
     Emit({EventType::CallEnded, c.peer, text, c.id, reason});
 }
 
-std::shared_ptr<Connection> Engine::CallConn() {
+std::shared_ptr<Connection> Engine::CallConn(bool wait) {
     std::shared_ptr<Connection> c;
     std::string peer;
     {
@@ -4915,7 +4915,9 @@ std::shared_ptr<Connection> Engine::CallConn() {
     }
     if (!c || c->closed) {
         // the connection was replaced (e.g. LAN came back): look it up once, under the engine lock
-        auto lk = Lock();
+        std::unique_lock<std::recursive_mutex> lk(mtx, std::defer_lock);
+        if (wait) lk.lock();
+        else if (!lk.try_lock()) return nullptr;  // (busy: the caller goes the last known way meanwhile)
         c = ReadyConn(peer);
         if (!c) return nullptr;
         c->callPriority = true;
@@ -4994,7 +4996,7 @@ bool Engine::RtOut(const uint8_t* d, size_t n) {
     }
     std::string addr, peer;
     Transport tr;
-    if (auto c = CallConn()) {
+    if (auto c = CallConn(false)) {
         addr = c->addr;
         peer = c->peerId;
         tr = c->transport;
