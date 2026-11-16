@@ -3550,6 +3550,7 @@ void Engine::CheckNetwork(int64_t now) {
 
 void Engine::OnNetworkChanged(int64_t now, const std::vector<std::string>& ips) {
     std::vector<std::shared_ptr<Connection>> gone;
+    int nConns = 0, nRejoin = 0;
     {
         auto lk = Lock();
         // whom to find again: the devices connected now, and those still being looked for after an earlier change
@@ -3577,9 +3578,11 @@ void Engine::OnNetworkChanged(int64_t now, const std::vector<std::string>& ips) 
             std::string ip = SocketLocalIp(c->sock);
             if (!ip.empty() && ip.rfind("127.", 0) != 0 && !std::binary_search(ips.begin(), ips.end(), ip)) gone.push_back(c);
         }
+        nConns = (int)conns.size();  // (read here, under the lock)
+        nRejoin = (int)rejoin_.size();
     }
     fprintf(stderr, "net: the network changed (%s): checking %d connection(s), %d device(s) to find again\n", netSig_.c_str(),
-            (int)conns.size(), (int)rejoin_.size());
+            nConns, nRejoin);
     for (auto& c : gone) CloseConn(c, "network changed");
     wan_.NetworkChanged();  // the server learns the new address now
     mdns_.Stop();           // (its sockets were joined to the old network's interfaces)

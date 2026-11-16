@@ -475,9 +475,8 @@ void Engine::GroupCallTick() {
         }
         UpdateSpotlight();
         // keep asking for the picture I'm watching (once every few seconds is cheap; a lost request costs the video)
-        static int64_t lastAsk = 0;
-        if (!call.spotlight.empty() && SteadyMs() - lastAsk > 5000) {
-            lastAsk = SteadyMs();
+        if (!call.spotlight.empty() && SteadyMs() - groupWantAt_ > 5000) {  // (a member: one per engine, not a static)
+            groupWantAt_ = SteadyMs();
             GroupControl(call.spotlight, Msg::CallWant, {{"call", call.id}, {"gid", call.group.substr(1)}, {"want", true}});
         }
     }

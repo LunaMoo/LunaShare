@@ -874,7 +874,8 @@ private:
     std::map<std::string, int64_t> watchViewerGone_;  // host: viewer device -> since when without a connection
     int64_t watchRetryAt_ = 0;
     int64_t listenRetryAt_ = 0, readRetryAt_ = 0;
-    int64_t groupRetryAt_ = 0;  // (group call: last time dropped people were dialled again)  // (last time a lost host was dialled again)                    // (last time a lost host / viewer was dialled again)
+    int64_t groupRetryAt_ = 0;
+    int64_t groupWantAt_ = 0;   // (group call: last time the spotlighted picture was asked for)  // (group call: last time dropped people were dialled again)  // (last time a lost host was dialled again)                    // (last time a lost host / viewer was dialled again)
     std::vector<std::string> watchComing_;        // host: viewers of the previous movie, not joined to this one yet
     int64_t watchVer_ = 0, watchLastState_ = 0, watchLastReport_ = 0, watchHostSeen_ = 0, watchStateAt_ = 0;  // (StateAt: the host's last state)
     bool watchReportedBuffering_ = false;
