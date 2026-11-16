@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.8.5
+
+**Calls and sessions that survive a bad connection**
+- **A call no longer ends the moment its connection drops.** Without a goodbye (Wi-Fi gone, a network switch, a router
+  hiccup) it waits up to 30 s, dialling again every 2 s, and goes on over the new connection - "Reconnecting... N s"
+  in the call bar and over the frozen picture meanwhile. Hanging up or closing the app still ends it at once. A call's
+  dead connection is noticed after 12 s (was 25: a call could sit frozen that long).
+- **Group calls keep someone whose connection drops** for 30 s (their tile counts the seconds) instead of dropping
+  them at once.
+- **Watching, listening and reading together survive a drop:** the host no longer drops a member the moment its
+  connection closes (a viewer that dropped while loading kept the movie held for everyone, for good), and both sides
+  dial each other again every 2 s.
+- **Video mends itself after a lost frame** instead of freezing for a keyframe - the heaviest frame there is, wanted
+  just when the link is worst (intra refresh: Linux, and Android phones whose H.264 encoder has it; Windows still
+  waits for a keyframe).
+
+**Saying what's going on**
+- The chat header says why a device that's online won't connect (refused, no answer - a firewall or the Wi-Fi's
+  guest isolation -, unreachable, the secure connection fails, or it may have blocked you) instead of an endless
+  "connecting...", and "still connecting (N s)" when it just takes long. Adding by QR code says the reason too.
+- Calls say "Ringing at X..." once the other phone really rings; their camera on with no picture says the connection
+  may be too slow for video; the high-speed camera mode says what it sends instead of "Starting camera...".
+- **After a crash** the next start offers to send the report to a chat or share it (copy on desktops).
+
+**QR codes on more phones:** the scanner uses the main back camera (it took the last one listed - on phones with
+several, an ultra-wide or macro helper), focuses for close things, and tries a half-size read; the phone showing a
+code turns its screen to full brightness.
+
+**Found by a new user simulator** (three people doing random things in random order while the network misbehaves -
+now part of every build):
+- closing the app right after a network change could hang it for good or crash it
+- closing the app while background work was still going could crash it
+- the app could freeze when a call ended while its media was being sent (a deadlock)
+- someone whose host ended a watching / listening / reading session while they weren't connected stayed in it for good
+- a file the sender removed while you weren't connected stayed "transferring" for good once you accepted it
+- two data races
+
 ## 1.8.4
 
 - **Video calls: 60 fps that stayed at 30.** Many phone cameras give only 30 fps at big sizes to apps (their own
