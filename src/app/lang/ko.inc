@@ -1589,3 +1589,8 @@
 {"Copied - paste it wherever you report it.", "복사했습니다 - 알리는 곳에 붙여 넣으세요."},
 {"Connection lost - reconnecting...", "연결이 끊어졌습니다 - 다시 연결 중..."},
 {"%d s", "%d초"},
+{"Connection quality", "연결 품질"},
+{"weak: your side", "약함: 내 쪽"},
+{"weak: their side", "약함: 상대 쪽"},
+{"weak - mostly what you send", "약함 - 주로 내가 보내는 쪽"},
+{"weak - mostly what they send", "약함 - 주로 상대가 보내는 쪽"},

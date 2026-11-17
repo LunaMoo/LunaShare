@@ -1583,3 +1583,8 @@
 {"Copied - paste it wherever you report it.", "Скопировано - вставьте туда, куда сообщаете."},
 {"Connection lost - reconnecting...", "Связь потеряна - переподключение..."},
 {"%d s", "%d с"},
+{"Connection quality", "Качество связи"},
+{"weak: your side", "слабо: с вашей стороны"},
+{"weak: their side", "слабо: с их стороны"},
+{"weak - mostly what you send", "слабо - в основном то, что вы отправляете"},
+{"weak - mostly what they send", "слабо - в основном то, что отправляют они"},

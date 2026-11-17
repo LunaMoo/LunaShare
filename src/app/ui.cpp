@@ -4396,6 +4396,7 @@ void App::DrawCallBar() {
     ImGui::SameLine();
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ImGui::GetTextLineHeight()) * 0.5f);
     ImGui::TextUnformatted(status);
+    if (c.state == CallState::Active && !reconnecting && !groupCall) DrawCallQuality(h, mobile);
     if (c.state == CallState::Active) {
         LsmStats st = Media().Stats();
         if (!mobile) {
@@ -4909,6 +4910,73 @@ void App::DrawCameraPanel() {
     }
     if (mobile && ImGui::Button(T("Close"), ImVec2(w, h))) camPanel = false;
     ImGui::End();
+}
+
+App::CallQualityInfo App::CallQuality() {
+    // a direction's bars from its loss, plus what the whole path says (round trip, a queue building up, how much it
+    // carries); the weaker direction is the call's
+    auto fromLoss = [](int pct10) { return pct10 > 150 ? 1 : pct10 > 80 ? 2 : pct10 > 30 ? 3 : 4; };
+    CallQualityInfo q;
+    RtStats st;
+    int raw = -1, side = 0;
+    if (eng.CallRtStats(st) && st.ready) {
+        int in = fromLoss(st.lossInPct10), out = fromLoss(st.lossOutPct10);
+        if (st.queueDelayMs > 400) out = std::min(out, 2);  // (what I send waits on the way: my upload is full)
+        else if (st.queueDelayMs > 200) out = std::min(out, 3);
+        int path = st.rttMs > 600 ? 1 : st.rttMs > 350 ? 2 : st.rttMs > 200 ? 3 : 4;
+        if (st.estimateKbps > 0) path = std::min(path, st.estimateKbps < 120 ? 1 : st.estimateKbps < 300 ? 2 : 4);
+        raw = std::min(path, std::min(in, out));
+        side = out < in ? 1 : in < out ? 2 : 0;
+    } else if (int bps = eng.CallLinkBps(); bps > 0) {  // (no real-time path: only what the connection carries)
+        raw = bps < 150000 ? 1 : bps < 400000 ? 2 : bps < 1000000 ? 3 : 4;
+    }
+    // down at once and held 4 s; back up a bar a second after that
+    static int held = -1;
+    static int heldSide = 0;
+    static int64_t holdUntil = 0, lastUp = 0;
+    int64_t now = SteadyMs();
+    if (raw < 0) {
+        held = -1;
+    } else if (held < 0 || raw < held) {
+        held = raw;
+        heldSide = side;
+        holdUntil = now + 4000;
+    } else if (raw > held && now > holdUntil && now - lastUp > 1000) {
+        held++;
+        lastUp = now;
+        if (held >= 3) heldSide = 0;
+    }
+    q.bars = held;
+    q.weakSide = held >= 0 && held <= 2 ? heldSide : 0;
+    return q;
+}
+
+void App::DrawCallQuality(float h, bool mobile) {
+    CallQualityInfo q = CallQuality();
+    if (q.bars < 0) return;
+    ImGui::SameLine();
+    float fs = ImGui::GetFontSize();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float bw = fs * 0.22f, gap = fs * 0.1f, top = p.y + (h - fs * 0.9f) * 0.5f, bottom = top + fs * 0.9f;
+    ImU32 on = q.bars >= 3 ? IM_COL32(150, 240, 170, 255) : q.bars == 2 ? IM_COL32(250, 210, 90, 255) : IM_COL32(255, 120, 100, 255);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (int b = 0; b < 4; b++) {
+        float x = p.x + b * (bw + gap), y = bottom - (bottom - top) * (b + 1) / 4.0f;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + bw, bottom), b < q.bars ? on : IM_COL32(255, 255, 255, 60), 1.5f);
+    }
+    ImGui::Dummy(ImVec2(4 * (bw + gap), h));
+    if (ImGui::IsItemHovered()) {
+        std::string rt = RealtimeLine();
+        ImGui::SetTooltip("%s%s%s", T("Connection quality"), rt.empty() ? "" : "\n", rt.c_str());
+    }
+    if (q.weakSide) {
+        ImGui::SameLine();
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ImGui::GetTextLineHeight()) * 0.5f);
+        // (what I send isn't getting through: my upload or Wi-Fi; what they send: theirs, or my download)
+        const char* t = q.weakSide == 1 ? (mobile ? T("weak: your side") : T("weak - mostly what you send"))
+                                        : (mobile ? T("weak: their side") : T("weak - mostly what they send"));
+        ImGui::TextColored(ImVec4(1.f, 0.85f, 0.5f, 1), "%s", t);
+    }
 }
 
 // How the call's real-time channel is doing ("" when the call has none)

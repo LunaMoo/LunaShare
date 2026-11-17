@@ -1589,3 +1589,8 @@
 {"Copied - paste it wherever you report it.", "已复制 - 粘贴到你报告的地方。"},
 {"Connection lost - reconnecting...", "连接已断开 - 正在重新连接..."},
 {"%d s", "%d 秒"},
+{"Connection quality", "连接质量"},
+{"weak: your side", "较弱：你这边"},
+{"weak: their side", "较弱：对方那边"},
+{"weak - mostly what you send", "较弱 - 主要是你发送的部分"},
+{"weak - mostly what they send", "较弱 - 主要是对方发送的部分"},

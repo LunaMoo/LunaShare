@@ -1577,3 +1577,8 @@
 {"Copied - paste it wherever you report it.", "Copié - collez-le là où vous le signalez."},
 {"Connection lost - reconnecting...", "Connexion perdue - reconnexion..."},
 {"%d s", "%d s"},
+{"Connection quality", "Qualité de la connexion"},
+{"weak: your side", "faible : de votre côté"},
+{"weak: their side", "faible : de leur côté"},
+{"weak - mostly what you send", "faible - surtout ce que vous envoyez"},
+{"weak - mostly what they send", "faible - surtout ce qu'ils envoient"},

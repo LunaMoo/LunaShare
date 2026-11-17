@@ -1599,3 +1599,8 @@
 {"Copied - paste it wherever you report it.", "Skopiowano - wklej tam, gdzie to zgłaszasz."},
 {"Connection lost - reconnecting...", "Utracono połączenie - ponowne łączenie..."},
 {"%d s", "%d s"},
+{"Connection quality", "Jakość połączenia"},
+{"weak: your side", "słabo: po twojej stronie"},
+{"weak: their side", "słabo: po ich stronie"},
+{"weak - mostly what you send", "słabo - głównie to, co wysyłasz"},
+{"weak - mostly what they send", "słabo - głównie to, co oni wysyłają"},

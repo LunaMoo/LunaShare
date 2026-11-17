@@ -438,6 +438,14 @@ private:
     std::string crashReport;
     bool crashChecked = false;
     std::string RealtimeLine();  // the call's real-time channel, for the stats ("" when it has none)
+    // how good the call's connection is: 0-4 bars (-1: nothing to go by yet), and which way is the weak one
+    // (0 neither / both, 1 what I send, 2 what they send) - held a few seconds so it doesn't flicker
+    struct CallQualityInfo {
+        int bars = -1;
+        int weakSide = 0;
+    };
+    CallQualityInfo CallQuality();
+    void DrawCallQuality(float h, bool mobile);
     bool CallButton(const std::string& peer, float size, bool video = false);
     bool WebcamButton(const std::string& peer, float size);  // PC: "use this phone as webcam"; phone: "send my camera to this PC"
     bool WebcamButtonShown(const std::string& peer) const;

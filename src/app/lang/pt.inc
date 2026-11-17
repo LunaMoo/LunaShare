@@ -1573,3 +1573,8 @@
 {"Copied - paste it wherever you report it.", "Copiado - cole onde você for relatar."},
 {"Connection lost - reconnecting...", "Conexão perdida - reconectando..."},
 {"%d s", "%d s"},
+{"Connection quality", "Qualidade da conexão"},
+{"weak: your side", "fraca: do seu lado"},
+{"weak: their side", "fraca: do lado deles"},
+{"weak - mostly what you send", "fraca - principalmente o que você envia"},
+{"weak - mostly what they send", "fraca - principalmente o que eles enviam"},
