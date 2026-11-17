@@ -920,7 +920,7 @@ void App::DrawCrashReportOffer() {
     if (mobile) ImGui::SetNextWindowSize(ImVec2(ImGui::GetMainViewport()->Size.x * 0.92f, 0));
     if (!ImGui::BeginPopupModal(title, nullptr, mobile ? 0 : ImGuiWindowFlags_AlwaysAutoResize)) return;
     ImGui::PushTextWrapPos(mobile ? 0 : ImGui::GetFontSize() * 28);
-    ImGui::TextWrapped("%s", T("It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first."));
+    ImGui::TextWrapped("%s", T("It wrote down where in the app it stopped and what it did just before (connections, calls - device names and addresses, not your messages). Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first."));
     ImGui::PopTextWrapPos();
     if (ImGui::CollapsingHeader(T("What's in it"))) {
         ImGui::BeginChild("crashtext", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 28, ImGui::GetFontSize() * 10), ImGuiChildFlags_Borders);

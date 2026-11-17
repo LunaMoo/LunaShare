@@ -1571,7 +1571,7 @@
 {"Video call (not connected yet - see above the chat)", "Appel vidéo (pas encore connecté - voir au-dessus de la discussion)"},
 {"Voice call (not connected yet - see above the chat)", "Appel vocal (pas encore connecté - voir au-dessus de la discussion)"},
 {"LunaShare stopped last time", "LunaShare s'est arrêté la dernière fois"},
-{"It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "Il a noté où dans l'appli il s'est arrêté - des adresses et des nombres, pas vos discussions. L'envoyer à qui fait votre LunaShare aide à corriger ; vous pouvez le regarder d'abord."},
+{"It wrote down where in the app it stopped and what it did just before (connections, calls - device names and addresses, not your messages). Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "Il a noté où dans l'appli il s'est arrêté et ce qu'il faisait juste avant (connexions, appels - noms d'appareils et adresses, pas vos messages). L'envoyer à qui fait votre LunaShare aide à corriger ; vous pouvez le regarder d'abord."},
 {"What's in it", "Ce qu'il contient"},
 {"Send to a chat...", "Envoyer à une discussion..."},
 {"Copied - paste it wherever you report it.", "Copié - collez-le là où vous le signalez."},

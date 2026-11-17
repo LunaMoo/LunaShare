@@ -559,7 +559,8 @@ void WanTransport::Loop() {
                 p.relayAsked = true;
                 send(server, 'R', json{{"t", "relay"}, {"to", p.peerId}, {"nonce", p.nonce}, {"conv", ConvFromNonce(p.nonce)}}.dump());
             }
-            if (now - p.lastSend > 250) {
+            static const bool noPunch = getenv("LUNASHARE_TEST_NO_PUNCH") != nullptr;  // (tests: only the relay works)
+            if (!noPunch && now - p.lastSend > 250) {
                 std::string body = json{{"n", p.nonce}, {"id", cfg_.id}}.dump();
                 for (auto& c : p.candidates) send(c, 'P', body);
                 p.lastSend = now;

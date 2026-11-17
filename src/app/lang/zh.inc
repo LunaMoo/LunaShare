@@ -1583,7 +1583,7 @@
 {"Video call (not connected yet - see above the chat)", "视频通话（尚未连接 - 见聊天上方）"},
 {"Voice call (not connected yet - see above the chat)", "语音通话（尚未连接 - 见聊天上方）"},
 {"LunaShare stopped last time", "LunaShare 上次意外停止了"},
-{"It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "它记下了应用在哪里停止 - 只是地址和数字，不是你的聊天。把它发给制作你的 LunaShare 的人有助于修复；你可以先看看。"},
+{"It wrote down where in the app it stopped and what it did just before (connections, calls - device names and addresses, not your messages). Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "它记下了应用在哪里停止，以及停止前在做什么（连接、通话 - 设备名称和地址，不是你的消息）。把它发给制作你的 LunaShare 的人有助于修复；你可以先看看。"},
 {"What's in it", "内容"},
 {"Send to a chat...", "发送到聊天..."},
 {"Copied - paste it wherever you report it.", "已复制 - 粘贴到你报告的地方。"},

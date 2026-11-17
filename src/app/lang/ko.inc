@@ -1583,7 +1583,7 @@
 {"Video call (not connected yet - see above the chat)", "영상 통화 (아직 연결되지 않음 - 채팅 위를 보세요)"},
 {"Voice call (not connected yet - see above the chat)", "음성 통화 (아직 연결되지 않음 - 채팅 위를 보세요)"},
 {"LunaShare stopped last time", "지난번에 LunaShare가 멈췄습니다"},
-{"It wrote down where in the app it stopped - addresses and numbers, not your chats. Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "앱의 어디에서 멈췄는지 기록했습니다 - 주소와 숫자이며 채팅 내용은 아닙니다. LunaShare를 만드는 사람에게 보내면 고치는 데 도움이 됩니다. 먼저 내용을 볼 수 있습니다."},
+{"It wrote down where in the app it stopped and what it did just before (connections, calls - device names and addresses, not your messages). Sending that to whoever makes your LunaShare helps get it fixed; you can look at it first.", "앱의 어디에서 멈췄는지, 그 직전에 무엇을 했는지 기록했습니다(연결, 통화 - 기기 이름과 주소이며 메시지 내용은 아닙니다). LunaShare를 만드는 사람에게 보내면 고치는 데 도움이 됩니다. 먼저 내용을 볼 수 있습니다."},
 {"What's in it", "내용"},
 {"Send to a chat...", "채팅으로 보내기..."},
 {"Copied - paste it wherever you report it.", "복사했습니다 - 알리는 곳에 붙여 넣으세요."},

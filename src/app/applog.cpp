@@ -40,6 +40,19 @@ FILE* g_file = nullptr;  // (g_m)
 std::string g_path;
 int64_t g_fileBytes = 0;
 
+// the last lines in every build, for crash reports: a plain ring the crash handler can write out as it is (no locks,
+// no memory to get - written under g_m, read by the handler without it; a line torn at the moment of the crash is fine)
+constexpr uint32_t kRing = 32 * 1024;
+char g_ring[kRing];
+std::atomic<uint32_t> g_ringPos{0};  // (total bytes ever written; mod kRing is where the next goes)
+
+void RingPut(const std::string& l) {  // (g_m held)
+    uint32_t p = g_ringPos.load(std::memory_order_relaxed);
+    for (char ch : l) g_ring[p++ % kRing] = ch;
+    g_ring[p++ % kRing] = '\n';
+    g_ringPos.store(p, std::memory_order_release);
+}
+
 std::string Stamp() {
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
@@ -56,7 +69,9 @@ std::string Stamp() {
 }
 
 void SdlOut(void* ud, int category, SDL_LogPriority prio, const char* msg) {
-    Add(msg ? msg : "");
+#if defined(_WIN32) || defined(__ANDROID__) || defined(__APPLE__)
+    Add(msg ? msg : "");  // (elsewhere SDL prints it to stderr, which is read already - it came twice)
+#endif
     if (g_prev) g_prev(g_prevData, category, prio, msg);
 }
 
@@ -182,8 +197,7 @@ void SetDir(const std::string& dir) {
 }
 
 void Init() {
-    if (!On()) return;
-    if (g_init.exchange(true)) return;
+    if (g_init.exchange(true)) return;  // (every build: the recent lines go into crash reports)
     SDL_LogGetOutputFunction(&g_prev, &g_prevData);
     SDL_LogSetOutputFunction(SdlOut, nullptr);
 #if !defined(_WIN32)
@@ -193,9 +207,10 @@ void Init() {
 }
 
 void Add(const std::string& line) {
-    if (!On()) return;
     std::string l = Stamp() + line;
     std::lock_guard<std::mutex> g(g_m);
+    RingPut(l);
+    if (!On()) return;  // (ordinary builds: only the ring, for a crash report)
     if (g_file) {
         fputs(l.c_str(), g_file);
         fputc('\n', g_file);
@@ -221,6 +236,18 @@ void Add(const std::string& line) {
 // ------------------------------------------------------------------------------------------------ crash reports
 
 namespace {
+std::string RingText() {  // (not in a signal handler: Windows' exception filter, the Java one)
+    uint32_t p = g_ringPos.load(std::memory_order_acquire);
+    std::string t;
+    uint32_t start = p > kRing ? p - kRing : 0;
+    for (uint32_t k = start; k < p; k++) t += g_ring[k % kRing];
+    if (p > kRing) {
+        size_t nl = t.find('\n');
+        t = nl == std::string::npos ? "" : t.substr(nl + 1);
+    }
+    return t;
+}
+
 void CrashWrite(const std::string& text) {
     if (!g_crashPath[0]) return;
     FILE* f = fopen(g_crashPath, "ab");
@@ -244,6 +271,28 @@ _Unwind_Reason_Code BtStep(_Unwind_Context* c, void* arg) {
         b->pcs[b->n++] = pc;
     }
     return _URC_NO_REASON;
+}
+
+void WriteAll(int fd, const char* s);
+
+// the recent log lines, oldest first, from the first whole line (signal-safe: write() only)
+void WriteRing(int fd) {
+    uint32_t p = g_ringPos.load(std::memory_order_acquire);
+    if (!p) return;
+    WriteAll(fd, "the last things it did (log):\n");
+    uint32_t start = p > kRing ? p - kRing : 0;
+    if (p > kRing) {  // (skip the line the ring cut in half)
+        while (start < p && g_ring[start % kRing] != '\n') start++;
+        start++;
+    }
+    while (start < p) {
+        uint32_t i = start % kRing;
+        uint32_t n = p - start;
+        if (n > kRing - i) n = kRing - i;
+        ssize_t w = write(fd, g_ring + i, n);
+        if (w <= 0) break;
+        start += (uint32_t)w;
+    }
 }
 
 void WriteAll(int fd, const char* s) {
@@ -357,6 +406,7 @@ void OnSignal(int sig, siginfo_t* si, void* ucv) {
         _Unwind_Backtrace(BtStep, &bt);
         WriteAll(fd, "backtrace:\n");
         for (int i = 0; i < bt.n; i++) WritePc(fd, i, pcs[i]);
+        WriteRing(fd);
         close(fd);
     }
     // the system's own handling, as before (Android: its crash dialog and report)
@@ -375,7 +425,7 @@ LONG WINAPI OnException(EXCEPTION_POINTERS* ep) {
     snprintf(b, sizeof(b), "\n==== LunaShare " LUNASHARE_VERSION " crashed (time %ld): exception 0x%08lx at %s+0x%llx\n", (long)time(nullptr),
              (unsigned long)ep->ExceptionRecord->ExceptionCode, f ? f + 1 : name,
              (unsigned long long)((uintptr_t)addr - (uintptr_t)mod));
-    CrashWrite(b);
+    CrashWrite(b + std::string("the last things it did (log):\n") + RingText());
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
@@ -401,7 +451,8 @@ void CrashReportsInit() {
 }
 
 void CrashText(const std::string& text) {
-    CrashWrite("\n==== LunaShare " LUNASHARE_VERSION " crashed (time " + std::to_string((long)time(nullptr)) + "): " + text + "\n");
+    CrashWrite("\n==== LunaShare " LUNASHARE_VERSION " crashed (time " + std::to_string((long)time(nullptr)) + "): " + text + "\n" +
+               "the last things it did (log):\n" + RingText());
 }
 
 std::string Text() {
