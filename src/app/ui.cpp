@@ -12,6 +12,7 @@
 #include "crypto.h"
 #include "hash.h"
 #include "avatar.h"
+#include "cues.h"
 #include "notify.h"
 #include "image_cache.h"
 #include "media_host.h"
@@ -155,6 +156,7 @@ static void DrawTwilightSky(ImDrawList* dl, ImVec2 a, ImVec2 b, bool cold) {
 void App::Frame() {
     auto lk = eng.Lock();
     PullEvents();
+    cues::Tick();
     // found by username: open their chat as soon as the connection is there
     if (!findUserAcc.empty() && eng.IsConnected("@" + findUserAcc)) {
         SelectPeer("@" + findUserAcc);
@@ -617,7 +619,14 @@ void App::PullEvents() {
         t.tid = e.tid;
         std::string who = e.peer.empty() ? "" : eng.PeerName(e.peer);
         switch (e.type) {
-            case EventType::ChatReceived:
+            case EventType::ChatReceived: {
+                // its sound: softer in the chat that's open; none for a silenced chat (an @mention still), and none on a
+                // phone in the background, where the system's notification has its own
+                bool open = e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat) && !notify::Background();
+                bool phoneBg = notify::Background() && ui::M().mobile;
+                if (eng.settings.chatSounds && !phoneBg && (!eng.ChatMuted(e.peer) || e.a == "mention"))
+                    cues::Play(open ? cues::Cue::ReceivedOpen : cues::Cue::Received);
+            }
                 if (e.peer == selectedPeer && (tab == Tab::Chat || screen == MScreen::Chat)) continue;
                 if (eng.ChatMuted(e.peer) && e.a != "mention") continue;  // (silent: only the unread count; an @mention still shows)
                 t.title = who;
@@ -1294,6 +1303,11 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
             sub = std::string(T("Draft")) + ": " + Emoji().Display(dr);
         }
     }
+    bool typingNow = !eng.TypingIn(peer).empty();  // ("writing...", in the accent colour, in place of the rest)
+    if (typingNow) {
+        sub = T("writing...");
+        busy = true;
+    }
     int unread = 0;
     auto cv = eng.chats.find(peer);
     if (cv != eng.chats.end()) unread = cv->second.unread;
@@ -1322,7 +1336,7 @@ bool App::DevicePeerRow(const std::string& peer, bool selected, float height) {
     float tx = p0.x + pad * 2 + av;
     float textH = ImGui::GetTextLineHeight();
     dl->AddText(ImVec2(tx, cy - textH - 1), ImGui::GetColorU32(blocked ? ImGuiCol_TextDisabled : ImGuiCol_Text), name.c_str());
-    dl->AddText(ImVec2(tx, cy + 1), ui::ColMuted(), sub.c_str());
+    dl->AddText(ImVec2(tx, cy + 1), typingNow ? ui::ColAccentText() : ui::ColMuted(), sub.c_str());
     if (tSize > 0) {
         float w = (p1.x - tx - pad) * (float)((double)tDone / (double)tSize);
         dl->AddRectFilled(ImVec2(tx, p1.y - 3), ImVec2(tx + w, p1.y - 1), ui::ColAccent());
@@ -1947,6 +1961,7 @@ void App::DrawChat(const std::string& peer) {
     }
     DrawChatSearch(peer);
     if (replyFor != peer) {  // (another chat: no answer / change in progress; its own unsent text)
+        if (!replyFor.empty()) eng.SetTyping(replyFor, false);  // (I've gone from there)
         if (!replyFor.empty() && editMid.empty()) DraftSet(replyFor, chatInput);
         replyFor = peer;
         chatInput = DraftGet(peer);
@@ -2128,6 +2143,7 @@ void App::DrawChat(const std::string& peer) {
                                           ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine | ImGuiInputTextFlags_WordWrap |
                                               ImGuiInputTextFlags_CallbackEdit | ImGuiInputTextFlags_CallbackAlways,
                                           EmojiHost::InputCallback);
+    if (ImGui::IsItemEdited() && editMid.empty()) eng.SetTyping(peer, !chatInput.empty());  // ("... is writing" for them)
     if (ImGui::IsItemHovered() && !mobile) ImGui::SetTooltip("%s", T("Enter = send, Ctrl+Enter = new line, drop files to send"));
     ImGui::SameLine();
     if (showVmsg) {
@@ -2172,6 +2188,7 @@ void App::DrawChat(const std::string& peer) {
                         if (mbr.acc != eng.MyAccount() && t.find("@" + Emoji().Display(eng.PeerName("@" + mbr.acc))) != std::string::npos)
                             men.push_back(mbr.acc);
                 eng.SendChat(peer, Emoji().Restore(t), replyMid, men);
+                if (eng.settings.chatSounds) cues::Play(cues::Cue::Sent);
                 scrollToBottom = true;
             }
         }
@@ -2760,6 +2777,38 @@ void App::DrawMessages(const std::string& peer) {
             ImGui::EndPopup();
         }
         ImGui::PopID();
+    }
+    // "... is writing": their bubble at the end of the chat with three dots that bounce one after another (and in a
+    // group, who it is); a soft sound when someone starts, while the chat is in front of me
+    {
+        std::vector<std::string> who = eng.TypingIn(peer);
+        if (!who.empty()) {
+            busy = true;
+            ImGui::Dummy(ImVec2(0, pad * 0.3f));
+            if (Engine::IsGroupKey(peer)) {
+                std::string a0 = Emoji().Display(eng.PeerName(who[0]));
+                std::string label = who.size() == 1   ? TF("%s is writing", a0.c_str())
+                                    : who.size() == 2 ? TF("%s and %s are writing", a0.c_str(), Emoji().Display(eng.PeerName(who[1])).c_str())
+                                                      : TF("%d people are writing", (int)who.size());
+                ImGui::TextDisabled("%s", label.c_str());
+            }
+            float h = ImGui::GetTextLineHeight() + pad * 1.8f, w = h * 2.1f;
+            ImVec2 b0 = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(w, h));
+            dl->AddRectFilled(b0, ImVec2(b0.x + w, b0.y + h), ImGui::GetColorU32(ImGuiCol_FrameBg), h * 0.5f);
+            double t = ImGui::GetTime();
+            float r = h * 0.1f;
+            for (int k = 0; k < 3; k++) {
+                float ph = (float)fmod(t * 1.5 - k * 0.16, 1.0);
+                float up = ph < 0.45f ? sinf(ph / 0.45f * 3.14159265f) : 0.0f;  // (each hops in turn, then rests)
+                ImVec2 c(b0.x + w * (0.29f + 0.21f * k), b0.y + h * 0.5f - up * h * 0.17f);
+                dl->AddCircleFilled(c, r, ImGui::GetColorU32(ImGuiCol_Text, 0.4f + 0.5f * up));
+            }
+        }
+        if (who.size() > typingWas && typingWasPeer == peer && eng.settings.chatSounds && !notify::Background())
+            cues::Play(cues::Cue::Typing);
+        typingWasPeer = peer;
+        typingWas = who.size();
     }
     // Stay at the end while it's where the reader is: pictures, video thumbnails and long texts above keep growing
     // for a while after a chat opens (the first time after starting most of all). Scrolling up lets go; back at the

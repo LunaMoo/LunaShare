@@ -246,6 +246,19 @@ int main(int argc, char** argv) {
     }
     int secs = getenv("DEMO_SECONDS") ? atoi(getenv("DEMO_SECONDS")) : 30;
     for (int64_t end = SteadyMs() + secs * 1000; SteadyMs() < end;) {
+        if (getenv("DEMO_TYPING")) {  // "... is writing" in our chat (and the group's, with DEMO_GROUP), all the time
+            static int64_t at = 0;
+            if (SteadyMs() - at > 3100) {
+                at = SteadyMs();
+                std::vector<std::string> keys;
+                {
+                    auto l = e.Lock();
+                    keys.push_back(e.ChatKey(peer));
+                    for (auto& [gid, g] : e.groups) keys.push_back("#" + gid);
+                }
+                for (auto& k : keys) e.SetTyping(k, true);
+            }
+        }
         if (getenv("DEMO_READ_JOIN")) {  // join the other side's comic as soon as it's offered
             uint64_t sid = 0;
             {

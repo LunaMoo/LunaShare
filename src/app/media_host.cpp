@@ -1,6 +1,7 @@
 #include "media_host.h"
 #include "music.h"
 #include "audio_out.h"
+#include "cues.h"
 #include "player_host.h"
 #include "i18n.h"
 
@@ -800,6 +801,7 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
         if (audio_out::Single()) {  // (one sound output on a phone: what else plays is heard through the call's)
             music::Play().MixInto(out, n);  // music / radio played on purpose during the call
             Player().MixInto(out, n);       // a movie watched together, a voice message
+            cues::MixS16(out, n, LSM_SAMPLE_RATE);  // the chat's sounds
         }
         return;
     }
@@ -815,7 +817,10 @@ void MediaHost::PlaybackCb(void* u, uint8_t* stream, int len) {
         }
         out[i] = (int16_t)(v * 32767);
     }
-    if (audio_out::Single()) Player().MixInto(out, n);
+    if (audio_out::Single()) {
+        Player().MixInto(out, n);
+        cues::MixS16(out, n, LSM_SAMPLE_RATE);
+    }
 }
 
 // LunaShare's own echo canceller - not on top of the phone's: one canceller should own the echo (a second one only

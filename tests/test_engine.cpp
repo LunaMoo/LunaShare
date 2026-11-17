@@ -870,6 +870,41 @@ static void RtCall(Engine& X, Engine& Y, const std::string& idY, bool onX, bool 
 
 // one device dialing another on two of its addresses at once (a PC on Wi-Fi and cable, a VPN, docker - or a QR code
 // why a connection doesn't come up, in words for the user (the chat header, adding by QR code)
+static void TestTyping() {
+    printf("[... is writing]\n");
+    auto P = MakeEngine("typep", 48560, false, false);
+    auto Q = MakeEngine("typeq", 48570, false, false);
+    std::string idP = P->settings.deviceId, idQ = Q->settings.deviceId;
+    P->ConnectAddress("127.0.0.1", Q->boundPort);
+    CHECK(WaitFor([&] { return P->IsConnected(idQ) && Q->IsConnected(idP); }, 8000), "connected");
+    std::string kq = P->ChatKey(idQ), kp = Q->ChatKey(idP);
+    P->SetTyping(kq, true);
+    CHECK(WaitFor([&] { return Q->TypingIn(kp).size() == 1; }, 3000), "they see me writing");
+    P->SendChat(kq, "done writing");
+    CHECK(WaitFor([&] { return Q->TypingIn(kp).empty(); }, 3000), "the message came: no longer writing");
+    P->SetTyping(kq, true);
+    CHECK(WaitFor([&] { return Q->TypingIn(kp).size() == 1; }, 3000), "writing again");
+    P->SetTyping(kq, false);
+    CHECK(WaitFor([&] { return Q->TypingIn(kp).empty(); }, 3000), "stopped (the text was deleted)");
+    {
+        auto l = P->Lock();
+        P->settings.sendTyping = false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(3100));  // (past the 3 s between two "on"s)
+    P->SetTyping(kq, true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+    CHECK(Q->TypingIn(kp).empty(), "turned off: nobody sees it");
+    {
+        auto l = P->Lock();
+        P->settings.sendTyping = true;
+    }
+    P->SetTyping(kq, true);
+    CHECK(WaitFor([&] { return Q->TypingIn(kp).size() == 1; }, 3000), "on again");
+    CHECK(WaitFor([&] { return Q->TypingIn(kp).empty(); }, 9000), "stopped without a word (gone): it ends by itself");
+    P->Stop();
+    Q->Stop();
+}
+
 static void TestConnReasons() {
     printf("[why connecting fails]\n");
     ConnFail why;
@@ -1258,6 +1293,7 @@ int main() {
     if (getenv("LUNASHARE_TEST_LINKS_ONLY")) return g_fail ? 1 : 0;
     TestParallelDial();
     TestConnReasons();
+    TestTyping();
     TestRemovedWhileApart();
     if (getenv("LUNASHARE_TEST_DIAL_ONLY")) return g_fail ? 1 : 0;
     TestBadNetwork();

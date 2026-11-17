@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Message sounds**: a light blip when you send, "pop-ding" when a message comes (softer in the chat that's open), none
+  for silenced chats. Made by the app itself; on phones they play through whatever has the sound already (a call,
+  music, a video). Settings - History & privacy - Chats.
+- **"... is writing"**: three dots that hop in their bubble at the end of the chat (in a group, who it is), "writing..."
+  in the chat list, and a soft sound when someone starts writing in the open chat. It can be turned off ("Let the
+  others see when I'm writing"); older versions simply don't show it.
 - **Unblocking a person works again.** Blocking someone (all their devices) could not be undone: the unblock didn't
   find their devices, since they were blocked. Found by the user simulator.
 - **A file no longer sits at "Transferring" on one side and "Waiting for accept" on the other.** With two connections

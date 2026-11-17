@@ -346,6 +346,11 @@ void App::SettingsCategory(int cat, float fieldW, float h, bool& changed) {
             SettingsSection("History & privacy");
             changed |= ui::Checkbox(T("Keep chat and shared-file history"), &edit.keepHistory);
             if (ImGui::Button(T("Clear shared files history"), ImVec2(bw, h))) eng.ClearHistory();
+            SettingsSection("Chats");  // i18n-keys: "Chats"
+            changed |= ui::Checkbox(T("Message sounds"), &edit.chatSounds);
+            if (ImGui::IsItemHovered() && !ui::M().mobile)
+                ImGui::SetTooltip("%s", T("A sound when you send a message, when one comes, and a soft one when someone starts writing to you"));
+            changed |= ui::Checkbox(T("Let the others see when I'm writing"), &edit.sendTyping);
             break;
         }
         case kFiles: {

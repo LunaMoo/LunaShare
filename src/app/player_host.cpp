@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "audio_out.h"
+#include "cues.h"
 #include "bluetooth.h"
 #include "gl_funcs.h"
 #include "media_host.h"
@@ -245,6 +246,7 @@ void PlayerHost::AudioCb(void* u, uint8_t* stream, int len) {
     std::lock_guard<std::mutex> l(self->pm_);
     if (self->p_) self->mod_->read_audio(self->p_, (float*)stream, len / (int)(sizeof(float) * 2));
     else memset(stream, 0, (size_t)len);
+    if (audio_out::Single()) cues::MixF32((float*)stream, len / (int)(sizeof(float) * 2), 2, 48000);  // (the chat's sounds: one output)
 }
 
 bool PlayerHost::OpenAudio() {

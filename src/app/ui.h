@@ -528,6 +528,8 @@ private:
     MScreen screen = MScreen::Home;
     std::vector<MScreen> backStack;
     std::string selectedPeer;
+    std::string typingWasPeer;  // the open chat, and how many were writing in it last frame (the sound when one starts)
+    size_t typingWas = 0;
     std::string chatInput;
     std::vector<std::string> pendingForward;  // messages' text to pass on (with pendingSend: their files)
     bool pendingShareText = false;            // pendingForward is text shared with LunaShare (not forwarded)

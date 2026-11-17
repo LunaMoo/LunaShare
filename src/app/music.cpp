@@ -18,6 +18,7 @@
 #include <random>
 
 #include "audio_out.h"
+#include "cues.h"
 #include "lunashare_player.h"
 #include "model.h"
 #include "platform.h"
@@ -901,6 +902,7 @@ void Player::LoopExternal() {
 
 void Player::AudioCb(void* u, uint8_t* stream, int len) {
     ((Player*)u)->Render((float*)stream, len / (int)(sizeof(float) * 2));
+    if (audio_out::Single()) cues::MixF32((float*)stream, len / (int)(sizeof(float) * 2), 2, 48000);  // (the chat's sounds: one output)
 }
 
 // Android, during a call: the music played on purpose goes out mixed into the call's sound (one output there)
