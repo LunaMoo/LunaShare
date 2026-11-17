@@ -960,6 +960,106 @@ void App::DrawCrashReportOffer() {
     ImGui::EndPopup();
 }
 
+std::string App::BuildProblemReport() {
+    std::string r = std::string("LunaShare ") + LUNASHARE_VERSION + " on " + PlatformName() + " - problem report\n";
+    {
+        auto lk = eng.Lock();
+        r += "this device: " + eng.settings.displayName + " (" + eng.settings.deviceId.substr(0, 8) + ")\n";
+        r += "internet connections: " + std::string(eng.settings.wanEnabled ? eng.WanStatus() : "off") + "\n";
+        r += "connected:\n";
+        int n = 0;
+        for (auto& c : eng.conns) {
+            if (!c->ready || c->closed) continue;
+            r += "  " + eng.PeerName(c->peerId) + " via " + TransportName(c->transport) + (c->addr == "relay" ? " (relayed)" : "") + ", last heard " +
+                 std::to_string((SteadyMs() - c->lastRecv.load()) / 1000) + " s ago\n";
+            n++;
+        }
+        if (!n) r += "  nobody\n";
+        int seen = 0;
+        for (auto& [id, o] : eng.online)
+            if (!eng.IsConnected(id)) {
+                ConnFail why = eng.ConnectTrouble(id);
+                r += "  seen, not connected: " + eng.PeerName(id) + (why != ConnFail::None ? std::string(" - ") + Engine::ConnFailText(why) : "") + "\n";
+                if (++seen >= 10) break;
+            }
+        static const char* states[] = {"none", "calling", "ringing", "active"};
+        const CallInfo& c = eng.call;
+        if (c.state != CallState::None)
+            r += std::string("call: ") + states[(int)c.state < 4 ? (int)c.state : 0] + " with " +
+                 (c.group.empty() ? eng.PeerName(c.peer) : "a group" + std::string(c.hub ? " (through the server)" : "")) +
+                 (c.lostAt ? ", reconnecting" : "") + "\n";
+        int moving = 0, waiting = 0;
+        for (auto& [tid, t] : eng.transfers) {
+            if (t->state == TState::Active || t->state == TState::Hashing) moving++;
+            else if (!TStateFinal(t->state)) waiting++;
+        }
+        r += "transfers: " + std::to_string(moving) + " going, " + std::to_string(waiting) + " waiting or paused\n";
+    }
+    std::string rt = RealtimeLine();
+    if (!rt.empty()) r += rt + "\n";
+    if (Media().VideoRunning()) {
+        LsvStats vs = Media().VideoStats();
+        char b[200];
+        snprintf(b, sizeof(b), "video: out %dx%d %d fps %d kbit/s, in %dx%d %d fps %d kbit/s\n", vs.send_width, vs.send_height, vs.send_fps, vs.send_kbps,
+                 vs.recv_width, vs.recv_height, vs.recv_fps, vs.recv_kbps);
+        r += b;
+    }
+    r += "\nthe last things it did (log):\n" + (applog::On() ? applog::Text() : applog::Recent());
+    return r;
+}
+
+void App::DrawProblemReport() {
+    if (problemReport.empty()) return;
+    const char* title = T("Problem report");
+    if (!ImGui::IsPopupOpen(title)) ImGui::OpenPopup(title);
+    bool mobile = ui::M().mobile;
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (mobile) ImGui::SetNextWindowSize(ImVec2(ImGui::GetMainViewport()->Size.x * 0.92f, 0));
+    bool open = true;
+    if (!ImGui::BeginPopupModal(title, &open, mobile ? 0 : ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (!open) problemReport.clear();
+        return;
+    }
+    ImGui::PushTextWrapPos(mobile ? 0 : ImGui::GetFontSize() * 30);
+    ImGui::TextWrapped("%s", T("How things stand now and what the app did recently: connections, calls, transfers - device names and addresses, "
+                               "not your messages or files. Send it to whoever helps you with LunaShare; you can look at it first."));
+    ImGui::PopTextWrapPos();
+    if (ImGui::CollapsingHeader(T("What's in it"))) {
+        ImGui::BeginChild("reporttext", ImVec2(mobile ? 0 : ImGui::GetFontSize() * 30, ImGui::GetFontSize() * 12), ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(problemReport.c_str());
+        ImGui::EndChild();
+    }
+    float h = mobile ? ui::M().rowH * 0.85f : 0;
+    bool done = false;
+    if (ui::IconTextButton(T("Send to a chat..."), Icon::Send, ImVec2(0, h))) {
+        std::string path = JoinPath(eng.settings.downloadDir, "lunashare-problem-report.txt");
+        if (FILE* f = fopen(path.c_str(), "wb")) {
+            fwrite(problemReport.data(), 1, problemReport.size(), f);
+            fclose(f);
+            OpenSendTo({path});
+        }
+        done = true;
+    }
+    ImGui::SameLine();
+    if (Bridge().shareText) {
+        if (ui::IconTextButton(T("Share..."), Icon::Share, ImVec2(0, h))) {
+            Bridge().shareText(problemReport);
+            done = true;
+        }
+    } else if (ImGui::Button(T("Copy"), ImVec2(0, h))) {
+        ImGui::SetClipboardText(problemReport.c_str());
+        toasts.push_back({EventType::Info, title, T("Copied - paste it wherever you report it."), "", 0, 3.0f});
+        done = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Cancel"), ImVec2(0, h)) || !open) done = true;
+    if (done) {
+        problemReport.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 void App::OpenSendTo(const std::vector<std::string>& paths) {
     pendingSend = paths;
     pendingSendList.clear();
@@ -3904,6 +4004,7 @@ void App::DrawPopups() {
 
     DrawIncomingCall();
     DrawCrashReportOffer();
+    DrawProblemReport();
     {
         // a code on screen to be scanned: the screen at full brightness meanwhile (a dim screen gives the other
         // camera a weak, grey picture), the system's own again after - not while the movie player has its own

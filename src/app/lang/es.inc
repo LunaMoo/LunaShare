@@ -1582,3 +1582,7 @@
 {"weak: their side", "débil: su lado"},
 {"weak - mostly what you send", "débil: sobre todo lo que envías"},
 {"weak - mostly what they send", "débil: sobre todo lo que envían"},
+{"Problem report", "Informe de problema"},
+{"How things stand now and what the app did recently: connections, calls, transfers - device names and addresses, not your messages or files. Send it to whoever helps you with LunaShare; you can look at it first.", "Cómo está todo ahora y qué hizo la app hace poco: conexiones, llamadas, transferencias - nombres de dispositivos y direcciones, no tus mensajes ni archivos. Envíalo a quien te ayuda con LunaShare; puedes mirarlo antes."},
+{"Send a problem report...", "Enviar un informe de problema..."},
+{"When something doesn't work as it should: what's connected and how, the call, transfers and what the app did recently - no messages, no file contents. You see it before it goes anywhere.", "Cuando algo no funciona como debe: qué está conectado y cómo, la llamada, las transferencias y qué hizo la app hace poco - sin mensajes ni contenido de archivos. Lo ves antes de que vaya a ningún sitio."},

@@ -1588,3 +1588,7 @@
 {"weak: their side", "слабо: с их стороны"},
 {"weak - mostly what you send", "слабо - в основном то, что вы отправляете"},
 {"weak - mostly what they send", "слабо - в основном то, что отправляют они"},
+{"Problem report", "Отчёт о проблеме"},
+{"How things stand now and what the app did recently: connections, calls, transfers - device names and addresses, not your messages or files. Send it to whoever helps you with LunaShare; you can look at it first.", "Как всё обстоит сейчас и что приложение делало недавно: соединения, звонки, передачи - имена устройств и адреса, не ваши сообщения и файлы. Отправьте это тому, кто помогает вам с LunaShare; сначала можно посмотреть."},
+{"Send a problem report...", "Отправить отчёт о проблеме..."},
+{"When something doesn't work as it should: what's connected and how, the call, transfers and what the app did recently - no messages, no file contents. You see it before it goes anywhere.", "Когда что-то работает не так: что подключено и как, звонок, передачи и что приложение делало недавно - без сообщений и содержимого файлов. Вы увидите это до отправки."},

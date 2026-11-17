@@ -435,6 +435,10 @@ private:
     void DrawIncomingCall();
     // the start after a crash: offer to send what was written down about it (applog::NewCrashReport)
     void DrawCrashReportOffer();
+    // Settings - About: "Send a problem report..." - how things stand and the recent log, to a chat or shared
+    std::string BuildProblemReport();
+    void DrawProblemReport();
+    std::string problemReport;  // (non-empty: its window is open)
     std::string crashReport;
     bool crashChecked = false;
     std::string RealtimeLine();  // the call's real-time channel, for the stats ("" when it has none)

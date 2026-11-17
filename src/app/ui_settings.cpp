@@ -697,6 +697,10 @@ void App::SettingsCategory(int cat, float fieldW, float h, bool& changed) {
                     ImGui::SameLine();
                     if (ImGui::Button(TF("Get %s", updateTag.c_str()).c_str(), ImVec2(0, h))) SDL_OpenURL(updateUrl.c_str());
                 }
+                // something not working: how things stand and the recent log, to whoever helps (every build)
+                if (ImGui::Button(T("Send a problem report..."), ImVec2(0, h))) problemReport = BuildProblemReport();
+                ui::HelpMarker(T("When something doesn't work as it should: what's connected and how, the call, transfers and what the "
+                                 "app did recently - no messages, no file contents. You see it before it goes anywhere."));
                 // a test build: what the app has been doing (for a problem report) - copied, to paste in a message;
                 // it's also in lunashare-log.txt in the LunaShare folder
                 if (applog::On() && ImGui::Button(T("Copy the diagnostic log"), ImVec2(0, h))) {

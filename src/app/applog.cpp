@@ -455,6 +455,11 @@ void CrashText(const std::string& text) {
                "the last things it did (log):\n" + RingText());
 }
 
+std::string Recent() {
+    std::lock_guard<std::mutex> g(g_m);
+    return RingText();
+}
+
 std::string Text() {
     std::lock_guard<std::mutex> g(g_m);
     std::string out;

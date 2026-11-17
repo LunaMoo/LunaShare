@@ -11,6 +11,7 @@ void SetDir(const std::string& dir);  // where lunashare-log.txt goes (the LunaS
 bool On();                // a test build: the log is kept
 void Add(const std::string& line);
 std::string Text();       // the recent lines, oldest first
+std::string Recent();     // the last ~32 KB, kept in every build (what crash and problem reports carry)
 
 // Crash reports (every build, not only test builds): a native crash (a signal) or an uncaught Java exception writes
 // what happened - the faulting place, a backtrace and the last 32 KB of the log - to lunashare-crash.txt in the LunaShare folder (SetDir), then

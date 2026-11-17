@@ -1594,3 +1594,7 @@
 {"weak: their side", "较弱：对方那边"},
 {"weak - mostly what you send", "较弱 - 主要是你发送的部分"},
 {"weak - mostly what they send", "较弱 - 主要是对方发送的部分"},
+{"Problem report", "问题报告"},
+{"How things stand now and what the app did recently: connections, calls, transfers - device names and addresses, not your messages or files. Send it to whoever helps you with LunaShare; you can look at it first.", "当前状态和应用最近做了什么：连接、通话、传输 - 设备名称和地址，不包括你的消息或文件。发给帮你处理 LunaShare 的人；你可以先看看。"},
+{"Send a problem report...", "发送问题报告..."},
+{"When something doesn't work as it should: what's connected and how, the call, transfers and what the app did recently - no messages, no file contents. You see it before it goes anywhere.", "当有东西不正常时：连接了什么以及如何连接、通话、传输以及应用最近做了什么 - 不含消息和文件内容。发送前你可以先看到它。"},
