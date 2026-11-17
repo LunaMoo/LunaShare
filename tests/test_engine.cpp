@@ -2495,6 +2495,12 @@ int main() {
                 if (m.kind == MsgKind::Text) v.push_back({m.text, m.outgoing});
             return v;
         };
+        WaitFor([&] {  // (what's still to be sent stays in the chat when it's cleared: wait until it got there)
+            auto l = A->Lock();
+            for (auto& m : A->chats[bk].messages)
+                if (m.outgoing && !m.pendingTo.empty()) return false;
+            return true;
+        }, 5000);
         auto before = texts(*A, bk);
         CHECK(!before.empty(), "a chat to archive (%d)", (int)before.size());
         std::string path = A->ArchiveChat(bk, true, false);

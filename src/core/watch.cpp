@@ -381,7 +381,7 @@ void Engine::WatchSavesTick() {
     int64_t now = SteadyMs();
     for (auto it = watchServed_.begin(); it != watchServed_.end();) {
         auto cur = it++;
-        if (cur->second.ended && (now - cur->second.lastUse > 3600 * 1000LL || !cur->second.allowSave)) WatchServeClose(cur->first);
+        if (cur->second.ended && (now - cur->second.lastUse > 600 * 1000LL || !cur->second.allowSave)) WatchServeClose(cur->first);  // (10 min unread: the one saving is gone)
     }
     std::vector<std::shared_ptr<WatchCache>> list;
     {

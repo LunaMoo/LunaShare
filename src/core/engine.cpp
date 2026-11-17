@@ -217,6 +217,12 @@ void Engine::Stop() {
         conns.clear();
         online.clear();
     }
+    {  // the movies, songs and pages served to the others (a session open, or a copy still being saved): let go of them
+        std::lock_guard<std::mutex> l(watchServe_.m);
+        for (auto& [sid, f] : watchServe_.files)
+            if (f.f) fclose(f.f);
+        watchServe_.files.clear();
+    }
     Save();
 }
 
@@ -412,9 +418,11 @@ void Engine::SetHistoryEncryption(const std::string& pin) {
 
 void Engine::Save() {
     json js, jh, jt;
+    std::vector<AckLater> acks;  // (what's written below includes these messages: now they may be acknowledged)
     {
         auto lk = Lock();
         dirty_ = false;
+        acks.swap(acksAfterSave_);
         js["settings"] = ToJson(settings, true);
         js["devices"] = json::array();
         for (auto& [id, d] : devices) js["devices"].push_back(ToJson(d));
@@ -485,6 +493,35 @@ void Engine::Save() {
     }
     SaveJsonFile(JoinPath(dir, "transfers.json"), jt);
     SaveJsonFile(JoinPath(dir, "swarm.json"), SwarmJson());
+    if (!acks.empty()) {
+        auto lk = Lock();
+        for (auto& a : acks)
+            if (!a.c->closed || a.c->mailbox) Queue(a.c, a.type, a.j);
+            else if (auto rc = ReadyConn(a.c->peerId)) Queue(rc, a.type, a.j);  // (that connection went: another one)
+    }
+}
+
+// A message is acknowledged once it's on disk, not when it arrives: the sender stops sending it at the
+// acknowledgement, so an app that died in between (killed by the system, a crash, the battery) would have lost it for
+// good. Saving comes within about a second (the maintenance loop).
+// A message that came in the last 10 minutes (whether it's still in its chat or not): one sent again because its
+// acknowledgement hadn't arrived isn't taken as new - also after the chat was cleared meanwhile. Marks it as come.
+bool Engine::RecentlyGot(const std::string& mid) {
+    if (mid.empty()) return false;
+    int64_t now = SteadyMs();
+    if (recentMids_.size() > 4000)
+        for (auto it = recentMids_.begin(); it != recentMids_.end();) it = now - it->second > 600000 ? recentMids_.erase(it) : std::next(it);
+    auto [it, fresh] = recentMids_.emplace(mid, now);
+    if (!fresh && now - it->second > 600000) {
+        it->second = now;
+        return false;
+    }
+    return !fresh;
+}
+
+void Engine::AckAfterSave(const std::shared_ptr<Connection>& c, Msg type, const json& j) {
+    acksAfterSave_.push_back({c, type, j});
+    MarkDirty();
 }
 
 // ============================================================================ helpers
@@ -2054,7 +2091,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             }
             Conversation& cv = chats[key];
             cv.peer = key;
-            bool dup = false;
+            bool dup = RecentlyGot(mid);  // (here already, and maybe cleared since: its acknowledgement came late)
             for (auto& m : cv.messages)
                 if (m.mid == mid && !m.outgoing) dup = true;  // (a person's devices each send their copy)
             if (!dup && !mid.empty()) {
@@ -2099,7 +2136,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 Emit({EventType::ChatReceived, key, m.text, 0, me ? "mention" : ""});
                 MarkDirty();
             }
-            Queue(c, Msg::ChatAck, KeyField(key, {{"mid", mid}}));
+            AckAfterSave(c, Msg::ChatAck, KeyField(key, {{"mid", mid}}));
             break;
         }
         case Msg::ChatSync: {
@@ -2119,7 +2156,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
             }
             Conversation& cv = chats[key];
             cv.peer = key;
-            bool out = j.value("out", false), dup = false;
+            bool out = j.value("out", false), dup = RecentlyGot(mid);
             for (auto& m : cv.messages)
                 if (m.mid == mid) dup = true;
             if (!dup) {
@@ -2155,7 +2192,7 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 }
                 MarkDirty();
             }
-            Queue(c, Msg::ChatSyncAck, {{"mid", mid}});
+            AckAfterSave(c, Msg::ChatSyncAck, {{"mid", mid}});
             break;
         }
         case Msg::Typing: {

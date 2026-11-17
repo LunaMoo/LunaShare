@@ -8,6 +8,12 @@
 - **"... is writing"**: three dots that hop in their bubble at the end of the chat (in a group, who it is), "writing..."
   in the chat list, and a soft sound when someone starts writing in the open chat. It can be turned off ("Let the
   others see when I'm writing"); older versions simply don't show it.
+- **A message can no longer be lost when an app dies right after it arrived** (found by the simulator, which now kills
+  apps without warning): it was acknowledged on arrival, so the sender stopped sending it - but it was saved up to a
+  second later. Now it's acknowledged once it's saved; one sent again meanwhile isn't taken as new.
+- **A movie shown to others is no longer held open after the app closes** (found by an hour-long simulator run): the
+  file stayed open for every restart during a watch-together session, and one already ended stayed open an hour for
+  someone who had left - now 10 minutes after their last read.
 - **Unblocking a person works again.** Blocking someone (all their devices) could not be undone: the unblock didn't
   find their devices, since they were blocked. Found by the user simulator.
 - **A file no longer sits at "Transferring" on one side and "Waiting for accept" on the other.** With two connections

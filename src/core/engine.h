@@ -7,6 +7,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -972,6 +973,15 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> dirty_{false};
+    struct AckLater {
+        std::shared_ptr<Connection> c;  // (held: a message from the server mailbox comes on one that is gone at once)
+        Msg type;
+        json j;
+    };
+    std::vector<AckLater> acksAfterSave_;  // (engine lock) acknowledgements that wait for the next save
+    void AckAfterSave(const std::shared_ptr<Connection>& c, Msg type, const json& j);
+    std::unordered_map<std::string, int64_t> recentMids_;  // messages that came lately (RecentlyGot)
+    bool RecentlyGot(const std::string& mid);
     std::atomic<bool> backedUp_{false};  // settings.json.bak written this run
     SocketHandle listener_ = kInvalidSocket;
     SocketHandle udp_ = kInvalidSocket;

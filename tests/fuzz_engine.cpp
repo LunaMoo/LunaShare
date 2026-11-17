@@ -904,7 +904,15 @@ int main(int argc, char** argv) {
         }
         CheckRules();
         int threads = CountDir("/proc/self/task"), fds = CountDir("/proc/self/fd");
-        printf(" %d actions so far, %d threads, %d open files%s\n", actions, threads, fds, g_problems > before ? "  <- problems" : "");
+        long rssMb = 0;  // (memory in use: a long run shows whether it keeps growing)
+#ifndef _WIN32
+        if (FILE* f = fopen("/proc/self/statm", "r")) {
+            long pages = 0, res = 0;
+            if (fscanf(f, "%ld %ld", &pages, &res) == 2) rssMb = res * (sysconf(_SC_PAGESIZE) / 1024) / 1024;
+            fclose(f);
+        }
+#endif
+        printf(" %d actions so far, %d threads, %d open files, %ld MB%s\n", actions, threads, fds, rssMb, g_problems > before ? "  <- problems" : "");
         if (g_problems > before) DumpLog();
         if (threads > threads0 + 200) Problem("threads keep growing: " + std::to_string(threads0) + " -> " + std::to_string(threads));
         if (fds > fds0 + 300) Problem("open files keep growing: " + std::to_string(fds0) + " -> " + std::to_string(fds));
@@ -924,6 +932,17 @@ int main(int argc, char** argv) {
     dog.join();
     for (auto& p : g_p) p.e->Stop();
     if (g_srv) g_srv->Stop();
+#ifndef _WIN32
+    {  // stopped: nothing of theirs may still be open (a file left open by each restart is a slow leak)
+        std::map<std::string, int> open;
+        std::error_code ec;
+        for (auto& d : fs::directory_iterator("/proc/self/fd", ec)) {
+            std::string t = fs::read_symlink(d.path(), ec).string();
+            if (!ec && t.rfind(g_root, 0) == 0) open[t.substr(g_root.size())]++;
+        }
+        for (auto& [f, n] : open) Problem(f + " is still open " + std::to_string(n) + " time(s) after every app stopped");
+    }
+#endif
     printf("%s: %d rounds, %d actions, %d problems (seed %u)\n", g_problems ? "PROBLEMS" : "ALL RULES HELD", g_round, actions, g_problems, seed);
     std::error_code ec;
     fs::remove_all(g_root, ec);
