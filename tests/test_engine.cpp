@@ -1,4 +1,5 @@
 // Headless end-to-end tests: two engines in one process talking over loopback TCP.
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1025,6 +1026,168 @@ static void TestBadNetwork() {
     Q->Stop();
 }
 
+// A slow, far link: a TCP relay that holds every byte back by a delay and lets only so much through a second
+// (a busy mobile network or a far relay) - TCP hides loss, so this is what loss looks like from above it.
+struct SlowLink {
+    SocketHandle listener = kInvalidSocket;
+    uint16_t port = 0;
+    std::atomic<bool> stop{false};
+    std::vector<std::thread> threads;
+    std::mutex sm;
+    std::vector<SocketHandle> socks;
+    int delayMs, bytesPerSec;
+    uint16_t target;
+    SlowLink(uint16_t to, int delay, int bps) : delayMs(delay), bytesPerSec(bps), target(to) {
+        listener = TcpListen(0, &port);
+        threads.emplace_back([this] {
+            while (!stop) {
+                std::string ip;
+                SocketHandle a = TcpAccept(listener, &ip, 200);
+                if (a == kInvalidSocket) continue;
+                SocketHandle b = TcpConnect("127.0.0.1", target, 3000);
+                if (b == kInvalidSocket) { CloseSocket(a); continue; }
+                SetSocketBuffers(a, 64 * 1024);  // (a small buffer, like a real link's - not a loopback's megabytes)
+                SetSocketBuffers(b, 64 * 1024);
+                {
+                    std::lock_guard<std::mutex> l(sm);
+                    socks.push_back(a);
+                    socks.push_back(b);
+                }
+                Pipe(a, b);
+                Pipe(b, a);
+            }
+        });
+    }
+    void Pipe(SocketHandle from, SocketHandle to) {
+        auto q = std::make_shared<std::deque<std::pair<int64_t, std::vector<uint8_t>>>>();
+        auto m = std::make_shared<std::mutex>();
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        threads.emplace_back([this, from, q, m, done] {
+            std::vector<uint8_t> buf(16384);
+            while (!stop) {
+                for (;;) {  // (a router's buffer: so much waits, then the sender's TCP is held back)
+                    size_t queued = 0;
+                    {
+                        std::lock_guard<std::mutex> l(*m);
+                        for (auto& e : *q) queued += e.second.size();
+                    }
+                    if (queued < 64 * 1024 || stop) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+                int n = RecvSome(from, buf.data(), buf.size());
+                if (n <= 0) break;
+                std::lock_guard<std::mutex> l(*m);
+                q->push_back({SteadyMs() + delayMs, std::vector<uint8_t>(buf.begin(), buf.begin() + n)});
+            }
+            *done = true;
+        });
+        threads.emplace_back([this, to, from, q, m, done] {
+            double budget = 0;
+            int64_t last = SteadyMs();
+            while (!stop) {
+                int64_t now = SteadyMs();
+                budget += (double)(now - last) * bytesPerSec / 1000.0;
+                if (budget > bytesPerSec / 10.0) budget = bytesPerSec / 10.0;  // (bursts of 100 ms at most)
+                last = now;
+                std::vector<uint8_t> out;
+                bool empty;
+                {
+                    std::lock_guard<std::mutex> l(*m);
+                    while (!q->empty() && q->front().first <= now && budget >= 1) {
+                        auto& f = q->front().second;
+                        size_t take = f.size() < (size_t)budget ? f.size() : (size_t)budget;
+                        out.insert(out.end(), f.begin(), f.begin() + (long)take);
+                        f.erase(f.begin(), f.begin() + (long)take);
+                        budget -= (double)take;
+                        if (f.empty()) q->pop_front();
+                    }
+                    empty = q->empty();
+                }
+                if (!out.empty() && !SendAll(to, out.data(), out.size())) break;
+                if (empty && *done) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            ShutdownSocket(to);
+            ShutdownSocket(from);
+        });
+    }
+    ~SlowLink() {
+        stop = true;
+        {
+            std::lock_guard<std::mutex> l(sm);
+            for (auto s : socks) ShutdownSocket(s);
+        }
+        for (auto& t : threads) t.join();
+        for (auto s : socks) CloseSocket(s);
+        CloseSocket(listener);
+    }
+};
+
+static void TestSlowLink() {
+    printf("[a slow, far link: 150 ms each way, 200 KB/s - messages, a file and a call together]\n");
+    auto P = MakeEngine("slowp", 48500, true, true, true, true, "", "", {"voice"});
+    auto Q = MakeEngine("slowq", 48510, true, true, true, true, "", "", {"voice"});
+    std::string idP = P->settings.deviceId, idQ = Q->settings.deviceId;
+    SlowLink link(Q->boundPort, 150, 200 << 10);
+    int64_t t0 = SteadyMs();
+    P->ConnectAddress("127.0.0.1", link.port);
+    CHECK(WaitFor([&] { return P->IsConnected(idQ) && Q->IsConnected(idP); }, 8000), "connected through it");
+    printf("  connected in %d ms\n", (int)(SteadyMs() - t0));
+    std::string f = JoinPath(Root(), "src/slow.bin");
+    WriteRandomFile(f, 2 << 20, 55);
+    uint64_t tid = FirstTid(*P, P->SendPaths(idQ, {f}));
+    std::string sha = Sha256File(f);
+    uint64_t cid = P->StartCall(idQ);
+    CHECK(WaitFor([&] { auto l = Q->Lock(); return Q->call.state == CallState::IncomingRinging; }, 5000), "ringing");
+    Q->AcceptCall();
+    CHECK(WaitFor([&] { auto l = P->Lock(); return P->call.state == CallState::Active; }, 5000), "call on");
+    std::atomic<int> media{0};
+    Q->onMedia = [&](uint64_t, int, const uint8_t* d, size_t n) { if (n == 3 && d[0] == 'p') media++; };
+    // while the file fills the link: messages both ways, voice-sized packets each 20 ms
+    int sent = 0;
+    int64_t worst = 0;
+    t0 = SteadyMs();
+    while (SteadyMs() - t0 < 8000) {
+        if ((SteadyMs() - t0) / 400 >= sent) {
+            P->SendChat(idQ, "s" + std::to_string(sent));
+            Q->SendChat(idP, "r" + std::to_string(sent));
+            sent++;
+        }
+        P->SendMedia("ppp", 3);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    // a message sent now still gets there soon, file or not (it doesn't wait behind the file)
+    int64_t ts = SteadyMs();
+    P->SendChat(idQ, "now");
+    bool got = WaitFor([&] {
+        auto l = Q->Lock();
+        for (auto& m : Q->chats[Q->ChatKey(idP)].messages) if (!m.outgoing && m.text == "now") return true;
+        return false;
+    }, 5000);
+    worst = SteadyMs() - ts;
+    printf("  a message during the file: %d ms; %d voice packets of %d\n", (int)worst, media.load(), 8000 / 20);
+    CHECK(got && worst < 2500, "a message isn't stuck behind the file (%d ms)", (int)worst);
+    CHECK(media > 8000 / 20 / 2, "voice gets through (%d)", media.load());
+    int n = 0;
+    WaitFor([&] {
+        n = 0;
+        auto l = Q->Lock();
+        for (auto& m : Q->chats[Q->ChatKey(idP)].messages) if (!m.outgoing && m.text.size() > 1 && m.text[0] == 's' && isdigit((unsigned char)m.text[1])) n++;
+        return n == sent;
+    }, 5000);
+    CHECK(n == sent, "every message (%d of %d)", n, sent);
+    CHECK(WaitFor([&] { return StateOf(*Q, tid) == TState::Completed; }, 40000), "the file arrives (%s)", TStateName(StateOf(*Q, tid)));
+    auto t = GetT(*Q, tid);
+    CHECK(t && Sha256File(t->localPath) == sha, "whole");
+    {
+        auto l = P->Lock();
+        CHECK(P->call.state == CallState::Active && P->call.id == cid, "the call is still on");
+    }
+    P->EndCall();
+    P->Stop();
+    Q->Stop();
+}
+
 // (found by the user simulator) a transfer the sender removed while the two weren't connected - its cancel lost -
 // accepted later by the receiver: it ends there too, instead of "transferring" for good
 static void TestRemovedWhileApart() {
@@ -1095,6 +1258,7 @@ int main() {
     TestRemovedWhileApart();
     if (getenv("LUNASHARE_TEST_DIAL_ONLY")) return g_fail ? 1 : 0;
     TestBadNetwork();
+    TestSlowLink();
     if (getenv("LUNASHARE_TEST_STRESS_ONLY")) return g_fail ? 1 : 0;
 
     auto A = MakeEngine("alice", 48110, false, true);

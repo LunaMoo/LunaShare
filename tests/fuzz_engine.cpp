@@ -535,9 +535,17 @@ static void CheckRules() {
     // everyone is connected again
     for (int a = 0; a < kN; a++)
         for (int b = 0; b < kN; b++)
-            if (a != b && !g_p[a].e->IsConnected(g_p[b].dev))
+            if (a != b && !g_p[a].e->IsConnected(g_p[b].dev)) {
+                std::string seen = "not seen";
+                {
+                    auto l = g_p[a].e->Lock();
+                    auto it = g_p[a].e->online.find(g_p[b].dev);
+                    if (it != g_p[a].e->online.end())
+                        seen = "seen via " + it->second.Via() + (it->second.ip.empty() ? "" : " at " + it->second.ip + ":" + std::to_string(it->second.port));
+                }
                 Problem(g_p[a].name + " isn't connected to " + g_p[b].name + " again after the calm spell (" +
-                        Engine::ConnFailText(g_p[a].e->ConnectTrouble(g_p[b].dev)) + ")");
+                        Engine::ConnFailText(g_p[a].e->ConnectTrouble(g_p[b].dev)) + "; " + seen + "; server: " + g_p[a].e->WanStatus() + "; " + g_p[a].e->DebugPeer(g_p[b].dev) + ")");
+            }
     // the way they're connected is the world's: through the server where they can't see each other directly
     for (int a = 0; a < kN; a++)
         for (int b = 0; b < kN; b++) {
@@ -664,11 +672,15 @@ static void CheckRules() {
                 auto l = g_p[o].e->Lock();
                 auto it = g_p[o].e->transfers.find(m.t->tid);
                 there = it == g_p[o].e->transfers.end() ? "not there" : std::string(TStateName(it->second->state)) +
-                        (it->second->pausedByPeer ? " (paused by the other side)" : "") + ", " + std::to_string(it->second->done.load()) + " done";
+                        (it->second->pausedByPeer ? " (paused by the other side)" : "") + ", " + std::to_string(it->second->done.load()) + " done" +
+                        (it->second->outgoing ? ", sending" : ", receiving") + " with " +
+                        (IndexOfDev(it->second->peer) >= 0 ? g_p[IndexOfDev(it->second->peer)].name : it->second->peer.substr(0, 8));
             }
             Problem(g_p[m.who].name + "'s " + (m.t->outgoing ? "outgoing" : "incoming") + " transfer " + m.t->name + " (" +
                     std::to_string(m.t->tid % 10000) + ") is " + TStateName(m.st) + " and doesn't move (" + std::to_string(m.done) + " of " +
-                    std::to_string(m.t->size) + "); at " + (o >= 0 ? g_p[o].name : "?") + ": " + there);
+                    std::to_string(m.t->size) + "); at " + (o >= 0 ? g_p[o].name : "?") + ": " + there +
+                    (g_p[m.who].e->IsConnected(m.t->peer) ? "; connected" : "; not connected") + ", last moved " +
+                    std::to_string((SteadyMs() - m.t->lastMoved) / 1000) + " s ago");
         }
     // only the three of them know each other (another program's devices showing up would spoil the run)
     for (int a = 0; a < kN; a++) {

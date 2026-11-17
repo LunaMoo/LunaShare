@@ -27,6 +27,7 @@ SocketHandle TcpAccept(SocketHandle listener, std::string* peerIp, int timeoutMs
 enum class ConnFail { None, Refused, NoAnswer, Unreachable, BadAddress, Handshake, ClosedByThem };
 SocketHandle TcpConnect(const std::string& host, uint16_t port, int timeoutMs, ConnFail* why = nullptr);
 void TuneStreamSocket(SocketHandle s, bool tcp);
+void SetSocketBuffers(SocketHandle s, int bytes);  // (tests: a small buffer, like a real link's)
 
 SocketHandle UdpOpen(uint16_t port);  // bound, broadcast-enabled, address reuse
 // A port of its own (no address reuse; 0 = any free one), with a bigger receive buffer (call media bursts).

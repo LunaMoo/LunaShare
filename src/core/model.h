@@ -302,6 +302,7 @@ struct Transfer {
     double speed = 0;        // bytes/s, smoothed
     int64_t lastDone = 0;
     int64_t lastTick = 0;
+    int64_t lastMoved = 0;  // (an incoming one: when bytes last came - see the maintenance loop)
     bool wantResume = false;
 };
 

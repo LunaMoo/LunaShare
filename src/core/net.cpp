@@ -273,6 +273,21 @@ void TuneStreamSocket(SocketHandle s, bool tcp) {
     int buf = 1 << 20;
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char*)&buf, sizeof(buf));
     setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char*)&buf, sizeof(buf));
+#ifdef TCP_NOTSENT_LOWAT
+    // Not much waiting unsent in the system's buffer: on a slow link a big send buffer full of a file's data is seconds
+    // that a message, a call's signalling or a pause must wait behind (1 MB at 200 KB/s: 5 s). The app's own queue
+    // puts those first; this keeps the system's share small (on a fast network it still drains in a millisecond).
+    if (tcp) {
+        int lowat = 128 * 1024;
+        setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, (const char*)&lowat, sizeof(lowat));
+    }
+#endif
+}
+
+void SetSocketBuffers(SocketHandle s, int bytes) {
+    auto fd = (decltype(socket(0, 0, 0)))s;
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char*)&bytes, sizeof(bytes));
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char*)&bytes, sizeof(bytes));
 }
 
 SocketHandle UdpOpen(uint16_t port) {

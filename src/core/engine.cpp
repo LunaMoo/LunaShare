@@ -1580,6 +1580,8 @@ void Engine::CloseConn(const std::shared_ptr<Connection>& c, const char* why) {
                     t->state = TState::Interrupted;
                     CloseFile(*t);
                     OfferTransfer(t, false);
+                } else if (t->state == TState::Offered) {
+                    OfferTransfer(t, false);  // (the offer, or their accept, may have gone with it)
                 }
             }
         }
@@ -1637,6 +1639,22 @@ void Engine::ReaderLoop(std::shared_ptr<Connection> c) {
     }
     CloseConn(c, bye ? "bye" : "reader");
     if (--c->alive == 0) CloseSocket(c->sock);
+}
+
+std::string Engine::DebugPeer(const std::string& peer) {
+    auto lk = Lock();
+    int64_t now = SteadyMs();
+    auto d = devices.find(peer);
+    std::string r = std::string("me<them ") + (settings.deviceId < peer ? "yes" : "no") + ", autoConnect " + (settings.autoConnect ? "on" : "off") +
+                    ", blocked " + (d == devices.end() ? "?" : d->second.blocked ? "yes" : "no") + ", dialing " + (connecting_.count(peer) ? "yes" : "no");
+    auto la = lastAutoConnect_.find(peer);
+    if (la != lastAutoConnect_.end()) r += ", lan dial " + std::to_string((now - la->second) / 1000) + " s ago";
+    auto lw = lastWanConnect_.find(peer);
+    if (lw != lastWanConnect_.end()) r += ", wan dial " + std::to_string((now - lw->second) / 1000) + " s ago";
+    int n = 0;
+    for (auto& c : conns) if (c->peerId == peer) n++;
+    r += ", conns " + std::to_string(n) + ", running " + (running_ ? "yes" : "no");
+    return r;
 }
 
 void Engine::StallConnectionTo(const std::string& peer, int ms) {
@@ -2415,8 +2433,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                             t->state = TState::Paused;
                             t->pausedByPeer = true;
                             CloseFile(*t);
-                        } else if (resume || settings.autoResume || t->wantResume) {
-                            SendAcceptFor(t);
+                        } else if (resume || settings.autoResume || t->wantResume || t->state == TState::Active) {
+                            SendAcceptFor(t);  // (Active: accepted already - they didn't get it)
                         } else {
                             t->state = TState::Interrupted;
                         }
@@ -2501,9 +2519,13 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 if (tid) Queue(c, Msg::FileCancel, {{"tid", tid}, {"reason", "removed by the sender"}});
                 break;
             }
-            if (!it->second->outgoing || it->second->peer != c->peerId) break;
+            if (!it->second->outgoing || it->second->peer != c->peerId) {
+                DIAG("transfer %llu: an accept from %s, not ours to send there", (unsigned long long)tid, c->peerId.substr(0, 8).c_str());
+                break;
+            }
             auto t = it->second;
             if (TStateFinal(t->state)) {
+                DIAG("transfer %llu: an accept, but it's %s here", (unsigned long long)tid, TStateName(t->state));
                 if (t->state == TState::Cancelled) Queue(c, Msg::FileCancel, {{"tid", tid}, {"reason", "cancelled by sender"}});
                 break;
             }
@@ -2546,6 +2568,8 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         }
         case Msg::FileCancel: {
             auto it = transfers.find(j.value("tid", (uint64_t)0));
+            DIAG("transfer %llu: cancelled there (%s)", (unsigned long long)j.value("tid", (uint64_t)0),
+                 it == transfers.end() ? "not here" : TStateName(it->second->state));
             if (it == transfers.end() || it->second->peer != c->peerId || TStateFinal(it->second->state)) break;
             SetFinal(it->second, TState::Cancelled, "Cancelled by the other device: " + j.value("reason", std::string("")));
             break;
@@ -2967,6 +2991,13 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
         }
     }
     std::vector<std::shared_ptr<Transfer>> outs;
+    {  // sent to the person while none of their devices could take it (all blocked, or none known): this one now
+        auto pd = devices.find(peer);
+        std::string pk = pd != devices.end() && !pd->second.accountPub.empty() ? "@" + pd->second.accountPub : "";
+        if (!pk.empty())
+            for (auto& [id, t] : transfers)
+                if (t->peer == pk) t->peer = peer;
+    }
     for (auto& [id, t] : transfers)
         if (t->peer == peer && t->outgoing && !TStateFinal(t->state) && t->state != TState::Hashing) outs.push_back(t);
     std::sort(outs.begin(), outs.end(), [](auto& a, auto& b) { return a->created < b->created; });
@@ -2977,6 +3008,10 @@ void Engine::OnReady(const std::shared_ptr<Connection>& c) {
 }
 
 void Engine::OfferTransfer(const std::shared_ptr<Transfer>& t, bool resumeRequest) {
+    if (IsContactKey(t->peer)) {  // (to a person, not yet a device of theirs: the one it goes to now - their answers come from it)
+        std::string d = Resolve(t->peer);
+        if (!IsContactKey(d)) t->peer = d;
+    }
     json j = {{"tid", t->tid}, {"name", t->name}, {"rel", t->rel}, {"size", t->size}, {"sha256", t->sha256},
               {"mtime", t->mtime}, {"batch", t->batch}, {"batchName", t->batchName}, {"batchCount", t->batchCount},
               {"paused", t->state == TState::Paused}, {"resume", resumeRequest}};
@@ -3050,7 +3085,7 @@ void Engine::SendAcceptFor(const std::shared_ptr<Transfer>& t, bool userResume) 
     t->pausedByPeer = false;
     t->wantResume = false;
     t->lastDone = offset;
-    t->lastTick = SteadyMs();
+    t->lastTick = t->lastMoved = SteadyMs();
     if (!c) {
         t->state = TState::Interrupted;
         t->wantResume = true;
@@ -3375,8 +3410,16 @@ void Engine::MaintenanceLoop() {
                 double inst = (double)(t->done.load() - t->lastDone) * 1000.0 / (double)dt;
                 if (inst < 0) inst = 0;
                 t->speed = t->speed == 0 ? inst : t->speed * 0.6 + inst * 0.4;
+                if (t->done.load() != t->lastDone || !t->lastMoved) t->lastMoved = now;
                 t->lastDone = t->done.load();
                 t->lastTick = now;
+                // accepted, connected, and nothing comes: the accept (or their offer) may have gone with a connection
+                // that died while another one stayed up - ask again from what we have
+                if (!t->outgoing && now - t->lastMoved > 6000 && ReadyConn(t->peer)) {
+                    DIAG("transfer %llu: nothing arrives - asking again", (unsigned long long)t->tid);
+                    t->lastMoved = now;
+                    SendAcceptFor(t);
+                }
             }
             bool ping = now - lastPing > 5000;
             if (ping) lastPing = now;
@@ -4132,6 +4175,9 @@ void Engine::SetBlocked(const std::string& peer, bool v) {
     {
         auto lk = Lock();
         ds = DevicesOf(peer);
+        if (!v && IsContactKey(peer))  // (DevicesOf skips blocked devices: unblocking a person needs them too)
+            for (auto& [id, d] : devices)
+                if (d.accountPub == peer.substr(1) && d.blocked && id != settings.deviceId) ds.push_back(id);
         for (auto& d : ds) {
             Device(d).blocked = v;
             if (v) Device(d).trusted = false;

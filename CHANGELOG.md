@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Unblocking a person works again.** Blocking someone (all their devices) could not be undone: the unblock didn't
+  find their devices, since they were blocked. Found by the user simulator.
+- **A file no longer sits at "Transferring" on one side and "Waiting for accept" on the other.** With two connections
+  to the same device, an offer or its accept could go down with the one that closed. The sender now offers again on the
+  connection that stays, and a receiver that gets nothing for 6 s asks again.
+- **A file sent to someone while none of their devices could take it** (all blocked, or none known yet) no longer stays
+  "Waiting for accept" for good: their accept was ignored, as it came from a device and not "the person".
+- **Messages and call signalling no longer wait seconds behind a file on a slow link** (Linux, Android): the system's
+  send buffer held up to 2 MB of the file's data ahead of them - 10 s at 200 KB/s. Now only a little waits there and
+  the app's own queue, which puts messages first, does the rest.
+- Windows: video mends itself after a lost frame on GPU encoders that have intra refresh (the others still wait for a
+  keyframe).
+- Calls show how good the connection is (bars, and which side is weak); crash reports include what the app did just
+  before; Settings - About can send a problem report.
+
 ## 1.8.5
 
 **Calls and sessions that survive a bad connection**

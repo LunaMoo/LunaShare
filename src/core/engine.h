@@ -644,6 +644,7 @@ public:
     }
     // tests: the connections to this device send nothing for a while (as when the network stalls)
     void StallConnectionTo(const std::string& peer, int ms);
+    std::string DebugPeer(const std::string& peer);  // (tests: why it isn't connected)
     // tests: the connections to this device break without a goodbye (as when Wi-Fi goes)
     void DropConnectionTo(const std::string& peer) {
         auto lk = Lock();

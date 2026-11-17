@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cmath>
 #include <chrono>
 #include <condition_variable>
@@ -160,9 +161,13 @@ Com<IMFSample> MakeSample(DWORD size) {
 }
 
 // ======================================================================== H.264 encoder (sync or async MFT)
+// CODECAPI_AVEncVideoGradualIntraRefresh (newer SDKs only): frames over which the whole picture is made anew
+static const GUID kGradualIntraRefresh = {0x8f347dee, 0xcb0d, 0x49ba, {0xb4, 0x62, 0xdb, 0x69, 0x27, 0xee, 0x21, 0x01}};
+
 class Encoder {
 public:
     std::string name;
+    int refresh = 0;  // intra refresh round in frames (0: the encoder doesn't do it - lost frames wait for a keyframe)
 
     bool Open(int w, int h, int fps, int bitrate, bool hardware, std::string* err) {
         w_ = w;
@@ -206,8 +211,18 @@ public:
         SetCodecBool(api_.get(), CODECAPI_AVLowLatencyMode, true);
         SetCodecU32(api_.get(), CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
         SetCodecU32(api_.get(), CODECAPI_AVEncCommonMeanBitRate, (UINT32)bitrate);
-        SetCodecU32(api_.get(), CODECAPI_AVEncMPVGOPSize, (UINT32)(fps * 4));
         SetCodecU32(api_.get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
+        // intra refresh, where the encoder has it (some GPU ones): a strip of every frame made anew, so a lost frame
+        // mends itself within a round (a second) instead of waiting for a keyframe - then few periodic keyframes
+        refresh = 0;
+        if (api_ && !getenv("LUNASHARE_NO_INTRA_REFRESH") && api_->IsSupported(&kGradualIntraRefresh) == S_OK) {
+            VARIANT var;
+            VariantInit(&var);
+            var.vt = VT_UI4;
+            var.ulVal = (UINT32)fps;
+            if (api_->SetValue(&kGradualIntraRefresh, &var) == S_OK) refresh = fps;
+        }
+        SetCodecU32(api_.get(), CODECAPI_AVEncMPVGOPSize, (UINT32)(fps * (refresh ? 10 : 4)));
 
         Com<IMFMediaType> ot;
         MFCreateMediaType(&ot);
@@ -927,6 +942,7 @@ public:
         std::lock_guard<std::mutex> l(nameM_);
         return encName_;
     }
+    int IntraRefresh() const override { return irPeriod_.load(); }
     bool VcamAvailable() override { return vcam_.Available(); }
     bool VcamEnable(bool on, std::string* err) override { return vcam_.Enable(on, err); }
     void VcamPush(const LsvImage& img) override { vcam_.Push(img); }
@@ -1023,14 +1039,17 @@ private:
         encH_ = h;
         enc_ = std::make_unique<Encoder>();
         std::string e1;
+        irPeriod_ = 0;
         if (!triedSoftwareOnly_ && enc_->Open(w, h, fps, bitrate_, true, &e1)) {
-            SetEncName(enc_->name + " (hardware)");
+            irPeriod_ = enc_->refresh;
+            SetEncName(enc_->name + " (hardware)" + (enc_->refresh ? ", intra refresh" : ""));
             return true;
         }
         enc_->Close();
         enc_ = std::make_unique<Encoder>();
         std::string e2;
         if (enc_->Open(w, h, fps, bitrate_, false, &e2)) {
+            irPeriod_ = enc_->refresh;
             SetEncName(enc_->name.empty() ? "H.264 (software)" : enc_->name);
             return true;
         }
@@ -1331,6 +1350,7 @@ private:
     Com<IAMCameraControl> cam_;
     Com<IAMVideoProcAmp> amp_;
     std::unique_ptr<Encoder> enc_;
+    std::atomic<int> irPeriod_{0};
     std::string encName_;
     // decoder
     std::unique_ptr<ComInit> decCom_;
