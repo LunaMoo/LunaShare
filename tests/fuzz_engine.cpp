@@ -1,7 +1,7 @@
 // A user simulator: three people (Ana, Ben, Cleo - contacts, and a group together; Ana has her phone as well, a second
 // device on her account) do random things in random order -
 // chat, files, calls, group calls, watching / listening / reading together, settings, blocking - while the network drops,
-// stalls and the apps restart. Rounds: a minute of that, then a calm spell, then rules that must hold whatever happened
+// stalls, slows down to a crawl, and the apps restart or die (only what was on disk then survives). Rounds: a minute of that, then a calm spell, then rules that must hold whatever happened
 // (nothing hangs, calls agree on both ends, nothing stuck, every message there exactly once, sessions consistent).
 //
 //   lunashare_fuzz [seconds=300] [seed=random]     LUNASHARE_FUZZ_VERBOSE=1: every action as it's done
@@ -475,8 +475,16 @@ static void Act() {
         Do(p.name + (on ? " blocks " : " unblocks ") + g_p[j].name, [&] { e.SetBlocked(g_p[j].acc, on); });
     } else if (k < 90) {  // the network
         int j = Other(i);
-        int what = R(6);
-        if (what == 0) Do(p.name + " disconnects from " + g_p[j].name, [&] { e.Disconnect(g_p[j].dev); });
+        int what = R(7);
+        if (what == 6) {  // a slow, lossy link between the two for a while (a far relay, a busy mobile network)
+            int kbs = 16 + R(400), ms = 3000 + R(20000), loss = R(25);
+            Do(p.name + "'s link to " + g_p[j].name + " is slow for " + std::to_string(ms / 1000) + " s (" + std::to_string(kbs) +
+                   " KB/s, " + std::to_string(loss) + "% of the call's packets lost)",
+               [&] {
+                   e.SlowConnectionTo(g_p[j].dev, kbs, ms, loss);
+                   g_p[j].e->SlowConnectionTo(p.dev, kbs, ms, loss);
+               });
+        } else if (what == 0) Do(p.name + " disconnects from " + g_p[j].name, [&] { e.Disconnect(g_p[j].dev); });
         else if (what == 1) Do(p.name + "'s connection to " + g_p[j].name + " drops", [&] { e.DropConnectionTo(g_p[j].dev); });
         else if (what == 2) {
             int ms = 500 + R(4000);
@@ -498,11 +506,33 @@ static void Act() {
             });
             return;
         }
-        if (!Chance(25)) return;
-        Do(p.name + " closes and reopens the app", [&] {
+        if (!Chance(40)) return;
+        if (Chance(50)) {
+            Do(p.name + " closes and reopens the app", [&] {
+                g_restarting = i;
+                p.e->Stop();
+                p.e.reset();
+                StartEngine(p);
+                g_restarting = -1;
+            });
+            return;
+        }
+        // the app dies (killed by the system, a crash, the battery): what is on disk at that moment is all there is -
+        // the files as they are, half-saved ones too; nothing it would have saved on the way out
+        Do(p.name + "'s app dies and is opened again", [&] {
             g_restarting = i;
+            std::string cfg = JoinPath(g_root, p.name + "/config"), snap = JoinPath(g_root, p.name + "/config-at-death");
+            std::error_code ec;
+            for (int tries = 0; tries < 5; tries++) {  // (a file renamed while it's copied: again)
+                fs::remove_all(snap, ec);
+                ec.clear();
+                fs::copy(cfg, snap, fs::copy_options::recursive, ec);
+                if (!ec) break;
+            }
             p.e->Stop();
             p.e.reset();
+            fs::remove_all(cfg, ec);
+            fs::rename(snap, cfg, ec);
             StartEngine(p);
             g_restarting = -1;
         });

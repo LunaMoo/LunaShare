@@ -14,6 +14,8 @@
   the app's own queue, which puts messages first, does the rest.
 - Windows: video mends itself after a lost frame on GPU encoders that have intra refresh (the others still wait for a
   keyframe).
+- Tests: versions together (two devices on this build, one on an older release - CI uses the last one), and the
+  user simulator now also kills apps without warning and slows links down to a crawl.
 - Calls show how good the connection is (bars, and which side is weak); crash reports include what the app did just
   before; Settings - About can send a problem report.
 

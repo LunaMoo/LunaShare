@@ -183,6 +183,21 @@ jobs:
             echo "::error title=User simulator::$(grep -m1 PROBLEM fuzz.txt) - replay: lunashare_fuzz 180 ${{ github.run_number }}"
             exit 1
           fi
+      # versions together (tests/compat_engine.cpp): two devices on this build and one on the last release, which most
+      # people still have for a while - chat, files, groups and calls between them must keep working
+      - name: Versions together
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        run: |
+          last=$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' | sort -V | tail -1)
+          git fetch -q --depth 1 origin tag "$last"
+          bot=$(tools/build_old_peer.sh "$last" "$RUNNER_TEMP/oldpeer" | tail -1)
+          build/lunashare_compat "$bot" 150 ${{ github.run_number }} 2>/dev/null | grep -v "^net:" | tee compat.txt | grep -E "PROBLEM|RULES|round" || true
+          if ! grep -q "ALL RULES HELD" compat.txt; then
+            echo "::error title=Versions together ($last)::$(grep -m1 PROBLEM compat.txt) - replay: lunashare_compat <$last bot> 150 ${{ github.run_number }}"
+            exit 1
+          fi
       - name: Package
         shell: bash
         run: |

@@ -41,6 +41,9 @@ struct Connection {
     int64_t connectedAt = 0;
     std::atomic<int64_t> lastRecv{0};
     std::atomic<int64_t> testStallUntil{0};  // tests: nothing goes out until then (steady ms) - a network that stalls
+    std::atomic<int64_t> testSlowUntil{0};   // tests: until then (steady ms) only testSlowKBs KB/s go out - a slow link
+    std::atomic<int> testSlowKBs{0};
+    double testSlowDebtMs = 0;  // (the writer's own)
     std::atomic<int64_t> bytesIn{0}, bytesOut{0};
     std::atomic<bool> closed{false};
     std::vector<std::string> caps;  // optional features the peer has (e.g. "voice"), from its Hello
@@ -314,6 +317,10 @@ public:
     std::unique_lock<std::recursive_mutex> Lock() { return std::unique_lock<std::recursive_mutex>(mtx); }
 
     // ---- actions (thread-safe; do not call while holding Lock() unless noted)
+    // "... is writing": the UI says so as the text in a chat's box changes (on) and when it's sent / emptied (off);
+    // it goes out at most every 3 s, only to devices connected now, and not if settings.sendTyping is off
+    void SetTyping(const std::string& key, bool on);
+    std::vector<std::string> TypingIn(const std::string& key);  // who writes in that chat now (person keys "@...", or devices)
     void SendChat(const std::string& peer, const std::string& text, const std::string& replyTo = "",
                   const std::vector<std::string>& mentions = {}, bool forwarded = false);  // mentions: groups, the @named people (account keys)
     void PinMessage(const std::string& peer, const std::string& mid, bool on);   // for everyone in the chat
@@ -644,6 +651,8 @@ public:
     }
     // tests: the connections to this device send nothing for a while (as when the network stalls)
     void StallConnectionTo(const std::string& peer, int ms);
+    // tests: a slow link to them for ms: kbs KB/s out of here, and lossPct of the call's datagrams lost on the way
+    void SlowConnectionTo(const std::string& peer, int kbs, int ms, int lossPct);
     std::string DebugPeer(const std::string& peer);  // (tests: why it isn't connected)
     // tests: the connections to this device break without a goodbye (as when Wi-Fi goes)
     void DropConnectionTo(const std::string& peer) {
@@ -672,6 +681,8 @@ public:
 
     // ---- state (read under Lock())
     std::recursive_mutex mtx;
+    std::map<std::string, std::map<std::string, int64_t>> typing_;  // chat key -> who writes there -> until (steady ms)
+    std::map<std::string, int64_t> typingSentAt_;                    // chat key -> when I last said I write (0: stopped)
     Settings settings;
     std::map<std::string, KnownDevice> devices;
     std::map<std::string, OnlinePeer> online;
@@ -801,6 +812,8 @@ private:
     std::shared_ptr<RtMedia> rt_;  // guarded by mediaMtx_
     uint16_t rtLanPort_ = 0;       // the other side's UDP port (mediaMtx_)
     std::string rtLastAddr_, rtLastPeer_;  // where call media last went (kept through a drop of the connection: the
+    std::atomic<int64_t> testRtLossUntil_{0};  // (tests: SlowConnectionTo)
+    std::atomic<int> testRtLossPct_{0};
     Transport rtLastTransport_ = Transport::LAN;  // datagrams may still get through while it reconnects)
     SocketHandle rtUdp_ = kInvalidSocket;
     uint16_t rtUdpPort_ = 0;

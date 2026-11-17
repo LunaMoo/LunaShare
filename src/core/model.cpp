@@ -57,7 +57,7 @@ json ToJson(const Settings& s, bool withIdentity) {
     json j = {
         {"displayName", s.displayName}, {"downloadDir", s.downloadDir}, {"tcpPort", s.tcpPort},
         {"discovery", s.discovery}, {"mdns", s.mdns}, {"broadcast", s.broadcast}, {"autoConnect", s.autoConnect}, {"autoAcceptTrusted", s.autoAcceptTrusted},
-        {"autoAcceptAll", s.autoAcceptAll}, {"autoAcceptMaxMB", s.autoAcceptMaxMB}, {"photosSmaller", s.photosSmaller}, {"autoAcceptNotMetered", s.autoAcceptNotMetered}, {"autoResume", s.autoResume}, {"bluetooth", s.bluetooth},
+        {"autoAcceptAll", s.autoAcceptAll}, {"autoAcceptMaxMB", s.autoAcceptMaxMB}, {"photosSmaller", s.photosSmaller}, {"autoAcceptNotMetered", s.autoAcceptNotMetered}, {"autoResume", s.autoResume}, {"sendTyping", s.sendTyping}, {"chatSounds", s.chatSounds}, {"bluetooth", s.bluetooth},
         {"btChannel", s.btChannel}, {"wanEnabled", s.wanEnabled}, {"wanServer", s.wanServer}, {"wanRoom", s.wanRoom},
         {"wanPassword", s.wanPassword}, {"wanNatPmp", s.wanNatPmp}, {"wanLocalPort", s.wanLocalPort},
         {"wanForwardedPort", s.wanForwardedPort}, {"speedLimitKBs", s.speedLimitKBs}, {"chunkKB", s.chunkKB},
@@ -118,6 +118,8 @@ void FromJson(const json& j, Settings& s, bool withIdentity) {
     Get(j, "photosSmaller", s.photosSmaller);
     Get(j, "autoAcceptNotMetered", s.autoAcceptNotMetered);
     Get(j, "autoResume", s.autoResume);
+    Get(j, "sendTyping", s.sendTyping);
+    Get(j, "chatSounds", s.chatSounds);
     Get(j, "bluetooth", s.bluetooth);
     Get(j, "btChannel", s.btChannel);
     Get(j, "wanEnabled", s.wanEnabled);

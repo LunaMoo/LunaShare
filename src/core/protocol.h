@@ -39,6 +39,8 @@ enum class Msg : uint8_t {
     LinkOffer = 32,   // {}  "join my account" (the user picked this device); both show the connection's Code()
     LinkAnswer = 33,  // {accept}
     ChatRead = 36,    // {mids[], chat}  "seen": to the sender's devices (and to my own, which then clear their badge)
+    Typing = 37,      // {on, gid?}  I'm writing in our chat (on: again every few seconds while I am) / I stopped.
+                      // Older versions ignore it; it isn't kept or mailed, and it goes out only while connected.
     LinkGrant = 34,
     // ---- watch together: one device streams a file, everyone's player plays it at the same moment
     WatchInvite = 80,  // {sid, name, size[, gid]}            host -> the people it's shared with

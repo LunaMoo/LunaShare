@@ -1663,6 +1663,33 @@ void Engine::StallConnectionTo(const std::string& peer, int ms) {
         if (c->peerId == peer) c->testStallUntil = SteadyMs() + ms;
 }
 
+void Engine::SlowConnectionTo(const std::string& peer, int kbs, int ms, int lossPct) {
+    auto lk = Lock();
+    int64_t until = SteadyMs() + ms;
+    for (auto& c : conns)
+        if (c->peerId == peer) {
+            c->testSlowKBs = kbs < 1 ? 1 : kbs;
+            c->testSlowUntil = until;
+        }
+    testRtLossPct_ = lossPct;
+    testRtLossUntil_ = until;
+}
+
+// tests: what a slow link would take to send so much (SlowConnectionTo)
+static void SlowLinkWait(Connection& c, size_t bytes) {
+    if (c.testSlowUntil.load() <= SteadyMs()) {
+        c.testSlowDebtMs = 0;
+        return;
+    }
+    c.testSlowDebtMs += (double)bytes * 1000.0 / (c.testSlowKBs.load() * 1024.0);
+    if (c.testSlowDebtMs >= 5) {
+        int64_t ms = (int64_t)c.testSlowDebtMs;
+        c.testSlowDebtMs -= (double)ms;
+        int64_t end = SteadyMs() + ms;
+        while (SteadyMs() < end && !c.closed) std::this_thread::sleep_for(std::chrono::milliseconds(ms < 20 ? ms : 20));
+    }
+}
+
 void Engine::WriterLoop(std::shared_ptr<Connection> c) {
     std::vector<uint8_t> buf;
     bool pieceTurn = false;
@@ -1688,12 +1715,14 @@ void Engine::WriterLoop(std::shared_ptr<Connection> c) {
         }
         if (haveCtrl) {
             if (!c->sec->Send(c->sock, msg.first, msg.second)) break;
+            SlowLinkWait(*c, msg.second.size() + 5);
             c->bytesOut += (int64_t)msg.second.size() + 5;
             continue;
         }
         if (haveWatch) {  // watch together: the movie comes before anything else that's bulk
             if (ProduceWatch(c, buf)) {
                 if (!c->sec->Send(c->sock, Msg::WatchData, buf.data(), buf.size())) break;
+                SlowLinkWait(*c, buf.size() + 5);
                 c->bytesOut += (int64_t)buf.size() + 5;
                 totalUp += (int64_t)buf.size() - 16;
             }
@@ -1704,6 +1733,7 @@ void Engine::WriterLoop(std::shared_ptr<Connection> c) {
             int64_t pw = 0;
             if (ProducePiece(c, buf, pw)) {
                 if (!c->sec->Send(c->sock, Msg::PieceData, buf.data(), buf.size())) break;
+                SlowLinkWait(*c, buf.size() + 5);
                 c->bytesOut += (int64_t)buf.size() + 5;
                 totalUp += (int64_t)buf.size() - 36;
             } else if (pw > 0 && !haveData) {
@@ -1716,6 +1746,7 @@ void Engine::WriterLoop(std::shared_ptr<Connection> c) {
         int64_t wait = 0;
         if (ProduceChunk(c, buf, wait)) {
             if (!c->sec->Send(c->sock, Msg::FileData, buf.data(), buf.size())) break;
+            SlowLinkWait(*c, buf.size() + 5);
             c->bytesOut += (int64_t)buf.size() + 5;
             totalUp += (int64_t)(buf.size() - kDataHeader);
         } else if (wait > 0) {
@@ -2013,6 +2044,10 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
         case Msg::Chat: {
             std::string mid = j.value("mid", "");
             std::string key = FrameKey(c, j);
+            if (auto t = typing_.find(key); t != typing_.end()) {  // (what they were writing is here)
+                auto dv = devices.find(c->peerId);
+                if (dv != devices.end()) t->second.erase(dv->second.accountPub.empty() ? c->peerId : "@" + dv->second.accountPub);
+            }
             if (key.empty()) {
                 Queue(c, Msg::ChatAck, KeyField("#" + j.value("gid", ""), {{"mid", mid}}));  // (so it isn't sent again)
                 break;
@@ -2121,6 +2156,22 @@ void Engine::HandleFrame(const std::shared_ptr<Connection>& c, Frame& f) {
                 MarkDirty();
             }
             Queue(c, Msg::ChatSyncAck, {{"mid", mid}});
+            break;
+        }
+        case Msg::Typing: {
+            auto dv = devices.find(c->peerId);
+            if (dv == devices.end() || dv->second.blocked) break;
+            const std::string& acc = dv->second.accountPub;
+            if (!acc.empty() && acc == MyAccount()) break;  // (my other device)
+            std::string who = acc.empty() ? c->peerId : "@" + acc, key, gid = j.value("gid", "");
+            if (gid.empty()) key = ChatKey(c->peerId);
+            else {
+                auto g = groups.find(gid);
+                if (g == groups.end() || g->second.left || !g->second.Has(acc)) break;
+                key = "#" + gid;
+            }
+            if (j.value("on", false)) typing_[key][who] = SteadyMs() + 6000;
+            else if (auto t = typing_.find(key); t != typing_.end()) t->second.erase(who);
             break;
         }
         case Msg::ChatRead: {
@@ -3647,6 +3698,33 @@ void Engine::StartBtServer() {
 
 // ============================================================================ public actions
 
+void Engine::SetTyping(const std::string& keyArg, bool on) {
+    auto lk = Lock();
+    if (keyArg.empty() || IsSelfKey(keyArg)) return;
+    const std::string key = IsContactKey(keyArg) || IsGroupKey(keyArg) ? keyArg : ChatKey(keyArg);
+    int64_t now = SteadyMs();
+    int64_t& at = typingSentAt_[key];
+    if (on && (!settings.sendTyping || (at && now - at < 3000))) return;
+    if (!on && !at) return;
+    at = on ? now : 0;
+    json j = KeyField(key, {{"on", on}});
+    for (auto& d : DevicesOf(key))
+        if (auto c = ReadyConn(d)) Queue(c, Msg::Typing, j);
+}
+
+std::vector<std::string> Engine::TypingIn(const std::string& key) {
+    auto lk = Lock();
+    std::vector<std::string> r;
+    auto it = typing_.find(key);
+    if (it == typing_.end()) return r;
+    int64_t now = SteadyMs();
+    for (auto w = it->second.begin(); w != it->second.end();) {
+        if (w->second < now) w = it->second.erase(w);  // (they stopped without saying: their app closed, the connection went)
+        else r.push_back((w++)->first);
+    }
+    return r;
+}
+
 void Engine::SendChat(const std::string& peerArg, const std::string& text, const std::string& replyTo, const std::vector<std::string>& mentions,
                       bool forwarded) {
     SendChatPoll(peerArg, text, replyTo, mentions, forwarded, json());
@@ -3688,6 +3766,7 @@ void Engine::SendChatPoll(const std::string& peerArg, const std::string& text, c
         for (auto& d : MyOtherDevices()) m.pendingTo.push_back(d);
     else
         m.delivered = true;  // (my own chat: it's here; my other devices get their copy when they can)
+    if (typingSentAt_.count(peer) && typingSentAt_[peer]) SetTyping(peer, false);  // (what I wrote is on its way)
     Conversation& cv = chats[peer];
     cv.peer = peer;
     cv.messages.push_back(m);
@@ -5038,6 +5117,7 @@ void Engine::StopRt() {
 }
 
 bool Engine::RtOut(const uint8_t* d, size_t n) {
+    if (testRtLossUntil_.load() > SteadyMs() && (int)(RandomU64() % 100) < testRtLossPct_.load()) return true;  // (tests)
     uint16_t port;
     {
         std::lock_guard<std::mutex> l(mediaMtx_);

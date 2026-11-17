@@ -73,6 +73,8 @@ struct Settings {
     int autoAcceptMaxMB = 0;            // bigger files ask first (0 = any size)
     bool autoAcceptNotMetered = false;  // on mobile data everything asks first
     bool autoResume = true;
+    bool sendTyping = true;   // the others see "... is writing" while I write to them
+    bool chatSounds = true;   // a sound for a message sent and one that comes (and a soft one when someone starts writing)
     bool bluetooth = false;
     int btChannel = 12;
     // optional internet rendezvous (see docs/INTERNET.md)
