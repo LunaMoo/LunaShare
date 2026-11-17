@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.6
 
 - **Message sounds**: a light blip when you send, "pop-ding" when a message comes (softer in the chat that's open), none
   for silenced chats. Made by the app itself; on phones they play through whatever has the sound already (a call,
@@ -10,7 +10,8 @@
   others see when I'm writing"); older versions simply don't show it.
 - **A message can no longer be lost when an app dies right after it arrived** (found by the simulator, which now kills
   apps without warning): it was acknowledged on arrival, so the sender stopped sending it - but it was saved up to a
-  second later. Now it's acknowledged once it's saved; one sent again meanwhile isn't taken as new.
+  second later. Now it's acknowledged once it's saved (and when the app closes, before it says goodbye); one sent
+  again meanwhile isn't taken as new.
 - **A movie shown to others is no longer held open after the app closes** (found by an hour-long simulator run): the
   file stayed open for every restart during a watch-together session, and one already ended stayed open an hour for
   someone who had left - now 10 minutes after their last read.

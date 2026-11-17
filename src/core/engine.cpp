@@ -173,6 +173,12 @@ void Engine::Stop() {
     mdns_.Stop();
     wan_.Stop();
     shareLinks.Stop();
+    bool acksWait;
+    {
+        auto lk = Lock();
+        acksWait = !acksAfterSave_.empty();
+    }
+    if (acksWait) Save();  // (messages that came just now: saved, and acknowledged before the goodbye)
     std::vector<std::shared_ptr<Connection>> cs;
     {
         auto lk = Lock();

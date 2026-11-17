@@ -2495,20 +2495,21 @@ int main() {
                 if (m.kind == MsgKind::Text) v.push_back({m.text, m.outgoing});
             return v;
         };
-        WaitFor([&] {  // (what's still to be sent stays in the chat when it's cleared: wait until it got there)
-            auto l = A->Lock();
-            for (auto& m : A->chats[bk].messages)
-                if (m.outgoing && !m.pendingTo.empty()) return false;
-            return true;
-        }, 5000);
         auto before = texts(*A, bk);
         CHECK(!before.empty(), "a chat to archive (%d)", (int)before.size());
         std::string path = A->ArchiveChat(bk, true, false);
         CHECK(!path.empty() && FileExists(path), "archived");
-        CHECK(texts(*A, bk).empty(), "and cleared");
+        {  // (cleared - but what's still to be sent stays: to a device of mine that's gone since, say)
+            auto l = A->Lock();
+            int left = 0;
+            for (auto& m : A->chats[bk].messages)
+                if (m.kind == MsgKind::Text && !(m.outgoing && !m.pendingTo.empty())) left++;
+            CHECK(left == 0, "and cleared (%d left)", left);
+        }
+        int kept = (int)texts(*A, bk).size();  // (those still to be sent)
         auto list = A->ChatArchives(bk);
         CHECK(list.size() == 1 && list[0].path == path && list[0].count >= (int)before.size(), "listed");
-        CHECK(A->RestoreChatArchive(path) >= (int)before.size(), "restored");
+        CHECK(A->RestoreChatArchive(path) >= (int)before.size() - kept, "restored");
         CHECK(texts(*A, bk) == before, "the same messages, the same sides");
         CHECK(A->RestoreChatArchive(path) == 0, "restoring again adds nothing");
         CHECK(A->DeleteChatArchive(path) && A->ChatArchives(bk).empty(), "archive deleted");
