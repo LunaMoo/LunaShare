@@ -563,7 +563,7 @@ struct SimLink {
         std::string d;
     };
     std::deque<P> q;
-    int delayMs = 40, lossPct = 0, kbps = 0;  // kbps 0 = unlimited
+    std::atomic<int> delayMs{40}, lossPct{0}, kbps{0};  // kbps 0 = unlimited (changed by the test while it runs)
     double busyUntil = 0;
     size_t bufBytes = 0, bufLimit = 1u << 20;
     std::mt19937 rng{7};
@@ -600,7 +600,8 @@ struct SimLink {
         if (bufBytes + n > bufLimit) return true;  // (the router's buffer is full: dropped)
         double now = NowF();
         double start = std::max(now, busyUntil);
-        double tx = kbps ? (double)n * 8.0 / kbps : 0.0;  // ms on the slow link
+        int k = kbps;
+        double tx = k ? (double)n * 8.0 / k : 0.0;  // ms on the slow link
         busyUntil = start + tx;
         q.push_back({busyUntil + delayMs, std::string((const char*)d, n)});
         bufBytes += n;
@@ -1032,14 +1033,15 @@ struct SlowLink {
     SocketHandle listener = kInvalidSocket;
     uint16_t port = 0;
     std::atomic<bool> stop{false};
-    std::vector<std::thread> threads;
+    std::thread acceptor;
+    std::vector<std::thread> threads;  // (the pipes: added by the acceptor only)
     std::mutex sm;
     std::vector<SocketHandle> socks;
     int delayMs, bytesPerSec;
     uint16_t target;
     SlowLink(uint16_t to, int delay, int bps) : delayMs(delay), bytesPerSec(bps), target(to) {
         listener = TcpListen(0, &port);
-        threads.emplace_back([this] {
+        acceptor = std::thread([this] {
             while (!stop) {
                 std::string ip;
                 SocketHandle a = TcpAccept(listener, &ip, 200);
@@ -1117,6 +1119,7 @@ struct SlowLink {
             std::lock_guard<std::mutex> l(sm);
             for (auto s : socks) ShutdownSocket(s);
         }
+        acceptor.join();  // (after it, the list of pipes stays as it is)
         for (auto& t : threads) t.join();
         for (auto s : socks) CloseSocket(s);
         CloseSocket(listener);
